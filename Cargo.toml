@@ -1,0 +1,35 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+resolver = "2"
+members = [
+    "./crates/nvisy-cli",
+    "./crates/nvisy-minio",
+    "./crates/nvisy-openrouter",
+    "./crates/nvisy-postgres",
+    "./crates/nvisy-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+rust-version = "1.89"
+edition = "2024"
+license = "MIT"
+publish = false
+
+authors = ["nvisy <contact@nvisy.com>"]
+repository = "https://github.com/nvisycom/api"
+homepage = "https://github.com/nvisycom/api"
+documentation = "https://docs.rs/nvisy-server"
+
+[workspace.dependencies]
+# Default features are disabled for certain dependencies to allow
+# downstream workspaces/crates to selectively enable them as needed.
+#
+# See for more details: https://github.com/rust-lang/cargo/issues/11329
+
+# Internal crates
+nvisy-minio = { path = "./crates/nvisy-minio", version = "0.1.0" }
+nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
+nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
