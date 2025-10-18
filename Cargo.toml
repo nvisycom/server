@@ -33,3 +33,33 @@ nvisy-minio = { path = "./crates/nvisy-minio", version = "0.1.0" }
 nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
+
+# Async runtime
+tokio = { version = "1.48", features = [] }
+futures = { version = "0.3", features = [] }
+
+# ORM & Database
+diesel = { version = "2.3", features = [] }
+diesel_migrations = { version = "2.3", features = [] }
+diesel-async = { version = "0.7", features = [] }
+diesel-derive-enum = { version = "2.1", features = [] }
+deadpool = { version = "0.12", features = [] }
+
+# Observability
+tracing = { version = "0.1", features = [] }
+tracing-subscriber = { version = "0.3", features = [] }
+
+# (De)serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = [] }
+
+# Derive macros & utilities
+thiserror = { version = "2.0", features = [] }
+derive_more = { version = "2.0", features = [] }
+strum = { version = "0.27", features = ["derive"] }
+
+# Data types
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
+ipnet = { version = "2.11", features = [] }
+bigdecimal = { version = "0.4", features = ["serde"] }
