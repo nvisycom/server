@@ -15,7 +15,7 @@ updates:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
     rebase-strategy: "auto"
-    versioning-strategy: "increase"
+    versioning-strategy: "auto"
 
   # Version updates for GitHub Actions
   - package-ecosystem: "github-actions"

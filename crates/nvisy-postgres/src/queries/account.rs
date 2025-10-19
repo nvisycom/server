@@ -86,10 +86,7 @@ impl AccountRepository {
     }
 
     /// Soft deletes an account by setting deleted_at timestamp.
-    pub async fn delete_account(
-        conn: &mut AsyncPgConnection,
-        account_id: Uuid,
-    ) -> PgResult<()> {
+    pub async fn delete_account(conn: &mut AsyncPgConnection, account_id: Uuid) -> PgResult<()> {
         use schema::accounts::{self, dsl};
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
@@ -260,10 +257,7 @@ impl AccountRepository {
     // Query methods
 
     /// Checks if an email address is already in use.
-    pub async fn email_exists(
-        conn: &mut AsyncPgConnection,
-        email: &str,
-    ) -> PgResult<bool> {
+    pub async fn email_exists(conn: &mut AsyncPgConnection, email: &str) -> PgResult<bool> {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
@@ -508,9 +502,7 @@ impl AccountRepository {
     }
 
     /// Unlocks expired account locks.
-    pub async fn unlock_expired_accounts(
-        conn: &mut AsyncPgConnection,
-    ) -> PgResult<Vec<Account>> {
+    pub async fn unlock_expired_accounts(conn: &mut AsyncPgConnection) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 
         diesel::update(

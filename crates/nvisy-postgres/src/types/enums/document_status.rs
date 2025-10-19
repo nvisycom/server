@@ -8,8 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// This enumeration corresponds to the `DOCUMENT_STATUS` PostgreSQL enum and is used
 /// to track document states from creation through processing, completion, and archival.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::DocumentStatus"]
 pub enum DocumentStatus {
     /// Document is being created or edited (work in progress)

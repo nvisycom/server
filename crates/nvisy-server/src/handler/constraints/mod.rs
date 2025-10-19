@@ -1,0 +1,108 @@
+//! Constraint violation to HTTP error conversion handlers.
+//!
+//! This module provides organized handlers for converting PostgreSQL constraint
+//! violations into appropriate HTTP error responses. Each submodule handles
+//! constraints for a specific domain (accounts, projects, documents, etc.).
+//!
+//! All conversions are implemented via the `From` trait for ergonomic usage.
+
+mod account;
+mod document;
+mod project;
+mod subscriber;
+mod support;
+
+use nvisy_postgres::PgError;
+use nvisy_postgres::types::ConstraintViolation;
+
+use crate::handler::{Error, ErrorKind};
+
+impl From<ConstraintViolation> for Error<'static> {
+    fn from(constraint: ConstraintViolation) -> Self {
+        match constraint {
+            ConstraintViolation::Account(c) => c.into(),
+            ConstraintViolation::AccountSession(c) => c.into(),
+            ConstraintViolation::AccountToken(c) => c.into(),
+            ConstraintViolation::Project(c) => c.into(),
+            ConstraintViolation::ProjectMember(c) => c.into(),
+            ConstraintViolation::ProjectInvite(c) => c.into(),
+            ConstraintViolation::ProjectActivityLog(c) => c.into(),
+            ConstraintViolation::Document(c) => c.into(),
+            ConstraintViolation::DocumentFile(c) => c.into(),
+            ConstraintViolation::DocumentVersion(c) => c.into(),
+            ConstraintViolation::SupportTicket(c) => c.into(),
+            ConstraintViolation::SupportTicketReply(c) => c.into(),
+            ConstraintViolation::Feedback(c) => c.into(),
+            ConstraintViolation::Subscriber(c) => c.into(),
+        }
+    }
+}
+
+impl From<PgError> for Error<'static> {
+    fn from(error: PgError) -> Self {
+        match error {
+            PgError::Config(config_error) => {
+                tracing::error!(
+                    target: "server::postgres",
+                    error = %config_error,
+                    "database configuration error"
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
+            PgError::Timeout(timeout) => {
+                tracing::error!(
+                    target: "server::postgres",
+                    timeout = ?timeout,
+                    "database timeout",
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
+            PgError::Connection(connection_error) => {
+                tracing::error!(
+                    target: "server::postgres",
+                    error = %connection_error,
+                    "database connection error"
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
+            PgError::Migration(migration_error) => {
+                tracing::error!(
+                    target: "server::postgres",
+                    error = %migration_error,
+                    "database migration error"
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
+            PgError::Query(ref query_error) => {
+                // Try to extract constraint violation
+                if let Some(constraint_name) = error.constraint() {
+                    if let Some(constraint) = ConstraintViolation::new(constraint_name) {
+                        tracing::error!(
+                            target: "server::postgres",
+                            constraint = constraint_name,
+                            error = %query_error,
+                            "query error (constraint violation)"
+                        );
+                        return constraint.into();
+                    }
+                }
+
+                // Generic query error without constraint
+                tracing::error!(
+                    target: "server::postgres",
+                    error = %query_error,
+                    "query error"
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
+            PgError::Unexpected(unexpected_error) => {
+                tracing::error!(
+                    target: "server::postgres",
+                    error = %unexpected_error,
+                    "unexpected database error"
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
+        }
+    }
+}

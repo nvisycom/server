@@ -9,8 +9,8 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `VIRUS_SCAN_STATUS` PostgreSQL enum and is used
 /// to track the security status of files after they have been scanned for malware,
 /// viruses, and other security threats.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::VirusScanStatus"]
 pub enum VirusScanStatus {
     /// No virus or malware detected - file is safe

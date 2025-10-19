@@ -9,8 +9,8 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `PROCESSING_STATUS` PostgreSQL enum and is used
 /// to track the state of files as they progress through various processing stages
 /// such as text extraction, OCR, transcription, and analysis.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ProcessingStatus"]
 pub enum ProcessingStatus {
     /// File is queued for processing and waiting to be picked up

@@ -236,8 +236,9 @@ impl ProjectIntegrationRepository {
 
         let integrations = query
             .filter(
-                status.eq(IntegrationStatus::Failure)
-                    .or(is_enabled.eq(false))
+                status
+                    .eq(IntegrationStatus::Failure)
+                    .or(is_enabled.eq(false)),
             )
             .select(ProjectIntegration::as_select())
             .order(updated_at.desc())

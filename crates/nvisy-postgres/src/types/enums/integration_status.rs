@@ -8,8 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// This enumeration corresponds to the `INTEGRATION_STATUS` PostgreSQL enum and is used
 /// to manage integration states from initial setup through active execution and error handling.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::IntegrationStatus"]
 pub enum IntegrationStatus {
     /// Integration is pending configuration or activation

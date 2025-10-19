@@ -99,10 +99,7 @@ impl ProjectRepository {
     }
 
     /// Soft deletes a project.
-    pub async fn delete_project(
-        conn: &mut AsyncPgConnection,
-        project_id: Uuid,
-    ) -> PgResult<()> {
+    pub async fn delete_project(conn: &mut AsyncPgConnection, project_id: Uuid) -> PgResult<()> {
         use schema::projects::dsl::*;
 
         diesel::update(projects)
@@ -171,9 +168,7 @@ impl ProjectRepository {
     ) -> PgResult<Vec<Project>> {
         use schema::projects::dsl::*;
 
-        let mut query = projects
-            .filter(deleted_at.is_null())
-            .into_boxed();
+        let mut query = projects.filter(deleted_at.is_null()).into_boxed();
 
         if let Some(vis) = visibility_filter {
             query = query.filter(visibility.eq(vis));
@@ -210,7 +205,7 @@ impl ProjectRepository {
             .filter(
                 display_name
                     .ilike(&search_pattern)
-                    .or(description.ilike(&search_pattern))
+                    .or(description.ilike(&search_pattern)),
             )
             .filter(visibility.eq(ProjectVisibility::Public))
             .select(Project::as_select())
@@ -225,9 +220,7 @@ impl ProjectRepository {
     }
 
     /// Lists all available project templates.
-    pub async fn list_project_templates(
-        conn: &mut AsyncPgConnection,
-    ) -> PgResult<Vec<Project>> {
+    pub async fn list_project_templates(conn: &mut AsyncPgConnection) -> PgResult<Vec<Project>> {
         use schema::projects::dsl::*;
 
         let templates = projects
@@ -316,7 +309,7 @@ impl ProjectRepository {
         conn: &mut AsyncPgConnection,
         project_id: Uuid,
     ) -> PgResult<(i64, i64, i64)> {
-        use schema::{project_members, project_invites};
+        use schema::{project_invites, project_members};
 
         // Count active members
         let member_count: i64 = project_members::table

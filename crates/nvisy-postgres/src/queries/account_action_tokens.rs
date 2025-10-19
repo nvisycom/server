@@ -157,11 +157,12 @@ impl AccountActionTokenRepository {
     ) -> PgResult<bool> {
         use schema::account_action_tokens::{self, dsl};
 
-        let rows_affected = diesel::update(account_action_tokens::table.filter(dsl::action_token.eq(token_uuid)))
-            .set(dsl::used_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
-            .await
-            .map_err(PgError::from)?;
+        let rows_affected =
+            diesel::update(account_action_tokens::table.filter(dsl::action_token.eq(token_uuid)))
+                .set(dsl::used_at.eq(Some(OffsetDateTime::now_utc())))
+                .execute(conn)
+                .await
+                .map_err(PgError::from)?;
 
         Ok(rows_affected > 0)
     }
@@ -402,14 +403,12 @@ impl AccountActionTokenRepository {
     ) -> PgResult<i64> {
         use schema::account_action_tokens::{self, dsl};
 
-        diesel::update(
-            account_action_tokens::table.filter(dsl::attempt_count.ge(max_attempts))
-        )
-        .set(dsl::used_at.eq(Some(OffsetDateTime::now_utc())))
-        .execute(conn)
-        .await
-        .map_err(PgError::from)
-        .map(|rows| rows as i64)
+        diesel::update(account_action_tokens::table.filter(dsl::attempt_count.ge(max_attempts)))
+            .set(dsl::used_at.eq(Some(OffsetDateTime::now_utc())))
+            .execute(conn)
+            .await
+            .map_err(PgError::from)
+            .map(|rows| rows as i64)
     }
 }
 

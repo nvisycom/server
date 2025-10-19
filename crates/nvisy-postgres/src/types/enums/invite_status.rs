@@ -8,8 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// This enumeration corresponds to the `INVITE_STATUS` PostgreSQL enum and is used
 /// to track the lifecycle of project invitations from creation to resolution.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::InviteStatus"]
 pub enum InviteStatus {
     /// Invitation has been sent and is awaiting a response from the invitee

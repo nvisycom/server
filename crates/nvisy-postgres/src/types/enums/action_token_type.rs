@@ -9,9 +9,8 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `ACTION_TOKEN_TYPE` PostgreSQL enum and is used
 /// for various token-based security operations including account verification,
 /// password management, and data operations.
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString,
-)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ActionTokenType"]
 pub enum ActionTokenType {
     /// Email verification for new account activation

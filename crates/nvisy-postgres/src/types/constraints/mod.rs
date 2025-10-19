@@ -142,9 +142,10 @@ impl ConstraintViolation {
                 return Some(ConstraintViolation::DocumentFile(c));
             }
         } else if constraint.starts_with("document_versions_")
-            && let Some(c) = DocumentVersionConstraints::new(constraint) {
-                return Some(ConstraintViolation::DocumentVersion(c));
-            }
+            && let Some(c) = DocumentVersionConstraints::new(constraint)
+        {
+            return Some(ConstraintViolation::DocumentVersion(c));
+        }
 
         None
     }

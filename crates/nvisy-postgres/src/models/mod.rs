@@ -24,12 +24,10 @@ pub use account_action_token::{
     AccountActionToken, NewAccountActionToken, UpdateAccountActionToken,
 };
 pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-
 // Document models
 pub use document::{Document, NewDocument, UpdateDocument};
 pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 pub use document_version::{DocumentVersion, NewDocumentVersion, UpdateDocumentVersion};
-
 // Project models
 pub use project::{NewProject, Project, UpdateProject};
 pub use project_activity::{NewProjectActivity, ProjectActivity};

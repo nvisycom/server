@@ -28,7 +28,6 @@ pub use account_api_tokens::{AccountApiTokenRepository, AccountApiTokenStats};
 pub use document::{DocumentProjectStats, DocumentRepository, DocumentUserStats};
 pub use document_files::{DocumentFileRepository, DocumentFileStats, ProcessingSummary};
 pub use document_versions::{DocumentVersionRepository, DocumentVersionStats, UserVersionStats};
-
 pub use project::ProjectRepository;
 pub use project_activity::ProjectActivityRepository;
 pub use project_integration::ProjectIntegrationRepository;

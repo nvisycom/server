@@ -237,12 +237,13 @@ impl PgPoolConfig {
 
         // Validate idle timeout if present
         if let Some(timeout) = self.idle_timeout
-            && (timeout < MIN_IDLE_TIMEOUT || timeout > MAX_IDLE_TIMEOUT) {
-                return Err(PgError::Config(format!(
-                    "idle_timeout must be between {:?} and {:?}",
-                    MIN_IDLE_TIMEOUT, MAX_IDLE_TIMEOUT
-                )));
-            }
+            && (timeout < MIN_IDLE_TIMEOUT || timeout > MAX_IDLE_TIMEOUT)
+        {
+            return Err(PgError::Config(format!(
+                "idle_timeout must be between {:?} and {:?}",
+                MIN_IDLE_TIMEOUT, MAX_IDLE_TIMEOUT
+            )));
+        }
 
         Ok(())
     }

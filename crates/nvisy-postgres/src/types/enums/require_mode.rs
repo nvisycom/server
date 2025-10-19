@@ -10,8 +10,8 @@ use crate::types::FileType;
 ///
 /// This enumeration corresponds to the `REQUIRE_MODE` PostgreSQL enum and is used
 /// to specify what type of processing is needed to extract content from uploaded files.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::RequireMode"]
 pub enum RequireMode {
     /// Plain text content that is ready for analysis without additional processing

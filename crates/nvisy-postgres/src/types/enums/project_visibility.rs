@@ -8,8 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// This enumeration corresponds to the `PROJECT_VISIBILITY` PostgreSQL enum and is used
 /// to control how projects can be discovered and accessed by users.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectVisibility"]
 pub enum ProjectVisibility {
     /// Project is private and only accessible to members

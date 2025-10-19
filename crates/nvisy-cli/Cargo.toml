@@ -20,5 +20,30 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
+tls = ["axum-server"]
+otel = ["tracing-subscriber/env-filter"]
 
 [dependencies]
+# Internal crates
+nvisy-server = { workspace = true, features = [] }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+
+# HTTP server
+axum = { workspace = true, features = ["http2", "macros"] }
+axum-server = { workspace = true, features = ["tls-rustls"], optional = true }
+
+# CLI
+clap = { workspace = true, features = ["derive", "env"] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env-filter"] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+
+# Error handling
+anyhow = { workspace = true, features = ["backtrace"] }
+thiserror = { workspace = true, features = [] }

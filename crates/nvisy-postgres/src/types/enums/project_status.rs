@@ -8,8 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// This enumeration corresponds to the `PROJECT_STATUS` PostgreSQL enum and is used
 /// to manage project states from active development through archival and template usage.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectStatus"]
 pub enum ProjectStatus {
     /// Project is active and accessible for normal operations

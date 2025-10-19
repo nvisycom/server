@@ -1,12 +1,13 @@
 //! Project activity log table constraint violations.
 
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumString};
+use strum::{Display, EnumIter, EnumString};
 
 use super::ConstraintCategory;
 
 /// Project activity log table constraint violations.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, EnumString, Display, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum ProjectActivityLogConstraints {
     // Activity log validation constraints

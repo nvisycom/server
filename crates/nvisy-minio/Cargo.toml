@@ -22,3 +22,26 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 [dependencies]
+# Async runtime
+futures = { workspace = true, features = [] }
+
+# File storage
+minio = { workspace = true, features = ["rustls-tls"] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
+
+# Data types
+time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+bytes = { workspace = true, features = ["serde"] }
+mime = { workspace = true, features = [] }
+url = { workspace = true, features = [] }

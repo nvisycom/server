@@ -9,8 +9,8 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// This enumeration corresponds to the `FILE_TYPE` PostgreSQL enum and is used
 /// to categorize uploaded files by their general type for appropriate processing
 /// and handling within the document management system.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::FileType"]
 pub enum FileType {
     /// Text documents (PDF, DOC, DOCX, TXT, RTF, etc.)

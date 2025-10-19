@@ -10,8 +10,8 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// This enumeration corresponds to the `PROJECT_ROLE` PostgreSQL enum and provides
 /// hierarchical access control for project members with clearly defined capabilities.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[derive(DbEnum, Display, EnumIter, EnumString)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectRole"]
 pub enum ProjectRole {
     /// Full control over the project, including deletion and all management aspects
@@ -32,6 +32,7 @@ pub enum ProjectRole {
     /// Read-only access to project content
     #[db_rename = "viewer"]
     #[serde(rename = "viewer")]
+    #[default]
     Viewer,
 }
 

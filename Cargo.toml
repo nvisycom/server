@@ -5,6 +5,7 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-minio",
+    "./crates/nvisy-nats",
     "./crates/nvisy-openrouter",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
@@ -29,7 +30,9 @@ documentation = "https://docs.rs/nvisy-server"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Internal crates
+nvisy-cli = { path = "./crates/nvisy-cli", version = "0.1.0" }
 nvisy-minio = { path = "./crates/nvisy-minio", version = "0.1.0" }
+nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
@@ -37,13 +40,44 @@ nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 # Async runtime
 tokio = { version = "1.48", features = [] }
 futures = { version = "0.3", features = [] }
+scoped-futures = { version = "0.1", features = [] }
+pin-project-lite = { version = "0.2", features = [] }
 
-# ORM & Database
+# HTTP client & server
+reqwest = { version = "0.12", features = [] }
+axum = { version = "0.8", features = [] }
+axum-client-ip = { version = "1.1", features = ["serde"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-extra = { version = "0.10", features = [] }
+axum-test = { version = "17.1", features = [] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["full"] }
+http-body-util = { version = "0.1", features = [] }
+
+# OpenAPI/Documentation
+utoipa = { version = "5.3", features = ["uuid", "time"] }
+utoipa-axum = { version = "0.2", features = [] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
+utoipa-scalar = { version = "0.3", features = ["axum"] }
+
+# Authentication & Security
+jsonwebtoken = { version = "10.1", features = ["rust_crypto"] }
+argon2 = { version = "0.6.0-rc.0", features = ["rand"] }
+base64 = { version = "0.22", features = [] }
+rand = { version = "0.9", features = ["serde"] }
+sha2 = { version = "0.10", features = [] }
+zxcvbn = { version = "3.1", features = ["serde"] }
+
+# Relational database (Postgres)
 diesel = { version = "2.3", features = [] }
 diesel_migrations = { version = "2.3", features = [] }
 diesel-async = { version = "0.7", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
+
+# Object storage (Minio)
+minio = { version = "0.3", features = [] }
+tempfile = { version = "3.23", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }
@@ -52,6 +86,13 @@ tracing-subscriber = { version = "0.3", features = [] }
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
+validator = { version = "0.20", features = ["derive"] }
+
+# Error handling
+anyhow = { version = "1.0", features = [] }
+
+# CLI
+clap = { version = "4.5", features = [] }
 
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }
@@ -59,7 +100,13 @@ derive_more = { version = "2.0", features = [] }
 strum = { version = "0.27", features = ["derive"] }
 
 # Data types
+jiff = { version = "0.2", features = ["serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
 ipnet = { version = "2.11", features = [] }
 bigdecimal = { version = "0.4", features = ["serde"] }
+bytes = { version = "1.10", features = ["serde"] }
+mime = { version = "0.3", features = [] }
+url = { version = "2.5", features = [] }
+semver = { version = "1.0", features = ["serde"] }
+ecow = { version = "0.2", features = ["serde"] }
