@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::models::{NewProject, NewProjectMember, Project, ProjectMember, UpdateProject};
-use nvisy_postgres::queries::ProjectRepository;
+use nvisy_postgres::queries::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
 use nvisy_postgres::{PgDatabase, PgError};
 use scoped_futures::ScopedFutureExt;
@@ -13,8 +13,8 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::extract::{AuthState, Json, Path, ValidateJson};
-use crate::handler::utils::{AuthService, ProjectPermission};
+use crate::extract::auth::AuthProvider;
+use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
@@ -126,7 +126,7 @@ async fn create_project(
                     member_role: ProjectRole::Owner,
                     ..Default::default()
                 };
-                let _member = ProjectRepository::add_project_member(conn, new_member).await?;
+                ProjectMemberRepository::add_project_member(conn, new_member).await?;
                 Ok::<CreateProjectResponse, PgError>(project.into())
             }
             .scope_boxed()
@@ -218,22 +218,21 @@ async fn list_all_projects(
 ) -> Result<(StatusCode, Json<ListProjectsResponse>)> {
     let mut conn = pg_database.get_connection().await?;
 
-    let projects = ProjectRepository::list_user_projects(
+    let memberships = ProjectMemberRepository::list_user_projects(
         &mut conn,
         auth_claims.account_id,
-        true,
         pagination.into(),
     )
     .await?;
 
-    // Get membership data for each project to include user's role
+    // Convert memberships to response items
     let mut project_items = Vec::new();
-    for project in projects {
-        if let Some(member) =
-            ProjectRepository::find_project_member(&mut conn, project.id, auth_claims.account_id)
-                .await?
+    for membership in memberships {
+        // Get project details for each membership
+        if let Some(project) =
+            ProjectRepository::find_project_by_id(&mut conn, membership.project_id).await?
         {
-            project_items.push(ListProjectsResponseItem::from((project, member)));
+            project_items.push(ListProjectsResponseItem::from((project, membership)));
         }
     }
 
@@ -297,17 +296,19 @@ async fn read_project(
 ) -> Result<(StatusCode, Json<GetProjectResponse>)> {
     let mut conn = pg_database.get_connection().await?;
 
-    AuthService::authorize_project(
-        &mut conn,
-        &auth_claims,
-        path_params.project_id,
-        ProjectPermission::ReadAnyDocument,
-    )
-    .await?;
+    auth_claims
+        .authorize_project(
+            &mut conn,
+            path_params.project_id,
+            ProjectPermission::ViewDocuments,
+        )
+        .await?;
 
-    let project = ProjectRepository::find_project_by_id(&mut conn, path_params.project_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_resource("project"))?;
+    let Some(project) =
+        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("project"));
+    };
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -391,13 +392,13 @@ async fn update_project(
         "updating project",
     );
 
-    AuthService::authorize_project(
-        &mut conn,
-        &auth_claims,
-        path_params.project_id,
-        ProjectPermission::Manage,
-    )
-    .await?;
+    auth_claims
+        .authorize_project(
+            &mut conn,
+            path_params.project_id,
+            ProjectPermission::UpdateProject,
+        )
+        .await?;
 
     let update_data = UpdateProject {
         display_name: request.display_name,
@@ -474,19 +475,21 @@ async fn delete_project(
 
     let mut conn = pg_database.get_connection().await?;
 
-    AuthService::authorize_project(
-        &mut conn,
-        &auth_claims,
-        path_params.project_id,
-        ProjectPermission::DeleteProject,
-    )
-    .await?;
+    auth_claims
+        .authorize_project(
+            &mut conn,
+            path_params.project_id,
+            ProjectPermission::DeleteProject,
+        )
+        .await?;
 
     ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
 
-    let deleted_project = ProjectRepository::find_project_by_id(&mut conn, path_params.project_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_resource("project"))?;
+    let Some(deleted_project) =
+        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("project"));
+    };
 
     tracing::warn!(
         target: TRACING_TARGET,

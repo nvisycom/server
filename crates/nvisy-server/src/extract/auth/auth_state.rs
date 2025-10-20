@@ -2,20 +2,20 @@
 //!
 //! This module provides [`AuthState`], a robust extractor that performs multi-layer
 //! authentication verification by validating JWT tokens against current database state.
-//! Unlike basic JWT validation, this extractor ensures sessions remain active and
+//! Unlike basic JWT validation, this extractor ensures API tokens remain active and
 //! accounts are in good standing.
 //!
 //! # Security Architecture
 //!
 //! ## Multi-Layer Verification
 //! 1. **JWT Validation**: Cryptographic signature and claims verification
-//! 2. **Session Validation**: Database lookup to ensure session exists and is active
+//! 2. **Token Validation**: Database lookup to ensure API token exists and is active
 //! 3. **Account Verification**: Confirms account exists and email is verified
 //! 4. **Privilege Consistency**: Validates admin status matches database records
 //!
 //! ## Defense in Depth
 //! - JWT expiration is checked at both token and database levels
-//! - Session revocation is immediately effective
+//! - API token revocation is immediately effective
 //! - Account suspension blocks access regardless of valid tokens
 //! - Admin privilege changes are enforced in real-time
 //!
@@ -55,8 +55,8 @@
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::Deref;
-use nvisy_postgres::PgDatabase;
-use nvisy_postgres::queries::AccountRepository;
+use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::{PgConnection, PgDatabase};
 
 use super::{AuthClaims, AuthHeader};
 use crate::TRACING_TARGET_AUTHENTICATION;
@@ -70,7 +70,7 @@ use crate::service::AuthKeys;
 /// that the authenticated user has:
 ///
 /// - A cryptographically valid JWT token
-/// - An active session in the database
+/// - An active API token in the database
 /// - A verified and active account
 /// - Current privilege levels matching the database
 ///
@@ -78,7 +78,7 @@ use crate::service::AuthKeys;
 ///
 /// When [`AuthState`] extraction succeeds, you can be confident that:
 /// - The user is who they claim to be (authentication)
-/// - Their session has not been revoked
+/// - Their API token has not been revoked
 /// - Their account is in good standing
 /// - Their privileges are current and accurate
 ///
@@ -93,8 +93,8 @@ use crate::service::AuthKeys;
 ///
 /// Extraction fails with specific error types for:
 /// - [`ErrorKind::MalformedAuthToken`]: Invalid JWT format
-/// - [`ErrorKind::ExpiredAuthToken`]: Token or session expired
-/// - [`ErrorKind::Unauthorized`]: Invalid credentials or revoked session
+/// - [`ErrorKind::ExpiredAuthToken`]: Token expired
+/// - [`ErrorKind::Unauthorized`]: Invalid credentials or revoked token
 /// - [`ErrorKind::InternalServerError`]: Database or system errors
 ///
 /// # Thread Safety
@@ -136,7 +136,7 @@ impl AuthState {
     ///
     /// 1. **JWT Token Extraction**: Extracts and validates JWT structure
     /// 2. **Database Connection**: Acquires connection with error handling
-    /// 3. **Session Verification**: Confirms session exists and is active
+    /// 3. **Token Verification**: Confirms API token exists and is active
     /// 4. **Account Verification**: Validates account exists and is verified
     /// 5. **Privilege Consistency**: Ensures token claims match database state
     ///
@@ -154,7 +154,7 @@ impl AuthState {
     /// Returns specific error types for different failure modes:
     ///
     /// * [`ErrorKind::InternalServerError`]: Database connection or query failures
-    /// * [`ErrorKind::Unauthorized`]: Session not found, expired, or account issues
+    /// * [`ErrorKind::Unauthorized`]: API token not found, expired, or account issues
     /// * [`ErrorKind::Forbidden`]: Account verification incomplete or suspended
     ///
     /// # Database Impact
@@ -190,8 +190,8 @@ impl AuthState {
             "Beginning comprehensive authentication verification"
         );
 
-        // Step 1: Verify session exists and is active
-        let session = Self::verify_session_validity(&mut conn, &auth_claims).await?;
+        // Step 1: Verify API token exists and is active
+        let api_token = Self::verify_token_validity(&mut conn, &auth_claims).await?;
 
         // Step 2: Verify account exists and is in good standing
         let account = Self::verify_account_status(&mut conn, &auth_claims).await?;
@@ -204,102 +204,103 @@ impl AuthState {
             account_id = %auth_claims.account_id,
             token_id = %auth_claims.token_id,
             is_admin = account.is_admin,
-            session_expires = %session.expired_at,
+            token_expires = %api_token.expired_at,
             "Authentication verification completed successfully"
         );
 
         Ok(Self::from_verified_claims(auth_claims))
     }
 
-    /// Verifies that the session exists in the database and remains active.
+    /// Verifies that the API token exists in the database and remains active.
     ///
-    /// This method performs critical session validation to ensure the JWT token
-    /// corresponds to a legitimate, non-revoked session in the database.
+    /// This method performs critical token validation to ensure the JWT token
+    /// corresponds to a legitimate, non-revoked API token in the database.
     ///
     /// # Verification Steps
     ///
-    /// 1. **Session Lookup**: Queries database for session by token ID
-    /// 2. **Existence Check**: Ensures session exists (not deleted/revoked)
-    /// 3. **Expiration Check**: Validates session hasn't expired in database
+    /// 1. **Token Lookup**: Queries database for API token by token ID
+    /// 2. **Existence Check**: Ensures API token exists (not deleted/revoked)
+    /// 3. **Expiration Check**: Validates API token hasn't expired in database
     ///
     /// # Security Implications
     ///
     /// This check is critical because:
-    /// - Sessions can be revoked independently of JWT expiration
+    /// - API tokens can be revoked independently of JWT expiration
     /// - Database-level expiration overrides JWT expiration
-    /// - Session deletion immediately invalidates all associated tokens
+    /// - Token deletion immediately invalidates access
     ///
     /// # Arguments
     ///
-    /// * `conn` - Database connection for session queries
-    /// * `auth_claims` - JWT claims containing the session token ID
+    /// * `conn` - Database connection for token queries
+    /// * `auth_claims` - JWT claims containing the API token ID
     ///
     /// # Returns
     ///
-    /// Returns the valid [`Session`] record from the database.
+    /// Returns the valid [`AccountApiToken`] record from the database.
     ///
     /// # Errors
     ///
-    /// * [`ErrorKind::Unauthorized`]: Session not found or expired
+    /// * [`ErrorKind::Unauthorized`]: API token not found or expired
     /// * [`ErrorKind::InternalServerError`]: Database query failures
-    async fn verify_session_validity(
-        conn: &mut impl nvisy_postgres::PgConnectionTrait,
+    async fn verify_token_validity(
+        conn: &mut PgConnection,
         auth_claims: &AuthClaims,
-    ) -> Result<nvisy_postgres::models::Session> {
-        let session = AccountRepository::find_session_by_access_token(conn, auth_claims.token_id)
-            .await
-            .map_err(|db_error| {
-                tracing::error!(
-                    target: TRACING_TARGET_AUTHENTICATION,
-                    error = %db_error,
-                    token_id = %auth_claims.token_id,
-                    account_id = %auth_claims.account_id,
-                    "Database error occurred during session validation query"
-                );
-                ErrorKind::InternalServerError
-                    .with_message("Authentication verification encountered an error")
-                    .with_context("Unable to validate session credentials")
-            })?
-            .ok_or_else(|| {
-                tracing::warn!(
-                    target: TRACING_TARGET_AUTHENTICATION,
-                    token_id = %auth_claims.token_id,
-                    account_id = %auth_claims.account_id,
-                    "Authentication failed: session token not found in database"
-                );
-                ErrorKind::Unauthorized
-                    .with_message("Authentication session is invalid")
-                    .with_context("Your session may have been revoked or expired")
-            })?;
+    ) -> Result<nvisy_postgres::models::AccountApiToken> {
+        let api_token =
+            AccountApiTokenRepository::find_token_by_access_token(conn, auth_claims.token_id)
+                .await
+                .map_err(|db_error| {
+                    tracing::error!(
+                        target: TRACING_TARGET_AUTHENTICATION,
+                        error = %db_error,
+                        token_id = %auth_claims.token_id,
+                        account_id = %auth_claims.account_id,
+                        "Database error occurred during API token validation query"
+                    );
+                    ErrorKind::InternalServerError
+                        .with_message("Authentication verification encountered an error")
+                        .with_context("Unable to validate API token credentials")
+                })?
+                .ok_or_else(|| {
+                    tracing::warn!(
+                        target: TRACING_TARGET_AUTHENTICATION,
+                        token_id = %auth_claims.token_id,
+                        account_id = %auth_claims.account_id,
+                        "Authentication failed: API token not found in database"
+                    );
+                    ErrorKind::Unauthorized
+                        .with_message("Authentication token is invalid")
+                        .with_context("Your token may have been revoked or expired")
+                })?;
 
-        // Verify session hasn't expired at the database level
-        if session.is_expired() {
+        // Verify API token hasn't expired at the database level
+        if api_token.is_expired() {
             tracing::warn!(
                 target: TRACING_TARGET_AUTHENTICATION,
                 token_id = %auth_claims.token_id,
                 account_id = %auth_claims.account_id,
-                expired_at = %session.expired_at,
+                expired_at = %api_token.expired_at,
                 current_time = %time::OffsetDateTime::now_utc(),
-                "Authentication failed: session expired at database level"
+                "Authentication failed: API token expired at database level"
             );
             return Err(ErrorKind::Unauthorized
-                .with_message("Your session has expired")
+                .with_message("Your token has expired")
                 .with_context("Please sign in again to continue"));
         }
 
         tracing::debug!(
             target: TRACING_TARGET_AUTHENTICATION,
             token_id = %auth_claims.token_id,
-            session_expires = %session.expired_at,
-            "Session validation successful"
+            token_expires = %api_token.expired_at,
+            "API token validation successful"
         );
 
-        Ok(session)
+        Ok(api_token)
     }
 
     /// Verifies that the account exists and is in good standing.
     ///
-    /// This method ensures the account associated with the session is valid,
+    /// This method ensures the account associated with the API token is valid,
     /// verified, and has not been suspended or deleted.
     ///
     /// # Verification Criteria
@@ -313,7 +314,7 @@ impl AuthState {
     /// - Prevents access with tokens for deleted accounts
     /// - Enforces email verification requirements
     /// - Allows immediate access revocation via account suspension
-    /// - Maintains data integrity between sessions and accounts
+    /// - Maintains data integrity between API tokens and accounts
     ///
     /// # Arguments
     ///
@@ -329,7 +330,7 @@ impl AuthState {
     /// * [`ErrorKind::Unauthorized`]: Account not found, unverified, or suspended
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_account_status(
-        conn: &mut impl nvisy_postgres::PgConnectionTrait,
+        conn: &mut PgConnection,
         auth_claims: &AuthClaims,
     ) -> Result<nvisy_postgres::models::Account> {
         let account = AccountRepository::find_account_by_id(conn, auth_claims.account_id)
@@ -363,7 +364,7 @@ impl AuthState {
             tracing::warn!(
                 target: TRACING_TARGET_AUTHENTICATION,
                 account_id = %auth_claims.account_id,
-                email = %account.email,
+                email = %account.email_address,
                 token_id = %auth_claims.token_id,
                 "Authentication failed: account email verification not completed"
             );
@@ -375,7 +376,7 @@ impl AuthState {
         tracing::debug!(
             target: TRACING_TARGET_AUTHENTICATION,
             account_id = %auth_claims.account_id,
-            email = %account.email,
+            email = %account.email_address,
             is_admin = account.is_admin,
             "Account validation successful"
         );
@@ -418,7 +419,7 @@ impl AuthState {
                 token_id = %auth_claims.token_id,
                 token_admin_claim = auth_claims.is_administrator,
                 current_admin_status = account.is_admin,
-                email = %account.email,
+                email = %account.email_address,
                 "Critical: Admin privilege mismatch detected between token and database"
             );
             return Err(ErrorKind::Unauthorized

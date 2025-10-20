@@ -26,7 +26,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures::{SinkExt, StreamExt};
 use nvisy_postgres::PgDatabase;
@@ -38,7 +38,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::extract::{AuthState, Path};
+use crate::extract::{AuthProvider, AuthState, Path, ProjectPermission};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -173,6 +173,7 @@ pub enum ProjectWsMessage {
 
 impl ProjectWsMessage {
     /// Creates an error message with the given code and message.
+    #[allow(dead_code)]
     #[inline]
     const fn error(code: String, message: String) -> Self {
         Self::Error {
@@ -183,6 +184,7 @@ impl ProjectWsMessage {
     }
 
     /// Creates an error message with additional details.
+    #[allow(dead_code)]
     #[inline]
     const fn error_with_details(code: String, message: String, details: String) -> Self {
         Self::Error {
@@ -520,19 +522,18 @@ async fn handle_project_websocket(
         let mut msg_count = 0;
 
         // Send initial join message to this client
-        if let Ok(text) = join_msg.to_text() {
-            if sender
+        if let Ok(text) = join_msg.to_text()
+            && sender
                 .send(Message::Text(Utf8Bytes::from(text)))
                 .await
                 .is_err()
-            {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    connection_id = %send_ctx.connection_id,
-                    "failed to send join message, aborting connection"
-                );
-                return 0;
-            }
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %send_ctx.connection_id,
+                "failed to send join message, aborting connection"
+            );
+            return 0;
         }
 
         // Listen for broadcast messages and forward to this client
@@ -721,23 +722,21 @@ async fn project_websocket_handler(
     let mut conn = pg_database.get_connection().await?;
 
     // Check if user has permission to access this project
-    AuthService::authorize_project(
-        &mut conn,
-        &auth_claims,
-        project_id,
-        ProjectPermission::ReadAnyDocument,
-    )
-    .await?;
+    auth_claims
+        .authorize_project(&mut conn, project_id, ProjectPermission::ViewDocuments)
+        .await?;
 
     // Verify the project exists
-    ProjectRepository::find_project_by_id(&mut conn, project_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_resource("project"))?;
+    let Some(_project) = ProjectRepository::find_project_by_id(&mut conn, project_id).await? else {
+        return Err(ErrorKind::NotFound.with_resource("project"));
+    };
 
     // Fetch account display name
-    let account = AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_resource("account"))?;
+    let Some(account) =
+        AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("account"));
+    };
 
     let display_name = account.display_name;
     let account_id = auth_claims.account_id;

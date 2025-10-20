@@ -4,6 +4,7 @@
 //! deletion, and listing with support for metadata, tags, and streaming.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -12,7 +13,8 @@ use minio::s3::types::{S3Api, ToStream};
 use time::OffsetDateTime;
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::types::{ObjectInfo, UploadContext};
+use crate::operations::{download_tracing, upload_tracing};
+use crate::types::{DownloadContext, ObjectInfo, UploadContext};
 use crate::{Error, MinioClient, Result, TRACING_TARGET_OBJECTS};
 
 /// Result of an upload operation.
@@ -91,25 +93,20 @@ impl ObjectOperations {
         let data_ref = data.as_ref();
         let size = data_ref.len() as u64;
 
-        debug!(
-            target: TRACING_TARGET_OBJECTS,
-            bucket = %bucket,
-            key = %key,
-            size = %size,
-            "Uploading file"
+        // Create upload context and tracer with metrics
+        let upload_ctx = UploadContext::new(bucket.to_string(), key.to_string(), size);
+        let tracer = upload_tracing::trace_upload_start_with_metrics(
+            &upload_ctx,
+            Arc::new(self.client.metrics().clone()),
         );
-
-        // Execute upload hooks if any
-        if metadata.is_some() {
-            let _upload_ctx = UploadContext::new(bucket.to_string(), key.to_string(), size);
-            // Hook execution would go here
-        }
 
         let start = std::time::Instant::now();
 
         // Convert data to SegmentedBytes for MinIO SDK
         let bytes_data = Bytes::copy_from_slice(data_ref);
         let segmented_data = SegmentedBytes::from(bytes_data);
+
+        tracer.log_progress("Data prepared for upload");
 
         // Use put_object directly - MinIO SDK handles the upload
         let result = self
@@ -125,33 +122,25 @@ impl ObjectOperations {
         match result {
             Ok(response) => {
                 let etag = response.etag;
-
-                info!(
-                    target: TRACING_TARGET_OBJECTS,
-                    bucket = %bucket,
-                    key = %key,
-                    size = %size,
-                    etag = %etag,
-                    elapsed = ?elapsed,
-                    "File uploaded successfully"
-                );
-
-                Ok(UploadResult {
+                let upload_result = UploadResult {
                     key: key.to_string(),
                     size,
                     etag,
                     duration: elapsed,
-                })
+                };
+
+                // Trace successful upload and record performance
+                upload_tracing::trace_upload_success(&upload_result);
+                tracer.complete_success();
+                self.client.record_operation(elapsed, true);
+
+                Ok(upload_result)
             }
             Err(e) => {
-                error!(
-                    target: TRACING_TARGET_OBJECTS,
-                    bucket = %bucket,
-                    key = %key,
-                    error = %e,
-                    elapsed = ?elapsed,
-                    "Failed to upload file"
-                );
+                // Trace upload error and record performance
+                upload_tracing::trace_upload_error(&upload_ctx, &e);
+                tracer.complete_error(&e);
+                self.client.record_operation(elapsed, false);
                 Err(e)
             }
         }
@@ -169,14 +158,16 @@ impl ObjectOperations {
     /// Returns an error if the download fails or object doesn't exist.
     #[instrument(skip(self), target = TRACING_TARGET_OBJECTS, fields(bucket = %bucket, key = %key))]
     pub async fn download_file(&self, bucket: &str, key: &str) -> Result<(Bytes, DownloadResult)> {
-        debug!(
-            target: TRACING_TARGET_OBJECTS,
-            bucket = %bucket,
-            key = %key,
-            "Downloading file"
+        // Create download context and tracer with metrics
+        let download_ctx = DownloadContext::new(bucket.to_string(), key.to_string());
+        let mut tracer = download_tracing::trace_download_start_with_metrics(
+            &download_ctx,
+            Arc::new(self.client.metrics().clone()),
         );
 
         let start = std::time::Instant::now();
+
+        tracer.log_progress("Initiating download request");
 
         let result = self
             .client
@@ -188,6 +179,8 @@ impl ObjectOperations {
 
         match result {
             Ok(response) => {
+                tracer.log_progress("Response received, processing headers");
+
                 // Extract headers before consuming response
                 let content_type = response
                     .headers
@@ -210,47 +203,40 @@ impl ObjectOperations {
                     })
                     .collect::<HashMap<String, String>>();
 
+                tracer.log_progress("Headers processed, reading response body");
+
                 // Read the body - convert ObjectContent to SegmentedBytes then to Bytes
                 let segmented = response
                     .content
                     .to_segmented_bytes()
                     .await
-                    .map_err(|e| Error::Io(e))?;
+                    .map_err(Error::Io)?;
                 let data = segmented.to_bytes();
 
                 let size = data.len() as u64;
+                tracer.add_bytes_processed(size);
                 let elapsed = start.elapsed();
 
-                info!(
-                    target: TRACING_TARGET_OBJECTS,
-                    bucket = %bucket,
-                    key = %key,
-                    size = %size,
-                    elapsed = ?elapsed,
-                    "File downloaded successfully"
-                );
+                let download_result = DownloadResult {
+                    key: key.to_string(),
+                    size,
+                    content_type,
+                    duration: elapsed,
+                    metadata,
+                };
 
-                Ok((
-                    data,
-                    DownloadResult {
-                        key: key.to_string(),
-                        size,
-                        content_type,
-                        duration: elapsed,
-                        metadata,
-                    },
-                ))
+                // Trace successful download and record performance
+                download_tracing::trace_download_success(&download_result);
+                tracer.complete_success();
+                self.client.record_operation(elapsed, true);
+
+                Ok((data, download_result))
             }
             Err(e) => {
-                let elapsed = start.elapsed();
-                error!(
-                    target: TRACING_TARGET_OBJECTS,
-                    bucket = %bucket,
-                    key = %key,
-                    error = %e,
-                    elapsed = ?elapsed,
-                    "Failed to download file"
-                );
+                // Trace download error and record performance
+                download_tracing::trace_download_error(&download_ctx, &e);
+                tracer.complete_error(&e);
+                self.client.record_operation(start.elapsed(), false);
                 Err(e)
             }
         }
@@ -313,8 +299,8 @@ impl ObjectOperations {
                 let objects: Vec<ObjectInfo> = response
                     .contents
                     .into_iter()
-                    .filter_map(|obj| {
-                        let size = obj.size.unwrap_or(0) as u64;
+                    .map(|obj| {
+                        let size = obj.size.unwrap_or(0);
 
                         // Parse last modified time
                         let last_modified = obj
@@ -333,7 +319,7 @@ impl ObjectOperations {
                             object_info = object_info.with_etag(etag);
                         }
 
-                        Some(object_info)
+                        object_info
                     })
                     .collect();
 
@@ -472,7 +458,7 @@ impl ObjectOperations {
 
         match result {
             Ok(response) => {
-                let size = response.size as u64;
+                let size = response.size;
 
                 // Parse last modified time
                 let last_modified = response

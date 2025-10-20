@@ -31,20 +31,8 @@ use utoipa::ToSchema;
 /// let policy = RegionalPolicy::from_minimal_flag(true);
 /// assert_eq!(policy, RegionalPolicy::MinimalDataCollection);
 /// ```
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-)]
-#[derive(
-    Serialize,
-    Deserialize,
-    ToSchema
-)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RegionalPolicy {
     /// Minimal data collection policy.

@@ -3,6 +3,8 @@
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
+#[cfg(feature = "utoipa")]
+use utoipa::ToSchema;
 
 use crate::types::FileType;
 
@@ -12,6 +14,7 @@ use crate::types::FileType;
 /// to specify what type of processing is needed to extract content from uploaded files.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::RequireMode"]
 pub enum RequireMode {
     /// Plain text content that is ready for analysis without additional processing

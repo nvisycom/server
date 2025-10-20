@@ -1,8 +1,10 @@
-//! Project status enumeration for project lifecycle management.
+//! Project status enumeration for project lifecycle tracking.
 
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
+#[cfg(feature = "utoipa")]
+use utoipa::ToSchema;
 
 /// Defines the operational status of a project in its lifecycle.
 ///
@@ -10,6 +12,7 @@ use strum::{Display, EnumIter, EnumString};
 /// to manage project states from active development through archival and template usage.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectStatus"]
 pub enum ProjectStatus {
     /// Project is active and accessible for normal operations

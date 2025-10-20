@@ -1,0 +1,117 @@
+# OS
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.vs/
+.vscode/
+.idea/
+.fleet/
+.zed/
+*.swp
+*.swo
+*~
+
+# Rust build artifacts
+debug/
+target/
+**/*.rs.bk
+*.pdb
+
+# Generated files
+*.pem
+*.backup
+coverage/
+*.profraw
+*.lcov
+
+# Intermediate output
+crates/nvisy-postgres/src/migrations/
+crates/nvisy-postgres/src/schema.rs
+
+# Build output (not needed in container)
+dist/
+build/
+output/
+
+# Environment files
+.env*
+!.env.example
+.envrc
+
+# Logs
+logs/
+*.log
+*.log*
+
+# Development and CI files (Docker-specific exclusions)
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+scripts/
+Makefile
+justfile
+*.sh
+*.bat
+*.ps1
+
+# Documentation (keep only essential)
+*.md
+!README.md
+docs/
+**/docs/
+
+# Test files
+tests/
+**/tests/
+test_data/
+fixtures/
+benchmarks/
+**/benchmarks/
+
+# Development tools
+.tool-versions
+rustfmt.toml
+clippy.toml
+deny.toml
+
+# Docker files (avoid recursion)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# License and legal (usually not needed at runtime)
+LICENSE*
+COPYRIGHT*
+NOTICE*
+
+# Backup and temporary files
+*.bak
+*.backup
+*.orig
+*.rej
+*.tmp
+tmp/
+temp/
+
+# Cache directories
+.cache/
+node_modules/
+.cargo/registry/
+.cargo/git/
+
+# IDE and system files
+*.pid
+*.seed
+*.pid.lock
+.ignore*/
+
+# Other
+LLM.md

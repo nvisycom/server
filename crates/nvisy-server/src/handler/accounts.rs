@@ -151,9 +151,11 @@ async fn update_account_internal(
     let mut conn = pg_database.get_connection().await?;
 
     // Get current account info for password validation
-    let current_account = AccountRepository::find_account_by_id(&mut conn, account_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.into_error())?;
+    let Some(current_account) =
+        AccountRepository::find_account_by_id(&mut conn, account_id).await?
+    else {
+        return Err(ErrorKind::NotFound.into_error());
+    };
 
     // Validate password strength if password is being updated
     let password_hash = if let Some(ref password) = request.password {
@@ -172,7 +174,7 @@ async fn update_account_internal(
         user_inputs.extend(email_parts);
         password_strength
             .validate_password(password, &user_inputs)
-            .map_err(|e| e.into_handler_error())?;
+            .map_err(|_| ErrorKind::BadRequest.into_error())?;
 
         Some(auth_hasher.hash_password(password)?)
     } else {
@@ -186,20 +188,17 @@ async fn update_account_internal(
         .map(|email| email.to_lowercase());
 
     // Check if email already exists for another account
-    if let Some(ref email) = normalized_email {
-        if AccountRepository::email_exists(&mut conn, email).await? {
-            if current_account.email_address != *email {
-                tracing::warn!(
-                    target: TRACING_TARGET,
-                    account_id = account_id.to_string(),
-                    email = %email,
-                    "account update failed: email already exists"
-                );
-                return Err(
-                    ErrorKind::Conflict.with_context("Account with this email already exists")
-                );
-            }
-        }
+    if let Some(ref email) = normalized_email
+        && AccountRepository::email_exists(&mut conn, email).await?
+        && current_account.email_address != *email
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            account_id = account_id.to_string(),
+            email = %email,
+            "account update failed: email already exists"
+        );
+        return Err(ErrorKind::Conflict.with_context("Account with this email already exists"));
     }
 
     let update_account = UpdateAccount {
@@ -232,19 +231,17 @@ async fn delete_account_internal(
     );
 
     let mut conn = pg_database.get_connection().await?;
-    let Some(account) = AccountRepository::delete_account(&mut conn, account_id).await? else {
-        return Err(ErrorKind::InternalServerError.into_error());
-    };
+    AccountRepository::delete_account(&mut conn, account_id).await?;
 
     let response = DeleteAccountResponse {
-        account_id: account.id,
-        created_at: account.created_at,
-        deleted_at: account.deleted_at.unwrap_or_else(OffsetDateTime::now_utc),
+        account_id,
+        created_at: OffsetDateTime::now_utc(),
+        deleted_at: OffsetDateTime::now_utc(),
     };
 
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = account.id.to_string(),
+        account_id = account_id.to_string(),
         "account deleted"
     );
 
@@ -569,7 +566,7 @@ mod test {
 
     #[tokio::test]
     async fn handlers_startup() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|state| routes(state)).await?;
+        let server = create_test_server_with_router(routes).await?;
 
         // Retrieves authenticated account.
         let response = server.get("/accounts/").await;

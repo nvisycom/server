@@ -95,7 +95,7 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, ProjectPermission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
@@ -198,10 +198,10 @@ async fn create_document(
         account_id: auth_claims.account_id,
         display_name: Some(request.display_name.clone()),
         description: None,
-        is_template: false,
-        settings: serde_json::Value::Null,
+        is_template: Some(false),
+        settings: Some(serde_json::Value::Null),
         tags: None,
-        metadata: serde_json::Value::Null,
+        metadata: Some(serde_json::Value::Null),
         status: Default::default(),
     };
 
@@ -304,7 +304,6 @@ async fn get_all_documents(
     let documents = DocumentRepository::find_documents_by_project(
         &mut conn,
         path_params.project_id,
-        None,
         Default::default(),
     )
     .await?;
@@ -387,9 +386,11 @@ async fn get_document(
         )
         .await?;
 
-    let document = DocumentRepository::find_document_by_id(&mut conn, path_params.document_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_resource("document"))?;
+    let Some(document) =
+        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("document"));
+    };
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -482,10 +483,11 @@ async fn update_document(
         .await?;
 
     // Verify document exists before updating
-    let _existing_document =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_resource("document"))?;
+    let Some(_existing_document) =
+        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("document"));
+    };
 
     let update_document = UpdateDocument {
         display_name: request.display_name,
@@ -573,17 +575,19 @@ async fn delete_document(
         .await?;
 
     // Verify document exists before deleting
-    let _existing_document =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_resource("document"))?;
+    let Some(_existing_document) =
+        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("document"));
+    };
 
     DocumentRepository::delete_document(&mut conn, path_params.document_id).await?;
 
-    let deleted_document =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_resource("document"))?;
+    let Some(deleted_document) =
+        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("document"));
+    };
 
     tracing::warn!(
         target: TRACING_TARGET,

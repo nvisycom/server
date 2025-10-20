@@ -48,16 +48,17 @@
 //! - Background processing for AI pipeline
 //! - Automatic storage optimization
 
-use axum::body::Bytes;
 use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{AppendHeaders, IntoResponse};
+use axum::response::IntoResponse;
+use bigdecimal::BigDecimal;
 use nvisy_minio::MinioClient;
 use nvisy_postgres::PgDatabase;
-use nvisy_postgres::models::{DocumentFile, NewDocumentFile};
+use nvisy_postgres::models::{NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::queries::DocumentFileRepository;
 use nvisy_postgres::types::{FileType, ProcessingStatus, RequireMode, VirusScanStatus};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -65,9 +66,10 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::extract::auth::AuthProvider;
 use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson, Version};
 use crate::handler::documents::DocumentPathParams;
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document file operations.
@@ -119,7 +121,7 @@ pub struct UploadFileResponse {
 }
 
 /// Uploads input files to a document for processing.
-#[tracing::instrument(skip(pg_database, storage, multipart))]
+#[tracing::instrument(skip(pg_database, minio_client, multipart))]
 #[utoipa::path(
     post, path = "/documents/{documentId}/files/", tag = "documents",
     params(DocumentPathParams),
@@ -194,8 +196,7 @@ async fn upload_file(
                 .with_context(format!(
                     "Maximum {} files allowed per upload",
                     MAX_FILES_PER_UPLOAD
-                ))
-                .into_error());
+                )));
         }
 
         let filename = if let Some(filename) = field.file_name() {
@@ -233,8 +234,7 @@ async fn upload_file(
                     "File '{}' exceeds maximum size of {} MB",
                     filename,
                     MAX_FILE_SIZE / (1024 * 1024)
-                ))
-                .into_error());
+                )));
         }
 
         // Extract file extension
@@ -260,8 +260,9 @@ async fn upload_file(
             "Uploading file to storage"
         );
 
-        storage
-            .put_object(&storage_path, data.clone())
+        minio_client
+            .object_operations()
+            .upload_file("documents", &storage_path, data.clone(), None, None)
             .await
             .map_err(|err| {
                 tracing::error!(
@@ -277,7 +278,6 @@ async fn upload_file(
 
         // Create database record
         let new_file = NewDocumentFile {
-            id: file_id,
             document_id: path_params.document_id,
             account_id: auth_claims.account_id,
             display_name: filename.clone(),
@@ -285,19 +285,25 @@ async fn upload_file(
             file_extension: file_extension.clone(),
             mime_type: content_type.clone(),
             file_type,
-            require_mode: RequireMode::Optional,
+            require_mode: RequireMode::Text,
             processing_priority: 0,
-            file_size: data.len() as i64,
-            file_hash: calculate_hash(&data),
+            metadata: serde_json::Value::Null,
+            file_size_bytes: data.len() as i64,
             storage_path: storage_path.clone(),
-            virus_scan_status: VirusScanStatus::Pending,
-            virus_scan_result: None,
+            storage_bucket: "documents".to_string(),
+            file_hash_sha256: calculate_hash(&data),
             processing_status: ProcessingStatus::Pending,
+            processing_attempts: 0,
             processing_error: None,
-            processing_started_at: None,
-            processing_completed_at: None,
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
+            processing_duration_ms: None,
+            processing_score: BigDecimal::from(0),
+            completeness_score: BigDecimal::from(0),
+            confidence_score: BigDecimal::from(0),
+            is_sensitive: false,
+            is_encrypted: false,
+            virus_scan_status: Some(VirusScanStatus::Clean),
+            keep_for_sec: 86400 * 365, // 1 year
+            auto_delete_at: None,
         };
 
         let document_file = DocumentFileRepository::create_document_file(&mut conn, new_file)
@@ -323,7 +329,7 @@ async fn upload_file(
         uploaded_files.push(UploadedFile {
             file_id: document_file.id,
             display_name: document_file.display_name,
-            file_size: document_file.file_size,
+            file_size: document_file.file_size_bytes,
             mime_type: document_file.mime_type,
             status: document_file.processing_status,
         });
@@ -334,8 +340,7 @@ async fn upload_file(
     if uploaded_files.is_empty() {
         return Err(ErrorKind::BadRequest
             .with_message("No files provided")
-            .with_context("Multipart request contained no file fields")
-            .into_error());
+            .with_context("Multipart request contained no file fields"));
     }
 
     let response = UploadFileResponse {
@@ -426,37 +431,32 @@ async fn update_file(
         .await?;
 
     // Get existing file
-    let mut file = DocumentFileRepository::find_file_by_id(&mut conn, path_params.file_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("File not found"))?;
+    let Some(file) =
+        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("File not found"));
+    };
 
     // Verify file belongs to document
     if file.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound
-            .with_message("File not found in document")
-            .into_error());
+        return Err(ErrorKind::NotFound.with_message("File not found in document"));
     }
 
-    // Update fields
-    if let Some(display_name) = request.display_name {
-        file.display_name = display_name;
-    }
-    if let Some(priority) = request.processing_priority {
-        file.processing_priority = priority;
-    }
-    if let Some(override_hash) = request.override_hash {
-        file.file_hash = override_hash;
-    }
-
-    file.updated_at = OffsetDateTime::now_utc();
+    // Create update struct
+    let updates = UpdateDocumentFile {
+        display_name: request.display_name,
+        processing_priority: request.processing_priority,
+        ..Default::default()
+    };
 
     // Save changes
-    let updated_file = DocumentFileRepository::update_document_file(&mut conn, file)
-        .await
-        .map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
-            ErrorKind::InternalServerError.with_message("Failed to update file")
-        })?;
+    let updated_file =
+        DocumentFileRepository::update_document_file(&mut conn, path_params.file_id, updates)
+            .await
+            .map_err(|err| {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
+                ErrorKind::InternalServerError.with_message("Failed to update file")
+            })?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -475,7 +475,7 @@ async fn update_file(
 }
 
 /// Downloads a document file.
-#[tracing::instrument(skip(pg_database, storage))]
+#[tracing::instrument(skip(pg_database, minio_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
     params(DocFileIdPathParams),
@@ -522,15 +522,15 @@ async fn download_file(
         .await?;
 
     // Get file metadata
-    let file = DocumentFileRepository::find_file_by_id(&mut conn, path_params.file_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("File not found"))?;
+    let Some(file) =
+        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("File not found"));
+    };
 
     // Verify file belongs to document
     if file.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound
-            .with_message("File not found in document")
-            .into_error());
+        return Err(ErrorKind::NotFound.with_message("File not found in document"));
     }
 
     tracing::debug!(
@@ -541,8 +541,9 @@ async fn download_file(
     );
 
     // Download from MinIO
-    let file_data = storage
-        .get_object(&file.storage_path)
+    let (file_data, _download_result) = minio_client
+        .object_operations()
+        .download_file("documents", &file.storage_path)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -571,14 +572,14 @@ async fn download_file(
 
     headers.insert(
         header::CONTENT_LENGTH,
-        HeaderValue::from(file.file_size as u64),
+        HeaderValue::from(file.file_size_bytes as u64),
     );
 
     tracing::info!(
         target: TRACING_TARGET,
         file_id = %file.id,
         filename = %file.display_name,
-        size = file.file_size,
+        size = file.file_size_bytes,
         "File downloaded successfully"
     );
 
@@ -586,7 +587,7 @@ async fn download_file(
 }
 
 /// Deletes a document file.
-#[tracing::instrument(skip(pg_database, storage))]
+#[tracing::instrument(skip(pg_database, minio_client))]
 #[utoipa::path(
     delete, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
     params(DocFileIdPathParams),
@@ -632,20 +633,21 @@ async fn delete_file(
         .await?;
 
     // Get file metadata
-    let file = DocumentFileRepository::find_file_by_id(&mut conn, path_params.file_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("File not found"))?;
+    let Some(file) =
+        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("File not found"));
+    };
 
     // Verify file belongs to document
     if file.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound
-            .with_message("File not found in document")
-            .into_error());
+        return Err(ErrorKind::NotFound.with_message("File not found in document"));
     }
 
     // Delete from storage
-    storage
-        .delete_object(&file.storage_path)
+    minio_client
+        .object_operations()
+        .delete_object("documents", &file.storage_path)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -676,28 +678,25 @@ async fn delete_file(
 
 /// Helper: Determine file type from extension and MIME type.
 fn determine_file_type(extension: &str, mime_type: &str) -> FileType {
-    match extension {
-        "pdf" => FileType::Pdf,
-        "doc" | "docx" => FileType::Word,
-        "xls" | "xlsx" => FileType::Excel,
-        "ppt" | "pptx" => FileType::PowerPoint,
-        "txt" => FileType::Text,
-        "csv" => FileType::Csv,
-        "json" => FileType::Json,
-        "xml" => FileType::Xml,
-        "html" | "htm" => FileType::Html,
-        "md" | "markdown" => FileType::Markdown,
-        _ if mime_type.starts_with("image/") => FileType::Image,
-        _ => FileType::Other,
+    // First try to determine from file extension
+    if let Some(file_type) = FileType::from_extension(extension) {
+        return file_type;
     }
+
+    // If extension doesn't give us a result, try MIME type
+    if let Some(file_type) = FileType::from_mime_type(mime_type) {
+        return file_type;
+    }
+
+    // Default to Document if neither method works
+    FileType::Document
 }
 
-/// Helper: Calculate SHA-256 hash of file data.
-fn calculate_hash(data: &Bytes) -> String {
-    use sha2::{Digest, Sha256};
+/// Helper: Calculate SHA-256 hash of data.
+fn calculate_hash(data: &[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    hasher.finalize().to_vec()
 }
 
 /// Returns a [`Router`] with all related routes.

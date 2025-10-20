@@ -24,6 +24,7 @@ use crate::service::{RateLimitKey, RateLimiter};
 /// let state = ServiceState::from_config(&config).await?;
 /// let middleware = from_fn_with_state(state.clone(), rate_limit_by_ip);
 /// ```
+#[allow(dead_code)]
 pub async fn rate_limit_by_ip(
     ClientIp(ip_address): ClientIp,
     State(rate_limiter): State<RateLimiter>,
@@ -41,6 +42,7 @@ pub async fn rate_limit_by_ip(
 /// Rate limits requests by IP address with strict limits
 ///
 /// Use this for sensitive endpoints like password reset or account creation
+#[allow(dead_code)]
 pub async fn rate_limit_strict(
     ClientIp(ip_address): ClientIp,
     State(rate_limiter): State<RateLimiter>,

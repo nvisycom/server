@@ -30,7 +30,7 @@ pub(super) fn init_tracing() -> anyhow::Result<()> {
         .with(fmt_layer)
         .with(env_filter)
         .try_init()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize tracing: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to initialize tracing: {e}"))?;
 
     Ok(())
 }
@@ -51,7 +51,7 @@ pub(super) fn init_tracing_with_otel() -> anyhow::Result<()> {
         .with(fmt_layer)
         .with(env_filter)
         .try_init()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize tracing: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to initialize tracing: {e}"))?;
 
     tracing::info!("OpenTelemetry support enabled");
     Ok(())
@@ -61,7 +61,7 @@ pub(super) fn init_tracing_with_otel() -> anyhow::Result<()> {
 fn create_env_filter() -> anyhow::Result<EnvFilter> {
     EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
-        .map_err(|e| anyhow::anyhow!("Failed to create env filter: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to create env filter: {e}"))
 }
 
 /// Creates a formatted tracing layer.

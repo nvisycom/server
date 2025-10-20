@@ -165,7 +165,7 @@ mod tests {
             .with_message("Missing required field");
 
         assert_eq!(
-            response.message.as_deref(),
+            &response.message,
             "The request could not be processed due to invalid data. Invalid format. Missing required field"
         );
     }

@@ -296,6 +296,17 @@ impl AuthResult {
     }
 
     /// Converts the result to a `Result` type, returning an error if access is denied.
+    /// 
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use nvisy_server::extract::auth::AuthResult;
+    /// let result = AuthResult::granted();
+    /// assert!(result.into_unit_result().is_ok());
+    ///
+    /// let result = AuthResult::denied("Access denied");
+    /// assert!(result.into_unit_result().is_err());
+    /// ```
     pub fn into_result(self) -> Result<Option<ProjectMember>> {
         if self.granted {
             Ok(self.member)

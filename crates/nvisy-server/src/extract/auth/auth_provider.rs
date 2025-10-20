@@ -14,14 +14,13 @@
 use std::borrow::Cow;
 
 use nvisy_postgres::models::ProjectMember;
-use nvisy_postgres::queries::{DocumentRepository, ProjectRepository};
-use nvisy_postgres::types::ProjectRole;
+use nvisy_postgres::queries::{DocumentRepository, ProjectMemberRepository};
 use nvisy_postgres::{PgConnection, PgError};
 use uuid::Uuid;
 
 use super::{AuthContext, AuthResult, ProjectPermission};
 use crate::TRACING_TARGET_AUTHORIZATION;
-use crate::handler::{ErrorKind, Result};
+use crate::handler::Result;
 
 /// Authorization provider for authenticated users.
 ///
@@ -70,6 +69,7 @@ pub trait AuthProvider {
     /// # Errors
     ///
     /// Returns database errors if queries fail.
+    #[allow(async_fn_in_trait)]
     async fn check_project_permission(
         &self,
         conn: &mut PgConnection,
@@ -90,7 +90,8 @@ pub trait AuthProvider {
 
         // Check project membership
         let member =
-            ProjectRepository::find_project_member(conn, project_id, self.account_id()).await?;
+            ProjectMemberRepository::find_project_member(conn, project_id, self.account_id())
+                .await?;
 
         let Some(member) = member else {
             tracing::warn!(
@@ -148,6 +149,7 @@ pub trait AuthProvider {
     /// # Errors
     ///
     /// Returns database errors if queries fail.
+    #[allow(async_fn_in_trait)]
     async fn check_document_permission(
         &self,
         conn: &mut PgConnection,
@@ -276,6 +278,7 @@ pub trait AuthProvider {
     /// # Errors
     ///
     /// Returns [`ErrorKind::Forbidden`] if access is denied, or propagates database errors.
+    #[allow(async_fn_in_trait)]
     async fn authorize_project(
         &self,
         conn: &mut PgConnection,
@@ -308,6 +311,7 @@ pub trait AuthProvider {
     /// # Errors
     ///
     /// Returns [`ErrorKind::Forbidden`] if access is denied, or propagates database errors.
+    #[allow(async_fn_in_trait)]
     async fn authorize_document(
         &self,
         conn: &mut PgConnection,

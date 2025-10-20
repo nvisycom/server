@@ -3,6 +3,8 @@
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
+#[cfg(feature = "utoipa")]
+use utoipa::ToSchema;
 
 /// Defines the current status of a project invitation.
 ///
@@ -10,6 +12,7 @@ use strum::{Display, EnumIter, EnumString};
 /// to track the lifecycle of project invitations from creation to resolution.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::InviteStatus"]
 pub enum InviteStatus {
     /// Invitation has been sent and is awaiting a response from the invitee

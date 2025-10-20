@@ -2,7 +2,7 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use nvisy_postgres::PgDatabase;
-use nvisy_postgres::queries::AccountRepository;
+use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
 
 use crate::extract::{AuthClaims, AuthHeader, AuthState};
 use crate::handler::{ErrorKind, Result};
@@ -86,15 +86,15 @@ async fn refresh_token(
 ) -> Result<AuthHeader> {
     let mut conn = pg_database.get_connection().await?;
 
-    // First get the current session to obtain the refresh token
-    let current_session =
-        AccountRepository::find_session_by_access_token(&mut conn, auth_claims.token_id)
+    // First get the current API token to obtain the refresh token
+    let current_token =
+        AccountApiTokenRepository::find_token_by_access_token(&mut conn, auth_claims.token_id)
             .await?
             .ok_or_else(|| ErrorKind::Unauthorized.into_error())?;
 
-    // Refresh the session using the refresh token
-    let updated_session =
-        AccountRepository::refresh_session(&mut conn, current_session.refresh_seq).await?;
+    // Refresh the API token using the refresh token
+    let updated_token =
+        AccountApiTokenRepository::refresh_token(&mut conn, current_token.refresh_seq).await?;
 
     // Get the account information
     let account = AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id)
@@ -102,7 +102,7 @@ async fn refresh_token(
         .ok_or_else(|| ErrorKind::Unauthorized.into_error())?;
 
     // Create new auth claims with updated expiration
-    let new_auth_claims = AuthClaims::new(account, updated_session, regional_policy);
+    let new_auth_claims = AuthClaims::new(account, updated_token, regional_policy);
     let new_auth_header = AuthHeader::new(new_auth_claims, auth_secret_keys);
 
     Ok(new_auth_header)

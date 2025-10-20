@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 tls = ["axum-server"]
 otel = ["tracing-subscriber/env-filter"]
+telemetry = ["uuid", "reqwest", "serde_json"]
 
 [dependencies]
 # Internal crates
@@ -47,3 +48,8 @@ serde = { workspace = true, features = ["derive"] }
 # Error handling
 anyhow = { workspace = true, features = ["backtrace"] }
 thiserror = { workspace = true, features = [] }
+
+# Telemetry (optional)
+uuid = { workspace = true, features = ["v4", "serde"], optional = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"], optional = true }
+serde_json = { workspace = true, features = [], optional = true }

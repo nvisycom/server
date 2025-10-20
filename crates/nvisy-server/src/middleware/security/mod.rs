@@ -6,7 +6,7 @@
 //! - Request body size limiting
 
 mod body_limit;
-mod cors;
+pub mod cors;
 mod headers_config;
 
 pub(crate) use body_limit::create_body_limit_layer;

@@ -3,9 +3,11 @@
 use tower_http::limit::RequestBodyLimitLayer;
 
 /// Default maximum request body size: 16MB
+#[allow(dead_code)]
 pub const DEFAULT_MAX_BODY_SIZE: usize = 16 * 1024 * 1024;
 
 /// Creates a request body size limit layer with the default size (16MB).
+#[allow(dead_code)]
 pub fn create_default_body_limit_layer() -> RequestBodyLimitLayer {
     RequestBodyLimitLayer::new(DEFAULT_MAX_BODY_SIZE)
 }

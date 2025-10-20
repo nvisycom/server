@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use nvisy_minio::MinioClient;
-use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgDatabase;
 use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;

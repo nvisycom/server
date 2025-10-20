@@ -70,8 +70,8 @@ use axum_client_ip::ClientIp;
 use axum_extra::TypedHeader;
 use axum_extra::headers::UserAgent;
 use nvisy_postgres::PgDatabase;
-use nvisy_postgres::models::{Account, AccountSession, NewAccount, NewAccountSession};
-use nvisy_postgres::queries::AccountRepository;
+use nvisy_postgres::models::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
+use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
@@ -95,9 +95,9 @@ fn create_auth_header(
     regional_policy: RegionalPolicy,
     auth_secret_keys: AuthKeys,
     account: Account,
-    account_session: AccountSession,
+    account_api_token: AccountApiToken,
 ) -> Result<AuthHeader> {
-    let auth_claims = AuthClaims::new(account, account_session, regional_policy);
+    let auth_claims = AuthClaims::new(account, account_api_token, regional_policy);
     let auth_header = AuthHeader::new(auth_claims, auth_secret_keys);
     Ok(auth_header)
 }
@@ -123,7 +123,7 @@ struct LoginResponse {
     pub regional_policy: String,
 }
 
-/// Creates a new account session.
+/// Creates a new account API token.
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     post, path = "/auth/login/", tag = "accounts",
@@ -145,7 +145,7 @@ struct LoginResponse {
         ),
         (
             status = CREATED,
-            description = "Session created",
+            description = "API token created",
             body = LoginResponse,
         ),
     ),
@@ -180,10 +180,11 @@ async fn login(
             // Perform dummy hash verification to maintain consistent timing
             // Generate a random password hash to verify against
             use rand::Rng;
-            let dummy_password: String = rand::thread_rng()
-                .sample_iter(&rand::distributions::Alphanumeric)
-                .take(16)
-                .map(char::from)
+            let dummy_password: String = (0..16)
+                .map(|_| {
+                    let chars = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                    chars[rand::rng().random_range(0..chars.len())] as char
+                })
                 .collect();
 
             // Hash the dummy password and verify - this will always fail
@@ -196,22 +197,19 @@ async fn login(
     };
 
     // Check if login should succeed
-    let login_successful = match &account {
-        Some(acc) if password_valid && acc.can_authenticate() => true,
-        _ => false,
-    };
+    let login_successful = matches!(&account, Some(acc) if password_valid && acc.can_login());
 
     if !login_successful {
         // Record failed login attempt for existing accounts
-        if let Some(ref acc) = account {
-            if let Err(e) = AccountRepository::record_failed_login(&mut conn, acc.id).await {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    account_id = acc.id.to_string(),
-                    error = %e,
-                    "failed to record failed login attempt"
-                );
-            }
+        if let Some(ref acc) = account
+            && let Err(e) = AccountRepository::record_failed_login(&mut conn, acc.id).await
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                account_id = acc.id.to_string(),
+                error = %e,
+                "failed to record failed login attempt"
+            );
         }
 
         tracing::warn!(
@@ -239,16 +237,16 @@ async fn login(
         );
     }
 
-    let new_session = NewAccountSession {
+    let new_token = NewAccountApiToken {
         account_id: account.id,
         ip_address: ip_address.into(),
         user_agent: user_agent.to_string(),
         region_code: regional_policy.to_string(),
         ..Default::default()
     };
-    let account_session = AccountRepository::create_session(&mut conn, new_session).await?;
+    let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
 
-    let auth_header = create_auth_header(regional_policy, auth_keys, account, account_session)?;
+    let auth_header = create_auth_header(regional_policy, auth_keys, account, account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
     let response = LoginResponse {
@@ -264,7 +262,7 @@ async fn login(
         account_id = auth_claims.account_id.to_string(),
         email = %normalized_email,
         regional_policy = regional_policy.to_string(),
-        "login successful: session created"
+        "login successful: API token created"
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
@@ -295,7 +293,7 @@ struct SignupResponse {
     pub email_address: String,
 }
 
-/// Creates a new account and session.
+/// Creates a new account and API token.
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     post, path = "/auth/signup/", tag = "accounts",
@@ -322,6 +320,7 @@ struct SignupResponse {
         ),
     ),
 )]
+#[allow(clippy::too_many_arguments)]
 async fn signup(
     State(pg_database): State<PgDatabase>,
     State(auth_hasher): State<AuthHasher>,
@@ -350,11 +349,11 @@ async fn signup(
 
     password_strength
         .validate_password(&request.password, &user_inputs)
-        .map_err(|e| e.into_handler_error())?;
+        .map_err(|_| ErrorKind::BadRequest.into_error())?;
 
     let password_hash = auth_hasher
         .hash_password(&request.password)
-        .map_err(|e| e.into_handler_error())?;
+        .map_err(|_| ErrorKind::InternalServerError.into_error())?;
 
     // Check if email already exists
     if AccountRepository::email_exists(&mut conn, &normalized_email).await? {
@@ -382,20 +381,20 @@ async fn signup(
         "account created"
     );
 
-    let new_session = NewAccountSession {
+    let new_token = NewAccountApiToken {
         account_id: account.id,
         ip_address: ip_address.into(),
         user_agent: user_agent.to_string(),
         region_code: regional_policy.to_string(),
         ..Default::default()
     };
-    let account_session = AccountRepository::create_session(&mut conn, new_session).await?;
+    let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
 
     // Extract values before moving account
     let display_name = account.display_name.clone();
     let email_address = account.email_address.clone();
 
-    let auth_header = create_auth_header(regional_policy, auth_keys, account, account_session)?;
+    let auth_header = create_auth_header(regional_policy, auth_keys, account, account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
     let response = SignupResponse {
@@ -412,13 +411,13 @@ async fn signup(
         token_id = auth_claims.token_id.to_string(),
         account_id = auth_claims.account_id.to_string(),
         regional_policy = regional_policy.to_string(),
-        "signup successful: session created"
+        "signup successful: API token created"
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
-/// Deletes a session by its ID (from the Authorization header).
+/// Deletes an API token by its ID (from the Authorization header).
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     post, path = "/auth/logout/", tag = "accounts",
@@ -435,7 +434,7 @@ async fn signup(
         ),
         (
             status = OK,
-            description = "Session deleted",
+            description = "API token deleted",
         ),
     ),
 )]
@@ -453,24 +452,24 @@ async fn logout(
 
     let mut conn = pg_database.get_connection().await?;
 
-    // Verify session exists before attempting to delete
-    let session_exists =
-        AccountRepository::find_session_by_access_token(&mut conn, auth_claims.token_id)
+    // Verify API token exists before attempting to delete
+    let token_exists =
+        AccountApiTokenRepository::find_token_by_access_token(&mut conn, auth_claims.token_id)
             .await?
             .is_some();
 
-    if !session_exists {
+    if !token_exists {
         tracing::warn!(
             target: TRACING_TARGET,
             token_id = auth_claims.token_id.to_string(),
             account_id = auth_claims.account_id.to_string(),
-            "logout attempted on non-existent session"
+            "logout attempted on non-existent API token"
         );
-        return Ok(StatusCode::OK); // Consider it successful if session doesn't exist
+        return Ok(StatusCode::OK); // Consider it successful if token doesn't exist
     }
 
-    // Delete the session
-    let deleted = AccountRepository::delete_session(&mut conn, auth_claims.token_id).await?;
+    // Delete the API token
+    let deleted = AccountApiTokenRepository::delete_token(&mut conn, auth_claims.token_id).await?;
 
     if deleted {
         tracing::info!(
@@ -478,27 +477,28 @@ async fn logout(
             token_id = auth_claims.token_id.to_string(),
             account_id = auth_claims.account_id.to_string(),
             regional_policy = regional_policy.to_string(),
-            "logout successful: session deleted"
+            "logout successful: API token deleted"
         );
     } else {
         tracing::warn!(
             target: TRACING_TARGET,
             token_id = auth_claims.token_id.to_string(),
             account_id = auth_claims.account_id.to_string(),
-            "logout completed but session was not found for deletion"
+            "logout completed but API token was not found for deletion"
         );
     }
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
     tokio::spawn(async move {
-        if let Ok(mut cleanup_conn) = pg_database.get_connection().await {
-            if let Err(e) = AccountRepository::cleanup_expired_sessions(&mut cleanup_conn).await {
-                tracing::debug!(
-                    target: TRACING_TARGET_CLEANUP,
-                    error = %e,
-                    "failed to cleanup expired sessions during logout"
-                );
-            }
+        if let Ok(mut cleanup_conn) = pg_database.get_connection().await
+            && let Err(e) =
+                AccountApiTokenRepository::cleanup_expired_tokens(&mut cleanup_conn).await
+        {
+            tracing::debug!(
+                target: TRACING_TARGET_CLEANUP,
+                error = %e,
+                "failed to cleanup expired sessions during logout"
+            );
         }
     });
 

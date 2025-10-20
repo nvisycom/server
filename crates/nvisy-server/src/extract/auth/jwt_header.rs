@@ -38,7 +38,7 @@ use axum_extra::headers::authorization::Bearer;
 use axum_extra::typed_header::TypedHeaderRejectionReason;
 use jsonwebtoken::errors::{Error as JwtError, ErrorKind as JwtErrorKind};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use nvisy_postgres::models::{Account, AccountSession};
+use nvisy_postgres::models::{Account, AccountApiToken};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
@@ -297,16 +297,16 @@ impl AuthClaims {
     /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
     pub fn new(
         account: Account,
-        account_session: AccountSession,
+        account_api_token: AccountApiToken,
         regional_policy: RegionalPolicy,
     ) -> Self {
         Self {
             issued_by: Self::JWT_ISSUER.to_owned(),
             audience: Self::JWT_AUDIENCE.to_owned(),
-            token_id: account_session.access_seq,
+            token_id: account_api_token.access_seq,
             account_id: account.id,
-            issued_at: account_session.issued_at,
-            expired_at: account_session.expired_at,
+            issued_at: account_api_token.issued_at,
+            expired_at: account_api_token.expired_at,
             regional_policy,
             is_administrator: account.is_admin,
         }
@@ -427,7 +427,7 @@ impl AuthClaims {
                 expired_at = %claims.expired_at,
                 "JWT token validation failed: token expired"
             );
-            return Err(ErrorKind::ExpiredAuthToken
+            return Err(ErrorKind::Unauthorized
                 .with_message("Authentication session has expired")
                 .with_context("Please sign in again to continue"));
         }
@@ -490,7 +490,7 @@ impl AuthClaims {
 impl From<JwtError> for Error<'static> {
     fn from(error: JwtError) -> Self {
         match error.kind() {
-            JwtErrorKind::ExpiredSignature => ErrorKind::ExpiredAuthToken
+            JwtErrorKind::ExpiredSignature => ErrorKind::Unauthorized
                 .with_message("Your session has expired")
                 .with_context("Please sign in again to continue"),
             JwtErrorKind::InvalidToken => ErrorKind::MalformedAuthToken
@@ -517,10 +517,10 @@ impl From<JwtError> for Error<'static> {
             JwtErrorKind::Json(_) => ErrorKind::MalformedAuthToken
                 .with_message("Authentication token structure is invalid")
                 .with_context("Token payload contains malformed data"),
-            JwtErrorKind::Utf8(_) => ErrorKind::MalformedAuthToken
+            JwtErrorKind::InvalidKeyFormat => ErrorKind::MalformedAuthToken
                 .with_message("Authentication token encoding is invalid")
-                .with_context("Token contains non-UTF-8 character sequences"),
-            JwtErrorKind::Crypto(_) => ErrorKind::InternalServerError
+                .with_context("Token contains invalid key format"),
+            JwtErrorKind::InvalidEcdsaKey => ErrorKind::InternalServerError
                 .with_message("Authentication verification encountered an error")
                 .with_context("Cryptographic validation failed"),
             _ => ErrorKind::InternalServerError

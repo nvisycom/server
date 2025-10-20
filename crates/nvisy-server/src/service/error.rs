@@ -3,8 +3,6 @@
 //! This module provides comprehensive error handling for the service layer,
 //! covering configuration, database, external service, and system errors.
 
-use std::fmt;
-
 use thiserror::Error;
 
 /// Result type for service operations.
@@ -227,7 +225,7 @@ impl ServiceError {
     /// Converts this service error into a handler error.
     ///
     /// This is used when service errors need to be returned from HTTP handlers.
-    pub fn into_handler_error(self) -> crate::handler::Error {
+    pub fn into_handler_error(self) -> crate::handler::Error<'static> {
         use crate::handler::ErrorKind;
 
         match self {
@@ -247,7 +245,7 @@ impl ServiceError {
 }
 
 /// Conversion from service error to handler error.
-impl From<ServiceError> for crate::handler::Error {
+impl From<ServiceError> for crate::handler::Error<'static> {
     fn from(error: ServiceError) -> Self {
         error.into_handler_error()
     }
@@ -270,7 +268,7 @@ mod tests {
         let error = ServiceError::file_system_with_source("Cannot read config file", source);
 
         assert_eq!(error.category(), "file_system");
-        assert!(error.source().is_some());
+        assert!(std::error::Error::source(&error).is_some());
     }
 
     #[test]

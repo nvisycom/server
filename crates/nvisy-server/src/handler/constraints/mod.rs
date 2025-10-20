@@ -9,8 +9,6 @@
 mod account;
 mod document;
 mod project;
-mod subscriber;
-mod support;
 
 use nvisy_postgres::PgError;
 use nvisy_postgres::types::ConstraintViolation;
@@ -30,10 +28,6 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::Document(c) => c.into(),
             ConstraintViolation::DocumentFile(c) => c.into(),
             ConstraintViolation::DocumentVersion(c) => c.into(),
-            ConstraintViolation::SupportTicket(c) => c.into(),
-            ConstraintViolation::SupportTicketReply(c) => c.into(),
-            ConstraintViolation::Feedback(c) => c.into(),
-            ConstraintViolation::Subscriber(c) => c.into(),
         }
     }
 }
@@ -75,16 +69,16 @@ impl From<PgError> for Error<'static> {
             }
             PgError::Query(ref query_error) => {
                 // Try to extract constraint violation
-                if let Some(constraint_name) = error.constraint() {
-                    if let Some(constraint) = ConstraintViolation::new(constraint_name) {
-                        tracing::error!(
-                            target: "server::postgres",
-                            constraint = constraint_name,
-                            error = %query_error,
-                            "query error (constraint violation)"
-                        );
-                        return constraint.into();
-                    }
+                if let Some(constraint_name) = error.constraint()
+                    && let Some(constraint) = ConstraintViolation::new(constraint_name)
+                {
+                    tracing::error!(
+                        target: "server::postgres",
+                        constraint = constraint_name,
+                        error = %query_error,
+                        "query error (constraint violation)"
+                    );
+                    return constraint.into();
                 }
 
                 // Generic query error without constraint

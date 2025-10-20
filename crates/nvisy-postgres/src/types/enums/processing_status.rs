@@ -1,8 +1,11 @@
 //! Processing status enumeration for file processing pipeline tracking.
+//! Processing status enumeration for document and file processing operations.
 
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
+#[cfg(feature = "utoipa")]
+use utoipa::ToSchema;
 
 /// Defines the current processing status of a file in the processing pipeline.
 ///
@@ -11,6 +14,7 @@ use strum::{Display, EnumIter, EnumString};
 /// such as text extraction, OCR, transcription, and analysis.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ProcessingStatus"]
 pub enum ProcessingStatus {
     /// File is queued for processing and waiting to be picked up

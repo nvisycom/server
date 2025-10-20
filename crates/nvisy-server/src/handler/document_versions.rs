@@ -17,6 +17,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
+use crate::extract::auth::AuthProvider;
 use crate::extract::{AuthState, Json, Path, ProjectPermission, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
@@ -72,7 +73,7 @@ impl From<DocumentVersion> for VersionInfo {
             file_extension: version.file_extension,
             mime_type: version.mime_type,
             file_type: version.file_type,
-            file_size: version.file_size,
+            file_size: version.file_size_bytes,
             processing_credits: version.processing_credits,
             processing_duration_ms: version.processing_duration_ms,
             created_at: version.created_at,
@@ -152,17 +153,16 @@ async fn get_version_files(
     tracing::debug!(
         target: TRACING_TARGET,
         document_id = %path_params.document_id,
-        page = pagination.page,
-        per_page = pagination.per_page,
+        page = ?pagination.offset,
+        per_page = ?pagination.limit,
         "Fetching document versions"
     );
 
     // Get versions with pagination
-    let versions = DocumentVersionRepository::find_versions_by_document_id(
+    let versions = DocumentVersionRepository::list_document_versions(
         &mut conn,
         path_params.document_id,
-        pagination.limit(),
-        pagination.offset(),
+        pagination.into(),
     )
     .await
     .map_err(|err| {
@@ -183,13 +183,15 @@ async fn get_version_files(
     );
 
     let version_infos: Vec<VersionInfo> = versions.into_iter().map(VersionInfo::from).collect();
-    let total = version_infos.len();
+    let total =
+        DocumentVersionRepository::count_document_versions(&mut conn, path_params.document_id)
+            .await? as usize;
 
     let response = ReadAllVersionsResponse {
         total,
         versions: version_infos,
-        page: pagination.page,
-        per_page: pagination.per_page,
+        page: ((pagination.offset() / pagination.limit()) + 1) as i64,
+        per_page: pagination.limit() as i64,
     };
 
     Ok((StatusCode::OK, Json(response)))
@@ -246,15 +248,16 @@ async fn get_version_info(
         .await?;
 
     // Get version
-    let version = DocumentVersionRepository::find_version_by_id(&mut conn, path_params.version_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("Version not found"))?;
+    let Some(version) =
+        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
+            .await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("Version not found"));
+    };
 
     // Verify version belongs to document
     if version.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Version not found in document")
-            .into_error());
+        return Err(ErrorKind::NotFound.with_message("Version not found in document"));
     }
 
     tracing::info!(
@@ -268,7 +271,7 @@ async fn get_version_info(
 }
 
 /// Downloads a document version output file.
-#[tracing::instrument(skip(pg_database, storage))]
+#[tracing::instrument(skip(pg_database, minio_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/versions/{versionId}/download", tag = "documents",
     params(DocVersionIdPathParams),
@@ -321,15 +324,16 @@ async fn download_version_file(
     );
 
     // Get version metadata
-    let version = DocumentVersionRepository::find_version_by_id(&mut conn, path_params.version_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("Version not found"))?;
+    let Some(version) =
+        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
+            .await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("Version not found"));
+    };
 
     // Verify version belongs to document
     if version.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Version not found in document")
-            .into_error());
+        return Err(ErrorKind::NotFound.with_message("Version not found in document"));
     }
 
     tracing::debug!(
@@ -340,8 +344,9 @@ async fn download_version_file(
     );
 
     // Download from MinIO
-    let file_data = storage
-        .get_object(&version.storage_path)
+    let (file_data, _download_result) = minio_client
+        .object_operations()
+        .download_file("documents", &version.storage_path)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -370,29 +375,29 @@ async fn download_version_file(
 
     headers.insert(
         header::CONTENT_LENGTH,
-        HeaderValue::from(version.file_size as u64),
+        HeaderValue::from(version.file_size_bytes as u64),
     );
 
     // Add version metadata headers
     headers.insert(
-        HeaderValue::from_static("x-document-version"),
-        HeaderValue::from(version.version_number as u64),
+        "X-Version-Number",
+        HeaderValue::from_str(&version.version_number.to_string())
+            .unwrap_or_else(|_| HeaderValue::from_static("0")),
     );
 
     tracing::info!(
         target: TRACING_TARGET,
         version_id = %version.id,
-        version_number = version.version_number,
         filename = %version.display_name,
-        size = version.file_size,
-        "Version file downloaded successfully"
+        size = version.file_size_bytes,
+        "Version downloaded successfully"
     );
 
-    Ok((StatusCode::OK, headers, file_data))
+    Ok((StatusCode::OK, headers, file_data.to_vec()))
 }
 
 /// Deletes a document version.
-#[tracing::instrument(skip(pg_database, storage))]
+#[tracing::instrument(skip(pg_database, minio_client))]
 #[utoipa::path(
     delete, path = "/documents/{documentId}/versions/{versionId}", tag = "documents",
     params(DocVersionIdPathParams),
@@ -442,32 +447,34 @@ async fn delete_version(
         .await?;
 
     // Get version
-    let version = DocumentVersionRepository::find_version_by_id(&mut conn, path_params.version_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("Version not found"))?;
+    let Some(version) =
+        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
+            .await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("Version not found"));
+    };
 
     // Verify version belongs to document
     if version.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Version not found in document")
-            .into_error());
+        return Err(ErrorKind::NotFound.with_message("Version not found in document"));
     }
 
     // Get latest version number
     let stats =
-        DocumentVersionRepository::get_version_stats(&mut conn, path_params.document_id).await?;
+        DocumentVersionRepository::get_document_version_stats(&mut conn, path_params.document_id)
+            .await?;
 
     // Prevent deleting the latest version
     if version.version_number == stats.latest_version_number {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot delete the latest version")
-            .with_context("Delete older versions or create a new version first")
-            .into_error());
+            .with_context("Delete older versions or create a new version first"));
     }
 
     // Delete from storage
-    storage
-        .delete_object(&version.storage_path)
+    minio_client
+        .object_operations()
+        .delete_object("documents", &version.storage_path)
         .await
         .map_err(|err| {
             tracing::error!(

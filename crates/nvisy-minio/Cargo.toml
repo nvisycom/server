@@ -22,11 +22,16 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 [dependencies]
+# Internal
+nvisy-core = { workspace = true, features = ["serde"] }
+
 # Async runtime
 futures = { workspace = true, features = [] }
 
 # File storage
 minio = { workspace = true, features = ["rustls-tls"] }
+
+
 
 # Observability
 tracing = { workspace = true, features = [] }

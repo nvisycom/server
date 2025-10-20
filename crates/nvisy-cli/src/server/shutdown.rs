@@ -1,84 +1,67 @@
 //! Graceful shutdown signal handling.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::signal::ctrl_c;
 #[cfg(unix)]
 use tokio::signal::unix;
 
-use crate::TRACING_TARGET_SHUTDOWN;
-
-/// Waits for a shutdown signal and performs cleanup.
+/// Waits for a shutdown signal (SIGTERM or SIGINT/Ctrl+C).
 ///
-/// This function listens for:
+/// This function listens for shutdown signals and returns when one is received:
 /// - SIGTERM (Unix/Linux)
 /// - SIGINT (Ctrl+C on all platforms)
-///
-/// When a signal is received, it initiates graceful shutdown and ensures all
-/// resources are properly cleaned up within the specified timeout period.
 ///
 /// # Arguments
 ///
 /// * `shutdown_timeout` - Maximum duration to wait for cleanup operations
-///
-/// # Behavior
-///
-/// - On Unix systems: Listens for both SIGTERM and SIGINT
-/// - On other systems: Listens for Ctrl+C only
-/// - Logs tracing information about the shutdown process
-/// - Handles OpenTelemetry shutdown when the `otel` feature is enabled
 pub async fn shutdown_signal(shutdown_timeout: Duration) {
     let ctrl_c = async {
-        ctrl_c().await.expect("Failed to install Ctrl+C handler");
+        if let Err(e) = ctrl_c().await {
+            tracing::error!(
+                target: "nvisy_cli::shutdown",
+                error = %e,
+                "Failed to install Ctrl+C handler"
+            );
+        } else {
+            tracing::info!(
+                target: "nvisy_cli::shutdown",
+                "Received Ctrl+C signal, initiating graceful shutdown"
+            );
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        unix::signal(unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
-            .recv()
-            .await;
+        match unix::signal(unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+                tracing::info!(
+                    target: "nvisy_cli::shutdown",
+                    "Received SIGTERM signal, initiating graceful shutdown"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "nvisy_cli::shutdown",
+                    error = %e,
+                    "Failed to install SIGTERM handler"
+                );
+            }
+        }
     };
 
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        () = ctrl_c => {},
+        () = terminate => {},
     }
 
-    let t0 = Instant::now();
-
-    tracing::trace!(
-        target: TRACING_TARGET_SHUTDOWN,
-        timeout = shutdown_timeout.as_millis(),
-        "global tracer provider is closing"
-    );
-
-    #[cfg(feature = "otel")]
-    let (tx, rx) = std::sync::mpsc::channel();
-    #[cfg(feature = "otel")]
-    let _ = std::thread::spawn(move || {
-        // TODO: Setup opentelemetry.
-        // opentelemetry::global::shutdown_tracer_provider();
-        tx.send(()).ok()
-    });
-
-    #[cfg(feature = "otel")]
-    if rx.recv_timeout(shutdown_timeout).is_err() {
-        tracing::error!(
-            target: TRACING_TARGET_SHUTDOWN,
-            timeout = shutdown_timeout.as_millis(),
-            "global tracer provider failed to close"
-        );
-    }
-
-    let t1 = Instant::now().duration_since(t0);
-    tracing::warn!(
-        target: TRACING_TARGET_SHUTDOWN,
-        timeout = shutdown_timeout.as_millis(),
-        waiting = t1.as_millis(),
-        "server is terminating",
+    tracing::info!(
+        target: "nvisy_cli::shutdown",
+        timeout_seconds = shutdown_timeout.as_secs(),
+        "Graceful shutdown initiated"
     );
 }

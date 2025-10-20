@@ -7,7 +7,7 @@ use anyhow::{Result as AnyhowResult, anyhow};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
-use crate::TRACING_TARGET_CONFIG;
+use crate::TRACING_TARGET_SERVER_STARTUP;
 
 /// HTTP server configuration.
 ///
@@ -70,7 +70,7 @@ pub struct ServerConfig {
     ///
     /// If empty, localhost origins will be used for development.
     /// In production, specify the exact origins that should be allowed.
-    /// Example: https://nvisy.com,https://app.nvisy.com
+    /// Example: <https://nvisy.com,https://app.nvisy.com>
     #[arg(long, env = "CORS_ALLOWED_ORIGINS", value_delimiter = ',')]
     #[serde(default)]
     pub cors_allowed_origins: Vec<String>,
@@ -90,9 +90,9 @@ pub struct ServerConfig {
     pub tls_key_path: Option<std::path::PathBuf>,
 }
 
-/// Default host address for development.
-fn default_host() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::LOCALHOST)
+/// Default host address for production use.
+const fn default_host() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::UNSPECIFIED) // 0.0.0.0
 }
 
 impl ServerConfig {
@@ -154,12 +154,6 @@ impl ServerConfig {
         SocketAddr::new(self.host, self.port)
     }
 
-    /// Returns the request processing timeout as a `Duration`.
-    #[must_use]
-    pub const fn request_timeout(&self) -> Duration {
-        Duration::from_secs(self.request_timeout)
-    }
-
     /// Returns the graceful shutdown timeout as a `Duration`.
     #[must_use]
     pub const fn shutdown_timeout(&self) -> Duration {
@@ -168,19 +162,14 @@ impl ServerConfig {
 
     /// Returns whether the server is configured to bind to all interfaces.
     ///
-    /// This is true when the host is set to "0.0.0.0" (IPv4) or "::" (IPv6).
+    /// This returns true if the host is set to 0.0.0.0 (IPv4) or :: (IPv6),
+    /// which means the server will accept connections from any network interface.
     #[must_use]
     pub const fn binds_to_all_interfaces(&self) -> bool {
         match self.host {
             IpAddr::V4(addr) => addr.is_unspecified(),
             IpAddr::V6(addr) => addr.is_unspecified(),
         }
-    }
-
-    /// Returns whether this is a development configuration.
-    #[must_use]
-    pub fn is_development(&self) -> bool {
-        matches!(self.host, IpAddr::V4(addr) if addr.is_loopback()) && self.port == 3000
     }
 
     /// Returns whether TLS is configured.
@@ -190,18 +179,23 @@ impl ServerConfig {
         self.tls_cert_path.is_some() && self.tls_key_path.is_some()
     }
 
-    /// Creates a production-ready configuration with secure defaults.
+    /// Returns whether TLS is configured (always false when TLS feature is disabled).
     #[must_use]
-    pub fn production() -> Self {
+    #[cfg(not(feature = "tls"))]
+    pub const fn is_tls_enabled(&self) -> bool {
+        false
+    }
+}
+
+impl Default for ServerConfig {
+    /// Creates a production-ready configuration with safe defaults.
+    fn default() -> Self {
         Self {
-            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            host: default_host(), // 0.0.0.0
             port: 8080,
             request_timeout: 60,
             shutdown_timeout: 60,
-            cors_allowed_origins: vec![
-                "https://nvisy.com".to_string(),
-                "https://app.nvisy.com".to_string(),
-            ],
+            cors_allowed_origins: Vec::new(),
             #[cfg(feature = "tls")]
             tls_cert_path: None,
             #[cfg(feature = "tls")]
@@ -210,21 +204,29 @@ impl ServerConfig {
     }
 }
 
-impl Default for ServerConfig {
-    /// Creates a development-friendly configuration with safe defaults.
-    fn default() -> Self {
-        Self {
-            host: default_host(),
-            port: 3000,
-            request_timeout: 30,
-            shutdown_timeout: 30,
-            cors_allowed_origins: Vec::new(),
-            #[cfg(feature = "tls")]
-            tls_cert_path: None,
-            #[cfg(feature = "tls")]
-            tls_key_path: None,
+/// Logs server configuration details with appropriate tracing.
+///
+/// This function logs essential server configuration information at startup,
+/// including host, port, and TLS status when applicable.
+pub fn log_server_config(config: &ServerConfig) {
+    let tls_status = {
+        #[cfg(feature = "tls")]
+        {
+            config.is_tls_enabled()
         }
-    }
+        #[cfg(not(feature = "tls"))]
+        {
+            false
+        }
+    };
+
+    tracing::info!(
+        target: TRACING_TARGET_SERVER_STARTUP,
+        "Server configured successfully: {}:{}, TLS: {}",
+        config.host,
+        config.port,
+        tls_status
+    );
 }
 
 #[cfg(test)]
@@ -235,15 +237,10 @@ mod tests {
     fn validate_default_config() {
         let config = ServerConfig::default();
         assert!(config.validate().is_ok());
-        assert!(config.is_development());
-        assert!(!config.binds_to_all_interfaces());
-    }
-
-    #[test]
-    fn validate_production_config() {
-        let config = ServerConfig::production();
-        assert!(config.validate().is_ok());
-        assert!(!config.is_development());
+        assert!(config.binds_to_all_interfaces());
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.request_timeout, 60);
+        assert_eq!(config.shutdown_timeout, 60);
     }
 
     #[test]
@@ -271,36 +268,19 @@ mod tests {
     fn server_addr_returns_correct_socket() {
         let config = ServerConfig::default();
         let addr = config.server_addr();
-        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-        assert_eq!(addr.port(), 3000);
-    }
-}
-
-/// Logs server configuration details with appropriate tracing.
-///
-/// This function logs essential server configuration information at startup,
-/// including host, port, and TLS status when applicable.
-pub fn log_server_config(config: &ServerConfig) {
-    #[cfg(feature = "tls")]
-    {
-        tracing::info!(
-            target: TRACING_TARGET_CONFIG,
-            host = %config.host,
-            port = config.port,
-            tls_enabled = config.is_tls_enabled(),
-            development_mode = config.is_development(),
-            "Server configured successfully"
-        );
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        assert_eq!(addr.port(), 8080);
     }
 
-    #[cfg(not(feature = "tls"))]
-    {
-        tracing::info!(
-            target: TRACING_TARGET_CONFIG,
-            host = %config.host,
-            port = config.port,
-            development_mode = config.is_development(),
-            "Server configured successfully"
-        );
+    #[test]
+    fn binds_to_all_interfaces_detection() {
+        let mut config = ServerConfig::default();
+        assert!(config.binds_to_all_interfaces()); // Default is now 0.0.0.0
+
+        config.host = IpAddr::V4(Ipv4Addr::LOCALHOST); // 127.0.0.1
+        assert!(!config.binds_to_all_interfaces());
+
+        config.host = IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED); // ::
+        assert!(config.binds_to_all_interfaces());
     }
 }

@@ -187,23 +187,14 @@ impl Version {
             Self::Unstable => Some(UNSTABLE_VERSION),
         }
     }
+}
 
-    /// Returns a string representation of the version.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use nvisy_server::extract::Version;
-    /// assert_eq!(Version::new("v1").to_string(), "v1");
-    /// assert_eq!(Version::new("v0").to_string(), "v0");
-    /// assert_eq!(Version::new("invalid").to_string(), "unrecognized");
-    /// ```
-    #[must_use]
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unrecognized => "unrecognized".to_string(),
-            Self::Unstable => format!("v{}", UNSTABLE_VERSION),
-            Self::Stable(x) => format!("v{}", x.get()),
+            Self::Unrecognized => write!(f, "unrecognized"),
+            Self::Unstable => write!(f, "v{}", UNSTABLE_VERSION),
+            Self::Stable(x) => write!(f, "v{}", x.get()),
         }
     }
 }

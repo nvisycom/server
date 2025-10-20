@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use zxcvbn::feedback::Feedback;
 use zxcvbn::time_estimates::CrackTimeSeconds;
-use zxcvbn::{Score, zxcvbn};
+use zxcvbn::zxcvbn;
 
 use crate::handler::{ErrorKind, Result};
 
@@ -90,7 +90,7 @@ impl PasswordStrength {
             ),
         };
 
-        let feedback = entropy.feedback().map(|f| Self::convert_feedback(f));
+        let feedback = entropy.feedback().map(Self::convert_feedback);
 
         PasswordStrengthResult {
             score: entropy.score().into(),
@@ -113,7 +113,7 @@ impl PasswordStrength {
     pub fn validate_password(&self, password: &str, user_inputs: &[&str]) -> Result<()> {
         let result = self.evaluate(password, user_inputs);
 
-        if result.score <= self.min_score.into() {
+        if result.score <= self.min_score {
             let mut error_parts = Vec::new();
 
             if let Some(feedback) = result.feedback {

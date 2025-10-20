@@ -4,11 +4,9 @@
 //! used in JWT-based session authentication.
 
 use std::fmt;
-use std::io::Error as IoError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use jsonwebtoken::errors::Error as JwtError;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 
 use crate::service::{Result, ServiceError};
@@ -213,7 +211,7 @@ impl AuthKeys {
         use jsonwebtoken::{Algorithm, Header, Validation, decode, encode};
         use serde::{Deserialize, Serialize};
 
-        #[derive(Debug, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Serialize, Deserialize)]
         struct TestClaims {
             sub: String,
             exp: usize,

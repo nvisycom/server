@@ -3,6 +3,8 @@
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
+#[cfg(feature = "utoipa")]
+use utoipa::ToSchema;
 
 /// Defines the high-level category of a file for processing and handling.
 ///
@@ -11,6 +13,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// and handling within the document management system.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::FileType"]
 pub enum FileType {
     /// Text documents (PDF, DOC, DOCX, TXT, RTF, etc.)

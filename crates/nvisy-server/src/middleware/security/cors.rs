@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use axum::http::{HeaderValue, Method, header};
-use clap::Args;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
@@ -45,20 +44,17 @@ pub fn create_dev_cors_layer() -> CorsLayer {
 }
 
 /// CORS (Cross-Origin Resource Sharing) configuration.
-#[derive(Debug, Clone, Args, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[must_use = "config does nothing unless you use it"]
 pub struct CorsConfig {
     /// List of allowed CORS origins.
     /// If empty, defaults to localhost origins for development.
-    #[arg(long, env = "CORS_ORIGINS", value_delimiter = ',')]
     pub allowed_origins: Vec<String>,
 
     /// Maximum age for CORS preflight requests in seconds.
-    #[arg(long, env = "CORS_MAX_AGE", default_value = "3600")]
     pub max_age_seconds: u64,
 
     /// Whether to allow credentials in CORS requests.
-    #[arg(long, env = "CORS_ALLOW_CREDENTIALS", default_value = "true")]
     pub allow_credentials: bool,
 }
 

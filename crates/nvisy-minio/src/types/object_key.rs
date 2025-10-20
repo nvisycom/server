@@ -339,8 +339,6 @@ impl AsRef<str> for ObjectKey {
 
 #[cfg(test)]
 mod tests {
-    use time::macros::datetime;
-
     use super::*;
 
     #[test]

@@ -10,8 +10,12 @@ use minio::s3::creds::StaticProvider;
 use minio::s3::types::S3Api;
 use tracing::{debug, error, info, instrument};
 
+use crate::operations::observability::{OperationMetrics, PerformanceMonitor};
 use crate::operations::{BucketOperations, ObjectOperations};
-use crate::{Error, MinioConfig, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_OPERATIONS};
+use crate::{
+    DiagnosticInfo, Error, HealthCheck, HealthStatus, MetricsSnapshot, MinioConfig,
+    PerformanceAnalysis, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_OPERATIONS,
+};
 
 /// High-level MinIO client that manages connections and operations.
 ///
@@ -21,6 +25,8 @@ use crate::{Error, MinioConfig, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_OP
 pub struct MinioClient {
     inner: Client,
     config: Arc<MinioConfig>,
+    metrics: Arc<OperationMetrics>,
+    performance_monitor: Arc<std::sync::Mutex<PerformanceMonitor>>,
 }
 
 impl MinioClient {
@@ -88,6 +94,8 @@ impl MinioClient {
         Ok(Self {
             inner,
             config: Arc::new(config),
+            metrics: Arc::new(OperationMetrics::new()),
+            performance_monitor: Arc::new(std::sync::Mutex::new(PerformanceMonitor::new())),
         })
     }
 
@@ -202,6 +210,132 @@ impl MinioClient {
     #[inline]
     pub(crate) fn as_inner(&self) -> &Client {
         &self.inner
+    }
+
+    /// Gets a reference to the operation metrics.
+    pub fn metrics(&self) -> &OperationMetrics {
+        &self.metrics
+    }
+
+    /// Gets a snapshot of current metrics.
+    pub fn metrics_snapshot(&self) -> MetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    /// Performs a comprehensive health check with detailed diagnostics.
+    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn detailed_health_check(&self) -> HealthCheck {
+        let start = std::time::Instant::now();
+
+        debug!(target: TRACING_TARGET_CLIENT, "Starting detailed health check");
+
+        let connection_result = self.test_connection().await;
+        let check_duration = start.elapsed();
+
+        let mut health_check = match connection_result {
+            Ok(_) => {
+                info!(
+                    target: TRACING_TARGET_CLIENT,
+                    duration_ms = check_duration.as_millis(),
+                    "Health check passed"
+                );
+                HealthCheck::new(HealthStatus::Healthy, check_duration)
+                    .with_detail("connection", "successful")
+                    .with_detail("endpoint", self.config.endpoint_masked())
+            }
+            Err(ref e) => {
+                error!(
+                    target: TRACING_TARGET_CLIENT,
+                    duration_ms = check_duration.as_millis(),
+                    error = %e,
+                    "Health check failed"
+                );
+
+                let status = if e.is_retryable() {
+                    HealthStatus::Degraded
+                } else {
+                    HealthStatus::Unhealthy
+                };
+
+                HealthCheck::new(status, check_duration)
+                    .with_detail("connection", "failed")
+                    .with_detail("error", e.to_string())
+                    .with_detail("endpoint", self.config.endpoint_masked())
+            }
+        };
+
+        // Add metrics information
+        let metrics_snapshot = self.metrics_snapshot();
+        health_check = health_check
+            .with_detail(
+                "total_operations",
+                metrics_snapshot.operations_total.to_string(),
+            )
+            .with_detail(
+                "success_rate",
+                format!("{:.1}%", metrics_snapshot.success_rate()),
+            )
+            .with_detail(
+                "avg_upload_throughput",
+                format!("{:.2} MB/s", metrics_snapshot.avg_upload_throughput_mbps()),
+            )
+            .with_detail(
+                "avg_download_throughput",
+                format!(
+                    "{:.2} MB/s",
+                    metrics_snapshot.avg_download_throughput_mbps()
+                ),
+            );
+
+        health_check
+    }
+
+    /// Gets performance analysis from the monitor.
+    pub fn performance_analysis(&self) -> Option<PerformanceAnalysis> {
+        self.performance_monitor
+            .lock()
+            .ok()
+            .map(|monitor| monitor.analyze_performance())
+    }
+
+    /// Records an operation completion for performance monitoring.
+    pub fn record_operation(&self, duration: std::time::Duration, success: bool) {
+        if let Ok(mut monitor) = self.performance_monitor.lock() {
+            monitor.record_operation(duration, success);
+        }
+    }
+
+    /// Resets all metrics and performance data.
+    pub fn reset_metrics(&self) {
+        self.metrics.reset();
+        if let Ok(mut monitor) = self.performance_monitor.lock() {
+            *monitor = PerformanceMonitor::new();
+        }
+
+        info!(target: TRACING_TARGET_CLIENT, "Metrics and performance data reset");
+    }
+
+    /// Gets diagnostic information about the client.
+    pub fn diagnostic_info(&self) -> DiagnosticInfo {
+        let mut diag = DiagnosticInfo::new()
+            .with_config("endpoint", self.config.endpoint_masked())
+            .with_config("path_style", self.config.path_style.to_string())
+            .with_config(
+                "connect_timeout",
+                format!("{:?}", self.config.connect_timeout),
+            )
+            .with_config(
+                "request_timeout",
+                format!("{:?}", self.config.request_timeout),
+            );
+
+        let metrics = self.metrics_snapshot();
+        diag = diag
+            .with_config("total_operations", metrics.operations_total.to_string())
+            .with_config("success_rate", format!("{:.2}%", metrics.success_rate()))
+            .with_config("failure_rate", format!("{:.2}%", metrics.failure_rate()));
+
+        diag
     }
 }
 

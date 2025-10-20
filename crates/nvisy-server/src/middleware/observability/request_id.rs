@@ -6,4 +6,5 @@ use tower_http::request_id::MakeRequestUuid;
 ///
 /// This generates a unique UUID v4 for each request and sets it
 /// as the `x-request-id` header.
+#[allow(dead_code)]
 pub type DefaultRequestIdMaker = MakeRequestUuid;

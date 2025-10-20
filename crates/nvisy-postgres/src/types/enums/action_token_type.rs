@@ -3,19 +3,23 @@
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
+#[cfg(feature = "utoipa")]
+use utoipa::ToSchema;
 
 /// Defines the type of action that a security token authorizes.
 ///
 /// This enumeration corresponds to the `ACTION_TOKEN_TYPE` PostgreSQL enum and is used
 /// for various token-based security operations including account verification,
 /// password management, and data operations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ActionTokenType"]
 pub enum ActionTokenType {
     /// Email verification for new account activation
     #[db_rename = "activate_account"]
     #[serde(rename = "activate_account")]
+    #[default]
     ActivateAccount,
 
     /// Account suspension or deactivation authorization

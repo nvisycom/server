@@ -46,11 +46,11 @@
 //! - Member removal includes cleanup of associated resources
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use nvisy_postgres::PgDatabase;
-use nvisy_postgres::models::ProjectMember;
-use nvisy_postgres::queries::ProjectRepository;
+use nvisy_postgres::models::{ProjectMember, UpdateProjectMember};
+use nvisy_postgres::queries::ProjectMemberRepository;
 use nvisy_postgres::types::ProjectRole;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -58,12 +58,13 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::extract::{
-    AuthState, Json, Path, Path, ProjectPermission, ProjectPermission, ValidateJson,
-};
+use crate::extract::auth::AuthProvider;
+use crate::extract::{AuthState, ProjectPermission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+
 /// Tracing target for project member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_members";
 use crate::service::ServiceState;
@@ -240,10 +241,9 @@ async fn list_members(
         .await?;
 
     // Retrieve project members with pagination
-    let project_members = ProjectRepository::list_project_members(
+    let project_members = ProjectMemberRepository::list_project_members(
         &mut conn,
         path_params.project_id,
-        true, // active members only
         pagination.into(),
     )
     .await?;
@@ -330,13 +330,15 @@ async fn get_member(
         .await?;
 
     // Find the specific project member
-    let project_member = ProjectRepository::find_project_member(
+    let Some(project_member) = ProjectMemberRepository::find_project_member(
         &mut conn,
         path_params.project_id,
         path_params.account_id,
     )
     .await?
-    .ok_or_else(|| ErrorKind::NotFound.with_resource("project member"))?;
+    else {
+        return Err(ErrorKind::NotFound.with_resource("project member"));
+    };
 
     tracing::debug!(
         target: "server::handler::project_members",
@@ -398,7 +400,7 @@ async fn delete_member(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        member_id = path_params.member_id.to_string(),
+        member_id = path_params.account_id.to_string(),
         "Removing project member"
     );
 
@@ -419,23 +421,32 @@ async fn delete_member(
     }
 
     // Get the member being removed
-    let member_to_remove = ProjectRepository::find_project_member(
+    let Some(member_to_remove) = ProjectMemberRepository::find_project_member(
         &mut conn,
         path_params.project_id,
         path_params.account_id,
     )
     .await?
-    .ok_or_else(|| ErrorKind::NotFound.with_resource("project member"))?;
+    else {
+        return Err(ErrorKind::NotFound.with_resource("project member"));
+    };
 
     // Check if removing the last owner
-    if member_to_remove.role == nvisy_postgres::types::ProjectRole::Owner {
+    if member_to_remove.member_role == nvisy_postgres::types::ProjectRole::Owner {
         // Count how many active owners exist
-        let all_members =
-            ProjectRepository::find_all_project_members(&mut conn, path_params.project_id).await?;
+        let all_members = ProjectMemberRepository::list_project_members(
+            &mut conn,
+            path_params.project_id,
+            nvisy_postgres::queries::Pagination {
+                limit: 1000,
+                offset: 0,
+            },
+        )
+        .await?;
 
         let owner_count = all_members
             .iter()
-            .filter(|m| m.role == nvisy_postgres::types::ProjectRole::Owner && m.is_active)
+            .filter(|m| m.member_role == nvisy_postgres::types::ProjectRole::Owner && m.is_active)
             .count();
 
         if owner_count <= 1 {
@@ -443,22 +454,17 @@ async fn delete_member(
                 .with_message("Cannot remove last owner")
                 .with_context(
                     "Projects must have at least one owner. Transfer ownership or promote another member to owner before removing this member."
-                )
-                .into_error());
+                ));
         }
     }
 
     // Remove the member from the project
-    let success = ProjectRepository::remove_project_member(
+    ProjectMemberRepository::remove_project_member(
         &mut conn,
         path_params.project_id,
         path_params.account_id,
     )
     .await?;
-
-    if !success {
-        return Err(ErrorKind::NotFound.with_resource("project member"));
-    }
 
     let response = DeleteMemberResponse {
         account_id: path_params.account_id,
@@ -549,8 +555,8 @@ async fn update_member_role(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        member_id = path_params.member_id.to_string(),
-        new_role = ?request.new_role,
+        member_id = path_params.account_id.to_string(),
+        new_role = ?request.role,
         "updating project member role"
     );
 
@@ -567,28 +573,36 @@ async fn update_member_role(
     if auth_claims.account_id == path_params.account_id {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot update your own role")
-            .with_context("Ask another project owner or admin to update your role")
-            .into_error());
+            .with_context("Ask another project owner or admin to update your role"));
     }
 
     // Get the current member
     // Get current member information
-    let current_member = ProjectRepository::find_project_member(
+    let Some(current_member) = ProjectMemberRepository::find_project_member(
         &mut conn,
         path_params.project_id,
         path_params.account_id,
     )
     .await?
-    .ok_or_else(|| ErrorKind::NotFound.with_resource("project member"))?;
+    else {
+        return Err(ErrorKind::NotFound.with_resource("project member"));
+    };
 
     // If demoting from owner, check we're not removing the last owner
-    if member.role == ProjectRole::Owner && request.role != ProjectRole::Owner {
-        let all_members =
-            ProjectRepository::find_all_project_members(&mut conn, path_params.project_id).await?;
+    if current_member.member_role == ProjectRole::Owner && request.role != ProjectRole::Owner {
+        let all_members = ProjectMemberRepository::list_project_members(
+            &mut conn,
+            path_params.project_id,
+            nvisy_postgres::queries::Pagination {
+                limit: 1000,
+                offset: 0,
+            },
+        )
+        .await?;
 
         let owner_count = all_members
             .iter()
-            .filter(|m| m.role == ProjectRole::Owner && m.is_active)
+            .filter(|m| m.member_role == ProjectRole::Owner && m.is_active)
             .count();
 
         if owner_count <= 1 {
@@ -596,39 +610,54 @@ async fn update_member_role(
                 .with_message("Cannot demote last owner")
                 .with_context(
                     "Projects must have at least one owner. Promote another member to owner first.",
-                )
-                .into_error());
+                ));
         }
     }
 
     // Update the role
-    member.role = request.role;
-    member.updated_at = OffsetDateTime::now_utc();
+    let changes = UpdateProjectMember {
+        member_role: Some(request.role),
+        custom_permissions: None,
+        show_order: None,
+        is_favorite: None,
+        is_hidden: None,
+        notify_updates: None,
+        notify_comments: None,
+        notify_mentions: None,
+        is_active: None,
+        last_accessed_at: None,
+        updated_by: None,
+    };
 
-    let updated_member = ProjectRepository::update_project_member(&mut conn, member)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: "server::handler::project_members",
-                error = %err,
-                member_id = %path_params.account_id,
-                "Failed to update member role"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to update member role")
-        })?;
+    let updated_member = ProjectMemberRepository::update_project_member(
+        &mut conn,
+        path_params.project_id,
+        path_params.account_id,
+        changes,
+    )
+    .await
+    .map_err(|err| {
+        tracing::error!(
+            target: "server::handler::project_members",
+            error = %err,
+            member_id = %path_params.account_id,
+            "Failed to update member role"
+        );
+        ErrorKind::InternalServerError.with_message("Failed to update member role")
+    })?;
 
     tracing::info!(
         target: "server::handler::project_members",
         member_id = %updated_member.account_id,
         project_id = %updated_member.project_id,
-        new_role = ?updated_member.role,
+        new_role = ?updated_member.member_role,
         "Member role updated successfully"
     );
 
     let response = UpdateMemberRoleResponse {
         account_id: updated_member.account_id,
         project_id: updated_member.project_id,
-        role: updated_member.role,
+        role: updated_member.member_role,
         updated_at: updated_member.updated_at,
     };
 

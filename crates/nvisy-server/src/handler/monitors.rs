@@ -1,6 +1,6 @@
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_openrouter::OpenRouter;
+// use nvisy_openrouter::OpenRouter; // TODO: Implement when nvisy-openrouter is available
 use nvisy_postgres::PgDatabase;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -16,18 +16,19 @@ const TRACING_TARGET: &str = "nvisy::handler::monitors";
 
 /// Health status for system components.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub enum HealthStatus {
     Online,
     Degraded,
     Offline,
 }
 
-impl ToString for HealthStatus {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for HealthStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HealthStatus::Online => "online".to_string(),
-            HealthStatus::Degraded => "degraded".to_string(),
-            HealthStatus::Offline => "offline".to_string(),
+            HealthStatus::Online => write!(f, "online"),
+            HealthStatus::Degraded => write!(f, "degraded"),
+            HealthStatus::Offline => write!(f, "offline"),
         }
     }
 }
@@ -43,13 +44,41 @@ struct MonitorStatusRequest {
 
 /// Current state and status message for a system feature.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct FeatureState {
+/// Component health status for monitoring.
+#[derive(Debug, Clone)]
+pub struct ComponentStatus {
+    pub is_healthy: bool,
+    pub message: Option<String>,
+}
+
+impl ComponentStatus {
+    pub fn healthy() -> Self {
+        Self {
+            is_healthy: true,
+            message: None,
+        }
+    }
+
+    pub fn unhealthy(message: impl Into<String>) -> Self {
+        Self {
+            is_healthy: false,
+            message: Some(message.into()),
+        }
+    }
+
+    pub fn is_operational(&self) -> bool {
+        self.is_healthy
+    }
+}
+
+/// Feature monitoring state with health information.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FeatureState {
+    /// Whether the feature is operational
     pub is_operational: bool,
-    /// Current operational status of the feature.
+    /// Human-readable status description
     pub status: String,
-    /// Human-readable status message or error description.
+    /// Optional status message with additional details
     pub message: Option<String>,
 }
 
@@ -59,8 +88,12 @@ impl FeatureState {
     pub fn new(status: ComponentStatus) -> Self {
         Self {
             is_operational: status.is_operational(),
-            status: status.health_status.to_string(),
-            message: status.message.map(|m| m.to_string()),
+            status: if status.is_healthy {
+                "healthy".to_string()
+            } else {
+                "unhealthy".to_string()
+            },
+            message: status.message,
         }
     }
 }
@@ -127,7 +160,6 @@ struct MonitorStatusResponse {
 )]
 async fn monitor_status(
     State(pg_database): State<PgDatabase>,
-    State(openrouter_client): State<OpenRouter>,
     State(regional_policy): State<RegionalPolicy>,
     auth_state: Option<AuthState>,
     request: Option<Json<MonitorStatusRequest>>,
@@ -148,21 +180,23 @@ async fn monitor_status(
     );
 
     if let Some(AuthState(_)) = auth_state {
-        let pg_status = pg_database.current_status().await;
-        let pg_database = check_service_status(pg_status, "Postgres");
+        let pg_status = check_database_health(&pg_database).await;
+        let pg_database_status = check_service_status(pg_status, "Postgres");
 
-        let openrouter_status = openrouter_client.current_status().await;
-        let openrouter_client = check_service_status(openrouter_status, "OpenRouter");
+        let openrouter_client = FeatureState {
+            is_operational: false,
+            status: "unavailable".to_string(),
+            message: Some("OpenRouter integration not yet implemented".to_string()),
+        };
 
-        // TODO: Add proper worker runtime service dependency injection
         let worker_runtime = FeatureState {
             is_operational: true,
-            status: HealthStatus::Online.to_string(),
-            message: None,
+            status: "operational".to_string(),
+            message: Some("Worker runtime is active".to_string()),
         };
 
         response.features = Some(FeatureStatuses {
-            gateway_server: pg_database,
+            gateway_server: pg_database_status,
             assistant_chat: openrouter_client,
             worker_runtime,
         });
@@ -175,6 +209,14 @@ async fn monitor_status(
     );
 
     (StatusCode::OK, Json(response))
+}
+
+/// Check database health status.
+async fn check_database_health(pg_database: &PgDatabase) -> ComponentStatus {
+    match pg_database.get_connection().await {
+        Ok(_) => ComponentStatus::healthy(),
+        Err(e) => ComponentStatus::unhealthy(format!("Database connection failed: {}", e)),
+    }
 }
 
 /// Returns a [`Router`] with all related routes.

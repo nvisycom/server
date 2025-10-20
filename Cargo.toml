@@ -29,8 +29,11 @@ documentation = "https://docs.rs/nvisy-server"
 #
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
+# Runtime crates
+nvisy-core = { path = "../runtime/crates/nvisy-core", version = "0.1.0" }
+nvisy-client = { path = "../runtime/crates/nvisy-client", version = "0.1.0" }
+
 # Internal crates
-nvisy-cli = { path = "./crates/nvisy-cli", version = "0.1.0" }
 nvisy-minio = { path = "./crates/nvisy-minio", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }

@@ -143,10 +143,7 @@ fn enhance_query_error(rejection: QueryRejection) -> Error<'static> {
             } else {
                 ErrorKind::BadRequest
                     .with_message("Invalid query parameters")
-                    .with_context(format!(
-                        "Failed to parse query string: {}",
-                        error_message
-                    ))
+                    .with_context(format!("Failed to parse query string: {}", error_message))
             }
         }
         _ => {
@@ -156,7 +153,6 @@ fn enhance_query_error(rejection: QueryRejection) -> Error<'static> {
                 .with_context("The query string could not be parsed. Please check your parameters and try again")
         }
     }
-    .into_error()
 }
 
 /// Attempts to extract the field name from a serde error message.
@@ -165,19 +161,19 @@ fn enhance_query_error(rejection: QueryRejection) -> Error<'static> {
 /// error messages to provide more helpful error context.
 fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     // Try to extract field name from common serde error patterns
-    if let Some(start) = error_message.find('`') {
-        if let Some(end) = error_message[start + 1..].find('`') {
-            return Some(&error_message[start + 1..start + 1 + end]);
-        }
+    if let Some(start) = error_message.find('`')
+        && let Some(end) = error_message[start + 1..].find('`')
+    {
+        return Some(&error_message[start + 1..start + 1 + end]);
     }
 
     // Try alternative patterns
-    if error_message.contains("field ") {
-        if let Some(start) = error_message.find("field ") {
-            let field_part = &error_message[start + 6..];
-            if let Some(end) = field_part.find(' ') {
-                return Some(&field_part[..end]);
-            }
+    if error_message.contains("field ")
+        && let Some(start) = error_message.find("field ")
+    {
+        let field_part = &error_message[start + 6..];
+        if let Some(end) = field_part.find(' ') {
+            return Some(&field_part[..end]);
         }
     }
 

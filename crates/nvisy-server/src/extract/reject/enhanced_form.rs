@@ -139,7 +139,9 @@ fn enhance_form_error(rejection: FormRejection) -> Error<'static> {
                         "The form field '{}' is required but was not provided",
                         field_name.unwrap_or("unknown")
                     ))
-            } else if error_message.contains("invalid type") || error_message.contains("invalid value") {
+            } else if error_message.contains("invalid type")
+                || error_message.contains("invalid value")
+            {
                 ErrorKind::BadRequest
                     .with_message("Invalid form field value")
                     .with_context(format!(
@@ -157,30 +159,23 @@ fn enhance_form_error(rejection: FormRejection) -> Error<'static> {
             } else {
                 ErrorKind::BadRequest
                     .with_message("Invalid form data")
-                    .with_context(format!(
-                        "Failed to parse form data: {}",
-                        error_message
-                    ))
+                    .with_context(format!("Failed to parse form data: {}", error_message))
             }
         }
-        FormRejection::InvalidFormContentType(err) => {
-            ErrorKind::BadRequest
-                .with_message("Invalid content type for form data")
-                .with_context(format!(
-                    "Expected 'application/x-www-form-urlencoded' content type, but received: {}. \
+        FormRejection::InvalidFormContentType(err) => ErrorKind::BadRequest
+            .with_message("Invalid content type for form data")
+            .with_context(format!(
+                "Expected 'application/x-www-form-urlencoded' content type, but received: {}. \
                     Please set the correct Content-Type header for form submissions",
-                    err
-                ))
-        }
-        FormRejection::BytesRejection(err) => {
-            ErrorKind::BadRequest
-                .with_message("Failed to read form data")
-                .with_context(format!(
-                    "Could not read the request body as form data: {}. \
+                err
+            )),
+        FormRejection::BytesRejection(err) => ErrorKind::BadRequest
+            .with_message("Failed to read form data")
+            .with_context(format!(
+                "Could not read the request body as form data: {}. \
                     This might indicate a network issue or malformed request",
-                    err
-                ))
-        }
+                err
+            )),
         _ => {
             // Fallback for other form rejection types
             ErrorKind::BadRequest
@@ -190,7 +185,6 @@ fn enhance_form_error(rejection: FormRejection) -> Error<'static> {
                 )
         }
     }
-    .into_error()
 }
 
 /// Attempts to extract the field name from a serde error message.
@@ -199,34 +193,34 @@ fn enhance_form_error(rejection: FormRejection) -> Error<'static> {
 /// error messages to provide more helpful error context.
 fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     // Try to extract field name from common serde error patterns
-    if let Some(start) = error_message.find('`') {
-        if let Some(end) = error_message[start + 1..].find('`') {
-            return Some(&error_message[start + 1..start + 1 + end]);
-        }
+    if let Some(start) = error_message.find('`')
+        && let Some(end) = error_message[start + 1..].find('`')
+    {
+        return Some(&error_message[start + 1..start + 1 + end]);
     }
 
     // Try alternative patterns for "missing field X"
-    if error_message.contains("missing field ") {
-        if let Some(start) = error_message.find("missing field ") {
-            let field_part = &error_message[start + 14..]; // "missing field " is 14 chars
-            if let Some(end) = field_part.find(' ') {
-                return Some(&field_part[..end]);
-            } else {
-                // Field name might be at the end of the message
-                return Some(field_part.trim());
-            }
+    if error_message.contains("missing field ")
+        && let Some(start) = error_message.find("missing field ")
+    {
+        let field_part = &error_message[start + 14..]; // "missing field " is 14 chars
+        if let Some(end) = field_part.find(' ') {
+            return Some(&field_part[..end]);
+        } else {
+            // Field name might be at the end of the message
+            return Some(field_part.trim());
         }
     }
 
     // Try pattern for "duplicate field X"
-    if error_message.contains("duplicate field ") {
-        if let Some(start) = error_message.find("duplicate field ") {
-            let field_part = &error_message[start + 16..]; // "duplicate field " is 16 chars
-            if let Some(end) = field_part.find(' ') {
-                return Some(&field_part[..end]);
-            } else {
-                return Some(field_part.trim());
-            }
+    if error_message.contains("duplicate field ")
+        && let Some(start) = error_message.find("duplicate field ")
+    {
+        let field_part = &error_message[start + 16..]; // "duplicate field " is 16 chars
+        if let Some(end) = field_part.find(' ') {
+            return Some(&field_part[..end]);
+        } else {
+            return Some(field_part.trim());
         }
     }
 

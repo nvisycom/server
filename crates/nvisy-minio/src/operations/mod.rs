@@ -11,11 +11,20 @@
 //! - **Streaming Support**: Memory-efficient handling of large objects
 //! - **Metadata Management**: Rich metadata support for objects and buckets
 //! - **Error Handling**: Comprehensive error handling with recovery hints
-//! - **Observability**: Detailed tracing and metrics for all operations
+//! - **Observability**: Comprehensive structured tracing, performance metrics, and operation lifecycle tracking
 
 mod bucket_operations;
 mod custom_hooks;
 mod object_operations;
+pub mod observability;
 
 pub use bucket_operations::BucketOperations;
+pub use custom_hooks::{
+    ErrorTracing, OperationMetrics, OperationTracer, OperationType, download_tracing,
+    upload_tracing,
+};
 pub use object_operations::{DownloadResult, ListObjectsResult, ObjectOperations, UploadResult};
+pub use observability::{
+    DiagnosticInfo, HealthCheck, HealthStatus, MetricsSnapshot, PerformanceAnalysis,
+    PerformanceMonitor, PerformanceThresholds, ResourceUsage,
+};

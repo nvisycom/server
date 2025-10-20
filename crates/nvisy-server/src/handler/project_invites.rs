@@ -53,7 +53,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgDatabase;
 use nvisy_postgres::models::{NewProjectInvite, ProjectInvite};
-use nvisy_postgres::queries::ProjectRepository;
+use nvisy_postgres::queries::{ProjectInviteRepository, ProjectMemberRepository};
 use nvisy_postgres::types::{InviteStatus, ProjectRole};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -63,6 +63,7 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::extract::auth::AuthProvider;
 use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
@@ -86,6 +87,7 @@ pub struct InvitePathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct InviteePathParams {
     /// Unique identifier of the project.
     pub project_id: Uuid,
@@ -228,7 +230,7 @@ struct ReplyInviteResponse {
     pub project_id: Uuid,
     /// Email address of the invitee.
     pub invitee_email: String,
-    /// Final status of the invitation.
+    /// Current status of the invitation.
     pub invite_status: InviteStatus,
     /// When the invitation was accepted or declined.
     pub updated_at: OffsetDateTime,
@@ -348,41 +350,47 @@ async fn send_invite(
         .await?;
 
     // Check if user is already a member
-    if let Some(existing_member) = ProjectRepository::find_project_member(
+    if let Some(existing_member) = ProjectMemberRepository::find_project_member(
         &mut conn,
         path_params.project_id,
         auth_claims.account_id,
     )
     .await?
+        && existing_member.is_active
     {
-        if existing_member.is_active {
-            return Err(
-                ErrorKind::Conflict.with_context("User is already a member of this project")
-            );
-        }
+        return Err(ErrorKind::Conflict.with_context("User is already a member of this project"));
     }
 
     // Check for existing pending invites to the same email
     let normalized_email = request.invitee_email.to_lowercase();
-    let existing_invites = ProjectRepository::find_project_invites_by_email(
+    let all_invites = ProjectInviteRepository::list_user_invites(
         &mut conn,
-        path_params.project_id,
-        &normalized_email,
+        None,
+        Some(normalized_email.clone()),
+        nvisy_postgres::queries::Pagination {
+            limit: 100,
+            offset: 0,
+        },
     )
     .await?;
+
+    // Filter by project_id since list_user_invites doesn't filter by project
+    let existing_invites: Vec<_> = all_invites
+        .into_iter()
+        .filter(|invite| invite.project_id == path_params.project_id)
+        .collect();
 
     // Check if there's already a pending invite
     if let Some(pending_invite) = existing_invites
         .iter()
-        .find(|invite| invite.status == nvisy_postgres::types::InviteStatus::Pending)
+        .find(|invite| invite.invite_status == nvisy_postgres::types::InviteStatus::Pending)
     {
         return Err(ErrorKind::Conflict
             .with_message("Invitation already sent")
             .with_context(format!(
-                "A pending invitation to {} already exists for this project",
-                normalized_email
-            ))
-            .into_error());
+                "A pending invitation to {} already exists for this project (expires at {})",
+                normalized_email, pending_invite.expires_at
+            )));
     }
 
     // Generate expiration time
@@ -402,7 +410,8 @@ async fn send_invite(
         updated_by: auth_claims.account_id,
     };
 
-    let project_invite = ProjectRepository::create_project_invite(&mut conn, new_invite).await?;
+    let project_invite =
+        ProjectInviteRepository::create_project_invite(&mut conn, new_invite).await?;
 
     let response = CreateInviteResponse::from(project_invite);
 
@@ -487,10 +496,9 @@ async fn list_invites(
         .await?;
 
     // Retrieve project invitations with pagination
-    let project_invites = ProjectRepository::list_project_invites(
+    let project_invites = ProjectInviteRepository::list_project_invites(
         &mut conn,
         path_params.project_id,
-        None, // status filter - could be added as query parameter
         pagination.into(),
     )
     .await?;
@@ -578,10 +586,10 @@ async fn cancel_invite(
         .await?;
 
     // Cancel the invitation
-    let project_invite = ProjectRepository::cancel_invite(
+    let project_invite = ProjectInviteRepository::cancel_invite(
         &mut conn,
         path_params.invite_id,
-        Some("Cancelled by project administrator".to_string()),
+        auth_claims.account_id,
     )
     .await?;
 
@@ -664,9 +672,11 @@ async fn reply_to_invite(
     );
 
     // Find the invitation
-    let invite = ProjectRepository::find_invite_by_id(&mut conn, path_params.invite_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_resource("invitation"))?;
+    let Some(invite) =
+        ProjectInviteRepository::find_invite_by_id(&mut conn, path_params.invite_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("invitation"));
+    };
 
     // Verify invitation belongs to this project
     if invite.project_id != path_params.project_id {
@@ -682,7 +692,7 @@ async fn reply_to_invite(
 
     let project_invite = if request.accept_invite {
         // Accept the invitation
-        let accepted_invite = ProjectRepository::accept_invite(
+        let accepted_invite = ProjectInviteRepository::accept_invite(
             &mut conn,
             path_params.invite_id,
             auth_claims.account_id,
@@ -700,10 +710,10 @@ async fn reply_to_invite(
         accepted_invite
     } else {
         // Decline the invitation
-        let declined_invite = ProjectRepository::reject_invite(
+        let declined_invite = ProjectInviteRepository::reject_invite(
             &mut conn,
             path_params.invite_id,
-            Some("Declined by invitee".to_string()),
+            auth_claims.account_id,
         )
         .await?;
 

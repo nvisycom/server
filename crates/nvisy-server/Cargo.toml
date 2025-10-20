@@ -25,7 +25,7 @@ default = []
 # Internal crates
 nvisy-minio = { workspace = true, features = [] }
 nvisy-openrouter = { workspace = true, features = [] }
-nvisy-postgres = { workspace = true, features = [] }
+nvisy-postgres = { workspace = true, features = ["utoipa"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
@@ -48,7 +48,7 @@ utoipa-scalar = { workspace = true, features = ["axum"] }
 
 # Observability
 tracing = { workspace = true, features = [] }
-tracing-subscriber = { workspace = true, features = [] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # Authentication & Security
 jsonwebtoken = { workspace = true, features = [] }
@@ -70,9 +70,13 @@ derive_more = { workspace = true, features = ["full"] }
 time = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ipnet = { workspace = true, features = ["serde"] }
+bigdecimal = { workspace = true, features = ["serde"] }
 ecow = { workspace = true, features = [] }
 zxcvbn = { workspace = true, features = [] }
 url = { workspace = true, features = [] }
+
+# Error handling
+anyhow = { workspace = true, features = [] }
 
 [dev-dependencies]
 axum-test = { workspace = true, features = [] }
