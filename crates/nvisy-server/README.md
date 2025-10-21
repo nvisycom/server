@@ -1,21 +1,32 @@
 # api.nvisy.com/server
 
-High-performance HTTP API server for document processing and automation, built with Rust and Axum.
+High-performance HTTP API server for the Nvisy document redaction platform, built with Axum and Tokio.
 
-[![Rust](https://img.shields.io/badge/rust-1.70+-blue.svg)](https://www.rust-lang.org/)
-[![Axum](https://img.shields.io/badge/axum-0.7+-blue.svg)](https://github.com/tokio-rs/axum)
+[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
 
 ## Features
 
-- **High-Performance Architecture** - Built with Axum and Tokio for async request handling
-- **Type-Safe API** - Compile-time validation with strong typing throughout
-- **Comprehensive Security** - JWT authentication, CORS, security headers, input validation
-- **Production Ready** - Graceful shutdown, connection pooling, health checks
-- **Auto-Generated Documentation** - OpenAPI/Swagger specification with interactive UI
-- **External Integrations** - AWS S3, Stripe payments, OpenRouter AI
+- **Async HTTP Server** - Built with Axum web framework on Tokio runtime
+- **JWT Authentication** - Stateless authentication with session management
+- **OpenAPI Documentation** - Auto-generated Swagger and Scalar UI
+- **Type-Safe Validation** - Comprehensive request/response validation
+- **Middleware Stack** - CORS, security headers, and request logging
+- **Service Integration** - PostgreSQL, MinIO, OpenRouter, and NATS clients
 
-## Crates
+## Key Dependencies
 
-- [`tokio`](https://crates.io/crates/tokio) - Async runtime for Rust
-- [`axum`](https://crates.io/crates/axum) - Web framework built on Tokio
-- [`tower`](https://crates.io/crates/tower) - Middleware and service abstractions
+- `axum` - Modern web framework with excellent async performance
+- `tokio` - Async runtime for concurrent request handling
+- `tower` - Middleware ecosystem for HTTP services
+- `serde` - JSON serialization/deserialization
+- `validator` - Input validation with custom rules
+- `utoipa` - OpenAPI documentation generation
+
+## API Documentation
+
+When running, the server exposes interactive documentation at:
+
+- **Swagger UI**: `/api/swagger`
+- **Scalar UI**: `/api/scalar`  
+- **OpenAPI JSON**: `/api/openapi.json`

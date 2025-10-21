@@ -1,42 +1,30 @@
 # api.nvisy.com/cli
 
-High-performance HTTP server CLI for document processing with enhanced lifecycle management, built with Rust and Axum.
+Command-line interface for the Nvisy document redaction API server with enhanced lifecycle management and telemetry support.
 
-[![Rust](https://img.shields.io/badge/rust-1.70+-blue.svg)](https://www.rust-lang.org/)
-[![Axum](https://img.shields.io/badge/axum-0.8+-blue.svg)](https://github.com/tokio-rs/axum)
-[![Clap](https://img.shields.io/badge/clap-4.0+-blue.svg)](https://github.com/clap-rs/clap)
+[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
+[![clap](https://img.shields.io/badge/Clap-4.5+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/clap-rs/clap)
 
 ## Features
 
 - **Enhanced Server Lifecycle** - Comprehensive startup, shutdown, and health monitoring
-- **Privacy-First Telemetry** - Optional usage analytics and crash reporting with full user control
-- **Advanced Error Handling** - Rich error context with recovery suggestions and error codes
-- **Production Ready** - TLS support, graceful shutdown, structured logging, configuration validation
-- **Type-Safe Configuration** - CLI arguments, environment variables, and programmatic config
-- **Security Focused** - Automatic security warnings and configuration validation
+- **Flexible Configuration** - CLI arguments, environment variables, and file-based config
+- **Optional Telemetry** - Privacy-first usage analytics and crash reporting (opt-in)
+- **TLS Support** - HTTPS with certificate management (optional feature)
+- **Production Ready** - Graceful shutdown, structured logging, and error handling
+- **Service Integration** - PostgreSQL, MinIO, OpenRouter, and NATS configuration
 
-## Usage
+## Key Dependencies
 
-```bash
-# Basic HTTP server
-nvisy-cli --host 0.0.0.0 --port 8080
-
-# HTTPS with TLS
-nvisy-cli --tls-cert-path ./cert.pem --tls-key-path ./key.pem
-
-# With telemetry (opt-in)
-nvisy-cli --telemetry-enabled --telemetry-usage --telemetry-crashes
-```
+- `clap` - Command line argument parser with derive macros
+- `axum` - Web framework for HTTP server functionality
+- `tokio` - Async runtime for concurrent operations
+- `tracing` - Structured application-level logging and diagnostics
 
 ## Features
 
 - `tls` - TLS/HTTPS support with certificate management
-- `telemetry` - Anonymous usage analytics and crash reporting  
+- `telemetry` - Anonymous usage analytics and crash reporting
 - `otel` - OpenTelemetry integration for distributed tracing
 
-## Crates
-
-- [`axum`](https://crates.io/crates/axum) - Web framework built on Tokio
-- [`clap`](https://crates.io/crates/clap) - Command line argument parser
-- [`tokio`](https://crates.io/crates/tokio) - Async runtime for Rust
-- [`tracing`](https://crates.io/crates/tracing) - Structured application-level tracing

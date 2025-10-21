@@ -1,24 +1,23 @@
 # api.nvisy.com/minio
 
-High-performance, type-safe MinIO object storage client for the Nvisy platform,
-built with async/await and comprehensive error handling.
+S3-compatible MinIO client for object storage operations with async support and comprehensive error handling.
 
-[![Rust](https://img.shields.io/badge/rust-1.89+-blue.svg)](https://www.rust-lang.org/)
-[![MinIO](https://img.shields.io/badge/minio-0.3+-green.svg)](https://min.io/)
+[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![minio](https://img.shields.io/badge/MinIO-S3%20Compatible-000000?style=flat-square&logo=minio&logoColor=white)](https://min.io/)
 
 ## Features
 
 - **S3-Compatible Operations** - Full support for MinIO's S3-compatible API
 - **Async/Await Support** - Non-blocking operations with Tokio runtime
-- **Streaming Uploads/Downloads** - Memory-efficient handling of large objects
-- **Comprehensive Error Handling** - Detailed error types with recovery hints
-- **Type-Safe Configuration** - Compile-time validation of client settings
-- **Production Ready** - Health checks, metrics, and observability built-in
-- **Bucket Management** - Create, list, and manage MinIO buckets
+- **Bucket Management** - Create, delete, and manage storage buckets
 - **Object Operations** - Upload, download, delete, and list objects with metadata
+- **Streaming Support** - Efficient handling of large files with streaming
+- **Error Handling** - Comprehensive error types with context and recovery hints
 
-## Crates
+## Key Dependencies
 
-- [`tokio`](https://crates.io/crates/tokio) - Async runtime for Rust
-- [`futures`](https://crates.io/crates/futures) - Async stream utilities
-- [`minio`](https://crates.io/crates/minio) - Official MinIO Rust client
+- `minio` - Official MinIO Rust client for S3-compatible operations
+- `tokio` - Async runtime for non-blocking I/O operations
+- `bytes` - Efficient byte buffer management for streaming
+- `futures` - Stream processing utilities for async operations
+

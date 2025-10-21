@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Enable version updates for cargo
+  # Version updates for Cargo Crates
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:

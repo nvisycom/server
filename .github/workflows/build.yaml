@@ -7,16 +7,16 @@ on:
     branches: [main, develop]
   schedule:
     # Run daily at 2 AM UTC to catch dependency issues
-    - cron: '0 2 * * *'
+    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       full_test_matrix:
-        description: 'Run full test matrix (all OS/Rust versions)'
+        description: "Run full test matrix (all OS/Rust versions)"
         required: false
         default: false
         type: boolean
       performance_tests:
-        description: 'Run performance regression tests'
+        description: "Run performance regression tests"
         required: false
         default: false
         type: boolean
@@ -63,7 +63,7 @@ jobs:
       - name: Run cargo check
         run: cargo check --all-targets --all-features --workspace
 
-      - name: Run clippy
+      - name: Run clippy (general linting)
         run: |
           cargo clippy --all-targets --all-features --workspace -- \
             -D warnings \
@@ -77,6 +77,11 @@ jobs:
         run: cargo doc --no-deps --all-features --workspace --document-private-items
         env:
           RUSTDOCFLAGS: -D warnings
+
+      - name: Basic dependency check
+        run: |
+          cargo install cargo-deny
+          cargo deny check bans sources
 
   test:
     name: Test Suite
@@ -146,17 +151,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpq-dev
 
-      - name: Install Diesel CLI
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo install diesel_cli --no-default-features --features postgres
-        env:
-          CARGO_NET_RETRY: 10
-
       - name: Setup test database
         if: matrix.os == 'ubuntu-latest'
-        run: diesel database setup
+        run: |
+          cargo install diesel_cli --no-default-features --features postgres
+          diesel database setup
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost/nvisy_test
+          CARGO_NET_RETRY: 10
 
       - name: Run tests with database
         if: matrix.os == 'ubuntu-latest'
@@ -249,42 +251,6 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up cargo cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: audit-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: audit-cargo-
-
-      - name: Install security tools
-        run: |
-          cargo install cargo-audit
-          cargo install cargo-deny
-
-      - name: Run cargo audit
-        run: cargo audit --deny warnings
-
-      - name: Run cargo deny
-        run: cargo deny check
-
-      - name: Check for unused dependencies
-        run: |
-          cargo install cargo-machete
-          cargo machete
-
   performance:
     name: Performance Tests
     runs-on: ubuntu-latest
@@ -347,12 +313,12 @@ jobs:
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          tool: 'cargo'
+          tool: "cargo"
           output-file-path: benchmark-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           comment-on-alert: true
-          alert-threshold: '150%'
+          alert-threshold: "150%"
           fail-on-alert: false
 
       - name: Upload performance results
@@ -398,65 +364,29 @@ jobs:
           publish_dir: ./target/doc
           destination_dir: api-docs
 
-  license-check:
-    name: License Compliance
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-license
-        run: cargo install cargo-license
-
-      - name: Check licenses
-        run: |
-          cargo license --json > licenses.json
-
-          # Check for problematic licenses
-          if jq -e '.[] | select(.license | test("GPL|AGPL|SSPL|BCL"; "i"))' licenses.json > /dev/null; then
-            echo "❌ Problematic licenses found:"
-            jq -r '.[] | select(.license | test("GPL|AGPL|SSPL|BCL"; "i")) | "\(.name): \(.license)"' licenses.json
-            exit 1
-          else
-            echo "✅ All licenses are compatible"
-          fi
-
-      - name: Upload license report
-        uses: actions/upload-artifact@v4
-        with:
-          name: license-report
-          path: licenses.json
-          retention-days: 30
-
   build-summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [check, test, coverage, security-audit, performance, docs, license-check]
+    needs: [check, test, coverage, performance, docs]
     if: always()
     steps:
       - name: Create build summary
         run: |
-          echo "# Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# Build & Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Code Quality | ${{ needs.check.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tests | ${{ needs.test.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Coverage | ${{ needs.coverage.result == 'success' && '✅' || (needs.coverage.result == 'skipped' && '⏭️' || '❌') }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security Audit | ${{ needs.security-audit.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Performance | ${{ needs.performance.result == 'success' && '✅' || (needs.performance.result == 'skipped' && '⏭️' || '❌') }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Documentation | ${{ needs.docs.result == 'success' && '✅' || (needs.docs.result == 'skipped' && '⏭️' || '❌') }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| License Check | ${{ needs.license-check.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ needs.check.result }}" == "success" &&
-                "${{ needs.test.result }}" == "success" &&
-                "${{ needs.security-audit.result }}" == "success" &&
-                "${{ needs.license-check.result }}" == "success" ]]; then
-            echo "🎉 **All critical checks passed!**" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.check.result }}" == "success" && "${{ needs.test.result }}" == "success" ]]; then
+            echo "🎉 **Build and tests passed!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Note: For security compliance, see the Security workflow results._" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Some checks failed. Please review and fix.**" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Build or tests failed. Please review and fix.**" >> $GITHUB_STEP_SUMMARY
           fi

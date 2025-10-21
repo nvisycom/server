@@ -1,54 +1,37 @@
-# api.nvisy.com
+# Nvisy.com API Server
 
 [![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![build](https://img.shields.io/github/actions/workflow/status/nvisycom/api/build.yml?branch=main&color=000000&style=flat-square)](https://github.com/nvisycom/api/actions/workflows/build.yml)
 [![postgresql](https://img.shields.io/badge/PostgreSQL-17+-000000?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
 
-Backend API server for the Nvisy document redaction platform.
+High-performance backend API server for the Nvisy document redaction platform, built with Rust and modern async technologies.
 
 ## Features
 
-- High-performance async HTTP server built with Axum
-- Type-safe PostgreSQL integration with Diesel ORM
-- JWT-based authentication with session management
-- OpenAPI/Swagger documentation
-- AWS S3 storage integration
-- Stripe payment processing
-- OpenRouter AI integration
-- Comprehensive error handling and validation
-- Production-ready with health checks and graceful shutdown
+- **High-Performance Architecture** - Built with Axum and Tokio for exceptional async performance
+- **Type-Safe Database Layer** - PostgreSQL integration with Diesel ORM and strict typing
+- **Comprehensive Security** - JWT authentication, session management, and input validation
+- **MinIO Storage Integration** - S3-compatible object storage for document management
+- **AI-Powered Processing** - OpenRouter integration for intelligent document analysis
+- **Production Ready** - Health checks, graceful shutdown, connection pooling, and observability
+- **Auto-Generated Documentation** - OpenAPI/Swagger specs with interactive UI
+- **Workspace Architecture** - Modular crate design for optimal code organization
 
-## Workspace Structure
+## Architecture
 
 ```
 api/
 ├── crates/
-│   ├── nvisy-server/     # HTTP API server
-│   └── nvisy-postgres/   # Database layer
-└── Cargo.toml            # Workspace configuration
+│   ├── nvisy-cli/          # HTTP server CLI
+│   ├── nvisy-minio/        # MinIO/S3-compatible storage client
+│   ├── nvisy-nats/         # NATS messaging integration
+│   ├── nvisy-openrouter/   # OpenRouter AI client
+│   ├── nvisy-postgres/     # PostgreSQL database layer
+│   └── nvisy-server/       # Core HTTP API server
+├── migrations/             # Database migrations
+└── Cargo.toml              # Workspace configuration
 ```
-
-## Crates
-
-### nvisy-server
-
-High-performance HTTP API server for document processing.
-
-**Key Dependencies:**
-- `axum` - Web framework
-- `tokio` - Async runtime
-- `tower` - Middleware
-- `serde` - Serialization
-- `validator` - Input validation
-
-### nvisy-postgres
-
-Type-safe PostgreSQL database layer with connection pooling.
-
-**Key Dependencies:**
-- `diesel` - ORM and query builder
-- `deadpool` - Async connection pooling
-- `tokio` - Async runtime
 
 ## Quick Start
 
@@ -56,8 +39,7 @@ Type-safe PostgreSQL database layer with connection pooling.
 
 - Rust 1.89 or higher
 - PostgreSQL 17 or higher
-- AWS account (for S3 storage)
-- Stripe account (for payments)
+- MinIO instance or S3-compatible storage
 - OpenRouter API key (for AI features)
 
 ### Installation
@@ -67,62 +49,120 @@ Type-safe PostgreSQL database layer with connection pooling.
 git clone https://github.com/nvisycom/api.git
 cd api
 
-# Build all crates
+# Install required tools
+make install-all
+
+# Generate auth keys
+make generate-keys
+
+# Build the workspace
 cargo build --release
 
-# Run tests
-cargo test --workspace
+# Run database migrations
+make generate-migrations
 
-# Run the server
-cargo run --bin nvisy-server
-```
-
-### Environment Variables
-
-Create a `.env` file in the workspace root:
-
-```bash
-# Server Configuration
-HOST=127.0.0.1
-EXPOSED_PORT=3000
-REQUEST_TIMEOUT=30
-SHUTDOWN_TIMEOUT=30
-
-# Database
-POSTGRES_CONN_URL=postgresql://user:password@localhost:5432/nvisy
-
-# Authentication
-AUTH_PUBLIC_PEM_FILEPATH=/path/to/public.pem
-AUTH_PRIVATE_PEM_FILEPATH=/path/to/private.pem
-
-# External Services
-OPENROUTER_API_KEY=sk-or-v1-your-api-key
-STRIPE_API_KEY=sk_test_your-key
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_REGION=us-east-1
-AWS_S3_BUCKET=your-bucket-name
+# Start the server
+cargo run --bin nvisy-cli
 ```
 
 ### Docker
 
 ```bash
-# Build image
+# Build and run with Docker
 docker build -t nvisy-api .
+docker run -p 3000:3000 nvisy-api
 
-# Run with docker-compose
+# Or use docker-compose
 docker-compose up -d
+```
+
+## Configuration
+
+### Environment Variables
+
+Configure the API server using these environment variables:
+
+| Variable                    | Description                           | Required | Default                            |
+| --------------------------- | ------------------------------------- | -------- | ---------------------------------- |
+| `HOST`                      | Server host address                   | No       | `127.0.0.1`                        |
+| `PORT`                      | Server port number                    | No       | `3000`                             |
+| `REQUEST_TIMEOUT`           | Request timeout in seconds            | No       | `30`                               |
+| `SHUTDOWN_TIMEOUT`          | Graceful shutdown timeout             | No       | `30`                               |
+| `POSTGRES_URL`              | PostgreSQL connection string          | Yes      | -                                  |
+| `AUTH_PUBLIC_PEM_FILEPATH`  | JWT public key file path              | No       | `./public.pem`                     |
+| `AUTH_PRIVATE_PEM_FILEPATH` | JWT private key file path             | No       | `./private.pem`                    |
+| `OPENROUTER_API_KEY`        | OpenRouter API key for AI features   | Yes      | -                                  |
+| `OPENROUTER_BASE_URL`       | OpenRouter API base URL               | No       | `https://openrouter.ai/api/v1/`    |
+| `MINIO_ENDPOINT`            | MinIO server endpoint                 | No       | `localhost:9000`                   |
+| `MINIO_ACCESS_KEY`          | MinIO access key                      | No       | `minioadmin`                       |
+| `MINIO_SECRET_KEY`          | MinIO secret key                      | No       | `minioadmin`                       |
+| `CORS_ALLOWED_ORIGINS`      | Comma-separated CORS origins          | No       | Empty (allows localhost)           |
+| `CORS_MAX_AGE`              | CORS preflight cache duration        | No       | `3600`                             |
+| `CORS_ALLOW_CREDENTIALS`    | Allow credentials in CORS             | No       | `true`                             |
+
+### TLS Configuration (Optional)
+
+When built with the `tls` feature:
+
+| Variable         | Description                    | Required |
+| ---------------- | ------------------------------ | -------- |
+| `TLS_CERT_PATH`  | Path to TLS certificate (PEM)  | No       |
+| `TLS_KEY_PATH`   | Path to TLS private key (PEM)  | No       |
+
+### Configuration File
+
+Create a `.env` file in the project root:
+
+```bash
+# Server Configuration
+HOST=0.0.0.0
+PORT=3000
+REQUEST_TIMEOUT=30
+SHUTDOWN_TIMEOUT=30
+
+# Database
+POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/nvisy
+
+# Authentication (generate with: make generate-keys)
+AUTH_PUBLIC_PEM_FILEPATH=./public.pem
+AUTH_PRIVATE_PEM_FILEPATH=./private.pem
+
+# External Services
+OPENROUTER_API_KEY=sk-or-v1-your-api-key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1/
+
+# MinIO Storage
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+
+# CORS Configuration
+CORS_ALLOWED_ORIGINS=http://localhost:3000,https://app.nvisy.com
+CORS_MAX_AGE=3600
+CORS_ALLOW_CREDENTIALS=true
 ```
 
 ## API Documentation
 
 When the server is running, access the interactive API documentation:
 
-- Swagger UI: `http://localhost:3000/api/swagger`
-- Scalar UI: `http://localhost:3000/api/scalar`
-- OpenAPI JSON: `http://localhost:3000/api/openapi.json`
+- **Swagger UI**: `http://localhost:3000/api/swagger`
+- **Scalar UI**: `http://localhost:3000/api/scalar`
+- **OpenAPI JSON**: `http://localhost:3000/api/openapi.json`
+- **Health Check**: `http://localhost:3000/health`
 
-## Development
+## Testing
+
+```bash
+# Run all tests
+cargo test --workspace
+
+# Run tests with coverage
+cargo tarpaulin --workspace --out Html
+
+# Run specific crate tests
+cargo test --package nvisy-server
+```
 
 ### Code Quality
 
@@ -131,27 +171,38 @@ When the server is running, access the interactive API documentation:
 cargo fmt --all
 
 # Run linter
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Security audit
 cargo audit
 
-# Run tests with coverage
-cargo tarpaulin --workspace --out Html
+# Check dependencies
+cargo deny check
 ```
 
-### Database Migrations
+### Database Operations
 
 ```bash
-# Run migrations
-diesel migration run
+# Generate auth keys
+make generate-keys
 
-# Revert last migration
-diesel migration revert
+# Run migrations and update schema
+make generate-migrations
 
-# Generate schema
-diesel print-schema > crates/nvisy-postgres/src/schema.rs
+# Revert all migrations
+make clear-migrations
+
+# Create new migration
+diesel migration generate migration_name
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and contribution process.
 
 ## License
 
@@ -159,6 +210,7 @@ MIT License - see [LICENSE.txt](LICENSE.txt) for details.
 
 ## Support
 
-- Documentation: [docs.nvisy.com](https://docs.nvisy.com)
-- Issues: [GitHub Issues](https://github.com/nvisycom/api/issues)
-- Email: [support@nvisy.com](mailto:support@nvisy.com)
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/api/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [status.nvisy.com](https://status.nvisy.com)

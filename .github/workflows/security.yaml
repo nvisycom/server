@@ -20,6 +20,7 @@ on:
           - code
           - secrets
           - containers
+          - compliance
 
 env:
   CARGO_TERM_COLOR: always
@@ -51,32 +52,111 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: security-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: security-deps-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: security-deps-cargo-
 
       - name: Install security tools
         run: |
           cargo install cargo-audit
           cargo install cargo-deny
+          cargo install cargo-machete
 
-      - name: Run cargo audit
+      - name: Run comprehensive dependency audit
         run: |
-          cargo audit --json --format json > audit-results.json
-          if [ -s audit-results.json ] && [ "$(jq '.vulnerabilities | length' audit-results.json)" -gt 0 ]; then
-            echo "CRITICAL: Vulnerabilities found"
+          # Run cargo audit with JSON output for analysis
+          cargo audit --json --format json > audit-results.json || true
+
+          # Check for vulnerabilities
+          if [ -s audit-results.json ] && [ "$(jq '.vulnerabilities | length' audit-results.json 2>/dev/null || echo 0)" -gt 0 ]; then
+            echo "🚨 CRITICAL: Security vulnerabilities found in dependencies"
+            echo "::group::Vulnerability Details"
             jq -r '.vulnerabilities[] | "- \(.advisory.id): \(.advisory.title) (\(.package.name) \(.package.version))"' audit-results.json
-            exit 1
+            echo "::endgroup::"
+            echo "vulnerability_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No known vulnerabilities in dependencies"
+            echo "vulnerability_found=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run cargo deny
-        run: cargo deny check
+      - name: Run dependency policy checks
+        run: |
+          echo "::group::Dependency Policy Check"
+          cargo deny check
+          echo "::endgroup::"
 
-      - name: Upload results
+      - name: Check for unused dependencies
+        run: |
+          echo "::group::Unused Dependencies Check"
+          cargo machete
+          echo "::endgroup::"
+
+      - name: Upload dependency analysis results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dependency-scan-results
+          name: dependency-security-results
           path: audit-results.json
-          retention-days: 30
+          retention-days: 90
+
+  license-compliance:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    if: >
+      github.event.inputs.scan_type == 'full' ||
+      github.event.inputs.scan_type == 'compliance' ||
+      github.event_name == 'schedule' ||
+      github.event_name != 'workflow_dispatch'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+          key: license-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: license-cargo-
+
+      - name: Install cargo-license
+        run: cargo install cargo-license
+
+      - name: Generate license report
+        run: |
+          echo "::group::License Analysis"
+          cargo license --json > licenses.json
+
+          # Display all licenses for review
+          echo "📋 All dependency licenses:"
+          cargo license --tsv | sort -u
+          echo "::endgroup::"
+
+      - name: Check for problematic licenses
+        run: |
+          # Check for copyleft and proprietary licenses
+          problematic=$(jq -r '.[] | select(.license | test("GPL|AGPL|SSPL|BCL|BUSL"; "i")) | "\(.name): \(.license)"' licenses.json)
+
+          if [ -n "$problematic" ]; then
+            echo "🚨 CRITICAL: Problematic licenses found:"
+            echo "$problematic"
+            echo "license_issues=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ All licenses are compatible with MIT"
+            echo "license_issues=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-compliance-report
+          path: licenses.json
+          retention-days: 90
 
   code-security-analysis:
     name: Code Security Analysis
@@ -103,30 +183,52 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: code-security-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: code-security-cargo-
 
       - name: Run security-focused Clippy
         run: |
+          echo "::group::Security-Focused Linting"
           cargo clippy --all-targets --all-features --workspace -- \
             -D clippy::unwrap_used \
             -D clippy::expect_used \
             -D clippy::panic \
+            -D clippy::unimplemented \
+            -D clippy::todo \
+            -D clippy::unreachable \
             -D clippy::integer_arithmetic \
             -D clippy::indexing_slicing \
+            -D clippy::as_conversions \
             -W clippy::suspicious \
-            -W clippy::complexity
+            -W clippy::complexity \
+            -W clippy::perf \
+            -W clippy::nursery
+          echo "::endgroup::"
 
       - name: Install and run Semgrep
         run: |
+          echo "::group::Static Security Analysis (Semgrep)"
           python3 -m pip install semgrep
-          semgrep --config=auto --json --output=semgrep-results.json . || true
 
-      - name: Upload results
+          # Run Semgrep with security-focused rules
+          semgrep --config=security-and-quality --json --output=semgrep-results.json . || true
+
+          # Check for high-severity issues
+          high_severity=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo 0)
+          if [ "$high_severity" -gt 0 ]; then
+            echo "⚠️ Found $high_severity high-severity security issues"
+            jq -r '.results[] | select(.extra.severity == "ERROR") | "- \(.extra.message) (\(.path):\(.start.line))"' semgrep-results.json
+          else
+            echo "✅ No high-severity security issues found"
+          fi
+          echo "::endgroup::"
+
+      - name: Upload code analysis results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: code-analysis-results
+          name: code-security-results
           path: semgrep-results.json
-          retention-days: 30
+          retention-days: 90
 
   secret-detection:
     name: Secret Detection
@@ -147,29 +249,55 @@ jobs:
           path: ./
           base: main
           head: HEAD
-          extra_args: --only-verified
+          extra_args: --only-verified --json > trufflehog-results.json || true
 
       - name: Run Gitleaks
         run: |
+          echo "::group::Secret Detection (Gitleaks)"
+          # Download and install Gitleaks
           curl -sSfL https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz
           sudo mv gitleaks /usr/local/bin/
-          gitleaks detect --source . --report-format json --report-path gitleaks-report.json
 
-      - name: Check results
+          # Run Gitleaks scan
+          gitleaks detect --source . --report-format json --report-path gitleaks-report.json --verbose || true
+          echo "::endgroup::"
+
+      - name: Analyze secret detection results
         run: |
-          if [ -f gitleaks-report.json ] && [ "$(jq 'length' gitleaks-report.json)" -gt 0 ]; then
-            echo "CRITICAL: Secrets detected"
+          secrets_found=false
+
+          # Check Gitleaks results
+          if [ -f gitleaks-report.json ] && [ "$(jq 'length' gitleaks-report.json 2>/dev/null || echo 0)" -gt 0 ]; then
+            echo "🚨 CRITICAL: Secrets detected by Gitleaks"
+            echo "::group::Secret Details"
             jq -r '.[] | "- \(.Description) in \(.File):\(.StartLine)"' gitleaks-report.json
-            exit 1
+            echo "::endgroup::"
+            secrets_found=true
           fi
 
-      - name: Upload results
+          # Check TruffleHog results if available
+          if [ -f trufflehog-results.json ] && [ -s trufflehog-results.json ]; then
+            echo "🚨 CRITICAL: Secrets detected by TruffleHog"
+            secrets_found=true
+          fi
+
+          if [ "$secrets_found" = "true" ]; then
+            echo "secrets_found=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ No secrets detected"
+            echo "secrets_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload secret detection results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: secret-scan-results
-          path: gitleaks-report.json
-          retention-days: 30
+          name: secret-detection-results
+          path: |
+            gitleaks-report.json
+            trufflehog-results.json
+          retention-days: 90
 
   container-security:
     name: Container Security
@@ -190,16 +318,47 @@ jobs:
         with:
           context: .
           push: false
-          tags: nvisy-server:scan
+          tags: nvisy-server:security-scan
           load: true
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "nvisy-server:scan"
+          image-ref: "nvisy-server:security-scan"
           format: "sarif"
           output: "trivy-results.sarif"
-          severity: "CRITICAL,HIGH"
+          severity: "CRITICAL,HIGH,MEDIUM"
+
+      - name: Run Trivy for JSON report
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "nvisy-server:security-scan"
+          format: "json"
+          output: "trivy-results.json"
+          severity: "CRITICAL,HIGH,MEDIUM"
+
+      - name: Analyze container vulnerabilities
+        run: |
+          if [ -f trivy-results.json ]; then
+            critical_count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
+            high_count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
+
+            echo "Container vulnerability summary:"
+            echo "- Critical: $critical_count"
+            echo "- High: $high_count"
+
+            if [ "$critical_count" -gt 0 ]; then
+              echo "🚨 CRITICAL: $critical_count critical vulnerabilities found in container"
+              echo "container_critical=true" >> $GITHUB_OUTPUT
+              exit 1
+            elif [ "$high_count" -gt 5 ]; then
+              echo "⚠️ WARNING: $high_count high-severity vulnerabilities found"
+              echo "container_critical=false" >> $GITHUB_OUTPUT
+            else
+              echo "✅ Container security scan passed"
+              echo "container_critical=false" >> $GITHUB_OUTPUT
+            fi
+          fi
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
@@ -207,121 +366,182 @@ jobs:
         with:
           sarif_file: "trivy-results.sarif"
 
-      - name: Check for critical vulnerabilities
-        run: |
-          if [ -f trivy-results.sarif ]; then
-            critical_count=$(jq '[.runs[0].results[] | select(.level == "error")] | length' trivy-results.sarif)
-            if [ "$critical_count" -gt 0 ]; then
-              echo "CRITICAL: $critical_count critical vulnerabilities found"
-              exit 1
-            fi
-          fi
-
-  license-compliance:
-    name: License Compliance
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event.inputs.scan_type == 'full'
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-license
-        run: cargo install cargo-license
-
-      - name: Check licenses
-        run: |
-          cargo license --json > licenses.json
-          problematic=$(jq -r '.[] | select(.license | test("GPL|AGPL|SSPL|BCL"; "i")) | "\(.name): \(.license)"' licenses.json)
-          if [ -n "$problematic" ]; then
-            echo "CRITICAL: Problematic licenses found:"
-            echo "$problematic"
-            exit 1
-          fi
-
-      - name: Upload license report
+      - name: Upload container scan results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: license-report
-          path: licenses.json
+          name: container-security-results
+          path: |
+            trivy-results.json
+            trivy-results.sarif
           retention-days: 90
 
-  security-report:
-    name: Security Report
+  security-summary:
+    name: Security Assessment Summary
     runs-on: ubuntu-latest
-    needs: [dependency-security, code-security-analysis, secret-detection, container-security, license-compliance]
+    needs: [dependency-security, license-compliance, code-security-analysis, secret-detection, container-security]
     if: always()
     steps:
-      - name: Generate security report
+      - name: Generate comprehensive security report
+        id: report
         run: |
-          cat << 'EOF' > security-report.md
-          # Security Assessment Report
+          # Calculate overall security posture
+          critical_issues=0
+          high_issues=0
+
+          # Check for critical failures
+          if [[ "${{ needs.dependency-security.result }}" == "failure" ]]; then
+            echo "🚨 CRITICAL: Dependency vulnerabilities detected"
+            critical_issues=$((critical_issues + 1))
+          fi
+
+          if [[ "${{ needs.secret-detection.result }}" == "failure" ]]; then
+            echo "🚨 CRITICAL: Secrets detected in repository"
+            critical_issues=$((critical_issues + 1))
+          fi
+
+          if [[ "${{ needs.license-compliance.result }}" == "failure" ]]; then
+            echo "🚨 CRITICAL: License compliance issues"
+            critical_issues=$((critical_issues + 1))
+          fi
+
+          if [[ "${{ needs.container-security.result }}" == "failure" ]]; then
+            echo "⚠️ HIGH: Container security vulnerabilities"
+            high_issues=$((high_issues + 1))
+          fi
+
+          if [[ "${{ needs.code-security-analysis.result }}" == "failure" ]]; then
+            echo "⚠️ HIGH: Code security analysis issues"
+            high_issues=$((high_issues + 1))
+          fi
+
+          # Determine overall risk level
+          if [ $critical_issues -gt 0 ]; then
+            risk_level="CRITICAL"
+            status="❌ FAILED"
+          elif [ $high_issues -gt 0 ]; then
+            risk_level="HIGH"
+            status="⚠️ WARNING"
+          else
+            risk_level="LOW"
+            status="✅ PASSED"
+          fi
+
+          echo "risk_level=$risk_level" >> $GITHUB_OUTPUT
+          echo "critical_issues=$critical_issues" >> $GITHUB_OUTPUT
+          echo "high_issues=$high_issues" >> $GITHUB_OUTPUT
+
+          # Create detailed security report
+          cat << EOF > security-assessment.md
+          # 🔒 Security Assessment Report
 
           **Repository**: ${{ github.repository }}
           **Branch**: ${{ github.ref_name }}
           **Commit**: ${{ github.sha }}
-          **Date**: $(date -u)
+          **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Overall Status**: $status
+          **Risk Level**: $risk_level
 
-          ## Results Summary
+          ## 📊 Results Summary
 
-          | Domain | Status |
-          |--------|--------|
-          | Dependencies | ${{ needs.dependency-security.result == 'success' && 'PASS' || 'FAIL' }} |
-          | Code Analysis | ${{ needs.code-security-analysis.result == 'success' && 'PASS' || 'FAIL' }} |
-          | Secrets | ${{ needs.secret-detection.result == 'success' && 'PASS' || 'FAIL' }} |
-          | Containers | ${{ needs.container-security.result == 'success' && 'PASS' || (needs.container-security.result == 'skipped' && 'SKIP' || 'FAIL') }} |
-          | Licenses | ${{ needs.license-compliance.result == 'success' && 'PASS' || (needs.license-compliance.result == 'skipped' && 'SKIP' || 'FAIL') }} |
+          | Security Domain | Status | Details |
+          |----------------|--------|---------|
+          | Dependencies | ${{ needs.dependency-security.result == 'success' && '✅ PASS' || '❌ FAIL' }} | Vulnerability and policy checks |
+          | License Compliance | ${{ needs.license-compliance.result == 'success' && '✅ PASS' || (needs.license-compliance.result == 'skipped' && '⏭️ SKIP' || '❌ FAIL') }} | License compatibility analysis |
+          | Code Security | ${{ needs.code-security-analysis.result == 'success' && '✅ PASS' || (needs.code-security-analysis.result == 'skipped' && '⏭️ SKIP' || '❌ FAIL') }} | Static security analysis |
+          | Secret Detection | ${{ needs.secret-detection.result == 'success' && '✅ PASS' || (needs.secret-detection.result == 'skipped' && '⏭️ SKIP' || '❌ FAIL') }} | Repository secret scanning |
+          | Container Security | ${{ needs.container-security.result == 'success' && '✅ PASS' || (needs.container-security.result == 'skipped' && '⏭️ SKIP' || '❌ FAIL') }} | Docker image vulnerability scan |
 
-          ## Risk Assessment
+          ## 🎯 Action Items
           EOF
 
-          # Calculate overall risk
-          if [[ "${{ needs.dependency-security.result }}" == "failure" ]] || \
-             [[ "${{ needs.secret-detection.result }}" == "failure" ]]; then
-            echo "**Risk Level**: CRITICAL" >> security-report.md
-          elif [[ "${{ needs.container-security.result }}" == "failure" ]] || \
-               [[ "${{ needs.code-security-analysis.result }}" == "failure" ]]; then
-            echo "**Risk Level**: HIGH" >> security-report.md
-          else
-            echo "**Risk Level**: LOW" >> security-report.md
+          if [ $critical_issues -gt 0 ]; then
+            echo "" >> security-assessment.md
+            echo "### 🚨 URGENT (Critical Priority)" >> security-assessment.md
           fi
-
-          echo "" >> security-report.md
-          echo "## Action Items" >> security-report.md
 
           if [[ "${{ needs.dependency-security.result }}" == "failure" ]]; then
-            echo "- URGENT: Update vulnerable dependencies" >> security-report.md
-          fi
-          if [[ "${{ needs.secret-detection.result }}" == "failure" ]]; then
-            echo "- URGENT: Remove/rotate detected secrets" >> security-report.md
-          fi
-          if [[ "${{ needs.container-security.result }}" == "failure" ]]; then
-            echo "- HIGH: Address container vulnerabilities" >> security-report.md
+            echo "- Update or patch vulnerable dependencies immediately" >> security-assessment.md
           fi
 
-      - name: Upload security report
+          if [[ "${{ needs.secret-detection.result }}" == "failure" ]]; then
+            echo "- Immediately revoke/rotate any detected secrets" >> security-assessment.md
+            echo "- Remove secrets from git history if necessary" >> security-assessment.md
+          fi
+
+          if [[ "${{ needs.license-compliance.result }}" == "failure" ]]; then
+            echo "- Review and replace dependencies with problematic licenses" >> security-assessment.md
+          fi
+
+          if [ $high_issues -gt 0 ]; then
+            echo "" >> security-assessment.md
+            echo "### ⚠️ Important (High Priority)" >> security-assessment.md
+          fi
+
+          if [[ "${{ needs.container-security.result }}" == "failure" ]]; then
+            echo "- Update base images and dependencies in Dockerfile" >> security-assessment.md
+          fi
+
+          if [[ "${{ needs.code-security-analysis.result }}" == "failure" ]]; then
+            echo "- Address security-related code issues identified by static analysis" >> security-assessment.md
+          fi
+
+          if [ $critical_issues -eq 0 ] && [ $high_issues -eq 0 ]; then
+            echo "" >> security-assessment.md
+            echo "✅ **No critical security issues detected. Good job!**" >> security-assessment.md
+            echo "" >> security-assessment.md
+            echo "Continue following security best practices and keep dependencies updated." >> security-assessment.md
+          fi
+
+      - name: Upload security assessment
         uses: actions/upload-artifact@v4
         with:
-          name: security-report
-          path: security-report.md
-          retention-days: 90
+          name: security-assessment-report
+          path: security-assessment.md
+          retention-days: 180
+
+      - name: Create security summary
+        run: |
+          echo "# 🔒 Security Assessment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat security-assessment.md >> $GITHUB_STEP_SUMMARY
 
       - name: Create security issue for critical failures
-        if: >
-          needs.dependency-security.result == 'failure' ||
-          needs.secret-detection.result == 'failure'
+        if: steps.report.outputs.critical_issues > 0
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('security-report.md', 'utf8');
+            const report = fs.readFileSync('security-assessment.md', 'utf8');
 
-            await github.rest.issues.create({
+            // Check if an existing security issue is open
+            const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: 'Critical Security Issues Detected',
-              body: report,
-              labels: ['security', 'critical']
+              labels: 'security,critical',
+              state: 'open'
             });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚨 Critical Security Issues Detected',
+                body: report + '\n\n---\n*This issue was automatically created by the Security workflow.*',
+                labels: ['security', 'critical', 'automated']
+              });
+            } else {
+              // Update existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: '## 🔄 Security Assessment Update\n\n' + report
+              });
+            }
+
+      - name: Fail workflow on critical security issues
+        if: steps.report.outputs.critical_issues > 0
+        run: |
+          echo "💥 Workflow failed due to ${{ steps.report.outputs.critical_issues }} critical security issue(s)"
+          exit 1

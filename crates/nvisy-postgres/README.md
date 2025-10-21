@@ -1,24 +1,34 @@
 # api.nvisy.com/postgres
 
-High-performance, type-safe PostgreSQL database layer for the Nvisy platform,
-built with Diesel and async connection pooling.
+Type-safe PostgreSQL database layer for the Nvisy platform with async connection pooling and embedded migrations.
 
-[![Rust](https://img.shields.io/badge/rust-1.89+-blue.svg)](https://www.rust-lang.org/)
-[![Diesel](https://img.shields.io/badge/diesel-2.2+-green.svg)](https://diesel.rs/)
-[![PostgreSQL](https://img.shields.io/badge/postgresql-17+-blue.svg)](https://www.postgresql.org/)
+[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![diesel](https://img.shields.io/badge/Diesel-2.3+-000000?style=flat-square&logo=rust&logoColor=white)](https://diesel.rs/)
+[![postgresql](https://img.shields.io/badge/PostgreSQL-17+-000000?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
 ## Features
 
-- **Async Connection Pooling** - High-performance connection management with
-  Deadpool
+- **Async Connection Pooling** - High-performance connection management with Deadpool
 - **Type-Safe Queries** - Compile-time SQL validation with Diesel ORM
-- **Automatic Migrations** - Embedded migration system with rollback support
-- **Comprehensive Error Handling** - Detailed error types with recovery hints
-- **Production Ready** - Health checks, metrics, and observability built-in
+- **Embedded Migrations** - Automatic schema management with rollback support
+- **Error Handling** - Comprehensive database error types with context
+- **Production Ready** - Health checks and connection monitoring
 
-## Crates
+## Key Dependencies
 
-- [`tokio`](https://crates.io/crates/tokio) - Async runtime for Rust
-- [`diesel`](https://crates.io/crates/diesel) - Safe, extensible ORM and query
-  builder
-- [`deadpool`](https://crates.io/crates/deadpool) - Async connection pooling
+- `diesel` - Safe, extensible ORM and query builder for Rust
+- `diesel-async` - Async support for Diesel with PostgreSQL
+- `deadpool` - Async connection pooling for high-concurrency workloads
+- `tokio` - Async runtime integration
+
+
+
+## Schema Management
+
+Database schema is automatically generated from migrations using:
+
+```bash
+make generate-migrations
+```
+
+The generated schema is located at `src/schema.rs` and provides type-safe table definitions for Diesel queries.
