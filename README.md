@@ -14,6 +14,7 @@ High-performance backend API server for the Nvisy document redaction platform, b
 - **Comprehensive Security** - JWT authentication, session management, and input validation
 - **MinIO Storage Integration** - S3-compatible object storage for document management
 - **AI-Powered Processing** - OpenRouter integration for intelligent document analysis
+- **NATS Messaging** - Real-time updates, job queues, sessions, and caching via NATS with JetStream and KV
 - **Production Ready** - Health checks, graceful shutdown, connection pooling, and observability
 - **Auto-Generated Documentation** - OpenAPI/Swagger specs with interactive UI
 - **Workspace Architecture** - Modular crate design for optimal code organization
@@ -25,7 +26,7 @@ api/
 ├── crates/
 │   ├── nvisy-cli/          # HTTP server CLI
 │   ├── nvisy-minio/        # MinIO/S3-compatible storage client
-│   ├── nvisy-nats/         # NATS messaging integration
+│   ├── nvisy-nats/         # NATS client (messaging, KV, streams, queues)
 │   ├── nvisy-openrouter/   # OpenRouter AI client
 │   ├── nvisy-postgres/     # PostgreSQL database layer
 │   └── nvisy-server/       # Core HTTP API server
@@ -39,6 +40,7 @@ api/
 
 - Rust 1.89 or higher
 - PostgreSQL 17 or higher
+- NATS server with JetStream enabled
 - MinIO instance or S3-compatible storage
 - OpenRouter API key (for AI features)
 
@@ -96,6 +98,8 @@ Configure the API server using these environment variables:
 | `MINIO_ENDPOINT`            | MinIO server endpoint                 | No       | `localhost:9000`                   |
 | `MINIO_ACCESS_KEY`          | MinIO access key                      | No       | `minioadmin`                       |
 | `MINIO_SECRET_KEY`          | MinIO secret key                      | No       | `minioadmin`                       |
+| `NATS_URL`                  | NATS server URL                       | No       | `nats://127.0.0.1:4222`            |
+| `NATS_CLIENT_NAME`          | NATS client name                      | No       | `nvisy-api`                        |
 | `CORS_ALLOWED_ORIGINS`      | Comma-separated CORS origins          | No       | Empty (allows localhost)           |
 | `CORS_MAX_AGE`              | CORS preflight cache duration        | No       | `3600`                             |
 | `CORS_ALLOW_CREDENTIALS`    | Allow credentials in CORS             | No       | `true`                             |
@@ -135,6 +139,10 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1/
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
+
+# NATS Messaging
+NATS_URL=nats://127.0.0.1:4222
+NATS_CLIENT_NAME=nvisy-api
 
 # CORS Configuration
 CORS_ALLOWED_ORIGINS=http://localhost:3000,https://app.nvisy.com

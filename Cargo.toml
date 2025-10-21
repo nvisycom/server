@@ -82,6 +82,9 @@ deadpool = { version = "0.12", features = [] }
 minio = { version = "0.3", features = [] }
 tempfile = { version = "3.23", features = [] }
 
+# Messaging (NATS)
+async-nats = { version = "0.44", features = [] }
+
 # Observability
 tracing = { version = "0.1", features = [] }
 tracing-subscriber = { version = "0.3", features = [] }
@@ -105,6 +108,7 @@ strum = { version = "0.27", features = ["derive"] }
 # Data types
 jiff = { version = "0.2", features = ["serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
 ipnet = { version = "2.11", features = [] }
 bigdecimal = { version = "0.4", features = ["serde"] }

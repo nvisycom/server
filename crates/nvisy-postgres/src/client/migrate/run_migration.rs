@@ -9,11 +9,11 @@ use tracing::{debug, error, info, instrument};
 
 use super::{MigrationResult, custom_hooks};
 use crate::migrate::get_migration_status;
-use crate::{MIGRATIONS, PgDatabase, PgError, PgResult, TRACING_TARGET_MIGRATIONS};
+use crate::{MIGRATIONS, PgClient, PgError, PgResult, TRACING_TARGET_MIGRATIONS};
 
 /// Run all pending migrations on the database.
 #[instrument(skip(pg), target = TRACING_TARGET_MIGRATIONS)]
-pub async fn run_pending_migrations(pg: &PgDatabase) -> PgResult<MigrationResult> {
+pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> {
     info!(
         target: TRACING_TARGET_MIGRATIONS,
         "Starting database migration process",

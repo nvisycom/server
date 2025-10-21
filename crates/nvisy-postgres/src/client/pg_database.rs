@@ -17,12 +17,12 @@ use crate::{
 /// This struct provides the main interface for database operations, encapsulating
 /// connection pool management, configuration, and migration handling.
 #[derive(Clone)]
-pub struct PgDatabase {
+pub struct PgClient {
     pool: ConnectionPool,
     config: Arc<PgConfig>,
 }
 
-impl PgDatabase {
+impl PgClient {
     /// Creates a new database client with the provided configuration.
     ///
     /// This will establish a connection pool.
@@ -181,7 +181,7 @@ impl PgDatabase {
     }
 }
 
-impl std::fmt::Debug for PgDatabase {
+impl std::fmt::Debug for PgClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")

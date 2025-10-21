@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::{Result as AnyhowResult, anyhow};
 use nvisy_minio::MinioClient;
-use nvisy_postgres::{PgConfig, PgDatabase};
+use nvisy_postgres::client::PgClientExt;
+use nvisy_postgres::{PgClient, PgConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::service::auth::{AuthHasher, AuthKeys, AuthKeysConfig};
@@ -41,6 +42,12 @@ pub struct ServiceConfig {
 
     /// MinIO secret key.
     pub minio_secret_key: String,
+
+    /// NATS server URL.
+    pub nats_url: String,
+
+    /// NATS client name.
+    pub nats_client_name: String,
 }
 
 impl ServiceConfig {
@@ -87,24 +94,31 @@ impl ServiceConfig {
             return Err(anyhow!("MinIO secret key cannot be empty"));
         }
 
+        // Validate NATS URL
+        if self.nats_url.is_empty() {
+            return Err(anyhow!("NATS URL cannot be empty"));
+        }
+
+        if !self.nats_url.starts_with("nats://") && !self.nats_url.starts_with("tls://") {
+            return Err(anyhow!("NATS URL must start with 'nats://' or 'tls://'"));
+        }
+
         Ok(())
     }
 
     /// Connects to Postgres database and runs migrations.
-    pub async fn connect_postgres(&self) -> Result<PgDatabase> {
-        use nvisy_postgres::migrate::PgDatabaseExt;
-
+    pub async fn connect_postgres(&self) -> Result<PgClient> {
         let pool_config = nvisy_postgres::PgPoolConfig::default();
         let config = PgConfig::new(self.postgres_endpoint.clone(), pool_config);
-        let pg_database = PgDatabase::new(config).map_err(|e| {
+        let pg_client = PgClient::new(config).map_err(|e| {
             ServiceError::database_with_source("Failed to create database client", e)
         })?;
 
-        pg_database.run_pending_migrations().await.map_err(|e| {
+        pg_client.run_pending_migrations().await.map_err(|e| {
             ServiceError::database_with_source("Failed to apply database migrations", e)
         })?;
 
-        Ok(pg_database)
+        Ok(pg_client)
     }
 
     /// Connects to OpenRouter LLM service.
@@ -114,6 +128,18 @@ impl ServiceConfig {
         // Placeholder until nvisy-openrouter is implemented
         tracing::warn!("OpenRouter connection not yet implemented");
         Ok(())
+    }
+
+    /// Connects to NATS server.
+    #[inline]
+    pub async fn connect_nats(&self) -> Result<nvisy_nats::NatsClient> {
+        use nvisy_nats::NatsConfig;
+
+        let config = NatsConfig::new(&self.nats_url).with_name(&self.nats_client_name);
+
+        nvisy_nats::NatsClient::connect(config).await.map_err(|e| {
+            ServiceError::external_service_with_source("NATS", "Failed to connect to NATS", e)
+        })
     }
 
     /// Connects to MinIO file storage.
@@ -174,6 +200,8 @@ impl Default for ServiceConfig {
             minio_endpoint: "localhost:9000".to_owned(),
             minio_access_key: "minioadmin".to_owned(),
             minio_secret_key: "minioadmin".to_owned(),
+            nats_url: "nats://127.0.0.1:4222".to_owned(),
+            nats_client_name: "nvisy-api".to_owned(),
         }
     }
 }

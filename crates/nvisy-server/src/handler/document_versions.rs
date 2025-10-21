@@ -6,7 +6,7 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use nvisy_minio::MinioClient;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::DocumentVersion;
 use nvisy_postgres::queries::DocumentVersionRepository;
 use nvisy_postgres::types::FileType;
@@ -133,7 +133,7 @@ struct ReadAllVersionsResponse {
     )
 )]
 async fn get_version_files(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     Path(path_params): Path<DocumentPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
@@ -231,7 +231,7 @@ async fn get_version_files(
     ),
 )]
 async fn get_version_info(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
@@ -299,7 +299,7 @@ async fn get_version_info(
     ),
 )]
 async fn download_version_file(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(minio_client): State<MinioClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
@@ -429,7 +429,7 @@ async fn download_version_file(
     )
 )]
 async fn delete_version(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(minio_client): State<MinioClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,

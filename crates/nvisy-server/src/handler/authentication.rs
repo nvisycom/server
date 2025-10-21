@@ -69,7 +69,7 @@ use axum::http::StatusCode;
 use axum_client_ip::ClientIp;
 use axum_extra::TypedHeader;
 use axum_extra::headers::UserAgent;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
 use serde::{Deserialize, Serialize};
@@ -151,7 +151,7 @@ struct LoginResponse {
     ),
 )]
 async fn login(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(auth_hasher): State<AuthHasher>,
     State(regional_policy): State<RegionalPolicy>,
     State(auth_keys): State<AuthKeys>,
@@ -322,7 +322,7 @@ struct SignupResponse {
 )]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(auth_hasher): State<AuthHasher>,
     State(password_strength): State<PasswordStrength>,
     State(regional_policy): State<RegionalPolicy>,
@@ -439,7 +439,7 @@ async fn signup(
     ),
 )]
 async fn logout(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(regional_policy): State<RegionalPolicy>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {

@@ -84,7 +84,7 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_minio::MinioClient;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::{Document, NewDocument, UpdateDocument};
 use nvisy_postgres::queries::DocumentRepository;
 use serde::{Deserialize, Serialize};
@@ -170,7 +170,7 @@ impl From<Document> for CreateDocumentResponse {
     ),
 )]
 async fn create_document(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentRequest>,
@@ -286,7 +286,7 @@ impl ListDocumentsResponse {
     )
 )]
 async fn get_all_documents(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(_pagination): Json<Pagination>,
@@ -372,7 +372,7 @@ impl From<Document> for GetDocumentResponse {
     ),
 )]
 async fn get_document(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<GetDocumentResponse>)> {
@@ -460,7 +460,7 @@ impl From<Document> for UpdateDocumentResponse {
     ),
 )]
 async fn update_document(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocumentRequest>,
@@ -552,7 +552,7 @@ impl From<Document> for DeleteDocumentResponse {
     )
 )]
 async fn delete_document(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(_storage): State<MinioClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,

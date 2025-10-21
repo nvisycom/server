@@ -24,6 +24,7 @@ default = []
 [dependencies]
 # Internal crates
 nvisy-minio = { workspace = true, features = [] }
+nvisy-nats = { workspace = true, features = [] }
 nvisy-openrouter = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["utoipa"] }
 

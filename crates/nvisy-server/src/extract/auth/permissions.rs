@@ -296,7 +296,7 @@ impl AuthResult {
     }
 
     /// Converts the result to a `Result` type, returning an error if access is denied.
-    /// 
+    ///
     /// # Examples
     ///
     /// ```rust

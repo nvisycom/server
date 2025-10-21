@@ -110,6 +110,16 @@ pub struct ServiceConfig {
     #[arg(long, env = "MINIO_SECRET_KEY")]
     #[arg(default_value = "minioadmin")]
     pub minio_secret_key: String,
+
+    /// NATS server URL.
+    #[arg(long, env = "NATS_URL")]
+    #[arg(default_value = "nats://127.0.0.1:4222")]
+    pub nats_url: String,
+
+    /// NATS client name for identification.
+    #[arg(long, env = "NATS_CLIENT_NAME")]
+    #[arg(default_value = "nvisy")]
+    pub nats_client_name: String,
 }
 
 impl Default for ServiceConfig {
@@ -124,6 +134,8 @@ impl Default for ServiceConfig {
             minio_endpoint: "localhost:9000".to_owned(),
             minio_access_key: "minioadmin".to_owned(),
             minio_secret_key: "minioadmin".to_owned(),
+            nats_url: "nats://127.0.0.1:4222".to_owned(),
+            nats_client_name: "nvisy-api".to_owned(),
         }
     }
 }
@@ -140,6 +152,8 @@ impl From<ServiceConfig> for ServerServiceConfig {
             minio_endpoint: cli_config.minio_endpoint,
             minio_access_key: cli_config.minio_access_key,
             minio_secret_key: cli_config.minio_secret_key,
+            nats_url: cli_config.nats_url,
+            nats_client_name: cli_config.nats_client_name,
         }
     }
 }

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use nvisy_minio::MinioClient;
-use nvisy_postgres::PgDatabase;
+use nvisy_nats::NatsClient;
+use nvisy_postgres::PgClient;
 use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
@@ -26,8 +27,9 @@ pub type ProjectChannels = Arc<RwLock<HashMap<Uuid, broadcast::Sender<ProjectWsM
 #[must_use = "state does nothing unless you use it"]
 #[derive(Clone)]
 pub struct ServiceState {
-    pg_database: PgDatabase,
+    pg_client: PgClient,
     minio_client: MinioClient,
+    nats_client: NatsClient,
 
     auth_hasher: AuthHasher,
     password_strength: PasswordStrength,
@@ -44,8 +46,9 @@ impl ServiceState {
     /// Connects to all external services and loads required resources.
     pub async fn from_config(config: &ServiceConfig) -> Result<Self> {
         let service_state = Self {
-            pg_database: config.connect_postgres().await?,
+            pg_client: config.connect_postgres().await?,
             minio_client: config.connect_file_storage().await?,
+            nats_client: config.connect_nats().await?,
 
             auth_hasher: config.create_password_hasher()?,
             password_strength: PasswordStrength::new(),
@@ -69,8 +72,9 @@ macro_rules! impl_di {
     )+};
 }
 
-impl_di!(pg_database: PgDatabase);
+impl_di!(pg_client: PgClient);
 impl_di!(minio_client: MinioClient);
+impl_di!(nats_client: NatsClient);
 
 impl_di!(auth_hasher: AuthHasher);
 impl_di!(password_strength: PasswordStrength);

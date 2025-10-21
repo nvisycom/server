@@ -1,7 +1,7 @@
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
 
 use crate::extract::{AuthClaims, AuthHeader, AuthState};
@@ -16,7 +16,7 @@ use crate::service::{AuthKeys, RegionalPolicy};
 /// - Return the response with a new token in the Authorization header if refreshed
 pub async fn refresh_token_middleware(
     AuthState(auth_claims): AuthState,
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(auth_secret_keys): State<AuthKeys>,
     State(regional_policy): State<RegionalPolicy>,
     request: Request,
@@ -80,7 +80,7 @@ pub async fn refresh_token_middleware(
 /// Helper function to refresh an authentication token
 async fn refresh_token(
     auth_claims: &AuthClaims,
-    pg_database: PgDatabase,
+    pg_database: PgClient,
     auth_secret_keys: AuthKeys,
     regional_policy: RegionalPolicy,
 ) -> Result<AuthHeader> {

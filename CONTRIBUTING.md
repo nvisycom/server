@@ -6,9 +6,9 @@ Thank you for your interest in contributing to the Nvisy API Server.
 
 - Rust 1.89 or higher
 - PostgreSQL 17 or higher
-- MinIO instance (for object storage)
+- NATS 2.10 or higher with JetStream enabled (for messaging, sessions, and queues)
+- MinIO RELEASE.2024-01-01T00-00-00Z or higher (for object storage)
 - OpenRouter API key (for AI features)
-- NATS server (for messaging)
 - OpenSSL (for key generation)
 
 ## Development Setup

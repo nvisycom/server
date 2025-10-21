@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 // use nvisy_openrouter::OpenRouter; // TODO: Implement when nvisy-openrouter is available
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -159,7 +159,7 @@ struct MonitorStatusResponse {
     ),
 )]
 async fn monitor_status(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(regional_policy): State<RegionalPolicy>,
     auth_state: Option<AuthState>,
     request: Option<Json<MonitorStatusRequest>>,
@@ -212,7 +212,7 @@ async fn monitor_status(
 }
 
 /// Check database health status.
-async fn check_database_health(pg_database: &PgDatabase) -> ComponentStatus {
+async fn check_database_health(pg_database: &PgClient) -> ComponentStatus {
     match pg_database.get_connection().await {
         Ok(_) => ComponentStatus::healthy(),
         Err(e) => ComponentStatus::unhealthy(format!("Database connection failed: {}", e)),

@@ -79,7 +79,7 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware::from_fn_with_state;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::{Account, UpdateAccount};
 use nvisy_postgres::queries::AccountRepository;
 use serde::{Deserialize, Serialize};
@@ -107,7 +107,7 @@ pub struct AccountPathParams {
 
 /// Retrieves the account by its ID.
 async fn get_account_internal(
-    pg_database: PgDatabase,
+    pg_database: PgClient,
     account_id: Uuid,
 ) -> Result<(StatusCode, Json<GetAccountResponse>)> {
     tracing::trace!(
@@ -133,7 +133,7 @@ async fn get_account_internal(
 
 /// Updates an account by its ID.
 async fn update_account_internal(
-    pg_database: PgDatabase,
+    pg_database: PgClient,
     auth_hasher: AuthHasher,
     password_strength: PasswordStrength,
     account_id: Uuid,
@@ -221,7 +221,7 @@ async fn update_account_internal(
 
 /// Deletes an account by its ID.
 async fn delete_account_internal(
-    pg_database: PgDatabase,
+    pg_database: PgClient,
     account_id: Uuid,
 ) -> Result<(StatusCode, Json<DeleteAccountResponse>)> {
     tracing::trace!(
@@ -303,7 +303,7 @@ impl From<Account> for GetAccountResponse {
     ),
 )]
 async fn get_own_account(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<GetAccountResponse>)> {
     // Demonstrate new AuthState pattern - direct access to user info
@@ -341,7 +341,7 @@ async fn get_own_account(
     ),
 )]
 async fn get_account_by_id(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     Path(path_params): Path<AccountPathParams>,
 ) -> Result<(StatusCode, Json<GetAccountResponse>)> {
     get_account_internal(pg_database, path_params.account_id).await
@@ -408,7 +408,7 @@ impl From<Account> for UpdateAccountResponse {
     )
 )]
 async fn update_own_account(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(auth_hasher): State<AuthHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
@@ -453,7 +453,7 @@ async fn update_own_account(
     )
 )]
 async fn update_account_by_id(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(auth_hasher): State<AuthHasher>,
     State(password_strength): State<PasswordStrength>,
     Path(path_params): Path<AccountPathParams>,
@@ -503,7 +503,7 @@ struct DeleteAccountResponse {
     ),
 )]
 async fn delete_own_account(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<DeleteAccountResponse>)> {
     delete_account_internal(pg_database, auth_claims.account_id).await
@@ -533,7 +533,7 @@ async fn delete_own_account(
     ),
 )]
 async fn delete_account_by_id(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     Path(path_params): Path<AccountPathParams>,
 ) -> Result<(StatusCode, Json<DeleteAccountResponse>)> {
     delete_account_internal(pg_database, path_params.account_id).await

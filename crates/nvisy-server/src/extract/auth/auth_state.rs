@@ -56,7 +56,7 @@ use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::Deref;
 use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
-use nvisy_postgres::{PgConnection, PgDatabase};
+use nvisy_postgres::{PgClient, PgConnection};
 
 use super::{AuthClaims, AuthHeader};
 use crate::TRACING_TARGET_AUTHENTICATION;
@@ -163,7 +163,7 @@ impl AuthState {
     /// only once per request (caching handles subsequent uses).
     pub async fn from_unverified_header(
         auth_header: AuthHeader,
-        pg_database: PgDatabase,
+        pg_database: PgClient,
     ) -> Result<Self> {
         let auth_claims = auth_header.into_auth_claims();
 
@@ -441,7 +441,7 @@ impl AuthState {
 impl<S> FromRequestParts<S> for AuthState
 where
     S: Sync + Send + 'static,
-    PgDatabase: FromRef<S>,
+    PgClient: FromRef<S>,
     AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
@@ -454,7 +454,7 @@ where
 
         // Extract JWT token and perform comprehensive database verification
         let auth_header = AuthHeader::from_request_parts(parts, state).await?;
-        let pg_database = PgDatabase::from_ref(state);
+        let pg_database = PgClient::from_ref(state);
         let auth_state = Self::from_unverified_header(auth_header, pg_database).await?;
 
         // Cache the verified state for subsequent extractors in the same request
@@ -466,7 +466,7 @@ where
 impl<S> OptionalFromRequestParts<S> for AuthState
 where
     S: Sync + Send + 'static,
-    PgDatabase: FromRef<S>,
+    PgClient: FromRef<S>,
     AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;

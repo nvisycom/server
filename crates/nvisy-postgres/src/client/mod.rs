@@ -21,8 +21,8 @@ mod pool_status;
 use deadpool::managed::{Object, Pool};
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-pub use migrate::{MigrationResult, MigrationStatus, PgDatabaseExt};
-pub use pg_database::PgDatabase;
+pub use migrate::{MigrationResult, MigrationStatus, PgClientExt};
+pub use pg_database::PgClient;
 pub use pool_configs::{PgConfig, PgPoolConfig};
 pub use pool_status::PoolStatus;
 

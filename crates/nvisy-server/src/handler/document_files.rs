@@ -53,7 +53,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use bigdecimal::BigDecimal;
 use nvisy_minio::MinioClient;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::{NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::queries::DocumentFileRepository;
 use nvisy_postgres::types::{FileType, ProcessingStatus, RequireMode, VirusScanStatus};
@@ -154,7 +154,7 @@ pub struct UploadFileResponse {
     )
 )]
 async fn upload_file(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(minio_client): State<MinioClient>,
     Path(path_params): Path<DocumentPathParams>,
     AuthState(auth_claims): AuthState,
@@ -412,7 +412,7 @@ pub struct UpdateFileResponse {
     )
 )]
 async fn update_file(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
@@ -503,7 +503,7 @@ async fn update_file(
     )
 )]
 async fn download_file(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(minio_client): State<MinioClient>,
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
@@ -614,7 +614,7 @@ async fn download_file(
     )
 )]
 async fn delete_file(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(minio_client): State<MinioClient>,
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,

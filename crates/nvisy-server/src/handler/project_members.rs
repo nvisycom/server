@@ -48,7 +48,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::{ProjectMember, UpdateProjectMember};
 use nvisy_postgres::queries::ProjectMemberRepository;
 use nvisy_postgres::types::ProjectRole;
@@ -217,7 +217,7 @@ struct DeleteMemberResponse {
     ),
 )]
 async fn list_members(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
@@ -306,7 +306,7 @@ async fn list_members(
     )
 )]
 async fn get_member(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<GetMemberResponse>)> {
@@ -390,7 +390,7 @@ async fn get_member(
     )
 )]
 async fn delete_member(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<DeleteMemberResponse>)> {
@@ -544,7 +544,7 @@ pub struct UpdateMemberRoleResponse {
     )
 )]
 async fn update_member_role(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMemberRoleRequest>,

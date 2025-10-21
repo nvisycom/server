@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument, warn};
 
-use crate::{PgDatabase, PgError, PgResult, TRACING_TARGET_CLIENT};
+use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CLIENT};
 
 /// Complete database configuration including connection string and pool settings.
 ///
@@ -166,7 +166,7 @@ impl PgConfig {
     ///
     /// Validates the configuration for consistency and safety.
     #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub fn build(self) -> PgResult<PgDatabase> {
+    pub fn build(self) -> PgResult<PgClient> {
         debug!(target: TRACING_TARGET_CLIENT, "Validating database configuration");
 
         // Validate database URL
@@ -184,7 +184,7 @@ impl PgConfig {
         self.pool.validate()?;
 
         debug!(target: TRACING_TARGET_CLIENT, "Database configuration validation passed");
-        PgDatabase::new(self)
+        PgClient::new(self)
     }
 }
 

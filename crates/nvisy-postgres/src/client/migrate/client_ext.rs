@@ -1,21 +1,21 @@
-//! Extension trait for PgDatabase providing migration functionality.
+//! Extension trait for PgClient providing migration functionality.
 //!
 //! This module provides a clean extension trait that adds migration capabilities
-//! to the `PgDatabase` struct, keeping migration-related functionality separate
+//! to the `PgClient` struct, keeping migration-related functionality separate
 //! from the core database client implementation.
 
 use crate::migrate::{
     MigrationResult, MigrationStatus, get_migration_status, run_pending_migrations,
     verify_schema_integrity,
 };
-use crate::{PgDatabase, PgResult};
+use crate::{PgClient, PgResult};
 
-/// Extension trait providing migration functionality for PgDatabase.
+/// Extension trait providing migration functionality for PgClient.
 ///
 /// This trait adds methods for managing database migrations, including
 /// applying pending migrations, rolling back changes, and checking
 /// migration status.
-pub trait PgDatabaseExt {
+pub trait PgClientExt {
     /// Runs all pending database migrations.
     ///
     /// This method will apply any unapplied migrations to bring the database schema
@@ -60,7 +60,7 @@ pub trait PgDatabaseExt {
     fn verify_schema_integrity(&self) -> impl Future<Output = PgResult<()>>;
 }
 
-impl PgDatabaseExt for PgDatabase {
+impl PgClientExt for PgClient {
     async fn run_pending_migrations(&self) -> PgResult<MigrationResult> {
         run_pending_migrations(self).await
     }

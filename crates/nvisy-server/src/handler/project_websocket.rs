@@ -29,7 +29,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures::{SinkExt, StreamExt};
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::queries::{AccountRepository, ProjectRepository};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast};
@@ -703,7 +703,7 @@ async fn handle_project_websocket(
     ),
 )]
 async fn project_websocket_handler(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     State(channels): State<ProjectChannels>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,

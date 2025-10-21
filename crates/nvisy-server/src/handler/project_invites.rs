@@ -51,7 +51,7 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgDatabase;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::models::{NewProjectInvite, ProjectInvite};
 use nvisy_postgres::queries::{ProjectInviteRepository, ProjectMemberRepository};
 use nvisy_postgres::types::{InviteStatus, ProjectRole};
@@ -322,7 +322,7 @@ impl From<ProjectInvite> for CancelInviteResponse {
     ),
 )]
 async fn send_invite(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInviteRequest>,
@@ -472,7 +472,7 @@ async fn send_invite(
     ),
 )]
 async fn list_invites(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
@@ -562,7 +562,7 @@ async fn list_invites(
     ),
 )]
 async fn cancel_invite(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<(StatusCode, Json<CancelInviteResponse>)> {
@@ -655,7 +655,7 @@ async fn cancel_invite(
     )
 )]
 async fn reply_to_invite(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInviteRequest>,

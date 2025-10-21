@@ -26,7 +26,7 @@ use diesel::result::Error;
 pub use diesel_async::AsyncPgConnection as PgConnection;
 
 pub use crate::client::{
-    ConnectionPool, PgConfig, PgDatabase, PgPoolConfig, PoolStatus, PooledConnection, migrate,
+    ConnectionPool, PgClient, PgConfig, PgPoolConfig, PoolStatus, PooledConnection, migrate,
 };
 use crate::types::ConstraintViolation;
 

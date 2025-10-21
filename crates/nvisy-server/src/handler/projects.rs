@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::models::{NewProject, NewProjectMember, Project, ProjectMember, UpdateProject};
 use nvisy_postgres::queries::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
-use nvisy_postgres::{PgDatabase, PgError};
+use nvisy_postgres::{PgClient, PgError};
 use scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -97,7 +97,7 @@ impl From<Project> for CreateProjectResponse {
     ),
 )]
 async fn create_project(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<CreateProjectRequest>,
 ) -> Result<(StatusCode, Json<CreateProjectResponse>)> {
@@ -212,7 +212,7 @@ struct ListProjectsResponse {
     ),
 )]
 async fn list_all_projects(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<ListProjectsResponse>)> {
@@ -290,7 +290,7 @@ impl From<Project> for GetProjectResponse {
     ),
 )]
 async fn read_project(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<GetProjectResponse>)> {
@@ -378,7 +378,7 @@ impl From<Project> for UpdateProjectResponse {
     ),
 )]
 async fn update_project(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<UpdateProjectRequest>,
@@ -462,7 +462,7 @@ impl From<Project> for DeleteProjectResponse {
     ),
 )]
 async fn delete_project(
-    State(pg_database): State<PgDatabase>,
+    State(pg_database): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<DeleteProjectResponse>)> {
