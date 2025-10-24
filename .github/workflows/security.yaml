@@ -379,7 +379,13 @@ jobs:
   security-summary:
     name: Security Assessment Summary
     runs-on: ubuntu-latest
-    needs: [dependency-security, license-compliance, code-security-analysis, secret-detection, container-security]
+    needs: [
+      dependency-security,
+      license-compliance,
+      code-security-analysis,
+      secret-detection,
+      container-security,
+    ]
     if: always()
     steps:
       - name: Generate comprehensive security report

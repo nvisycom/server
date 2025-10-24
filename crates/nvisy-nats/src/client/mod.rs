@@ -1,8 +1,7 @@
 //! NATS client connection management and configuration.
 
-#[allow(clippy::module_inception)]
-mod client;
-mod config;
+mod nats_client;
+mod nats_config;
 
-pub use client::{NatsClient, NatsConnection};
-pub use config::{NatsConfig, NatsCredentials, NatsTlsConfig};
+pub use nats_client::{NatsClient, NatsConnection};
+pub use nats_config::{NatsConfig, NatsCredentials, NatsTlsConfig};

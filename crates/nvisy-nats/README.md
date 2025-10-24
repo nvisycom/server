@@ -1,162 +1,39 @@
-# nvisy-nats
+# api.nvisy.com/nats
 
-[![Crates.io](https://img.shields.io/crates/v/nvisy-nats.svg)](https://crates.io/crates/nvisy-nats)
-[![Documentation](https://docs.rs/nvisy-nats/badge.svg)](https://docs.rs/nvisy-nats)
+Task-focused NATS client for the Nvisy platform with comprehensive JetStream
+support and unified streaming infrastructure.
 
-Task-focused NATS client for the Nvisy platform.
-
-## Overview
-
-`nvisy-nats` provides a minimal, well-encapsulated NATS client with specialized modules for common use cases:
-
-- **Client**: Connection management and configuration
-- **KV**: Key-Value store for sessions and caching (NATS KV)
-- **Stream**: Real-time updates via JetStream for WebSocket broadcasting
-- **Queue**: Distributed job queues for background processing
+[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![nats](https://img.shields.io/badge/NATS-JetStream-000000?style=flat-square&logo=nats&logoColor=white)](https://nats.io/)
+[![async-nats](https://img.shields.io/badge/async--nats-0.38+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/nats-io/nats.rs)
 
 ## Features
 
-- Simple connection management with automatic reconnection
-- NATS KV for session management and caching
-- JetStream for real-time event streaming
-- Work queues for distributed job processing
-- Access to underlying NATS client for extensibility
-- Comprehensive error handling with retry logic
+- **Type-Safe Operations** - Generic KV store with compile-time type safety
+- **Unified Streaming** - Jobs and real-time updates use the same stream
+  infrastructure
+- **Object Storage** - File and binary data storage using NATS JetStream
+- **Session Management** - Built-in user session handling with device tracking
+- **Smart Caching** - Cache-aside pattern with automatic computation
+- **Job Processing** - Distributed background job queue with retry logic
+- **Connection Management** - Automatic reconnection with exponential backoff
+- **Error Handling** - Comprehensive error types with retry classification
 
-## Usage
+## Key Dependencies
 
-### Connecting to NATS
+- `async-nats` - High-performance async NATS client with JetStream support
+- `tokio` - Async runtime for connection management and streaming
+- `serde` - Type-safe serialization for message payloads
+- `thiserror` - Structured error handling with context
 
-```rust
-use nvisy_nats::{NatsClient, NatsConfig};
+## Architecture
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create configuration
-    let config = NatsConfig::new("nats://localhost:4222")
-        .with_name("my-service");
+The crate provides specialized modules for common NATS use cases:
 
-    // Connect to NATS
-    let client = NatsClient::connect(config).await?;
+- **Client** - Connection management and configuration
+- **KV** - Type-safe Key-Value operations for sessions and caching
+- **Object** - Object storage for files and binary data via JetStream
+- **Stream** - Unified real-time updates and distributed job processing
 
-    // Use the client
-    client.ping().await?;
-
-    Ok(())
-}
-```
-
-### Session Management
-
-```rust
-use nvisy_nats::{SessionStore, UserSession, DeviceInfo};
-use std::time::Duration;
-
-async fn manage_sessions(client: &NatsClient) -> Result<(), Box<dyn std::error::Error>> {
-    // Create session store
-    let sessions = SessionStore::new(
-        client.jetstream(),
-        Some(Duration::from_secs(86400)) // 24 hours
-    ).await?;
-
-    // Create a new session
-    let session = UserSession::new(
-        user_id,
-        "session_123".to_string(),
-        DeviceInfo::from_user_agent(user_agent),
-        "192.168.1.1".to_string(),
-        user_agent.to_string(),
-        Duration::from_secs(86400),
-    );
-
-    sessions.create("session_123", &session).await?;
-
-    // Retrieve session
-    if let Some(session) = sessions.get("session_123").await? {
-        println!("Session valid for user: {}", session.user_id);
-    }
-
-    Ok(())
-}
-```
-
-### Caching
-
-```rust
-use nvisy_nats::CacheStore;
-
-async fn cache_data(client: &NatsClient) -> Result<(), Box<dyn std::error::Error>> {
-    // Create cache store
-    let cache = CacheStore::new(
-        client.jetstream(),
-        "users",
-        Some(Duration::from_secs(3600)) // 1 hour TTL
-    ).await?;
-
-    // Cache a value
-    cache.set("user:123", &user_data).await?;
-
-    // Get from cache or compute
-    let user = cache.get_or_compute("user:456", || async {
-        fetch_user_from_db(456).await
-    }).await?;
-
-    Ok(())
-}
-```
-
-### Real-time Updates (WebSocket)
-
-```rust
-use nvisy_nats::{StreamPublisher, UpdateEvent, UpdateType};
-
-async fn publish_updates(client: &NatsClient) -> Result<(), Box<dyn std::error::Error>> {
-    // Create stream publisher
-    let publisher = StreamPublisher::new(client.jetstream(), "updates").await?;
-
-    // Publish document progress update
-    let event = UpdateEvent::new(UpdateType::DocumentProgress {
-        document_id: doc_id,
-        user_id: user_id,
-        percentage: 50,
-        stage: "Processing".to_string(),
-        estimated_completion: None,
-    });
-
-    publisher.publish(&event).await?;
-
-    Ok(())
-}
-```
-
-### Job Queue
-
-```rust
-use nvisy_nats::{JobQueue, Job, JobType, JobPriority};
-
-async fn process_jobs(client: &NatsClient) -> Result<(), Box<dyn std::error::Error>> {
-    // Create job queue
-    let queue = JobQueue::new(client.jetstream(), "documents", "worker-1").await?;
-
-    // Submit a job
-    let job = Job::new(JobType::DocumentProcessing, payload)
-        .with_priority(JobPriority::High)
-        .with_timeout(Duration::from_secs(300));
-
-    queue.submit(&job).await?;
-
-    // Create worker and process jobs
-    let consumer = queue.create_worker(&[JobType::DocumentProcessing]).await?;
-
-    queue.process_next(&consumer, |job| async move {
-        // Process the job
-        process_document(job.payload).await
-    }).await?;
-
-    Ok(())
-}
-```
-
-## License
-
-MIT
+All modules maintain type safety through generic parameters and provide access
+to the underlying NATS client for extensibility.

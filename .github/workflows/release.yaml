@@ -445,7 +445,14 @@ jobs:
   release-summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [prepare-release, build-binaries, build-docker, security-scan, create-release, publish-crates]
+    needs: [
+      prepare-release,
+      build-binaries,
+      build-docker,
+      security-scan,
+      create-release,
+      publish-crates,
+    ]
     if: always() && needs.prepare-release.outputs.should_release == 'true'
     steps:
       - name: Create summary

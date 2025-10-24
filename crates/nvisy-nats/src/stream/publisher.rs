@@ -1,29 +1,44 @@
-//! Event publishing for real-time updates via WebSocket.
+//! Type-safe publisher for JetStream streams.
 
-use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 use async_nats::jetstream::{self, stream};
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use tokio::sync::Semaphore;
 use tracing::{debug, instrument};
-use uuid::Uuid;
 
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
-/// Stream publisher for real-time updates
-pub struct StreamPublisher {
+/// Inner data for StreamPublisher
+#[derive(Debug)]
+struct StreamPublisherInner {
     jetstream: jetstream::Context,
     stream_name: String,
 }
 
-impl StreamPublisher {
-    /// Create a new stream publisher
+/// Type-safe stream publisher with compile-time guarantees
+///
+/// This publisher provides a generic interface over JetStream for a specific
+/// serializable data type T, ensuring compile-time type safety for all publish
+/// operations. The type parameter prevents mixing different message types.
+#[derive(Debug, Clone)]
+pub struct StreamPublisher<T> {
+    inner: Arc<StreamPublisherInner>,
+    _marker: PhantomData<T>,
+}
+
+impl<T> StreamPublisher<T>
+where
+    T: Serialize + Send + Sync + 'static,
+{
+    /// Create a new type-safe stream publisher
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
     pub async fn new(jetstream: &jetstream::Context, stream_name: &str) -> Result<Self> {
         let stream_config = stream::Config {
             name: stream_name.to_string(),
-            description: Some(format!("Real-time updates stream: {}", stream_name)),
-            subjects: vec![format!("updates.{}.>", stream_name)],
+            description: Some(format!("Type-safe stream: {}", stream_name)),
+            subjects: vec![format!("{}.>", stream_name)],
             max_age: std::time::Duration::from_secs(3600), // Keep messages for 1 hour
             ..Default::default()
         };
@@ -34,6 +49,7 @@ impl StreamPublisher {
                 debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %stream_name,
+                    type_name = std::any::type_name::<T>(),
                     "Using existing stream"
                 );
             }
@@ -42,6 +58,7 @@ impl StreamPublisher {
                 debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %stream_name,
+                    type_name = std::any::type_name::<T>(),
                     max_age_secs = 3600,
                     "Creating new stream"
                 );
@@ -53,258 +70,163 @@ impl StreamPublisher {
         }
 
         Ok(Self {
-            jetstream: jetstream.clone(),
-            stream_name: stream_name.to_string(),
+            inner: Arc::new(StreamPublisherInner {
+                jetstream: jetstream.clone(),
+                stream_name: stream_name.to_string(),
+            }),
+            _marker: PhantomData,
         })
     }
 
-    /// Publish an update event
+    /// Publish an event to the stream
     #[instrument(skip(self, event), target = TRACING_TARGET_STREAM)]
-    pub async fn publish(&self, event: &UpdateEvent) -> Result<()> {
-        let subject = self.generate_subject(&event.update_type);
-        let payload = serde_json::to_vec(event)?;
+    pub async fn publish(&self, subject: &str, event: &T) -> Result<()> {
+        let full_subject = format!("{}.{}", self.inner.stream_name, subject);
+        let payload = serde_json::to_vec(event).map_err(Error::Serialization)?;
         let payload_size = payload.len();
 
-        self.jetstream
-            .publish(subject.clone(), payload.into())
+        self.inner
+            .jetstream
+            .publish(full_subject.clone(), payload.into())
             .await
-            .map_err(|e| Error::delivery_failed(&subject, e.to_string()))?
+            .map_err(|e| Error::delivery_failed(&full_subject, e.to_string()))?
             .await
             .map_err(|e| Error::operation("stream_publish", e.to_string()))?;
 
         debug!(
             target: TRACING_TARGET_STREAM,
-            subject = %subject,
-            event_id = %event.event_id,
+            subject = %full_subject,
             payload_size = payload_size,
-            "Published update event"
+            type_name = std::any::type_name::<T>(),
+            "Published typed event"
         );
         Ok(())
     }
 
-    /// Publish multiple events in batch
+    /// Publish multiple events in batch with parallel processing
     #[instrument(skip(self, events), target = TRACING_TARGET_STREAM)]
-    pub async fn publish_batch(&self, events: &[UpdateEvent]) -> Result<()> {
+    pub async fn publish_batch(&self, subject: &str, events: &[T]) -> Result<()>
+    where
+        T: Clone,
+    {
+        self.publish_batch_parallel(subject, events, 10).await
+    }
+
+    /// Publish multiple events in batch with configurable parallelism
+    #[instrument(skip(self, events), target = TRACING_TARGET_STREAM)]
+    pub async fn publish_batch_parallel(
+        &self,
+        subject: &str,
+        events: &[T],
+        parallelism: usize,
+    ) -> Result<()>
+    where
+        T: Clone,
+    {
+        if events.is_empty() {
+            return Ok(());
+        }
+
         let count = events.len();
-        for event in events {
-            self.publish(event).await?;
+        let semaphore = Arc::new(Semaphore::new(parallelism));
+        let mut tasks = Vec::with_capacity(events.len());
+
+        for event in events.iter() {
+            let event = event.clone();
+            let subject = subject.to_string();
+            let publisher = self.clone();
+            let permit = semaphore.clone();
+
+            let task = tokio::spawn(async move {
+                let _permit = permit
+                    .acquire()
+                    .await
+                    .map_err(|_| Error::operation("semaphore", "Failed to acquire permit"))?;
+                publisher.publish(&subject, &event).await
+            });
+
+            tasks.push(task);
+        }
+
+        // Wait for all tasks and collect errors
+        let mut errors = Vec::new();
+        for task in tasks {
+            match task.await {
+                Ok(Ok(())) => {} // Success
+                Ok(Err(e)) => errors.push(e),
+                Err(e) => errors.push(Error::operation("task_join", e.to_string())),
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(Error::operation(
+                "batch_publish",
+                format!("Failed to publish {} out of {} events", errors.len(), count),
+            ));
         }
 
         debug!(
             target: TRACING_TARGET_STREAM,
             count = count,
-            stream = %self.stream_name,
-            "Published batch of events"
+            parallelism = parallelism,
+            stream = %self.inner.stream_name,
+            subject = %subject,
+            "Published batch of typed events in parallel"
         );
         Ok(())
     }
 
-    /// Generate subject based on update type
-    fn generate_subject(&self, update_type: &UpdateType) -> String {
-        match update_type {
-            UpdateType::DocumentProgress { document_id, .. } => {
-                format!(
-                    "updates.{}.document.{}.progress",
-                    self.stream_name, document_id
-                )
-            }
-            UpdateType::DocumentComplete { document_id, .. } => {
-                format!(
-                    "updates.{}.document.{}.complete",
-                    self.stream_name, document_id
-                )
-            }
-            UpdateType::DocumentError { document_id, .. } => {
-                format!(
-                    "updates.{}.document.{}.error",
-                    self.stream_name, document_id
-                )
-            }
-            UpdateType::UserNotification { user_id, .. } => {
-                format!("updates.{}.user.{}.notification", self.stream_name, user_id)
-            }
-            UpdateType::SystemAlert { .. } => {
-                format!("updates.{}.system.alert", self.stream_name)
-            }
-            UpdateType::Custom { event_type, .. } => {
-                format!("updates.{}.custom.{}", self.stream_name, event_type)
-            }
-        }
+    /// Get the stream name
+    pub fn stream_name(&self) -> &str {
+        &self.inner.stream_name
     }
 
-    /// Create a durable consumer for processing updates
+    /// Check if the stream is healthy and accessible
     #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
-    pub async fn create_consumer(
-        &self,
-        consumer_name: &str,
-        filter_subject: Option<&str>,
-    ) -> Result<jetstream::consumer::PullConsumer> {
-        let mut consumer_config = jetstream::consumer::pull::Config {
-            name: Some(consumer_name.to_string()),
-            durable_name: Some(consumer_name.to_string()),
-            description: Some(format!("Consumer for {}", consumer_name)),
-            ..Default::default()
-        };
-
-        if let Some(subject) = filter_subject {
-            consumer_config.filter_subject = subject.to_string();
-        }
-
-        let stream = self
+    pub async fn health_check(&self) -> Result<bool> {
+        match self
+            .inner
             .jetstream
-            .get_stream(&self.stream_name)
+            .get_stream(&self.inner.stream_name)
             .await
-            .map_err(|e| Error::stream_error(&self.stream_name, e.to_string()))?;
-
-        let consumer = stream
-            .create_consumer(consumer_config)
-            .await
-            .map_err(|e| Error::consumer_error(consumer_name, e.to_string()))?;
-
-        debug!(
-            target: TRACING_TARGET_STREAM,
-            consumer = %consumer_name,
-            stream = %self.stream_name,
-            filter_subject = ?filter_subject,
-            "Created durable consumer"
-        );
-        Ok(consumer)
-    }
-}
-
-/// Update event for real-time notifications
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateEvent {
-    pub event_id: Uuid,
-    pub timestamp: Timestamp,
-    pub update_type: UpdateType,
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
-impl UpdateEvent {
-    /// Create a new update event
-    pub fn new(update_type: UpdateType) -> Self {
-        Self {
-            event_id: Uuid::new_v4(),
-            timestamp: Timestamp::now(),
-            update_type,
-            metadata: HashMap::new(),
+        {
+            Ok(_) => {
+                debug!(
+                    target: TRACING_TARGET_STREAM,
+                    stream = %self.inner.stream_name,
+                    "Stream health check passed"
+                );
+                Ok(true)
+            }
+            Err(e) => {
+                debug!(
+                    target: TRACING_TARGET_STREAM,
+                    stream = %self.inner.stream_name,
+                    error = %e,
+                    "Stream health check failed"
+                );
+                Ok(false)
+            }
         }
     }
 
-    /// Add metadata to the event
-    pub fn with_metadata(mut self, key: String, value: serde_json::Value) -> Self {
-        self.metadata.insert(key, value);
-        self
+    /// Get stream information
+    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    pub async fn stream_info(&self) -> Result<async_nats::jetstream::stream::Info> {
+        let mut stream = self
+            .inner
+            .jetstream
+            .get_stream(&self.inner.stream_name)
+            .await
+            .map_err(|e| Error::stream_error(&self.inner.stream_name, e.to_string()))?;
+
+        stream
+            .info()
+            .await
+            .map_err(|e| Error::operation("stream_info", e.to_string()))
+            .map(|info| (*info).clone())
     }
-}
-
-/// Types of updates that can be sent via WebSocket
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
-pub enum UpdateType {
-    /// Document processing progress update
-    DocumentProgress {
-        document_id: Uuid,
-        user_id: Uuid,
-        percentage: u8,
-        stage: String,
-        estimated_completion: Option<Timestamp>,
-    },
-
-    /// Document processing completed
-    DocumentComplete {
-        document_id: Uuid,
-        user_id: Uuid,
-        processing_time_ms: u64,
-        result_summary: String,
-    },
-
-    /// Document processing error
-    DocumentError {
-        document_id: Uuid,
-        user_id: Uuid,
-        error_message: String,
-        retry_count: u32,
-    },
-
-    /// User notification
-    UserNotification {
-        user_id: Uuid,
-        notification_id: Uuid,
-        title: String,
-        message: String,
-        priority: NotificationPriority,
-        action_url: Option<String>,
-    },
-
-    /// System-wide alert
-    SystemAlert {
-        alert_type: String,
-        message: String,
-        severity: AlertSeverity,
-        affected_users: Option<Vec<Uuid>>,
-    },
-
-    /// Custom event type
-    Custom {
-        event_type: String,
-        payload: serde_json::Value,
-    },
-}
-
-/// Notification priority levels
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NotificationPriority {
-    Low,
-    Normal,
-    High,
-    Critical,
-}
-
-/// Alert severity levels
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AlertSeverity {
-    Info,
-    Warning,
-    Error,
-    Critical,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_update_event_creation() {
-        let doc_id = Uuid::new_v4();
-        let user_id = Uuid::new_v4();
-
-        let event = UpdateEvent::new(UpdateType::DocumentProgress {
-            document_id: doc_id,
-            user_id,
-            percentage: 50,
-            stage: "OCR Processing".to_string(),
-            estimated_completion: None,
-        });
-
-        assert!(!event.event_id.is_nil());
-        assert!(matches!(
-            event.update_type,
-            UpdateType::DocumentProgress { .. }
-        ));
-    }
-
-    #[test]
-    fn test_update_event_with_metadata() {
-        let event = UpdateEvent::new(UpdateType::SystemAlert {
-            alert_type: "maintenance".to_string(),
-            message: "Scheduled maintenance".to_string(),
-            severity: AlertSeverity::Warning,
-            affected_users: None,
-        })
-        .with_metadata("duration".to_string(), serde_json::json!("30m"));
-
-        assert!(event.metadata.contains_key("duration"));
-    }
-}
+mod tests {}

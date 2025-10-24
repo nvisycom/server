@@ -1,6 +1,7 @@
 # api.nvisy.com/server
 
-High-performance HTTP API server for the Nvisy document redaction platform, built with Axum and Tokio.
+High-performance HTTP API server for the Nvisy document redaction platform,
+built with Axum and Tokio.
 
 [![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
@@ -28,5 +29,5 @@ High-performance HTTP API server for the Nvisy document redaction platform, buil
 When running, the server exposes interactive documentation at:
 
 - **Swagger UI**: `/api/swagger`
-- **Scalar UI**: `/api/scalar`  
+- **Scalar UI**: `/api/scalar`
 - **OpenAPI JSON**: `/api/openapi.json`

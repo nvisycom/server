@@ -1,16 +1,49 @@
 //! NATS client wrapper and connection management.
+//!
+//! # Connection Pooling and Multiplexing
+//!
+//! The `NatsClient` uses the underlying `async-nats` client which implements
+//! connection multiplexing. Key characteristics:
+//!
+//! - **Single TCP connection**: Each `Client` maintains one TCP connection to NATS
+//! - **Thread-safe and Clone-able**: The `Client` is `Arc`-wrapped internally,
+//!   making `clone()` operations cheap (just an Arc clone, not a new connection)
+//! - **Concurrent operations**: Multiple async tasks can share the same client
+//!   and perform operations concurrently over the same connection
+//! - **Automatic reconnection**: Built-in reconnection logic with exponential backoff
+//!
+//! ## Usage Patterns
+//!
+//! ### Single shared client (recommended)
+//! ```ignore
+//! let client = NatsClient::connect(config).await?;
+//! // Clone is cheap - shares the same connection
+//! let client_clone = client.clone();
+//! ```
+//!
+//! ### Connection per service (if needed)
+//! Only create multiple connections if you need different configurations
+//! (credentials, timeouts, etc.) or want to isolate failure domains:
+//! ```ignore
+//! let auth_client = NatsClient::connect(auth_config).await?;
+//! let data_client = NatsClient::connect(data_config).await?;
+//! ```
 
 use std::time::Duration;
 
 use async_nats::{Client, ConnectOptions, jetstream};
 use bytes::Bytes;
 use tokio::time::timeout;
-use tracing::{debug, info, instrument};
 
-use super::config::{NatsConfig, NatsCredentials};
+use super::nats_config::{NatsConfig, NatsCredentials};
+use crate::kv::{ApiTokenStore, CacheStore, KvStore};
+use crate::object::ObjectStore;
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
-/// NATS client wrapper with connection management
+/// NATS client wrapper with connection management.
+///
+/// This wrapper is cheaply cloneable (Arc-based) and thread-safe.
+/// Multiple clones share the same underlying TCP connection via multiplexing.
 #[derive(Debug, Clone)]
 pub struct NatsClient {
     client: Client,
@@ -20,9 +53,9 @@ pub struct NatsClient {
 
 impl NatsClient {
     /// Create a new NATS client and connect
-    #[instrument(skip(config))]
+    #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
-        info!("Connecting to NATS servers: {:?}", config.servers);
+        tracing::info!("Connecting to NATS servers: {:?}", config.servers);
 
         let mut connect_opts = ConnectOptions::new()
             .name(&config.name)
@@ -33,10 +66,10 @@ impl NatsClient {
         if let Some(max_reconnects) = config.max_reconnects {
             connect_opts = connect_opts.max_reconnects(max_reconnects);
         }
-        let reconnect_delay_ms = config.reconnect_delay.as_millis() as u64;
+        let reconnect_delay_ms = config.reconnect_delay.as_millis().min(u64::MAX as u128) as u64;
         connect_opts = connect_opts.reconnect_delay_callback(move |attempts| {
             Duration::from_millis(std::cmp::min(
-                reconnect_delay_ms * 2_u64.pow(attempts as u32),
+                reconnect_delay_ms * 2_u64.pow(attempts.min(32) as u32),
                 30_000, // Max 30 seconds
             ))
         });
@@ -80,7 +113,7 @@ impl NatsClient {
         let jetstream = jetstream::new(client.clone());
 
         let server_info = client.server_info();
-        info!(
+        tracing::info!(
             target: TRACING_TARGET_CONNECTION,
             server_host = %server_info.host,
             server_version = %server_info.version,
@@ -97,21 +130,25 @@ impl NatsClient {
     }
 
     /// Get the underlying NATS client
+    #[must_use]
     pub fn client(&self) -> &Client {
         &self.client
     }
 
     /// Get the JetStream context
+    #[must_use]
     pub fn jetstream(&self) -> &jetstream::Context {
         &self.jetstream
     }
 
     /// Get the configuration
+    #[must_use]
     pub fn config(&self) -> &NatsConfig {
         &self.config
     }
 
     /// Create a new connection helper
+    #[must_use]
     pub fn connection(&self) -> NatsConnection {
         NatsConnection {
             client: self.client.clone(),
@@ -120,7 +157,7 @@ impl NatsClient {
     }
 
     /// Test connectivity with a ping
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub async fn ping(&self) -> Result<Duration> {
         let start = std::time::Instant::now();
 
@@ -132,7 +169,7 @@ impl NatsClient {
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
         let ping_time = start.elapsed();
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             duration_ms = ping_time.as_millis(),
             "NATS ping successful"
@@ -141,6 +178,7 @@ impl NatsClient {
     }
 
     /// Get connection statistics
+    #[must_use]
     pub fn stats(&self) -> ConnectionStats {
         let server_info = self.client.server_info();
         ConnectionStats {
@@ -154,6 +192,50 @@ impl NatsClient {
             max_payload: server_info.max_payload,
         }
     }
+
+    /// Get or create an ApiTokenStore
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn api_token_store(&self, ttl: Option<Duration>) -> Result<ApiTokenStore> {
+        ApiTokenStore::new(&self.jetstream, ttl).await
+    }
+
+    /// Get or create a KvStore for a specific bucket with typed values
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn kv_store<T>(
+        &self,
+        bucket_name: &str,
+        description: Option<&str>,
+        ttl: Option<Duration>,
+    ) -> Result<KvStore<T>>
+    where
+        T: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
+    {
+        KvStore::new(&self.jetstream, bucket_name, description, ttl).await
+    }
+
+    /// Get or create an ObjectStore for a specific bucket
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn object_store(
+        &self,
+        bucket_name: &str,
+        description: Option<&str>,
+        max_age: Option<Duration>,
+    ) -> Result<ObjectStore> {
+        ObjectStore::new(&self.jetstream, bucket_name, description, max_age).await
+    }
+
+    /// Get or create a CacheStore for a specific namespace
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn cache_store<T>(
+        &self,
+        namespace: &str,
+        ttl: Option<Duration>,
+    ) -> Result<CacheStore<T>>
+    where
+        T: serde::Serialize + for<'de> serde::Deserialize<'de> + Clone + Send + Sync + 'static,
+    {
+        CacheStore::new(&self.jetstream, namespace, ttl).await
+    }
 }
 
 /// A NATS connection wrapper for basic pub/sub operations
@@ -165,7 +247,7 @@ pub struct NatsConnection {
 
 impl NatsConnection {
     /// Publish a message to a subject
-    #[instrument(skip(self, payload))]
+    #[tracing::instrument(skip(self, payload))]
     pub async fn publish(&self, subject: &str, payload: impl Into<Bytes>) -> Result<()> {
         timeout(
             self.request_timeout,
@@ -177,7 +259,7 @@ impl NatsConnection {
         })?
         .map_err(|e| Error::delivery_failed(subject, e.to_string()))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             subject = %subject,
             "Published message"
@@ -186,7 +268,7 @@ impl NatsConnection {
     }
 
     /// Publish a message with a reply subject
-    #[instrument(skip(self, payload), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self, payload), target = TRACING_TARGET_CLIENT)]
     pub async fn publish_with_reply(
         &self,
         subject: &str,
@@ -204,7 +286,7 @@ impl NatsConnection {
         })?
         .map_err(|e| Error::delivery_failed(subject, e.to_string()))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             subject = %subject,
             reply = %reply,
@@ -214,7 +296,7 @@ impl NatsConnection {
     }
 
     /// Send a request and wait for a response
-    #[instrument(skip(self, payload), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self, payload), target = TRACING_TARGET_CLIENT)]
     pub async fn request(
         &self,
         subject: &str,
@@ -230,7 +312,7 @@ impl NatsConnection {
         })?
         .map_err(|e| Error::delivery_failed(subject, e.to_string()))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             subject = %subject,
             payload_size = response.payload.len(),
@@ -240,7 +322,7 @@ impl NatsConnection {
     }
 
     /// Subscribe to a subject
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn subscribe(&self, subject: &str) -> Result<async_nats::Subscriber> {
         let subscriber = self
             .client
@@ -248,7 +330,7 @@ impl NatsConnection {
             .await
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             subject = %subject,
             "Subscribed to subject"
@@ -257,7 +339,7 @@ impl NatsConnection {
     }
 
     /// Subscribe to a subject with a queue group
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn queue_subscribe(
         &self,
         subject: &str,
@@ -269,7 +351,7 @@ impl NatsConnection {
             .await
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             subject = %subject,
             queue = %queue,
@@ -279,7 +361,7 @@ impl NatsConnection {
     }
 
     /// Flush pending messages
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn flush(&self) -> Result<()> {
         timeout(self.request_timeout, self.client.flush())
             .await
@@ -288,7 +370,7 @@ impl NatsConnection {
             })?
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             "Flushed pending messages"
         );

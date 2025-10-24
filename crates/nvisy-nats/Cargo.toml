@@ -28,6 +28,7 @@ async-nats = { workspace = true }
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 futures = { workspace = true, features = [] }
+async-stream = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -37,8 +38,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 
 # Error handling
-anyhow = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["deref", "deref_mut"] }
 
 # Data types
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }

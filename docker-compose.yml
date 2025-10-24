@@ -40,7 +40,14 @@ services:
     volumes:
       - nats_data:/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      test: [
+        "CMD",
+        "wget",
+        "--no-verbose",
+        "--tries=1",
+        "--spider",
+        "http://localhost:8222/healthz",
+      ]
       interval: 10s
       timeout: 5s
       retries: 5

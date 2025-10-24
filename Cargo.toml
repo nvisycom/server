@@ -5,8 +5,10 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-minio",
+    "./crates/nvisy-mistral",
     "./crates/nvisy-nats",
     "./crates/nvisy-openrouter",
+    "./crates/nvisy-paddle",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
 ]
@@ -35,14 +37,17 @@ nvisy-client = { path = "../runtime/crates/nvisy-client", version = "0.1.0" }
 
 # Internal crates
 nvisy-minio = { path = "./crates/nvisy-minio", version = "0.1.0" }
+nvisy-mistral = { path = "./crates/nvisy-mistral", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
+nvisy-paddle = { path = "./crates/nvisy-paddle", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 
 # Async runtime
 tokio = { version = "1.48", features = [] }
 futures = { version = "0.3", features = [] }
+async-stream = { version = "0.3", features = [] }
 scoped-futures = { version = "0.1", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
 
@@ -102,7 +107,7 @@ clap = { version = "4.5", features = [] }
 
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }
-derive_more = { version = "2.0", features = [] }
+derive_more = { version = "1.0", features = [] }
 strum = { version = "0.27", features = ["derive"] }
 
 # Data types
