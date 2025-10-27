@@ -1,0 +1,60 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-postgres"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# Default feature set (none for minimal dependencies)
+default = []
+
+# OpenAPI documentation support - enables ToSchema derives on database enums
+# This allows database types to be used directly in API documentation without
+# manual schema implementations, while keeping the dependency optional
+utoipa = ["dep:utoipa"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = [] }
+futures = { workspace = true, features = [] }
+
+# ORM & Database
+diesel = { workspace = true, features = ["postgres", "time", "uuid", "ipnet-address", "serde_json", "numeric", "64-column-tables"] }
+diesel_migrations = { workspace = true, features = ["postgres"] }
+diesel-async = { workspace = true, features = ["postgres", "pool", "deadpool", "async-connection-wrapper"] }
+diesel-derive-enum = { workspace = true, features = ["postgres"] }
+deadpool = { workspace = true, features = ["rt_tokio_1"] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
+
+# Data types
+time = { workspace = true, features = ["serde", "formatting", "parsing"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+ipnet = { workspace = true, features = ["serde"] }
+bigdecimal = { workspace = true, features = ["serde"] }
+
+# OpenAPI documentation (optional)
+utoipa = { workspace = true, features = ["macros"], optional = true }

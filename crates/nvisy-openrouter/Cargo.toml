@@ -1,0 +1,44 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-openrouter"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["time"] }
+
+# AI/OpenAI services
+openrouter_api = { version = "0.1", features = ["rustls", "tracing"] }
+
+# Rate limiting
+governor = { version = "0.10", features = [] }
+
+# Error handling
+thiserror = { workspace = true, features = [] }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Text processing
+regex = { version = "1.0", features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }

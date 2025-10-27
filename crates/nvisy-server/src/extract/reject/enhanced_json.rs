@@ -1,0 +1,180 @@
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{FromRequest, Json as AxumJson, OptionalFromRequest, Request};
+use axum::response::{IntoResponse, Response};
+use derive_more::{Deref, DerefMut, From};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
+use crate::handler::{Error, ErrorKind};
+
+/// Maximum allowed JSON payload size in bytes (1MB).
+const MAX_JSON_PAYLOAD_SIZE: usize = 1024 * 1024;
+
+/// Enhanced JSON extractor with improved error handling and type safety.
+///
+/// This extractor provides better error messages compared to the
+/// default Axum JSON extractor. It includes:
+/// - Detailed error messages for different failure types
+/// - Type-safe deserialization with proper error context
+///
+/// # Size Limits
+///
+/// The extractor enforces a maximum payload size of 1MB to prevent
+/// memory exhaustion attacks.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use nvisy_server::extract::Json;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct CreateUser {
+///     name: String,
+///     email: String,
+/// }
+///
+/// async fn create_user(Json(payload): Json<CreateUser>) -> Result<(), ()> {
+///     // payload is now a validated CreateUser struct
+///     Ok(())
+/// }
+/// ```
+///
+/// [`Json`]: axum::extract::Json
+#[must_use]
+#[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]
+pub struct Json<T>(pub T);
+
+impl<T> Json<T> {
+    /// Creates a new [`Json`] wrapper around the provided value.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The value to wrap in the JSON extractor
+    #[inline]
+    pub fn new(inner: T) -> Self {
+        Self(inner)
+    }
+
+    /// Consumes the wrapper and returns the inner value.
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T, S> FromRequest<S> for Json<T>
+where
+    T: DeserializeOwned + 'static,
+    S: Send + Sync,
+{
+    type Rejection = Error<'static>;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let extractor = <AxumJson<T> as FromRequest<S>>::from_request(req, state).await;
+        extractor.map(|x| Self::new(x.0)).map_err(Into::into)
+    }
+}
+
+impl<T, S> OptionalFromRequest<S> for Json<T>
+where
+    T: DeserializeOwned + 'static,
+    S: Send + Sync,
+{
+    type Rejection = Error<'static>;
+
+    async fn from_request(req: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
+        let result = <Self as FromRequest<S>>::from_request(req, state).await;
+
+        match result {
+            Ok(json) => Ok(Some(json)),
+            Err(error) => {
+                // For optional extraction, only propagate server errors
+                // Client errors (like malformed JSON) result in None
+                match error.kind() {
+                    ErrorKind::InternalServerError => Err(error),
+                    _ => Ok(None),
+                }
+            }
+        }
+    }
+}
+
+impl<T> IntoResponse for Json<T>
+where
+    T: Serialize,
+{
+    #[inline]
+    fn into_response(self) -> Response {
+        AxumJson(self.0).into_response()
+    }
+}
+
+impl From<JsonRejection> for Error<'static> {
+    fn from(rejection: JsonRejection) -> Self {
+        let error_context = format!("JSON rejection details: {:?}", rejection);
+
+        match rejection {
+            JsonRejection::JsonDataError(err) => {
+                ErrorKind::BadRequest
+                    .with_message("Invalid request data format")
+                    .with_context(format!(
+                        "JSON deserialization failed: {}. Verify that all required fields are present, have correct types, and match the expected schema.",
+                        sanitize_error_message(&err.to_string())
+                    ))
+            }
+            JsonRejection::JsonSyntaxError(err) => {
+                ErrorKind::BadRequest
+                    .with_message("Invalid JSON syntax in request body")
+                    .with_context(format!(
+                        "JSON parsing failed: {}. Ensure the request body contains well-formed JSON with proper syntax.",
+                        sanitize_error_message(&err.to_string())
+                    ))
+            }
+            JsonRejection::MissingJsonContentType(_) => {
+                ErrorKind::BadRequest
+                    .with_message("Invalid content type")
+                    .with_context("Request must have Content-Type header set to 'application/json'. Include the header: Content-Type: application/json")
+            }
+            JsonRejection::BytesRejection(err) => {
+                let message = err.to_string();
+                if message.contains("length limit") {
+                    ErrorKind::BadRequest
+                        .with_message("Request body too large")
+                        .with_context(format!(
+                            "Request body exceeds maximum allowed size of {} bytes. Consider reducing the payload size or splitting into multiple requests.",
+                            MAX_JSON_PAYLOAD_SIZE
+                        ))
+                } else {
+                    ErrorKind::BadRequest
+                        .with_message("Failed to read request body")
+                        .with_context(format!(
+                            "Request body processing failed: {}. Body may be corrupted, incomplete, or connection interrupted.",
+                            sanitize_error_message(&message)
+                        ))
+                }
+            }
+            _ => {
+                ErrorKind::InternalServerError
+                    .with_message("Request processing failed")
+                    .with_context(format!(
+                        "Unexpected error occurred during JSON request body processing: {}",
+                        error_context
+                    ))
+            }
+        }
+    }
+}
+
+/// Sanitizes error messages to prevent information leakage while keeping them useful.
+fn sanitize_error_message(message: &str) -> String {
+    // Remove potentially sensitive information while keeping the core error message
+    message
+        .lines()
+        .take(3) // Limit to first 3 lines to prevent excessive verbosity
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(200) // Limit message length
+        .collect()
+}

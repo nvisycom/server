@@ -1,0 +1,11 @@
+# https://diesel.rs/guides/configuring-diesel-cli
+
+[print_schema]
+file = "./crates/nvisy-postgres/src/schema.rs"
+custom_type_derives = ["diesel::query_builder::QueryId"]
+
+[migrations_directory]
+# The "./migrations" directory is copied from the root directory into
+# the "./crates/nvisy-postgres/migrations" directory when running
+# the task "make generate-migrations".
+dir = "./migrations"

@@ -1,0 +1,85 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-server"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+[dependencies]
+# Internal crates
+nvisy-nats = { workspace = true, features = [] }
+nvisy-openrouter = { workspace = true, features = [] }
+nvisy-postgres = { workspace = true, features = ["utoipa"] }
+
+# Async runtime
+tokio = { workspace = true, features = [] }
+scoped-futures = { workspace = true, features = [] }
+futures = { workspace = true, features = [] }
+
+# HTTP & Web server
+axum = { workspace = true, features = ["http2", "macros", "ws", "multipart"] }
+axum-client-ip = { workspace = true, features = [] }
+axum-extra = { workspace = true, features = ["typed-header", "attachment"] }
+http-body-util = { workspace = true, features = [] }
+tower = { workspace = true, features = [] }
+tower-http = { workspace = true, features = [] }
+
+# OpenAPI/Documentation
+utoipa = { workspace = true, features = ["time", "uuid", "yaml"] }
+utoipa-axum = { workspace = true, features = [] }
+utoipa-swagger-ui = { workspace = true, features = [] }
+utoipa-scalar = { workspace = true, features = ["axum"] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+# Authentication & Security
+jsonwebtoken = { workspace = true, features = [] }
+argon2 = { workspace = true, features = [] }
+rand = { workspace = true, features = [] }
+base64 = { workspace = true, features = [] }
+sha2 = { workspace = true, features = [] }
+
+# (De)serialization and Validation
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+validator = { workspace = true, features = [] }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["full"] }
+strum = { workspace = true, features = ["derive"] }
+
+# Data types
+time = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+ipnet = { workspace = true, features = ["serde"] }
+bigdecimal = { workspace = true, features = ["serde"] }
+ecow = { workspace = true, features = [] }
+zxcvbn = { workspace = true, features = [] }
+url = { workspace = true, features = [] }
+
+# Error handling
+anyhow = { workspace = true, features = [] }
+
+[dev-dependencies]
+axum-test = { workspace = true, features = [] }
+anyhow = { workspace = true, features = ["backtrace"] }
+tempfile = { workspace = true, features = [] }

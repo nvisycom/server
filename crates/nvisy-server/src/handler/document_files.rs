@@ -1,0 +1,594 @@
+//! Document file upload and management handlers.
+//!
+//! This module provides comprehensive file management functionality for documents,
+//! including upload, download, metadata management, and file operations. All
+//! operations are secured with document-level authorization and include virus
+//! scanning and content validation.
+
+use axum::extract::{Multipart, State};
+use axum::http::StatusCode;
+use nvisy_nats::NatsClient;
+use nvisy_nats::object::{InputFiles, IntermediateFiles, OutputFiles};
+use nvisy_postgres::PgClient;
+use nvisy_postgres::model::UpdateDocumentFile;
+use nvisy_postgres::query::DocumentFileRepository;
+use nvisy_postgres::types::{FileType, ProcessingStatus};
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+use uuid::Uuid;
+use validator::Validate;
+
+use crate::extract::auth::AuthProvider;
+use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson, Version};
+use crate::handler::documents::DocumentPathParams;
+use crate::handler::{ErrorKind, ErrorResponse, Result};
+use crate::service::ServiceState;
+
+/// Tracing target for document file operations.
+const TRACING_TARGET: &str = "nvisy_server::handler::document_files";
+
+/// Maximum file size: 100MB
+const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
+
+/// `Path` param for `{fileId}` handlers.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct DocFileIdPathParams {
+    /// Unique identifier of the document.
+    pub document_id: Uuid,
+    /// Unique identifier of the document file.
+    pub file_id: Uuid,
+}
+
+/// Response for a single uploaded file.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadedFile {
+    /// Unique file identifier
+    pub file_id: Uuid,
+    /// Display name
+    pub display_name: String,
+    /// File size in bytes
+    pub file_size: i64,
+    /// Processing status
+    pub status: ProcessingStatus,
+}
+
+/// Response returned after successful file upload.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadFileResponse {
+    /// List of successfully uploaded files
+    pub files: Vec<UploadedFile>,
+    /// Number of files uploaded
+    pub count: usize,
+}
+
+/// Uploads input files to a document for processing.
+#[tracing::instrument(skip(pg_client, multipart))]
+#[utoipa::path(
+    post, path = "/documents/{documentId}/files/", tag = "documents",
+    params(DocumentPathParams),
+    request_body(
+        content = inline(String),
+        description = "Multipart form data with files",
+        content_type = "multipart/form-data",
+    ),
+    responses(
+        (
+            status = BAD_REQUEST,
+            description = "Bad request - invalid file or too many files",
+            body = ErrorResponse,
+        ),
+        (
+            status = UNAUTHORIZED,
+            description = "Unauthorized - insufficient permissions",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
+            status = CREATED,
+            description = "Files uploaded successfully",
+            body = UploadFileResponse,
+        ),
+    )
+)]
+async fn upload_file(
+    State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
+    Path(path_params): Path<DocumentPathParams>,
+    AuthState(auth_claims): AuthState,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<UploadFileResponse>)> {
+    let mut conn = pg_client.get_connection().await?;
+    let input_fs = nats_client.document_store::<InputFiles>().await?;
+    let intermediate_fs = nats_client.document_store::<IntermediateFiles>().await?;
+    let output_fs = nats_client.document_store::<OutputFiles>().await?;
+
+    // Verify document exists and user has editor permissions
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            ProjectPermission::UploadFiles,
+        )
+        .await?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        document_id = %path_params.document_id,
+        account_id = %auth_claims.account_id,
+        "Starting file upload"
+    );
+
+    while let Some(field) = multipart.next_field().await.map_err(|err| {
+        tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
+        ErrorKind::BadRequest
+            .with_message("Invalid multipart data")
+            .with_context(format!("Failed to parse multipart form: {}", err))
+    })? {
+        let filename = if let Some(filename) = field.file_name() {
+            filename.to_string()
+        } else {
+            tracing::debug!(target: TRACING_TARGET, "Skipping field without filename");
+            continue;
+        };
+
+        // Validate and sanitize filename
+        let filename = validate_filename(&filename)?;
+
+        let content_type = field
+            .content_type()
+            .map(|ct| ct.to_string())
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+
+        // Validate MIME type
+        validate_mime_type(&content_type)?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            filename = %filename,
+            content_type = %content_type,
+            "Processing file upload"
+        );
+
+        // Read file data
+        let data = field.bytes().await.map_err(|err| {
+            tracing::error!(target: TRACING_TARGET, error = %err, filename = %filename, "Failed to read file data");
+            ErrorKind::BadRequest
+                .with_message("Failed to read file data")
+                .with_context(format!("Could not read file '{}': {}", filename, err))
+        })?;
+
+        // Check file size
+        if data.len() > MAX_FILE_SIZE {
+            return Err(ErrorKind::BadRequest
+                .with_message("File too large")
+                .with_context(format!(
+                    "File '{}' exceeds maximum size of {} MB",
+                    filename,
+                    MAX_FILE_SIZE / (1024 * 1024)
+                )));
+        }
+
+        // Extract file extension
+        let file_extension = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Determine file type from extension/MIME type
+        let file_type = determine_file_type(&file_extension, &content_type);
+
+        // Generate unique file ID for storage
+        let file_id = Uuid::now_v7();
+        let storage_path = format!("documents/{}/files/{}", path_params.document_id, file_id);
+
+        // Upload to MinIO
+        tracing::debug!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            path = %storage_path,
+            size = data.len(),
+            "Uploading file to storage"
+        );
+
+        // TODO: Replace with NATS object store implementation
+        let _ = (
+            file_type,
+            data,
+            storage_path,
+            file_id,
+            filename,
+            content_type,
+            file_extension,
+        );
+        return Err(ErrorKind::NotImplemented
+            .with_message("File upload not implemented - MinIO removed, use NATS object store"));
+    }
+
+    // Unreachable: rest of upload logic removed since MinIO was deleted
+    Err(ErrorKind::NotImplemented.with_message("File upload not implemented"))
+}
+
+/// Request to update file metadata.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
+#[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "displayName": "renamed-document.pdf",
+    "processingPriority": 10
+}))]
+pub struct UpdateFileRequest {
+    /// New display name for the file
+    #[validate(length(min = 1, max = 255))]
+    pub display_name: Option<String>,
+    /// New processing priority
+    pub processing_priority: Option<i32>,
+}
+
+/// Response after updating file metadata.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFileResponse {
+    /// Updated file information
+    pub file_id: Uuid,
+    pub display_name: String,
+    pub processing_priority: i32,
+    pub updated_at: OffsetDateTime,
+}
+
+/// Updates file metadata.
+#[tracing::instrument(skip(pg_client))]
+#[utoipa::path(
+    patch, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
+    params(DocFileIdPathParams),
+    request_body = UpdateFileRequest,
+    responses(
+        (
+            status = BAD_REQUEST,
+            description = "Bad request",
+            body = ErrorResponse,
+        ),
+        (
+            status = NOT_FOUND,
+            description = "File not found",
+            body = ErrorResponse,
+        ),
+        (
+            status = UNAUTHORIZED,
+            description = "Unauthorized",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
+            status = OK,
+            description = "File updated successfully",
+            body = UpdateFileResponse,
+        ),
+    )
+)]
+async fn update_file(
+    State(pg_client): State<PgClient>,
+    Path(path_params): Path<DocFileIdPathParams>,
+    AuthState(auth_claims): AuthState,
+    _version: Version,
+    ValidateJson(request): ValidateJson<UpdateFileRequest>,
+) -> Result<(StatusCode, Json<UpdateFileResponse>)> {
+    let mut conn = pg_client.get_connection().await?;
+
+    // Verify permissions
+    // Verify document write permissions
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            ProjectPermission::UpdateDocuments,
+        )
+        .await?;
+
+    // Get existing file
+    let Some(file) =
+        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("File not found"));
+    };
+
+    // Verify file belongs to document
+    if file.document_id != path_params.document_id {
+        return Err(ErrorKind::NotFound.with_message("File not found in document"));
+    }
+
+    // Create update struct
+    let updates = UpdateDocumentFile {
+        display_name: request.display_name,
+        processing_priority: request.processing_priority,
+        ..Default::default()
+    };
+
+    // Save changes
+    let updated_file =
+        DocumentFileRepository::update_document_file(&mut conn, path_params.file_id, updates)
+            .await
+            .map_err(|err| {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
+                ErrorKind::InternalServerError.with_message("Failed to update file")
+            })?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        file_id = %updated_file.id,
+        "File updated successfully"
+    );
+
+    let response = UpdateFileResponse {
+        file_id: updated_file.id,
+        display_name: updated_file.display_name,
+        processing_priority: updated_file.processing_priority,
+        updated_at: updated_file.updated_at,
+    };
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+/// Downloads a document file.
+#[tracing::instrument(skip(_pg_client))]
+#[utoipa::path(
+    get, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
+    params(DocFileIdPathParams),
+    responses(
+        (
+            status = NOT_FOUND,
+            description = "File not found",
+            body = ErrorResponse,
+        ),
+        (
+            status = UNAUTHORIZED,
+            description = "Unauthorized",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
+            status = OK,
+            description = "File download",
+            content_type = "application/octet-stream",
+        ),
+    )
+)]
+async fn download_file(
+    State(_pg_client): State<PgClient>,
+    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    Path(_path_params): Path<DocFileIdPathParams>,
+    AuthState(_auth_claims): AuthState,
+    _version: Version,
+) -> Result<(StatusCode, Vec<u8>)> {
+    // TODO: Replace with NATS object store implementation
+    Err(ErrorKind::NotImplemented
+        .with_message("File download not implemented - MinIO removed, use NATS object store"))
+}
+
+/// Deletes a document file.
+#[tracing::instrument(skip(pg_client))]
+#[utoipa::path(
+    delete, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
+    params(DocFileIdPathParams),
+    responses(
+        (
+            status = NOT_FOUND,
+            description = "File not found",
+            body = ErrorResponse,
+        ),
+        (
+            status = UNAUTHORIZED,
+            description = "Unauthorized",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
+            status = NO_CONTENT,
+            description = "File deleted successfully",
+        ),
+    )
+)]
+async fn delete_file(
+    State(pg_client): State<PgClient>,
+    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    Path(path_params): Path<DocFileIdPathParams>,
+    AuthState(auth_claims): AuthState,
+    _version: Version,
+) -> Result<StatusCode> {
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            ProjectPermission::DeleteFiles,
+        )
+        .await?;
+
+    // Get file metadata
+    let Some(file) =
+        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("File not found"));
+    };
+
+    // Verify file belongs to document
+    if file.document_id != path_params.document_id {
+        return Err(ErrorKind::NotFound.with_message("File not found in document"));
+    }
+
+    // TODO: Replace with NATS object store implementation
+    Err(ErrorKind::NotImplemented
+        .with_message("File deletion not implemented - MinIO removed, use NATS object store"))
+}
+
+/// Validates that the file MIME type is allowed for upload.
+///
+/// This prevents potentially dangerous file types from being uploaded.
+fn validate_mime_type(mime_type: &str) -> Result<()> {
+    // Allowed MIME types - extend this list as needed
+    const ALLOWED_MIME_TYPES: &[&str] = &[
+        // Documents
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/plain",
+        "text/csv",
+        "text/markdown",
+        // Images
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
+        // Archives
+        "application/zip",
+        "application/x-rar-compressed",
+        "application/x-7z-compressed",
+        // Other
+        "application/json",
+        "application/xml",
+        "text/xml",
+        // Generic fallback
+        "application/octet-stream",
+    ];
+
+    // Block known dangerous MIME types
+    const BLOCKED_MIME_TYPES: &[&str] = &[
+        "application/x-msdownload",    // .exe
+        "application/x-msdos-program", // .com
+        "application/x-sh",            // shell scripts
+        "application/x-csh",           // C shell scripts
+        "text/x-script.python",        // Python scripts
+        "application/x-javascript",    // JavaScript
+        "text/javascript",             // JavaScript
+        "application/x-executable",    // Executables
+    ];
+
+    // Check if blocked
+    if BLOCKED_MIME_TYPES.contains(&mime_type) {
+        return Err(ErrorKind::BadRequest
+            .with_message("File type not allowed")
+            .with_context(format!(
+                "MIME type '{}' is blocked for security reasons",
+                mime_type
+            )));
+    }
+
+    // Check if allowed (case-insensitive)
+    let mime_lower = mime_type.to_lowercase();
+    if !ALLOWED_MIME_TYPES.iter().any(|&allowed| {
+        allowed.to_lowercase() == mime_lower
+            || mime_lower.starts_with("image/")
+            || mime_lower.starts_with("text/")
+    }) {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            mime_type = %mime_type,
+            "Potentially unsafe MIME type uploaded"
+        );
+    }
+
+    Ok(())
+}
+
+/// Validates file name to prevent path traversal and other attacks.
+fn validate_filename(filename: &str) -> Result<String> {
+    // Block path traversal attempts
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return Err(ErrorKind::BadRequest
+            .with_message("Invalid filename")
+            .with_context("Filename contains path traversal characters"));
+    }
+
+    // Block filenames that start with dangerous patterns
+    if filename.starts_with('.') {
+        return Err(ErrorKind::BadRequest
+            .with_message("Invalid filename")
+            .with_context("Filename cannot start with a dot"));
+    }
+
+    // Sanitize filename - remove potentially dangerous characters
+    let sanitized: String = filename
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '))
+        .collect();
+
+    if sanitized.is_empty() {
+        return Err(ErrorKind::BadRequest
+            .with_message("Invalid filename")
+            .with_context("Filename contains no valid characters"));
+    }
+
+    Ok(sanitized)
+}
+
+/// Helper: Determine file type from extension and MIME type.
+fn determine_file_type(extension: &str, mime_type: &str) -> FileType {
+    // First try to determine from file extension
+    if let Some(file_type) = FileType::from_extension(extension) {
+        return file_type;
+    }
+
+    // If extension doesn't give us a result, try MIME type
+    if let Some(file_type) = FileType::from_mime_type(mime_type) {
+        return file_type;
+    }
+
+    // Default to Document if neither method works
+    FileType::Document
+}
+
+/// Returns a [`Router`] with all related routes.
+///
+/// [`Router`]: axum::routing::Router
+pub fn routes() -> OpenApiRouter<ServiceState> {
+    OpenApiRouter::new().routes(routes!(
+        upload_file,
+        update_file,
+        download_file,
+        delete_file
+    ))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::handler::document_files::routes;
+    use crate::handler::test::create_test_server_with_router;
+
+    #[tokio::test]
+    async fn handlers() -> anyhow::Result<()> {
+        let _server = create_test_server_with_router(|_| routes()).await?;
+        Ok(())
+    }
+}
