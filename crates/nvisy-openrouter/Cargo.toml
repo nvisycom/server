@@ -25,7 +25,7 @@ default = []
 tokio = { workspace = true, features = ["time"] }
 
 # AI/OpenAI services
-openrouter_api = { version = "0.1", features = ["rustls", "tracing"] }
+openrouter_api = { version = "0.3", features = ["rustls", "tracing"] }
 
 # Rate limiting
 governor = { version = "0.10", features = [] }
