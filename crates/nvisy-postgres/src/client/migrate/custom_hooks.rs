@@ -2,6 +2,8 @@
 //!
 //! [`PgDatabaseExt`]: super::PgDatabaseExt
 
+use std::time::Instant;
+
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::PoolableConnection;
 
@@ -13,11 +15,23 @@ use crate::{PgResult, TRACING_TARGET_MIGRATIONS};
 ///
 /// [`PgDatabaseExt`]: super::PgDatabaseExt
 pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
-    tracing::trace!(
+    let is_broken = conn.is_broken();
+
+    tracing::info!(
         target: TRACING_TARGET_MIGRATIONS,
         hook = "pre_migrate",
-        is_broken = conn.is_broken(),
+        is_broken = is_broken,
+        timestamp = ?Instant::now(),
+        "Preparing to run database migrations"
     );
+
+    if is_broken {
+        tracing::error!(
+            target: TRACING_TARGET_MIGRATIONS,
+            hook = "pre_migrate",
+            "Connection is broken before migrations - migrations may fail"
+        );
+    }
 
     Ok(())
 }
@@ -28,11 +42,23 @@ pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
 ///
 /// [`PgDatabaseExt`]: super::PgDatabaseExt
 pub async fn post_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
-    tracing::trace!(
+    let is_broken = conn.is_broken();
+
+    tracing::info!(
         target: TRACING_TARGET_MIGRATIONS,
         hook = "post_migrate",
-        is_broken = conn.is_broken(),
+        is_broken = is_broken,
+        timestamp = ?Instant::now(),
+        "Database migrations completed"
     );
+
+    if is_broken {
+        tracing::error!(
+            target: TRACING_TARGET_MIGRATIONS,
+            hook = "post_migrate",
+            "Connection is broken after migrations - possible migration failure"
+        );
+    }
 
     Ok(())
 }

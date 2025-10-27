@@ -39,24 +39,4 @@ impl ProjectVisibility {
     pub fn is_public(self) -> bool {
         matches!(self, ProjectVisibility::Public)
     }
-
-    /// Returns a description of what the visibility setting means.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            ProjectVisibility::Private => "Only project members can access and view this project",
-            ProjectVisibility::Public => {
-                "Anyone can discover this project, but access depends on project settings"
-            }
-        }
-    }
-
-    /// Returns a user-friendly explanation of the visibility level.
-    #[inline]
-    pub fn user_explanation(self) -> &'static str {
-        match self {
-            ProjectVisibility::Private => "Hidden from public view and search results",
-            ProjectVisibility::Public => "Visible in search results and project listings",
-        }
-    }
 }

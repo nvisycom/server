@@ -29,6 +29,7 @@
 //! let data_client = NatsClient::connect(data_config).await?;
 //! ```
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::{Client, ConnectOptions, jetstream};
@@ -37,18 +38,18 @@ use tokio::time::timeout;
 
 use super::nats_config::{NatsConfig, NatsCredentials};
 use crate::kv::{ApiTokenStore, CacheStore, KvStore};
-use crate::object::ObjectStore;
+use crate::object::{DocumentFileStore, DocumentLabel, ObjectStore};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
 ///
-/// This wrapper is cheaply cloneable (Arc-based) and thread-safe.
+/// This wrapper is cheaply cloneable and thread-safe.
 /// Multiple clones share the same underlying TCP connection via multiplexing.
 #[derive(Debug, Clone)]
 pub struct NatsClient {
     client: Client,
-    jetstream: jetstream::Context,
-    config: NatsConfig,
+    jetstream: Arc<jetstream::Context>,
+    config: Arc<NatsConfig>,
 }
 
 impl NatsClient {
@@ -124,8 +125,8 @@ impl NatsClient {
 
         Ok(Self {
             client,
-            jetstream,
-            config,
+            jetstream: Arc::new(jetstream),
+            config: Arc::new(config),
         })
     }
 
@@ -145,15 +146,6 @@ impl NatsClient {
     #[must_use]
     pub fn config(&self) -> &NatsConfig {
         &self.config
-    }
-
-    /// Create a new connection helper
-    #[must_use]
-    pub fn connection(&self) -> NatsConnection {
-        NatsConnection {
-            client: self.client.clone(),
-            request_timeout: self.config.request_timeout,
-        }
     }
 
     /// Test connectivity with a ping
@@ -213,15 +205,21 @@ impl NatsClient {
         KvStore::new(&self.jetstream, bucket_name, description, ttl).await
     }
 
-    /// Get or create an ObjectStore for a specific bucket
+    /// Get or create a typed ObjectStore for a specific bucket with custom key and data types
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn object_store(
+    pub async fn object_store<K: AsRef<str>>(
         &self,
         bucket_name: &str,
         description: Option<&str>,
         max_age: Option<Duration>,
-    ) -> Result<ObjectStore> {
+    ) -> Result<ObjectStore<K>> {
         ObjectStore::new(&self.jetstream, bucket_name, description, max_age).await
+    }
+
+    /// Get or create a typed ObjectStore for a specific document label.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn document_store<S: DocumentLabel>(&self) -> Result<DocumentFileStore<S>> {
+        DocumentFileStore::new(&self.jetstream).await
     }
 
     /// Get or create a CacheStore for a specific namespace

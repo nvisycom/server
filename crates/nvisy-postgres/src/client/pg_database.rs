@@ -8,7 +8,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use super::custom_hooks;
 use crate::{
-    ConnectionPool, PgConfig, PgError, PgResult, PoolStatus, PooledConnection,
+    ConnectionPool, PgConfig, PgError, PgPoolStatus, PgResult, PooledConnection,
     TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION,
 };
 
@@ -164,9 +164,9 @@ impl PgClient {
     /// This method provides insights into the connection pool state for monitoring
     /// and debugging purposes.
     #[inline]
-    pub fn pool_status(&self) -> PoolStatus {
+    pub fn pool_status(&self) -> PgPoolStatus {
         let status = self.pool.status();
-        PoolStatus {
+        PgPoolStatus {
             max_size: status.max_size,
             size: status.size,
             available: status.available,

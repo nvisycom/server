@@ -10,7 +10,7 @@ use tracing::{debug, instrument, warn};
 
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
-/// Inner data for StreamSubscriber
+/// Inner data for StreamSubscriber.
 #[derive(Debug, Clone)]
 struct StreamSubscriberInner {
     jetstream: jetstream::Context,
@@ -19,7 +19,7 @@ struct StreamSubscriberInner {
     filter_subject: Option<String>,
 }
 
-/// Type-safe stream subscriber with compile-time guarantees
+/// Type-safe stream subscriber with compile-time guarantees.
 ///
 /// This subscriber provides a generic interface over JetStream for a specific
 /// deserializable data type T, ensuring compile-time type safety for all receive
@@ -34,7 +34,7 @@ impl<T> StreamSubscriber<T>
 where
     T: DeserializeOwned + Send + Sync + 'static,
 {
-    /// Create a new type-safe stream subscriber
+    /// Create a new type-safe stream subscriber.
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
     pub async fn new(
         jetstream: &jetstream::Context,
@@ -66,7 +66,7 @@ where
         })
     }
 
-    /// Add a subject filter to the subscriber (builder pattern)
+    /// Add a subject filter to the subscriber (builder pattern).
     pub fn with_filter_subject(self, filter: impl Into<String>) -> Self {
         let mut inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| (*arc).clone());
         inner.filter_subject = Some(filter.into());
@@ -76,7 +76,7 @@ where
         }
     }
 
-    /// Subscribe to the stream and get a typed message stream
+    /// Subscribe to the stream and get a typed message stream.
     #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn subscribe(&self) -> Result<TypedMessageStream<T>> {
         let mut consumer_config = consumer::pull::Config {
@@ -126,7 +126,7 @@ where
         })
     }
 
-    /// Subscribe with a batch size for fetching messages
+    /// Subscribe with a batch size for fetching messages.
     #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn subscribe_batch(&self, batch_size: usize) -> Result<TypedBatchStream<T>> {
         let mut consumer_config = consumer::pull::Config {
@@ -180,17 +180,19 @@ where
         })
     }
 
-    /// Get the stream name
+    /// Get the stream name.
+    #[inline]
     pub fn stream_name(&self) -> &str {
         &self.inner.stream_name
     }
 
-    /// Get the consumer name
+    /// Get the consumer name.
+    #[inline]
     pub fn consumer_name(&self) -> &str {
         &self.inner.consumer_name
     }
 
-    /// Check if the stream and consumer are healthy and accessible
+    /// Check if the stream and consumer are healthy and accessible.
     #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn health_check(&self) -> Result<bool> {
         match self
@@ -235,7 +237,7 @@ where
         }
     }
 
-    /// Get consumer information
+    /// Get consumer information.
     #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn consumer_info(&self) -> Result<consumer::Info> {
         let stream = self
@@ -257,7 +259,7 @@ where
             .map(|info| (*info).clone())
     }
 
-    /// Create a new subscriber with exponential backoff retry logic
+    /// Create a new subscriber with exponential backoff retry logic.
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
     pub async fn new_with_retry(
         jetstream: &jetstream::Context,
@@ -290,7 +292,7 @@ where
     }
 }
 
-/// Type-safe message stream wrapper
+/// Type-safe message stream wrapper.
 pub struct TypedMessageStream<T> {
     consumer: consumer::Consumer<consumer::pull::Config>,
     _marker: PhantomData<T>,
@@ -300,7 +302,7 @@ impl<T> TypedMessageStream<T>
 where
     T: DeserializeOwned + Send + 'static,
 {
-    /// Fetch the next message from the stream with timeout
+    /// Fetch the next message from the stream with timeout.
     pub async fn next_with_timeout(
         &mut self,
         timeout: std::time::Duration,
@@ -312,7 +314,7 @@ where
         }
     }
 
-    /// Fetch the next message from the stream
+    /// Fetch the next message from the stream.
     pub async fn next(&mut self) -> Result<Option<TypedMessage<T>>> {
         match self.consumer.messages().await {
             Ok(mut messages) => {
@@ -348,7 +350,7 @@ where
     }
 }
 
-/// Type-safe batch message stream wrapper
+/// Type-safe batch message stream wrapper.
 pub struct TypedBatchStream<T> {
     consumer: consumer::Consumer<consumer::pull::Config>,
     batch_size: usize,
@@ -359,7 +361,7 @@ impl<T> TypedBatchStream<T>
 where
     T: DeserializeOwned,
 {
-    /// Fetch the next batch of messages with timeout
+    /// Fetch the next batch of messages with timeout.
     pub async fn next_batch_with_timeout(
         &mut self,
         timeout: std::time::Duration,
@@ -371,7 +373,7 @@ where
         }
     }
 
-    /// Fetch the next batch of messages with custom batch size
+    /// Fetch the next batch of messages with custom batch size.
     pub async fn next_batch_sized(&mut self, batch_size: usize) -> Result<Vec<TypedMessage<T>>> {
         let mut batch = Vec::with_capacity(batch_size);
 
@@ -385,21 +387,19 @@ where
             Ok(mut messages) => {
                 while let Some(msg_result) = messages.next().await {
                     match msg_result {
-                        Ok(message) => {
-                            match serde_json::from_slice::<T>(&message.payload) {
-                                Ok(payload) => {
-                                    batch.push(TypedMessage { payload, message });
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        target: TRACING_TARGET_STREAM,
-                                        error = %e,
-                                        "Failed to deserialize message payload in custom batch"
-                                    );
-                                    // Continue processing other messages
-                                }
+                        Ok(message) => match serde_json::from_slice::<T>(&message.payload) {
+                            Ok(payload) => {
+                                batch.push(TypedMessage { payload, message });
                             }
-                        }
+                            Err(e) => {
+                                warn!(
+                                    target: TRACING_TARGET_STREAM,
+                                    error = %e,
+                                    "Failed to deserialize message payload in custom batch"
+                                );
+                                // Continue processing other messages
+                            }
+                        },
                         Err(e) => {
                             warn!(
                                 target: TRACING_TARGET_STREAM,
@@ -423,7 +423,7 @@ where
         }
     }
 
-    /// Fetch the next batch of messages
+    /// Fetch the next batch of messages.
     pub async fn next_batch(&mut self) -> Result<Vec<TypedMessage<T>>> {
         let mut batch = Vec::with_capacity(self.batch_size);
 
@@ -437,21 +437,19 @@ where
             Ok(mut messages) => {
                 while let Some(msg_result) = messages.next().await {
                     match msg_result {
-                        Ok(message) => {
-                            match serde_json::from_slice::<T>(&message.payload) {
-                                Ok(payload) => {
-                                    batch.push(TypedMessage { payload, message });
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        target: TRACING_TARGET_STREAM,
-                                        error = %e,
-                                        "Failed to deserialize message payload"
-                                    );
-                                    // Continue processing other messages
-                                }
+                        Ok(message) => match serde_json::from_slice::<T>(&message.payload) {
+                            Ok(payload) => {
+                                batch.push(TypedMessage { payload, message });
                             }
-                        }
+                            Err(e) => {
+                                warn!(
+                                    target: TRACING_TARGET_STREAM,
+                                    error = %e,
+                                    "Failed to deserialize message payload"
+                                );
+                                // Continue processing other messages
+                            }
+                        },
                         Err(e) => {
                             warn!(
                                 target: TRACING_TARGET_STREAM,
@@ -475,28 +473,28 @@ where
     }
 }
 
-/// A typed message from the stream
+/// A typed message from the stream.
 pub struct TypedMessage<T> {
-    /// The deserialized payload
+    /// The deserialized payload.
     pub payload: T,
-    /// The underlying NATS message for metadata and acknowledgment
+    /// The underlying NATS message for metadata and acknowledgment.
     message: jetstream::Message,
 }
 
 impl<T> TypedMessage<T> {
-    /// Get the message subject
+    /// Get the message subject.
     pub fn subject(&self) -> &str {
         &self.message.subject
     }
 
-    /// Get the message metadata
+    /// Get the message metadata.
     pub fn info(&self) -> Result<jetstream::message::Info<'_>> {
         self.message
             .info()
             .map_err(|e| Error::operation("message_info", e.to_string()))
     }
 
-    /// Acknowledge the message
+    /// Acknowledge the message.
     pub async fn ack(&mut self) -> Result<()> {
         self.message
             .ack()
@@ -504,7 +502,7 @@ impl<T> TypedMessage<T> {
             .map_err(|e| Error::operation("message_ack", e.to_string()))
     }
 
-    /// Negative acknowledge the message (trigger redelivery)
+    /// Negative acknowledge the message (trigger redelivery).
     pub async fn nack(&mut self) -> Result<()> {
         self.message
             .ack_with(jetstream::AckKind::Nak(None))
@@ -512,43 +510,43 @@ impl<T> TypedMessage<T> {
             .map_err(|e| Error::operation("message_nack", e.to_string()))
     }
 
-    /// Get a reference to the typed payload
+    /// Get a reference to the typed payload.
     pub fn payload(&self) -> &T {
         &self.payload
     }
 
-    /// Consume the message and return the payload
+    /// Consume the message and return the payload.
     pub fn into_payload(self) -> T {
         self.payload
     }
 
-    /// Get message headers if available
+    /// Get message headers if available.
     pub fn headers(&self) -> Option<&async_nats::HeaderMap> {
         self.message.headers.as_ref()
     }
 
-    /// Get message sequence number
+    /// Get message sequence number.
     pub fn sequence(&self) -> Result<u64> {
         self.info()
             .map(|info| info.stream_sequence)
             .map_err(|e| Error::operation("get_sequence", e.to_string()))
     }
 
-    /// Check if this message is a redelivery
+    /// Check if this message is a redelivery.
     pub fn is_redelivery(&self) -> Result<bool> {
         self.info()
             .map(|info| info.delivered > 1)
             .map_err(|e| Error::operation("check_redelivery", e.to_string()))
     }
 
-    /// Get the number of delivery attempts
+    /// Get the number of delivery attempts.
     pub fn delivery_count(&self) -> Result<usize> {
         self.info()
             .map(|info| info.delivered as usize)
             .map_err(|e| Error::operation("get_delivery_count", e.to_string()))
     }
 
-    /// Acknowledge with explicit acknowledgment kind
+    /// Acknowledge with explicit acknowledgment kind.
     pub async fn ack_with(&mut self, ack_kind: jetstream::AckKind) -> Result<()> {
         self.message
             .ack_with(ack_kind)
@@ -556,7 +554,7 @@ impl<T> TypedMessage<T> {
             .map_err(|e| Error::operation("message_ack_with", e.to_string()))
     }
 
-    /// Double acknowledge (useful for at-least-once processing)
+    /// Double acknowledge (useful for at-least-once processing).
     pub async fn double_ack(&mut self) -> Result<()> {
         self.message
             .double_ack()

@@ -120,19 +120,6 @@ impl VirusScanStatus {
         }
     }
 
-    /// Returns a description of what the scan status means.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            VirusScanStatus::Clean => "No virus or malware detected: file is safe",
-            VirusScanStatus::Infected => "Virus or malware detected: file is dangerous",
-            VirusScanStatus::Suspicious => "Suspicious activity detected: file may be harmful",
-            VirusScanStatus::Unknown => {
-                "Unable to determine virus status: scan failed or inconclusive"
-            }
-        }
-    }
-
     /// Returns scan statuses that allow normal file processing.
     pub fn safe_statuses() -> &'static [VirusScanStatus] {
         &[VirusScanStatus::Clean]

@@ -1,6 +1,6 @@
 /// Connection pool status information.
 #[derive(Debug, Clone)]
-pub struct PoolStatus {
+pub struct PgPoolStatus {
     /// Maximum number of connections in the pool
     pub max_size: usize,
     /// Current number of connections in the pool
@@ -11,7 +11,7 @@ pub struct PoolStatus {
     pub waiting: usize,
 }
 
-impl PoolStatus {
+impl PgPoolStatus {
     /// Returns the utilization percentage of the pool (0.0 to 1.0).
     #[inline]
     pub fn utilization(&self) -> f64 {
@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn test_pool_status_utilization() {
-        let status = PoolStatus {
+        let status = PgPoolStatus {
             max_size: 10,
             size: 8,
             available: 2,
@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn test_pool_status_pressure() {
-        let high_util = PoolStatus {
+        let high_util = PgPoolStatus {
             max_size: 10,
             size: 10,
             available: 1,
@@ -56,7 +56,7 @@ mod tests {
         };
         assert!(high_util.is_under_pressure());
 
-        let waiting = PoolStatus {
+        let waiting = PgPoolStatus {
             max_size: 10,
             size: 5,
             available: 3,
@@ -64,7 +64,7 @@ mod tests {
         };
         assert!(waiting.is_under_pressure());
 
-        let normal = PoolStatus {
+        let normal = PgPoolStatus {
             max_size: 10,
             size: 5,
             available: 5,

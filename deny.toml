@@ -88,7 +88,7 @@ deny = [
     { name = "chrono", version = "< 0.4.20" },       # Old versions have CVE issues
 
     # Crates that conflict with our chosen alternatives
-    { name = "json" },           # Prefer serde_json
+    { name = "json" },            # Prefer serde_json
     { name = "rustc-serialize" }, # Deprecated in favor of serde
 ]
 

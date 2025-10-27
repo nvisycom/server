@@ -39,9 +39,13 @@ serde_json = { workspace = true, features = [] }
 
 # Error handling
 thiserror = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["deref", "deref_mut"] }
+derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into"] }
 
 # Data types
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 bytes = { workspace = true, features = [] }
+
+# Cryptography
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }

@@ -1,217 +1,53 @@
-//! WebSocket handler for real-time project communication.
+//! WebSocket handler for real-time project communication via NATS.
 //!
 //! This module provides WebSocket endpoints for managing real-time communication
-//! within a single project. It handles events such as:
+//! within a single project using NATS JetStream for distributed pub/sub. It handles:
 //! - Document updates and collaborative editing
 //! - Member presence tracking
 //! - Project notifications
-//! - Real-time synchronization of project state
+//! - Real-time synchronization across multiple server instances
 //!
 //! # Architecture
 //!
-//! Each WebSocket connection spawns two independent tasks:
-//! - **Receiver task**: Handles incoming messages from the client
-//! - **Sender task**: Subscribes to project broadcast channel and forwards messages
-//!
-//! The tasks run concurrently using `tokio::select!`, and if either task terminates,
-//! the other is aborted to ensure clean shutdown.
-//!
-//! # Broadcasting
-//!
-//! Messages are broadcast to all connected clients in a project using a `tokio::sync::broadcast`
-//! channel. Each project has its own channel stored in a shared state map.
+//! - Each WebSocket connection creates a unique NATS consumer
+//! - Messages are published to `PROJECT_EVENTS.{project_id}` subject
+//! - Permissions are checked per-event, not at connection time
+//! - Echo prevention: messages aren't sent back to the sender
+//! - Automatic cleanup on disconnect
 
-use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures::{SinkExt, StreamExt};
+use nvisy_nats::NatsClient;
+use nvisy_nats::stream::{ProjectEventPublisher, ProjectEventSubscriber, ProjectWsMessage};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::queries::{AccountRepository, ProjectRepository};
-use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast};
-use utoipa::ToSchema;
+use nvisy_postgres::query::{AccountRepository, ProjectRepository};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Path, ProjectPermission};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project websocket operations.
-const TRACING_TARGET: &str = "nvisy::handler::project_websocket";
+const TRACING_TARGET: &str = "nvisy_server::handler::project_websocket";
 
 /// Maximum size of a WebSocket message in bytes (1 MB).
 const MAX_MESSAGE_SIZE: usize = 1_024 * 1_024;
 
-/// Capacity of broadcast channel per project (number of messages buffered).
-const BROADCAST_CAPACITY: usize = 100;
+/// Timeout for fetching messages from NATS stream.
+const NATS_FETCH_TIMEOUT: Duration = Duration::from_millis(100);
 
-/// WebSocket message types for project communication.
-///
-/// All messages are serialized as JSON with a `type` field that identifies
-/// the message variant. This enables type-safe message handling on both
-/// client and server.
-///
-/// Note: Protocol-level Ping/Pong is handled automatically by Axum.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum ProjectWsMessage {
-    /// Client announces presence in the project.
-    ///
-    /// Sent automatically when a connection is established.
-    #[serde(rename_all = "camelCase")]
-    Join {
-        account_id: Uuid,
-        display_name: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Client leaves the project.
-    ///
-    /// Sent automatically when a connection is closed.
-    #[serde(rename_all = "camelCase")]
-    Leave {
-        account_id: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Document content update notification.
-    #[serde(rename_all = "camelCase")]
-    DocumentUpdate {
-        document_id: Uuid,
-        version: u32,
-        updated_by: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Document creation notification.
-    #[serde(rename_all = "camelCase")]
-    DocumentCreated {
-        document_id: Uuid,
-        display_name: String,
-        created_by: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Document deletion notification.
-    #[serde(rename_all = "camelCase")]
-    DocumentDeleted {
-        document_id: Uuid,
-        deleted_by: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Member presence update.
-    #[serde(rename_all = "camelCase")]
-    MemberPresence {
-        account_id: Uuid,
-        is_online: bool,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Member added to project.
-    #[serde(rename_all = "camelCase")]
-    MemberAdded {
-        account_id: Uuid,
-        display_name: String,
-        member_role: String,
-        added_by: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Member removed from project.
-    #[serde(rename_all = "camelCase")]
-    MemberRemoved {
-        account_id: Uuid,
-        removed_by: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Project settings updated.
-    #[serde(rename_all = "camelCase")]
-    ProjectUpdated {
-        display_name: Option<String>,
-        updated_by: Uuid,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Typing indicator.
-    ///
-    /// Clients should throttle this message to avoid flooding the connection.
-    #[serde(rename_all = "camelCase")]
-    Typing {
-        account_id: Uuid,
-        document_id: Option<Uuid>,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: time::OffsetDateTime,
-    },
-
-    /// Error message from server.
-    #[serde(rename_all = "camelCase")]
-    Error {
-        code: String,
-        message: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        details: Option<String>,
-    },
-}
-
-impl ProjectWsMessage {
-    /// Creates an error message with the given code and message.
-    #[allow(dead_code)]
-    #[inline]
-    const fn error(code: String, message: String) -> Self {
-        Self::Error {
-            code,
-            message,
-            details: None,
-        }
-    }
-
-    /// Creates an error message with additional details.
-    #[allow(dead_code)]
-    #[inline]
-    const fn error_with_details(code: String, message: String, details: String) -> Self {
-        Self::Error {
-            code,
-            message,
-            details: Some(details),
-        }
-    }
-
-    /// Serializes the message to JSON text.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if serialization fails.
-    fn to_text(&self) -> std::result::Result<String, serde_json::Error> {
-        serde_json::to_string(self)
-    }
-
-    /// Deserializes a message from JSON text.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the text is not valid JSON or doesn't match the schema.
-    fn from_text(text: &str) -> std::result::Result<Self, serde_json::Error> {
-        serde_json::from_str(text)
-    }
-}
+/// Maximum time to wait for graceful connection shutdown.
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Context for a WebSocket connection.
 #[derive(Debug, Clone)]
@@ -222,433 +58,680 @@ struct WsContext {
     project_id: Uuid,
     /// The authenticated account ID.
     account_id: Uuid,
-    /// Display name of the account.
-    display_name: String,
 }
 
 impl WsContext {
     /// Creates a new WebSocket connection context.
-    fn new(project_id: Uuid, account_id: Uuid, display_name: String) -> Self {
+    fn new(project_id: Uuid, account_id: Uuid) -> Self {
         Self {
             connection_id: Uuid::new_v4(),
             project_id,
             account_id,
-            display_name,
         }
     }
 }
 
-/// Global state for managing project broadcast channels.
-///
-/// Each project has its own broadcast channel for real-time communication.
-/// Channels are created on-demand and cleaned up when no subscribers remain.
-type ProjectChannels = Arc<RwLock<HashMap<Uuid, broadcast::Sender<ProjectWsMessage>>>>;
-
-/// Gets or creates a broadcast channel for a project.
-async fn get_project_channel(
-    channels: &ProjectChannels,
-    project_id: Uuid,
-) -> broadcast::Sender<ProjectWsMessage> {
-    // Try to get existing channel (read lock)
-    {
-        let read_guard = channels.read().await;
-        if let Some(sender) = read_guard.get(&project_id) {
-            return sender.clone();
-        }
-    }
-
-    // Create new channel (write lock)
-    let mut write_guard = channels.write().await;
-    // Double-check in case another task created it
-    if let Some(sender) = write_guard.get(&project_id) {
-        return sender.clone();
-    }
-
-    let (sender, _) = broadcast::channel(BROADCAST_CAPACITY);
-    write_guard.insert(project_id, sender.clone());
-
-    tracing::debug!(
-        target: "server::handler::project_websocket",
-        project_id = %project_id,
-        "created new broadcast channel for project"
-    );
-
-    sender
+/// Metrics for a WebSocket connection.
+#[derive(Debug, Default)]
+struct ConnectionMetrics {
+    messages_sent: AtomicU64,
+    messages_received: AtomicU64,
+    messages_published: AtomicU64,
+    messages_dropped: AtomicU64,
+    errors: AtomicU64,
 }
 
-/// Processes an incoming WebSocket message.
-///
-/// Returns `ControlFlow::Break` if the connection should be closed,
-/// `ControlFlow::Continue` otherwise.
-fn process_message(
+impl ConnectionMetrics {
+    fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    fn increment_sent(&self) {
+        self.messages_sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_received(&self) {
+        self.messages_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_published(&self) {
+        self.messages_published.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_dropped(&self) {
+        self.messages_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_errors(&self) {
+        self.errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> MetricsSnapshot {
+        MetricsSnapshot {
+            sent: self.messages_sent.load(Ordering::Relaxed),
+            received: self.messages_received.load(Ordering::Relaxed),
+            published: self.messages_published.load(Ordering::Relaxed),
+            dropped: self.messages_dropped.load(Ordering::Relaxed),
+            errors: self.errors.load(Ordering::Relaxed),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct MetricsSnapshot {
+    sent: u64,
+    received: u64,
+    published: u64,
+    dropped: u64,
+    errors: u64,
+}
+
+/// Validate message size to prevent DoS attacks.
+fn validate_message_size(ctx: &WsContext, size: usize, metrics: &ConnectionMetrics) -> bool {
+    if size > MAX_MESSAGE_SIZE {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            connection_id = %ctx.connection_id,
+            message_size = size,
+            max_size = MAX_MESSAGE_SIZE,
+            "message exceeds maximum size, dropping"
+        );
+        metrics.increment_dropped();
+        false
+    } else {
+        true
+    }
+}
+
+/// Check if the account has permission to perform the action in the message.
+async fn check_event_permission(
+    pg_client: &PgClient,
+    ctx: &WsContext,
+    msg: &ProjectWsMessage,
+) -> Result<()> {
+    let mut conn = pg_client.get_connection().await?;
+
+    // Determine required permission based on message type
+    let permission = match msg {
+        // Read-only events - require ViewDocuments permission
+        ProjectWsMessage::Typing(_) | ProjectWsMessage::MemberPresence(_) => {
+            ProjectPermission::ViewDocuments
+        }
+
+        // Document write events - require UpdateDocuments permission
+        ProjectWsMessage::DocumentUpdate(_) => ProjectPermission::UpdateDocuments,
+        ProjectWsMessage::DocumentCreated(_) => ProjectPermission::CreateDocuments,
+        ProjectWsMessage::DocumentDeleted(_) => ProjectPermission::DeleteDocuments,
+
+        // File events - require appropriate file permissions
+        ProjectWsMessage::FileProcessed(_) | ProjectWsMessage::FileVerified(_) => {
+            ProjectPermission::ViewFiles
+        }
+        ProjectWsMessage::FileRedacted(_) => ProjectPermission::DeleteFiles,
+
+        // Member management - require InviteMembers/RemoveMembers permission
+        ProjectWsMessage::MemberAdded(_) => ProjectPermission::InviteMembers,
+        ProjectWsMessage::MemberRemoved(_) => ProjectPermission::RemoveMembers,
+
+        // Project settings - require UpdateProject permission
+        ProjectWsMessage::ProjectUpdated(_) => ProjectPermission::UpdateProject,
+
+        // System events - always allowed (sent by server)
+        ProjectWsMessage::Join(_) | ProjectWsMessage::Leave(_) | ProjectWsMessage::Error(_) => {
+            return Ok(());
+        }
+    };
+
+    // Fetch project membership directly
+    use nvisy_postgres::query::ProjectMemberRepository;
+
+    let member =
+        ProjectMemberRepository::find_project_member(&mut conn, ctx.project_id, ctx.account_id)
+            .await?;
+
+    // Check if member exists and has the required permission
+    match member {
+        Some(m) if permission.is_permitted_by_role(m.member_role) => Ok(()),
+        Some(m) => {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                account_id = %ctx.account_id,
+                project_id = %ctx.project_id,
+                required_permission = ?permission,
+                current_role = ?m.member_role,
+                "insufficient permissions for event"
+            );
+            Err(ErrorKind::Forbidden.with_context(format!(
+                "Insufficient permissions: requires {:?}",
+                permission.minimum_required_role()
+            )))
+        }
+        None => {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                account_id = %ctx.account_id,
+                project_id = %ctx.project_id,
+                "not a member of project"
+            );
+            Err(ErrorKind::Forbidden.with_context("Not a project member"))
+        }
+    }
+}
+
+/// Processes an incoming WebSocket message from the client.
+async fn process_client_message(
     ctx: &WsContext,
     msg: Message,
-    tx: &broadcast::Sender<ProjectWsMessage>,
+    publisher: &ProjectEventPublisher,
+    pg_client: &PgClient,
+    metrics: &ConnectionMetrics,
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(text) => {
-            // Check message size to prevent DoS
-            if text.len() > MAX_MESSAGE_SIZE {
-                tracing::warn!(
-                    target: "server::handler::project_websocket",
-                    connection_id = %ctx.connection_id,
-                    message_size = text.len(),
-                    max_size = MAX_MESSAGE_SIZE,
-                    "message exceeds maximum size"
-                );
+            metrics.increment_received();
+
+            if !validate_message_size(ctx, text.len(), metrics) {
                 return ControlFlow::Continue(());
             }
 
-            tracing::debug!(
-                target: "server::handler::project_websocket",
+            tracing::trace!(
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
                 message_length = text.len(),
                 "received text message"
             );
 
-            match ProjectWsMessage::from_text(&text) {
-                Ok(ws_msg) => handle_project_message(ctx, ws_msg, tx),
+            match serde_json::from_str::<ProjectWsMessage>(&text) {
+                Ok(ws_msg) => {
+                    handle_client_message(ctx, ws_msg, publisher, pg_client, metrics).await;
+                    ControlFlow::Continue(())
+                }
                 Err(e) => {
                     tracing::warn!(
-                        target: "server::handler::project_websocket",
+                        target: TRACING_TARGET,
                         connection_id = %ctx.connection_id,
                         error = %e,
-                        "failed to parse message"
+                        "failed to parse message, dropping"
                     );
+                    metrics.increment_errors();
+                    metrics.increment_dropped();
                     ControlFlow::Continue(())
                 }
             }
         }
         Message::Binary(data) => {
-            if data.len() > MAX_MESSAGE_SIZE {
-                tracing::warn!(
-                    target: "server::handler::project_websocket",
-                    connection_id = %ctx.connection_id,
-                    data_length = data.len(),
-                    max_size = MAX_MESSAGE_SIZE,
-                    "binary message exceeds maximum size"
-                );
+            metrics.increment_received();
+
+            if !validate_message_size(ctx, data.len(), metrics) {
                 return ControlFlow::Continue(());
             }
 
             tracing::debug!(
-                target: "server::handler::project_websocket",
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
                 data_length = data.len(),
-                "received binary message"
+                "received binary message (not supported), dropping"
             );
-
-            // Binary messages can be used for compressed data or file chunks
-            // For now, we just log them. Future: implement file transfer protocol
+            metrics.increment_dropped();
             ControlFlow::Continue(())
         }
         Message::Close(close_frame) => {
             if let Some(cf) = close_frame {
                 tracing::info!(
-                    target: "server::handler::project_websocket",
+                    target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
                     close_code = cf.code,
                     close_reason = %cf.reason,
-                    "client sent close message"
+                    "client sent close frame"
                 );
             } else {
                 tracing::info!(
-                    target: "server::handler::project_websocket",
+                    target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
-                    "client sent close message without frame"
+                    "client sent close frame"
                 );
             }
             ControlFlow::Break(())
         }
-        // Axum automatically handles Ping/Pong at the protocol level.
-        // These log messages are for observability only.
         Message::Ping(payload) => {
             tracing::trace!(
-                target: "server::handler::project_websocket",
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
                 payload_len = payload.len(),
-                "received protocol ping"
+                "received ping"
             );
             ControlFlow::Continue(())
         }
         Message::Pong(payload) => {
             tracing::trace!(
-                target: "server::handler::project_websocket",
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
                 payload_len = payload.len(),
-                "received protocol pong"
+                "received pong"
             );
             ControlFlow::Continue(())
         }
     }
 }
 
-/// Handles parsed project-specific messages and broadcasts them to other clients.
-fn handle_project_message(
+/// Handles parsed messages from the client with permission checking.
+async fn handle_client_message(
     ctx: &WsContext,
     msg: ProjectWsMessage,
-    tx: &broadcast::Sender<ProjectWsMessage>,
-) -> ControlFlow<(), ()> {
+    publisher: &ProjectEventPublisher,
+    pg_client: &PgClient,
+    metrics: &ConnectionMetrics,
+) {
+    // Check permissions for this event
+    if let Err(e) = check_event_permission(pg_client, ctx, &msg).await {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            connection_id = %ctx.connection_id,
+            account_id = %ctx.account_id,
+            message_type = ?std::mem::discriminant(&msg),
+            error = %e,
+            "permission denied for event, dropping"
+        );
+        metrics.increment_dropped();
+        metrics.increment_errors();
+        return;
+    }
+
     match &msg {
-        ProjectWsMessage::Typing { document_id, .. } => {
+        ProjectWsMessage::Typing(_) => {
             tracing::trace!(
-                target: "server::handler::project_websocket",
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
-                project_id = %ctx.project_id,
-                document_id = ?document_id,
-                "typing indicator received"
+                "publishing typing indicator"
             );
 
-            // Broadcast typing indicator to all other clients
-            // Add timestamp to ensure freshness
-            let msg_with_ts = ProjectWsMessage::Typing {
-                account_id: ctx.account_id,
-                document_id: *document_id,
-                timestamp: time::OffsetDateTime::now_utc(),
-            };
+            // Publish with fresh timestamp
+            let msg_with_ts = ProjectWsMessage::typing(ctx.account_id, None);
 
-            if let Err(e) = tx.send(msg_with_ts) {
-                tracing::debug!(
-                    target: "server::handler::project_websocket",
+            if let Err(e) = publisher.publish_message(ctx.project_id, msg_with_ts).await {
+                tracing::warn!(
+                    target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
                     error = %e,
-                    "failed to broadcast typing indicator (no receivers)"
+                    "failed to publish typing indicator"
                 );
+                metrics.increment_errors();
+            } else {
+                metrics.increment_published();
             }
         }
-        ProjectWsMessage::DocumentUpdate { .. }
-        | ProjectWsMessage::DocumentCreated { .. }
-        | ProjectWsMessage::DocumentDeleted { .. }
-        | ProjectWsMessage::MemberPresence { .. }
-        | ProjectWsMessage::MemberAdded { .. }
-        | ProjectWsMessage::MemberRemoved { .. }
-        | ProjectWsMessage::ProjectUpdated { .. } => {
+        ProjectWsMessage::DocumentUpdate(_)
+        | ProjectWsMessage::DocumentCreated(_)
+        | ProjectWsMessage::DocumentDeleted(_)
+        | ProjectWsMessage::FileProcessed(_)
+        | ProjectWsMessage::FileRedacted(_)
+        | ProjectWsMessage::FileVerified(_)
+        | ProjectWsMessage::MemberPresence(_)
+        | ProjectWsMessage::MemberAdded(_)
+        | ProjectWsMessage::MemberRemoved(_)
+        | ProjectWsMessage::ProjectUpdated(_) => {
             tracing::debug!(
-                target: "server::handler::project_websocket",
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
                 message_type = ?std::mem::discriminant(&msg),
-                "broadcasting message to project"
+                "publishing event to NATS"
             );
 
-            // Broadcast to all clients in the project
-            if let Err(e) = tx.send(msg) {
-                tracing::debug!(
-                    target: "server::handler::project_websocket",
+            if let Err(e) = publisher.publish_message(ctx.project_id, msg).await {
+                tracing::warn!(
+                    target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
                     error = %e,
-                    "failed to broadcast message (no receivers)"
+                    "failed to publish event to NATS"
                 );
+                metrics.increment_errors();
+            } else {
+                metrics.increment_published();
             }
         }
-        _ => {
+        ProjectWsMessage::Join(_) | ProjectWsMessage::Leave(_) | ProjectWsMessage::Error(_) => {
             tracing::debug!(
-                target: "server::handler::project_websocket",
+                target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
                 message_type = ?std::mem::discriminant(&msg),
-                "received non-broadcast message"
+                "ignoring system message from client"
             );
+            metrics.increment_dropped();
         }
     }
-    ControlFlow::Continue(())
 }
 
-/// Handles the WebSocket connection lifecycle.
+/// Handles the WebSocket connection lifecycle with NATS pub/sub.
 ///
 /// This function:
-/// 1. Subscribes to the project's broadcast channel
-/// 2. Sends a join message to all clients
-/// 3. Spawns separate tasks for sending and receiving
-/// 4. Uses `tokio::select!` to handle whichever task completes first
-/// 5. Sends a leave message and aborts the other task
+/// 1. Fetches account details and creates context
+/// 2. Creates a unique NATS consumer for this WebSocket connection
+/// 3. Publishes a join message to all clients
+/// 4. Spawns separate tasks for sending and receiving
+/// 5. Uses `tokio::select!` to handle whichever task completes first
+/// 6. Publishes a leave message and cleans up
 async fn handle_project_websocket(
     socket: WebSocket,
     project_id: Uuid,
     account_id: Uuid,
-    display_name: String,
-    channels: ProjectChannels,
+    nats_client: NatsClient,
+    pg_client: PgClient,
 ) {
-    let ctx = WsContext::new(project_id, account_id, display_name);
-
-    tracing::info!(
-        target: "server::handler::project_websocket",
-        connection_id = %ctx.connection_id,
-        account_id = %ctx.account_id,
-        project_id = %ctx.project_id,
-        "websocket connection established"
-    );
-
-    // Get or create broadcast channel for this project
-    let tx = get_project_channel(&channels, project_id).await;
-    let mut rx = tx.subscribe();
-
-    // Split socket into sender and receiver
-    let (mut sender, mut receiver) = socket.split();
-
-    // Broadcast join message to all clients in the project
-    let join_msg = ProjectWsMessage::Join {
-        account_id: ctx.account_id,
-        display_name: ctx.display_name.clone(),
-        timestamp: time::OffsetDateTime::now_utc(),
-    };
-
-    if let Err(e) = tx.send(join_msg.clone()) {
-        tracing::error!(
-            target: TRACING_TARGET,
-            connection_id = %ctx.connection_id,
-            error = %e,
-            "failed to broadcast join message"
-        );
-    }
-
-    // Clone context for the receive task
-    let recv_ctx = ctx.clone();
-    let recv_tx = tx.clone();
-
-    // Spawn a task to receive messages from the client
-    let mut recv_task = tokio::spawn(async move {
-        let mut msg_count = 0;
-        while let Some(Ok(msg)) = receiver.next().await {
-            msg_count += 1;
-            if process_message(&recv_ctx, msg, &recv_tx).is_break() {
-                break;
-            }
-        }
-        msg_count
-    });
-
-    // Spawn a task to send messages to the client from the broadcast channel
-    let send_ctx = ctx.clone();
-    let mut send_task = tokio::spawn(async move {
-        let mut msg_count = 0;
-
-        // Send initial join message to this client
-        if let Ok(text) = join_msg.to_text()
-            && sender
-                .send(Message::Text(Utf8Bytes::from(text)))
-                .await
-                .is_err()
-        {
-            tracing::error!(
-                target: TRACING_TARGET,
-                connection_id = %send_ctx.connection_id,
-                "failed to send join message, aborting connection"
-            );
-            return 0;
-        }
-
-        // Listen for broadcast messages and forward to this client
-        loop {
-            match rx.recv().await {
-                Ok(msg) => {
-                    // Don't send messages back to the sender (echo prevention)
-                    match &msg {
-                        ProjectWsMessage::Typing { account_id, .. }
-                        | ProjectWsMessage::Join { account_id, .. }
-                        | ProjectWsMessage::Leave { account_id, .. }
-                            if *account_id == send_ctx.account_id =>
-                        {
-                            continue;
-                        }
-                        _ => {}
-                    }
-
-                    if let Ok(text) = msg.to_text() {
-                        if sender
-                            .send(Message::Text(Utf8Bytes::from(text)))
-                            .await
-                            .is_err()
-                        {
-                            tracing::debug!(
-                                target: TRACING_TARGET,
-                                connection_id = %send_ctx.connection_id,
-                                "failed to send message, client disconnected"
-                            );
-                            break;
-                        }
-                        msg_count += 1;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        connection_id = %send_ctx.connection_id,
-                        skipped_messages = skipped,
-                        "client lagged behind, some messages were dropped"
-                    );
-                    // Continue receiving - the client is slow but still connected
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    tracing::info!(
-                        target: TRACING_TARGET,
-                        connection_id = %send_ctx.connection_id,
-                        "broadcast channel closed"
-                    );
-                    break;
-                }
-            }
-        }
-
-        msg_count
-    });
-
-    // Wait for either task to complete, then abort the other
-    tokio::select! {
-        recv_result = (&mut recv_task) => {
-            match recv_result {
-                Ok(msg_count) => {
-                    tracing::info!(
-                        target: TRACING_TARGET,
-                        connection_id = %ctx.connection_id,
-                        messages_received = msg_count,
-                        "receive task completed"
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(
-                        target: TRACING_TARGET,
-                        connection_id = %ctx.connection_id,
-                        error = %e,
-                        "receive task panicked"
-                    );
-                }
-            }
-            send_task.abort();
-        },
-        send_result = (&mut send_task) => {
-            match send_result {
-                Ok(msg_count) => {
-                    tracing::info!(
-                        target: TRACING_TARGET,
-                        connection_id = %ctx.connection_id,
-                        messages_sent = msg_count,
-                        "send task completed"
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(
-                        target: TRACING_TARGET,
-                        connection_id = %ctx.connection_id,
-                        error = %e,
-                        "send task panicked"
-                    );
-                }
-            }
-            recv_task.abort();
-        }
-    }
-
-    // Broadcast leave message
-    let leave_msg = ProjectWsMessage::Leave {
-        account_id: ctx.account_id,
-        timestamp: time::OffsetDateTime::now_utc(),
-    };
-    let _ = tx.send(leave_msg);
+    let start_time = std::time::Instant::now();
+    let ctx = WsContext::new(project_id, account_id);
+    let metrics = ConnectionMetrics::new();
 
     tracing::info!(
         target: TRACING_TARGET,
         connection_id = %ctx.connection_id,
         account_id = %ctx.account_id,
         project_id = %ctx.project_id,
+        "websocket connection established"
+    );
+
+    // Fetch account display name
+    let display_name = match pg_client.get_connection().await {
+        Ok(mut conn) => match AccountRepository::find_account_by_id(&mut conn, account_id).await {
+            Ok(Some(account)) => account.display_name,
+            Ok(None) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    connection_id = %ctx.connection_id,
+                    account_id = %account_id,
+                    "account not found, aborting connection"
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    connection_id = %ctx.connection_id,
+                    account_id = %account_id,
+                    error = %e,
+                    "failed to fetch account, aborting connection"
+                );
+                return;
+            }
+        },
+        Err(e) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                error = %e,
+                "failed to get database connection, aborting"
+            );
+            return;
+        }
+    };
+
+    // Get JetStream context
+    let jetstream = nats_client.jetstream();
+
+    // Create publisher for this connection
+    let publisher = match ProjectEventPublisher::new(jetstream).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                error = %e,
+                "failed to create event publisher, aborting connection"
+            );
+            return;
+        }
+    };
+
+    // Create subscriber with unique consumer name for this connection
+    let consumer_name = format!("ws-{}", ctx.connection_id);
+    let subscriber = match ProjectEventSubscriber::new_for_project(
+        jetstream,
+        &consumer_name,
+        project_id,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                error = %e,
+                "failed to create event subscriber, aborting connection"
+            );
+            return;
+        }
+    };
+
+    // Get message stream
+    let mut message_stream = match subscriber.subscribe().await {
+        Ok(stream) => stream,
+        Err(e) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                error = %e,
+                "failed to subscribe to event stream, aborting connection"
+            );
+            return;
+        }
+    };
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        connection_id = %ctx.connection_id,
+        consumer_name = %consumer_name,
+        "NATS subscriber created"
+    );
+
+    // Split socket into sender and receiver
+    let (mut sender, mut receiver) = socket.split();
+
+    // Create and publish join message
+    let join_msg = ProjectWsMessage::join(ctx.account_id, display_name);
+
+    if let Err(e) = publisher
+        .publish_message(ctx.project_id, join_msg.clone())
+        .await
+    {
+        tracing::error!(
+            target: TRACING_TARGET,
+            connection_id = %ctx.connection_id,
+            error = %e,
+            "failed to publish join message"
+        );
+    } else {
+        metrics.increment_published();
+    }
+
+    // Clone context and clients for the receive task
+    let recv_ctx = ctx.clone();
+    let recv_publisher = publisher.clone();
+    let recv_pg_client = pg_client.clone();
+    let recv_metrics = metrics.clone();
+
+    // Spawn a task to receive messages from the client
+    let recv_task = tokio::spawn(async move {
+        while let Some(msg_result) = receiver.next().await {
+            match msg_result {
+                Ok(msg) => {
+                    if process_client_message(
+                        &recv_ctx,
+                        msg,
+                        &recv_publisher,
+                        &recv_pg_client,
+                        &recv_metrics,
+                    )
+                    .await
+                    .is_break()
+                    {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: TRACING_TARGET,
+                        connection_id = %recv_ctx.connection_id,
+                        error = %e,
+                        "error receiving from websocket"
+                    );
+                    recv_metrics.increment_errors();
+                    break;
+                }
+            }
+        }
+    });
+
+    // Spawn a task to send messages from NATS to the client
+    let send_ctx = ctx.clone();
+    let send_metrics = metrics.clone();
+    let send_task = tokio::spawn(async move {
+        // Send initial join message to this client
+        if let Ok(text) = serde_json::to_string(&join_msg) {
+            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from(text))).await {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    connection_id = %send_ctx.connection_id,
+                    error = %e,
+                    "failed to send join message, aborting connection"
+                );
+                return;
+            }
+            send_metrics.increment_sent();
+        }
+
+        // Listen for NATS messages and forward to this client
+        loop {
+            match message_stream.next_with_timeout(NATS_FETCH_TIMEOUT).await {
+                Ok(Some(mut nats_msg)) => {
+                    let ws_message = &nats_msg.payload().message;
+
+                    // Echo prevention: don't send messages back to the sender
+                    if let Some(sender_id) = ws_message.account_id()
+                        && sender_id == send_ctx.account_id
+                    {
+                        if let Err(e) = nats_msg.ack().await {
+                            tracing::trace!(
+                                target: TRACING_TARGET,
+                                connection_id = %send_ctx.connection_id,
+                                error = %e,
+                                "failed to ack echoed message"
+                            );
+                        }
+                        continue;
+                    }
+
+                    // Serialize and send the message
+                    match serde_json::to_string(ws_message) {
+                        Ok(text) => {
+                            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from(text))).await
+                            {
+                                tracing::debug!(
+                                    target: TRACING_TARGET,
+                                    connection_id = %send_ctx.connection_id,
+                                    error = %e,
+                                    "failed to send message, client disconnected"
+                                );
+                                break;
+                            }
+                            send_metrics.increment_sent();
+
+                            // Acknowledge the message
+                            if let Err(e) = nats_msg.ack().await {
+                                tracing::warn!(
+                                    target: TRACING_TARGET,
+                                    connection_id = %send_ctx.connection_id,
+                                    error = %e,
+                                    "failed to acknowledge NATS message"
+                                );
+                                send_metrics.increment_errors();
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                target: TRACING_TARGET,
+                                connection_id = %send_ctx.connection_id,
+                                error = %e,
+                                "failed to serialize message"
+                            );
+                            send_metrics.increment_errors();
+
+                            // Still ack to prevent redelivery
+                            let _ = nats_msg.ack().await;
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // Timeout - continue waiting
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: TRACING_TARGET,
+                        connection_id = %send_ctx.connection_id,
+                        error = %e,
+                        "error receiving from NATS stream"
+                    );
+                    send_metrics.increment_errors();
+                    break;
+                }
+            }
+        }
+    });
+
+    // Wait for either task to complete with graceful shutdown
+    let shutdown_result = tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, async {
+        tokio::select! {
+            _ = recv_task => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    connection_id = %ctx.connection_id,
+                    "receive task completed"
+                );
+            },
+            _ = send_task => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    connection_id = %ctx.connection_id,
+                    "send task completed"
+                );
+            }
+        }
+    })
+    .await;
+
+    if shutdown_result.is_err() {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            connection_id = %ctx.connection_id,
+            "graceful shutdown timeout exceeded"
+        );
+    }
+
+    // Publish leave message
+    let leave_msg = ProjectWsMessage::leave(ctx.account_id);
+    if let Err(e) = publisher.publish_message(ctx.project_id, leave_msg).await {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            connection_id = %ctx.connection_id,
+            error = %e,
+            "failed to publish leave message"
+        );
+    }
+
+    // Log final metrics
+    let duration = start_time.elapsed();
+    let final_metrics = metrics.snapshot();
+    tracing::info!(
+        target: TRACING_TARGET,
+        connection_id = %ctx.connection_id,
+        account_id = %ctx.account_id,
+        project_id = %ctx.project_id,
+        duration_ms = duration.as_millis(),
+        messages_sent = final_metrics.sent,
+        messages_received = final_metrics.received,
+        messages_published = final_metrics.published,
+        messages_dropped = final_metrics.dropped,
+        errors = final_metrics.errors,
         "websocket connection closed"
     );
 }
@@ -656,13 +739,14 @@ async fn handle_project_websocket(
 /// Establishes a WebSocket connection for a project.
 ///
 /// This endpoint upgrades an HTTP connection to a WebSocket for real-time
-/// communication within a project. Clients must be authenticated and have
-/// at least read access to the project.
+/// communication within a project using NATS JetStream for distributed pub/sub.
+/// Clients must be authenticated and have at least read access to the project.
 ///
 /// # Security
 ///
 /// - Requires valid JWT authentication
-/// - Verifies user has `ReadAnyDocument` permission for the project
+/// - Verifies user has `ViewDocuments` permission for initial connection
+/// - Checks permissions per-event during the connection lifecycle
 /// - Validates project existence before upgrading connection
 /// - Enforces message size limits to prevent DoS attacks
 ///
@@ -671,11 +755,12 @@ async fn handle_project_websocket(
 /// 1. Client sends upgrade request with Authorization header
 /// 2. Server validates authentication and project access
 /// 3. Connection is upgraded to WebSocket
-/// 4. Server broadcasts `Join` message to all project clients
-/// 5. Two concurrent tasks handle sending and receiving
-/// 6. Messages are broadcast to all connected clients via channel
-/// 7. Server broadcasts `Leave` message on disconnect
-/// 8. Connection closed gracefully
+/// 4. Server fetches account details and creates unique NATS consumer
+/// 5. Server publishes `Join` message to NATS stream
+/// 6. Two concurrent tasks handle sending and receiving
+/// 7. Messages are distributed via NATS with per-event permission checking
+/// 8. Server publishes `Leave` message on disconnect
+/// 9. Connection closed gracefully with timeout and metrics logged
 #[tracing::instrument(skip_all, fields(
     account_id = %auth_claims.account_id,
     project_id = %path_params.project_id
@@ -691,55 +776,52 @@ async fn handle_project_websocket(
         (
             status = UNAUTHORIZED,
             description = "Authentication required",
+            body = ErrorResponse,
         ),
         (
             status = FORBIDDEN,
             description = "Insufficient permissions",
+            body = ErrorResponse,
         ),
         (
             status = NOT_FOUND,
             description = "Project not found",
+            body = ErrorResponse,
         ),
     ),
 )]
 async fn project_websocket_handler(
-    State(pg_database): State<PgClient>,
-    State(channels): State<ProjectChannels>,
+    State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ws: WebSocketUpgrade,
 ) -> Result<Response> {
     let project_id = path_params.project_id;
+    let account_id = auth_claims.account_id;
 
     tracing::debug!(
         target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
+        account_id = %account_id,
         project_id = %project_id,
         "websocket connection requested"
     );
 
-    // Verify project exists and user has access
-    let mut conn = pg_database.get_connection().await?;
+    // Verify project exists and user has basic access
+    let mut conn = pg_client.get_connection().await?;
 
-    // Check if user has permission to access this project
+    // Check if user has minimum permission to view documents
     auth_claims
         .authorize_project(&mut conn, project_id, ProjectPermission::ViewDocuments)
         .await?;
 
     // Verify the project exists
-    let Some(_project) = ProjectRepository::find_project_by_id(&mut conn, project_id).await? else {
+    if ProjectRepository::find_project_by_id(&mut conn, project_id)
+        .await?
+        .is_none()
+    {
         return Err(ErrorKind::NotFound.with_resource("project"));
-    };
-
-    // Fetch account display name
-    let Some(account) =
-        AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id).await?
-    else {
-        return Err(ErrorKind::NotFound.with_resource("account"));
-    };
-
-    let display_name = account.display_name;
-    let account_id = auth_claims.account_id;
+    }
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -750,7 +832,7 @@ async fn project_websocket_handler(
 
     // Upgrade the connection to WebSocket
     Ok(ws.on_upgrade(move |socket| {
-        handle_project_websocket(socket, project_id, account_id, display_name, channels)
+        handle_project_websocket(socket, project_id, account_id, nats_client, pg_client)
     }))
 }
 
@@ -767,18 +849,14 @@ mod test {
 
     #[test]
     fn test_message_serialization_join() {
-        let msg = ProjectWsMessage::Join {
-            account_id: Uuid::new_v4(),
-            display_name: "Test User".to_string(),
-            timestamp: time::OffsetDateTime::now_utc(),
-        };
+        let msg = ProjectWsMessage::join(Uuid::new_v4(), "Test User");
 
-        let json = msg.to_text().unwrap();
-        let parsed = ProjectWsMessage::from_text(&json).unwrap();
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ProjectWsMessage::Join { display_name, .. } => {
-                assert_eq!(display_name, "Test User");
+            ProjectWsMessage::Join(event) => {
+                assert_eq!(event.display_name, "Test User");
             }
             _ => panic!("Wrong message type"),
         }
@@ -787,20 +865,14 @@ mod test {
     #[test]
     fn test_message_serialization_leave() {
         let account_id = Uuid::new_v4();
-        let msg = ProjectWsMessage::Leave {
-            account_id,
-            timestamp: time::OffsetDateTime::now_utc(),
-        };
+        let msg = ProjectWsMessage::leave(account_id);
 
-        let json = msg.to_text().unwrap();
-        let parsed = ProjectWsMessage::from_text(&json).unwrap();
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ProjectWsMessage::Leave {
-                account_id: parsed_id,
-                ..
-            } => {
-                assert_eq!(parsed_id, account_id);
+            ProjectWsMessage::Leave(event) => {
+                assert_eq!(event.account_id, account_id);
             }
             _ => panic!("Wrong message type"),
         }
@@ -808,19 +880,15 @@ mod test {
 
     #[test]
     fn test_typing_with_timestamp() {
-        let msg = ProjectWsMessage::Typing {
-            account_id: Uuid::new_v4(),
-            document_id: Some(Uuid::new_v4()),
-            timestamp: time::OffsetDateTime::now_utc(),
-        };
+        let msg = ProjectWsMessage::typing(Uuid::new_v4(), Some(Uuid::new_v4()));
 
-        let json = msg.to_text().unwrap();
+        let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"typing\""));
         assert!(json.contains("timestamp"));
 
-        let parsed = ProjectWsMessage::from_text(&json).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            ProjectWsMessage::Typing { .. } => {}
+            ProjectWsMessage::Typing(_) => {}
             _ => panic!("Wrong message type"),
         }
     }
@@ -828,11 +896,11 @@ mod test {
     #[test]
     fn test_error_message_with_details() {
         let error = ProjectWsMessage::error_with_details(
-            "PARSE_ERROR".to_string(),
-            "Invalid JSON".to_string(),
-            "Expected } at line 5".to_string(),
+            "PARSE_ERROR",
+            "Invalid JSON",
+            "Expected } at line 5",
         );
-        let json = error.to_text().unwrap();
+        let json = serde_json::to_string(&error).unwrap();
         assert!(json.contains("PARSE_ERROR"));
         assert!(json.contains("Invalid JSON"));
         assert!(json.contains("Expected } at line 5"));
@@ -840,21 +908,118 @@ mod test {
 
     #[test]
     fn test_document_update_serialization() {
-        let msg = ProjectWsMessage::DocumentUpdate {
-            document_id: Uuid::new_v4(),
-            version: 42,
-            updated_by: Uuid::new_v4(),
-            timestamp: time::OffsetDateTime::now_utc(),
-        };
+        let msg = ProjectWsMessage::document_update(Uuid::new_v4(), 42, Uuid::new_v4());
 
-        let json = msg.to_text().unwrap();
-        let parsed = ProjectWsMessage::from_text(&json).unwrap();
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ProjectWsMessage::DocumentUpdate { version, .. } => {
-                assert_eq!(version, 42);
+            ProjectWsMessage::DocumentUpdate(event) => {
+                assert_eq!(event.version, 42);
             }
             _ => panic!("Wrong message type"),
         }
+    }
+
+    #[test]
+    fn test_account_id_extraction() {
+        let account_id = Uuid::new_v4();
+
+        let join = ProjectWsMessage::join(account_id, "Test");
+        assert_eq!(join.account_id(), Some(account_id));
+
+        let error = ProjectWsMessage::error("ERR", "Message");
+        assert_eq!(error.account_id(), None);
+    }
+
+    #[test]
+    fn test_file_processed_event() {
+        let file_id = Uuid::new_v4();
+        let doc_id = Uuid::new_v4();
+        let msg = ProjectWsMessage::file_processed(file_id, doc_id, "ocr", None);
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
+
+        match parsed {
+            ProjectWsMessage::FileProcessed(event) => {
+                assert_eq!(event.file_id, file_id);
+                assert_eq!(event.document_id, doc_id);
+                assert_eq!(event.processing_type, "ocr");
+            }
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_file_redacted_event() {
+        let file_id = Uuid::new_v4();
+        let doc_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+        let msg = ProjectWsMessage::file_redacted(file_id, doc_id, 5, account_id);
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
+
+        match parsed {
+            ProjectWsMessage::FileRedacted(event) => {
+                assert_eq!(event.file_id, file_id);
+                assert_eq!(event.redaction_count, 5);
+                assert_eq!(event.redacted_by, account_id);
+            }
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_file_verified_event() {
+        let file_id = Uuid::new_v4();
+        let doc_id = Uuid::new_v4();
+        let msg = ProjectWsMessage::file_verified(file_id, doc_id, "virus_scan", "clean", None);
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
+
+        match parsed {
+            ProjectWsMessage::FileVerified(event) => {
+                assert_eq!(event.file_id, file_id);
+                assert_eq!(event.verification_type, "virus_scan");
+                assert_eq!(event.verification_status, "clean");
+            }
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_metrics_tracking() {
+        let metrics = ConnectionMetrics::new();
+
+        metrics.increment_sent();
+        metrics.increment_sent();
+        metrics.increment_received();
+        metrics.increment_published();
+        metrics.increment_dropped();
+        metrics.increment_errors();
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.sent, 2);
+        assert_eq!(snapshot.received, 1);
+        assert_eq!(snapshot.published, 1);
+        assert_eq!(snapshot.dropped, 1);
+        assert_eq!(snapshot.errors, 1);
+    }
+
+    #[test]
+    fn test_message_size_validation() {
+        let ctx = WsContext::new(Uuid::new_v4(), Uuid::new_v4());
+        let metrics = ConnectionMetrics::new();
+
+        // Valid size
+        assert!(validate_message_size(&ctx, 1000, &metrics));
+        assert_eq!(metrics.snapshot().dropped, 0);
+
+        // Invalid size
+        assert!(!validate_message_size(&ctx, MAX_MESSAGE_SIZE + 1, &metrics));
+        assert_eq!(metrics.snapshot().dropped, 1);
     }
 }

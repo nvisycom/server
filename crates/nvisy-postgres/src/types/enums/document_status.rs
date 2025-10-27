@@ -144,19 +144,6 @@ impl DocumentStatus {
         )
     }
 
-    /// Returns a description of what the document status means.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            DocumentStatus::Draft => "Document is being created or edited",
-            DocumentStatus::Processing => "Document is currently being processed by the system",
-            DocumentStatus::Ready => "Document is ready for use and fully processed",
-            DocumentStatus::Archived => "Document is archived but remains accessible",
-            DocumentStatus::Locked => "Document is locked for editing and read-only",
-            DocumentStatus::Error => "Document processing failed or encountered an error",
-        }
-    }
-
     /// Returns document statuses that are considered active (not archived or error).
     pub fn active_statuses() -> &'static [DocumentStatus] {
         &[

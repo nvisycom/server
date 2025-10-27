@@ -13,8 +13,8 @@
 
 use std::borrow::Cow;
 
-use nvisy_postgres::models::ProjectMember;
-use nvisy_postgres::queries::{DocumentRepository, ProjectMemberRepository};
+use nvisy_postgres::model::ProjectMember;
+use nvisy_postgres::query::{DocumentRepository, ProjectMemberRepository};
 use nvisy_postgres::{PgConnection, PgError};
 use uuid::Uuid;
 

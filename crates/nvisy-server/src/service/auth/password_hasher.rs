@@ -209,6 +209,39 @@ impl AuthHasher {
             }
         }
     }
+
+    /// Performs a dummy password verification to maintain consistent timing.
+    ///
+    /// This method is used when an account doesn't exist to prevent timing attacks
+    /// that could reveal which accounts exist in the system. It generates a random
+    /// password, hashes it, and performs verification (which will always fail).
+    ///
+    /// # Arguments
+    ///
+    /// * `password` - The password to verify (will be checked against a random hash)
+    ///
+    /// # Security Notes
+    ///
+    /// - Takes approximately the same time as a real password verification
+    /// - Prevents account enumeration via timing analysis
+    /// - Always returns false but performs actual cryptographic work
+    pub fn verify_dummy_password(&self, password: &str) -> bool {
+        use rand::Rng;
+
+        // Generate a random dummy password (16 characters)
+        let password_len = rand::random_range(16..32);
+        let dummy_password: String = (0..password_len)
+            .map(|_| rand::rng().sample(rand::distr::Alphanumeric) as char)
+            .collect();
+
+        // Hash the dummy password and verify - this will always fail
+        // but takes the same time as a real verification
+        if let Ok(dummy_hash) = self.hash_password(&dummy_password) {
+            let _ = self.verify_password(password, &dummy_hash);
+        }
+
+        false
+    }
 }
 
 impl Default for AuthHasher {

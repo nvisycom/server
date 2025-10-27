@@ -23,7 +23,6 @@ default = []
 
 [dependencies]
 # Internal crates
-nvisy-minio = { workspace = true, features = [] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-openrouter = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["utoipa"] }
@@ -66,6 +65,7 @@ validator = { workspace = true, features = [] }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
+strum = { workspace = true, features = ["derive"] }
 
 # Data types
 time = { workspace = true, features = [] }

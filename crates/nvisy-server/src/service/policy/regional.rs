@@ -34,7 +34,7 @@ use utoipa::ToSchema;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum RegionalPolicy {
+pub enum DataCollectionPolicy {
     /// Minimal data collection policy.
     ///
     /// This policy is designed for regions with strict privacy regulations
@@ -59,7 +59,7 @@ pub enum RegionalPolicy {
     NormalDataCollection,
 }
 
-impl RegionalPolicy {
+impl DataCollectionPolicy {
     /// Creates a new minimal data collection policy.
     ///
     /// This is equivalent to `RegionalPolicy::MinimalDataCollection` but
@@ -127,7 +127,7 @@ impl RegionalPolicy {
     }
 }
 
-impl fmt::Display for RegionalPolicy {
+impl fmt::Display for DataCollectionPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -140,15 +140,15 @@ mod tests {
     #[test]
     fn test_default() {
         assert_eq!(
-            RegionalPolicy::default(),
-            RegionalPolicy::MinimalDataCollection
+            DataCollectionPolicy::default(),
+            DataCollectionPolicy::MinimalDataCollection
         );
     }
 
     #[test]
     fn test_predicates() {
-        let minimal = RegionalPolicy::MinimalDataCollection;
-        let normal = RegionalPolicy::NormalDataCollection;
+        let minimal = DataCollectionPolicy::MinimalDataCollection;
+        let normal = DataCollectionPolicy::NormalDataCollection;
 
         assert!(minimal.is_minimal());
         assert!(!minimal.is_normal());
@@ -159,14 +159,20 @@ mod tests {
 
     #[test]
     fn test_string_representation() {
-        assert_eq!(RegionalPolicy::MinimalDataCollection.as_str(), "minimal");
-        assert_eq!(RegionalPolicy::NormalDataCollection.as_str(), "normal");
+        assert_eq!(
+            DataCollectionPolicy::MinimalDataCollection.as_str(),
+            "minimal"
+        );
+        assert_eq!(
+            DataCollectionPolicy::NormalDataCollection.as_str(),
+            "normal"
+        );
     }
 
     #[test]
     fn test_policy_properties() {
-        let minimal = RegionalPolicy::MinimalDataCollection;
-        let normal = RegionalPolicy::NormalDataCollection;
+        let minimal = DataCollectionPolicy::MinimalDataCollection;
+        let normal = DataCollectionPolicy::NormalDataCollection;
 
         // Test consent requirements
         assert!(minimal.requires_explicit_consent());

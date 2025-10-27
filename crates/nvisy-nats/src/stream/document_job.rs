@@ -6,7 +6,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{JobPriority, JobStatus};
+use super::event::{EventPriority, EventStatus};
 
 /// Document processing stages
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,13 +71,13 @@ pub struct DocumentJobPayload {
 pub struct DocumentJob {
     pub id: Uuid,
     pub payload: DocumentJobPayload,
-    pub priority: JobPriority,
+    pub priority: EventPriority,
     pub max_retries: u32,
     pub retry_count: u32,
     pub timeout: Duration,
     pub created_at: Timestamp,
     pub scheduled_for: Option<Timestamp>,
-    pub status: JobStatus,
+    pub status: EventStatus,
 }
 
 impl DocumentJob {
@@ -103,13 +103,13 @@ impl DocumentJob {
                 cleanup_tasks: None,
                 finalization_steps: None,
             },
-            priority: JobPriority::Normal,
+            priority: EventPriority::Normal,
             max_retries: 3,
             retry_count: 0,
             timeout: Duration::from_secs(300),
             created_at: Timestamp::now(),
             scheduled_for: None,
-            status: JobStatus::Pending,
+            status: EventStatus::Pending,
         }
     }
 
@@ -134,13 +134,13 @@ impl DocumentJob {
                 cleanup_tasks: None,
                 finalization_steps: None,
             },
-            priority: JobPriority::Normal,
+            priority: EventPriority::Normal,
             max_retries: 3,
             retry_count: 0,
             timeout: Duration::from_secs(300),
             created_at: Timestamp::now(),
             scheduled_for: None,
-            status: JobStatus::Pending,
+            status: EventStatus::Pending,
         }
     }
 
@@ -165,18 +165,18 @@ impl DocumentJob {
                 cleanup_tasks: Some(cleanup_tasks),
                 finalization_steps: Some(finalization_steps),
             },
-            priority: JobPriority::Normal,
+            priority: EventPriority::Normal,
             max_retries: 3,
             retry_count: 0,
             timeout: Duration::from_secs(300),
             created_at: Timestamp::now(),
             scheduled_for: None,
-            status: JobStatus::Pending,
+            status: EventStatus::Pending,
         }
     }
 
     /// Set job priority
-    pub fn with_priority(mut self, priority: JobPriority) -> Self {
+    pub fn with_priority(mut self, priority: EventPriority) -> Self {
         self.priority = priority;
         self
     }
@@ -225,8 +225,8 @@ mod tests {
         );
 
         assert_eq!(job.payload.stage, ProcessingStage::Preprocessing);
-        assert_eq!(job.priority, JobPriority::Normal);
-        assert_eq!(job.status, JobStatus::Pending);
+        assert_eq!(job.priority, EventPriority::Normal);
+        assert_eq!(job.status, EventStatus::Pending);
         assert!(job.can_retry());
         assert_eq!(job.payload.source_format, Some("pdf".to_string()));
         assert_eq!(job.payload.target_format, Some("docx".to_string()));
@@ -276,8 +276,8 @@ mod tests {
         assert_eq!(job.payload.stage, ProcessingStage::Postprocessing);
         assert_eq!(job.payload.cleanup_tasks, Some(cleanup_tasks));
         assert_eq!(job.payload.finalization_steps, Some(finalization_steps));
-        assert_eq!(job.priority, JobPriority::Normal);
-        assert_eq!(job.status, JobStatus::Pending);
+        assert_eq!(job.priority, EventPriority::Normal);
+        assert_eq!(job.status, EventStatus::Pending);
     }
 
     #[test]
@@ -293,12 +293,12 @@ mod tests {
             None,
             vec![],
         )
-        .with_priority(JobPriority::High)
+        .with_priority(EventPriority::High)
         .with_max_retries(5)
         .with_timeout(Duration::from_secs(600))
         .scheduled_for(scheduled_time);
 
-        assert_eq!(job.priority, JobPriority::High);
+        assert_eq!(job.priority, EventPriority::High);
         assert_eq!(job.max_retries, 5);
         assert_eq!(job.timeout, Duration::from_secs(600));
         assert_eq!(job.scheduled_for, Some(scheduled_time));
@@ -315,17 +315,17 @@ mod tests {
         );
 
         // Test all priority levels
-        job = job.with_priority(JobPriority::Low);
-        assert_eq!(job.priority, JobPriority::Low);
+        job = job.with_priority(EventPriority::Low);
+        assert_eq!(job.priority, EventPriority::Low);
 
-        job = job.with_priority(JobPriority::Normal);
-        assert_eq!(job.priority, JobPriority::Normal);
+        job = job.with_priority(EventPriority::Normal);
+        assert_eq!(job.priority, EventPriority::Normal);
 
-        job = job.with_priority(JobPriority::High);
-        assert_eq!(job.priority, JobPriority::High);
+        job = job.with_priority(EventPriority::High);
+        assert_eq!(job.priority, EventPriority::High);
 
-        job = job.with_priority(JobPriority::Critical);
-        assert_eq!(job.priority, JobPriority::Critical);
+        job = job.with_priority(EventPriority::Critical);
+        assert_eq!(job.priority, EventPriority::Critical);
     }
 
     #[test]

@@ -4,11 +4,10 @@
 //! and version metadata management.
 
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use nvisy_minio::MinioClient;
+use axum::http::{HeaderMap, StatusCode};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::models::DocumentVersion;
-use nvisy_postgres::queries::DocumentVersionRepository;
+use nvisy_postgres::model::DocumentVersion;
+use nvisy_postgres::query::DocumentVersionRepository;
 use nvisy_postgres::types::FileType;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -24,7 +23,7 @@ use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document version operations.
-const TRACING_TARGET: &str = "nvisy::handler::document_versions";
+const TRACING_TARGET: &str = "nvisy_server::handler::document_versions";
 
 /// `Path` param for `{versionId}` handlers.
 #[must_use]
@@ -96,7 +95,7 @@ struct ReadAllVersionsResponse {
 }
 
 /// Lists all versions of a document.
-#[tracing::instrument(skip(pg_database))]
+#[tracing::instrument(skip(pg_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/versions/", tag = "documents",
     params(
@@ -133,13 +132,13 @@ struct ReadAllVersionsResponse {
     )
 )]
 async fn get_version_files(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     Path(path_params): Path<DocumentPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<ReadAllVersionsResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
     auth_claims
@@ -198,7 +197,7 @@ async fn get_version_files(
 }
 
 /// Gets information about a specific version.
-#[tracing::instrument(skip(pg_database))]
+#[tracing::instrument(skip(pg_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/versions/{versionId}/info", tag = "documents",
     params(DocVersionIdPathParams),
@@ -231,12 +230,12 @@ async fn get_version_files(
     ),
 )]
 async fn get_version_info(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<(StatusCode, Json<VersionInfo>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
     auth_claims
@@ -271,7 +270,7 @@ async fn get_version_info(
 }
 
 /// Downloads a document version output file.
-#[tracing::instrument(skip(pg_database, minio_client))]
+#[tracing::instrument(skip(_pg_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/versions/{versionId}/download", tag = "documents",
     params(DocVersionIdPathParams),
@@ -299,105 +298,20 @@ async fn get_version_info(
     ),
 )]
 async fn download_version_file(
-    State(pg_database): State<PgClient>,
-    State(minio_client): State<MinioClient>,
-    Path(path_params): Path<DocVersionIdPathParams>,
-    AuthState(auth_claims): AuthState,
+    State(_pg_client): State<PgClient>,
+    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    Path(_path_params): Path<DocVersionIdPathParams>,
+    AuthState(_auth_claims): AuthState,
     _version: Version,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
-    let mut conn = pg_database.get_connection().await?;
-
-    // Verify document access
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::ViewFiles,
-        )
-        .await?;
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        version_id = %path_params.version_id,
-        document_id = %path_params.document_id,
-        "Fetching version for download"
-    );
-
-    // Get version metadata
-    let Some(version) =
-        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
-            .await?
-    else {
-        return Err(ErrorKind::NotFound.with_message("Version not found"));
-    };
-
-    // Verify version belongs to document
-    if version.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound.with_message("Version not found in document"));
-    }
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        version_id = %version.id,
-        path = %version.storage_path,
-        "Downloading version file from storage"
-    );
-
-    // Download from MinIO
-    let (file_data, _download_result) = minio_client
-        .object_operations()
-        .download_file("documents", &version.storage_path)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                version_id = %version.id,
-                path = %version.storage_path,
-                "Failed to download version file from storage"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to retrieve version file")
-        })?;
-
-    // Build response headers
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_str(&version.mime_type)
-            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
-    );
-
-    let filename = format!("attachment; filename=\"{}\"", version.display_name);
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&filename).unwrap_or_else(|_| HeaderValue::from_static("attachment")),
-    );
-
-    headers.insert(
-        header::CONTENT_LENGTH,
-        HeaderValue::from(version.file_size_bytes as u64),
-    );
-
-    // Add version metadata headers
-    headers.insert(
-        "X-Version-Number",
-        HeaderValue::from_str(&version.version_number.to_string())
-            .unwrap_or_else(|_| HeaderValue::from_static("0")),
-    );
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        version_id = %version.id,
-        filename = %version.display_name,
-        size = version.file_size_bytes,
-        "Version downloaded successfully"
-    );
-
-    Ok((StatusCode::OK, headers, file_data.to_vec()))
+    // TODO: Replace with NATS object store implementation
+    Err(ErrorKind::NotImplemented.with_message(
+        "Version file download not implemented - MinIO removed, use NATS object store",
+    ))
 }
 
 /// Deletes a document version.
-#[tracing::instrument(skip(pg_database, minio_client))]
+#[tracing::instrument(skip(pg_client))]
 #[utoipa::path(
     delete, path = "/documents/{documentId}/versions/{versionId}", tag = "documents",
     params(DocVersionIdPathParams),
@@ -429,13 +343,13 @@ async fn download_version_file(
     )
 )]
 async fn delete_version(
-    State(pg_database): State<PgClient>,
-    State(minio_client): State<MinioClient>,
+    State(pg_client): State<PgClient>,
+    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify permissions (need editor role to delete)
     auth_claims
@@ -471,42 +385,9 @@ async fn delete_version(
             .with_context("Delete older versions or create a new version first"));
     }
 
-    // Delete from storage
-    minio_client
-        .object_operations()
-        .delete_object("documents", &version.storage_path)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                version_id = %version.id,
-                "Failed to delete version from storage"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to delete version from storage")
-        })?;
-
-    // Delete from database
-    DocumentVersionRepository::delete_document_version(&mut conn, version.id)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                version_id = %version.id,
-                "Failed to delete version from database"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to delete version record")
-        })?;
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        version_id = %version.id,
-        version_number = version.version_number,
-        "Version deleted successfully"
-    );
-
-    Ok(StatusCode::NO_CONTENT)
+    // TODO: Replace with NATS object store implementation
+    Err(ErrorKind::NotImplemented
+        .with_message("Version deletion not implemented - MinIO removed, use NATS object store"))
 }
 
 /// Returns a [`Router`] with all related routes.

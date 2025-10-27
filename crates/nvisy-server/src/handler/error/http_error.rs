@@ -19,9 +19,9 @@ use crate::handler::response::ErrorResponse;
 #[must_use = "errors do nothing unless serialized"]
 pub struct Error<'a> {
     kind: ErrorKind,
+    resource: Option<Cow<'a, str>>,
     context: Option<Cow<'a, str>>,
     message: Option<Cow<'a, str>>,
-    resource: Option<Cow<'a, str>>,
 }
 
 impl Error<'static> {
@@ -30,9 +30,9 @@ impl Error<'static> {
     pub fn new(kind: ErrorKind) -> Self {
         Self {
             kind,
+            resource: None,
             context: None,
             message: None,
-            resource: None,
         }
     }
 }

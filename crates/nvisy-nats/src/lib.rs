@@ -52,76 +52,18 @@ pub const TRACING_TARGET_OBJECT: &str = "nvisy_nats::object";
 pub const TRACING_TARGET_STREAM: &str = "nvisy_nats::stream";
 pub const TRACING_TARGET_CONNECTION: &str = "nvisy_nats::connection";
 
-pub mod client;
+mod client;
 pub mod kv;
 pub mod object;
-pub mod retry;
 pub mod stream;
 
-// Re-export key types
-pub use async_nats::Error as NatsError;
 pub use client::{NatsClient, NatsConfig, NatsConnection, NatsCredentials, NatsTlsConfig};
-pub use kv::{
-    ApiToken, ApiTokenStore, ApiTokenType, CacheStats, CacheStore, KvEntry, KvStore, KvValue,
-    TokenStoreStats,
-};
-pub use object::{GetResult, ObjectInfo, ObjectMeta, ObjectStore, PutResult};
-pub use retry::RetryConfig;
-pub use stream::{
-    DocumentJob, DocumentJobBatchStream, DocumentJobMessage, DocumentJobPayload,
-    DocumentJobPriority, DocumentJobPublisher, DocumentJobStatus, DocumentJobStream,
-    DocumentJobSubscriber, ProcessingOptions, ProcessingStage, ProcessingType, ProjectEventJob,
-    ProjectEventPayload, ProjectEventPriority, ProjectEventPublisher, ProjectEventStatus,
-    ProjectExportJob, ProjectExportPayload, ProjectExportPriority, ProjectExportPublisher,
-    ProjectExportStatus, ProjectImportJob, ProjectImportPayload, ProjectImportPriority,
-    ProjectImportPublisher, ProjectImportStatus, StreamPublisher, StreamSubscriber,
-    TypedBatchStream, TypedMessage, TypedMessageStream,
-};
 
 /// Result type for all NATS operations in this crate.
 ///
 /// This is a convenience type alias that defaults to using [`Error`] as the error type.
 /// Most functions in this crate return this type for consistent error handling.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-/// Check if a NATS server URL is valid.
-///
-/// This is a simple validation that checks for proper URL format and supported schemes.
-///
-/// # Examples
-///
-/// ```
-/// use nvisy_nats::is_valid_nats_url;
-///
-/// assert!(is_valid_nats_url("nats://localhost:4222"));
-/// assert!(is_valid_nats_url("tls://secure.nats.io:4222"));
-/// assert!(!is_valid_nats_url("http://example.com"));
-/// ```
-pub fn is_valid_nats_url(url: &str) -> bool {
-    url.starts_with("nats://")
-        || url.starts_with("tls://")
-        || url.starts_with("ws://")
-        || url.starts_with("wss://")
-}
-
-/// Create a default NATS configuration for development.
-///
-/// This is equivalent to `NatsConfig::new("nats://localhost:4222")` but with
-/// additional development-friendly settings.
-///
-/// # Examples
-///
-/// ```ignore
-/// use nvisy_nats::dev_config;
-///
-/// let config = dev_config();
-/// // Equivalent to:
-/// // let config = NatsConfig::new("nats://localhost:4222")
-/// //     .with_name("nvisy-dev");
-/// ```
-pub fn dev_config() -> NatsConfig {
-    NatsConfig::new("nats://localhost:4222").with_name("nvisy-dev")
-}
 
 /// Unified error type for NATS operations
 #[derive(Debug, thiserror::Error)]
@@ -387,51 +329,6 @@ impl Error {
         Self::Timeout { timeout: duration }
     }
 
-    /// Convert any error to JetstreamMessage error
-    pub fn jetstream_message(error: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::JetstreamMessage(Box::new(error))
-    }
-
-    /// Convert boxed error to JetstreamMessage error
-    pub fn jetstream_message_boxed(error: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        Self::JetstreamMessage(error)
-    }
-
-    /// Get the error severity level for alerting/monitoring
-    pub fn severity(&self) -> &'static str {
-        match self {
-            // Critical errors that require immediate attention
-            Error::InvalidConfig { .. } => "critical",
-
-            // High severity errors that affect functionality
-            Error::Connection(_) | Error::StreamError { .. } | Error::JobQueueError { .. } => {
-                "high"
-            }
-
-            // Medium severity errors that may affect user experience
-            Error::Timeout { .. }
-            | Error::DeliveryFailed { .. }
-            | Error::JetstreamPublish(_)
-            | Error::JetstreamMessage(_)
-            | Error::Consumer(_)
-            | Error::ConsumerError { .. }
-            | Error::Stream(_)
-            | Error::Ack(_)
-            | Error::Operation { .. } => "medium",
-
-            // Low severity errors that are often expected (like not found)
-            Error::KvKeyNotFound { .. }
-            | Error::ObjectNotFound { .. }
-            | Error::KvBucketNotFound { .. }
-            | Error::ObjectBucketNotFound { .. } => "low",
-
-            // Client errors that indicate programming issues
-            Error::Serialization(_)
-            | Error::Deserialization(_)
-            | Error::KvRevisionMismatch { .. } => "medium",
-        }
-    }
-
     /// Check if this is a client-side error (programming/configuration issue)
     pub fn is_client_error(&self) -> bool {
         matches!(
@@ -501,17 +398,14 @@ mod tests {
         };
         assert_eq!(timeout_err.category(), "timeout");
         assert!(timeout_err.is_retryable());
-        assert_eq!(timeout_err.severity(), "medium");
 
         let stream_err = Error::stream_error("TEST_STREAM", "Stream not found");
         assert_eq!(stream_err.category(), "jetstream.stream");
         assert!(!stream_err.is_retryable());
-        assert_eq!(stream_err.severity(), "high");
 
         let delivery_err = Error::delivery_failed("test.subject", "connection failed");
         assert_eq!(delivery_err.category(), "delivery");
         assert!(delivery_err.is_retryable());
-        assert_eq!(delivery_err.severity(), "medium");
 
         let non_retryable_delivery = Error::delivery_failed("test.subject", "invalid payload");
         assert_eq!(non_retryable_delivery.category(), "delivery");
@@ -531,11 +425,9 @@ mod tests {
         assert!(kv_not_found.is_not_found());
         assert!(!kv_not_found.is_client_error());
         assert!(!kv_not_found.is_retryable());
-        assert_eq!(kv_not_found.severity(), "low");
 
         let config_err = Error::invalid_config("missing required field");
         assert!(config_err.is_client_error());
         assert!(!config_err.is_retryable());
-        assert_eq!(config_err.severity(), "critical");
     }
 }

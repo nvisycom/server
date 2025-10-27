@@ -3,90 +3,12 @@
 //! This module provides comprehensive document management functionality within projects,
 //! including creation, reading, updating, and deletion of documents. All operations
 //! are secured with proper authorization and follow project-based access control.
-//!
-//! # Security Features
-//!
-//! ## Project-Based Authorization
-//! - JWT-based authentication required for all operations
-//! - Project membership verification with role-based permissions
-//! - Document ownership tracking and access control
-//! - Cross-project access prevention
-//!
-//! ## Access Control Levels
-//! - **Viewer**: Can read documents and their metadata
-//! - **Editor**: Can create, modify, and delete their own documents
-//! - **Admin**: Can manage all documents within the project
-//! - **Owner**: Full control over project and all documents
-//!
-//! ## Data Validation
-//! - Document title and description sanitization
-//! - Content type validation and security checks
-//! - File size and format restrictions
-//! - Malicious content detection
-//!
-//! # Endpoints
-//!
-//! ## Document Operations
-//! - `POST /projects/{projectId}/documents` - Create new document
-//! - `GET /projects/{projectId}/documents` - List project documents
-//! - `GET /projects/{projectId}/documents/{documentId}` - Get document details
-//! - `PUT /projects/{projectId}/documents/{documentId}` - Update document
-//! - `DELETE /projects/{projectId}/documents/{documentId}` - Delete document
-//!
-//! # Request/Response Examples
-//!
-//! ## Create Document Request
-//! ```json
-//! {
-//!   "title": "API Documentation",
-//!   "description": "Complete API documentation for v2.0",
-//!   "contentType": "text/markdown"
-//! }
-//! ```
-//!
-//! ## Document Response
-//! ```json
-//! {
-//!   "documentId": "550e8400-e29b-41d4-a716-446655440000",
-//!   "projectId": "660f9500-f39c-52e5-b827-556766550000",
-//!   "title": "API Documentation",
-//!   "description": "Complete API documentation for v2.0",
-//!   "contentType": "text/markdown",
-//!   "fileCount": 5,
-//!   "totalSize": 2048576,
-//!   "createdAt": "2024-01-15T10:30:00Z",
-//!   "updatedAt": "2024-01-15T14:45:00Z",
-//!   "createdBy": {
-//!     "accountId": "770fa600-049d-63f6-c938-667877660000",
-//!     "displayName": "John Doe"
-//!   }
-//! }
-//! ```
-//!
-//! # Error Handling
-//!
-//! All endpoints return standardized error responses:
-//! - `400 Bad Request` - Invalid input data or validation failures
-//! - `401 Unauthorized` - Authentication required or invalid token
-//! - `403 Forbidden` - Insufficient project permissions
-//! - `404 Not Found` - Document or project not found
-//! - `409 Conflict` - Document title conflicts within project
-//! - `413 Payload Too Large` - Document content exceeds limits
-//! - `500 Internal Server Error` - System errors
-//!
-//! # Performance Features
-//!
-//! - Efficient pagination for document listings
-//! - Lazy loading of document content and metadata
-//! - Database query optimization with proper indexing
-//! - File storage integration with MinIO for large content
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_minio::MinioClient;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::models::{Document, NewDocument, UpdateDocument};
-use nvisy_postgres::queries::DocumentRepository;
+use nvisy_postgres::model::{Document, NewDocument, UpdateDocument};
+use nvisy_postgres::query::DocumentRepository;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
@@ -101,7 +23,7 @@ use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document operations.
-const TRACING_TARGET: &str = "nvisy::handler::documents";
+const TRACING_TARGET: &str = "nvisy_server::handler::documents";
 
 /// `Path` param for `{documentId}` handlers.
 #[must_use]
@@ -116,7 +38,11 @@ pub struct DocumentPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "displayName": "Q4 Financial Report"
+}))]
 struct CreateDocumentRequest {
+    /// Display name of the document.
     #[validate(length(min = 1, max = 255))]
     pub display_name: String,
 }
@@ -126,18 +52,28 @@ struct CreateDocumentRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct CreateDocumentResponse {
+    /// ID of the document.
     pub document_id: Uuid,
+    /// Timestamp when the document was created.
     pub created_at: OffsetDateTime,
+    /// Timestamp when the document was last updated.
     pub updated_at: OffsetDateTime,
 }
 
-impl From<Document> for CreateDocumentResponse {
-    fn from(document: Document) -> Self {
+impl CreateDocumentResponse {
+    /// Creates a new instance of [`CreateDocumentResponse`].
+    pub fn new(document: Document) -> Self {
         Self {
             document_id: document.id,
             created_at: document.created_at,
             updated_at: document.updated_at,
         }
+    }
+}
+
+impl From<Document> for CreateDocumentResponse {
+    fn from(document: Document) -> Self {
+        Self::new(document)
     }
 }
 
@@ -170,7 +106,7 @@ impl From<Document> for CreateDocumentResponse {
     ),
 )]
 async fn create_document(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentRequest>,
@@ -183,7 +119,7 @@ async fn create_document(
         "creating new document",
     );
 
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_project(
@@ -223,8 +159,11 @@ async fn create_document(
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct ListDocumentsResponseItem {
+    /// ID of the document.
     pub document_id: Uuid,
+    /// ID of the account that owns the document.
     pub account_id: Uuid,
+    /// Display name of the document.
     pub display_name: String,
 }
 
@@ -286,12 +225,12 @@ impl ListDocumentsResponse {
     )
 )]
 async fn get_all_documents(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    Json(_pagination): Json<Pagination>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<ListDocumentsResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_project(
@@ -304,7 +243,7 @@ async fn get_all_documents(
     let documents = DocumentRepository::find_documents_by_project(
         &mut conn,
         path_params.project_id,
-        Default::default(),
+        pagination.into(),
     )
     .await?;
 
@@ -331,9 +270,13 @@ async fn get_all_documents(
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct GetDocumentResponse {
+    /// ID of the document.
     pub id: Uuid,
+    /// ID of the project that the document belongs to.
     pub project_id: Uuid,
+    /// ID of the account that owns the document.
     pub account_id: Uuid,
+    /// Display name of the document.
     pub display_name: String,
 }
 
@@ -372,11 +315,11 @@ impl From<Document> for GetDocumentResponse {
     ),
 )]
 async fn get_document(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<GetDocumentResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_document(
@@ -406,6 +349,9 @@ async fn get_document(
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "displayName": "Updated Report Name"
+}))]
 struct UpdateDocumentRequest {
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
@@ -416,18 +362,28 @@ struct UpdateDocumentRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct UpdateDocumentResponse {
+    /// ID of the updated document.
     pub document_id: Uuid,
+    /// Timestamp when the document was created.
     pub created_at: OffsetDateTime,
+    /// Timestamp when the document was last updated.
     pub updated_at: OffsetDateTime,
 }
 
-impl From<Document> for UpdateDocumentResponse {
-    fn from(document: Document) -> Self {
+impl UpdateDocumentResponse {
+    /// Creates a new instance of `UpdateDocumentResponse`.
+    pub fn new(document: Document) -> Self {
         Self {
             document_id: document.id,
             created_at: document.created_at,
             updated_at: document.updated_at,
         }
+    }
+}
+
+impl From<Document> for UpdateDocumentResponse {
+    fn from(document: Document) -> Self {
+        Self::new(document)
     }
 }
 
@@ -460,12 +416,12 @@ impl From<Document> for UpdateDocumentResponse {
     ),
 )]
 async fn update_document(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocumentRequest>,
 ) -> Result<(StatusCode, Json<UpdateDocumentResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -552,8 +508,8 @@ impl From<Document> for DeleteDocumentResponse {
     )
 )]
 async fn delete_document(
-    State(pg_database): State<PgClient>,
-    State(_storage): State<MinioClient>,
+    State(pg_client): State<PgClient>,
+    // State(_storage): State<MinioClient>, // TODO: Replace with NATS object store
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<DeleteDocumentResponse>)> {
@@ -564,7 +520,7 @@ async fn delete_document(
         "document deletion requested - this is a destructive operation",
     );
 
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_document(
@@ -610,19 +566,167 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod test {
-    use crate::handler::documents::routes;
+    use super::*;
     use crate::handler::test::create_test_server_with_router;
 
     #[tokio::test]
-    async fn handlers() -> anyhow::Result<()> {
-        let _server = create_test_server_with_router(|_| routes()).await?;
+    async fn test_create_document_success() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
 
-        // TODO: Add comprehensive integration tests for:
-        // - Document creation with proper authorization
-        // - Document listing with pagination
-        // - Document updates with permission checks
-        // - Document deletion with cascade handling
-        // - Error scenarios and edge cases
+        let request = CreateDocumentRequest {
+            display_name: "Test Document".to_string(),
+        };
+
+        let project_id = Uuid::new_v4();
+        let response = server
+            .post(&format!("/projects/{}/documents/", project_id))
+            .json(&request)
+            .await;
+        response.assert_status(StatusCode::CREATED);
+
+        let body: CreateDocumentResponse = response.json();
+        assert!(!body.document_id.is_nil());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_create_document_empty_name() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
+
+        let request = serde_json::json!({
+            "displayName": ""
+        });
+
+        let project_id = Uuid::new_v4();
+        let response = server
+            .post(&format!("/projects/{}/documents/", project_id))
+            .json(&request)
+            .await;
+        response.assert_status_bad_request();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_list_documents() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
+
+        let project_id = Uuid::new_v4();
+
+        // Create a document first
+        let request = CreateDocumentRequest {
+            display_name: "List Test Document".to_string(),
+        };
+        server
+            .post(&format!("/projects/{}/documents/", project_id))
+            .json(&request)
+            .await;
+
+        // List documents
+        let pagination = Pagination {
+            offset: Some(0),
+            limit: Some(10),
+        };
+        let response = server
+            .get(&format!("/projects/{}/documents/", project_id))
+            .json(&pagination)
+            .await;
+        response.assert_status_ok();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_update_document() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
+
+        let project_id = Uuid::new_v4();
+
+        // Create a document
+        let create_request = CreateDocumentRequest {
+            display_name: "Original Name".to_string(),
+        };
+        let create_response = server
+            .post(&format!("/projects/{}/documents/", project_id))
+            .json(&create_request)
+            .await;
+        let created: CreateDocumentResponse = create_response.json();
+
+        // Update the document
+        let update_request = UpdateDocumentRequest {
+            display_name: Some("Updated Name".to_string()),
+        };
+
+        let response = server
+            .patch(&format!("/documents/{}/", created.document_id))
+            .json(&update_request)
+            .await;
+        response.assert_status_ok();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_document() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
+
+        let project_id = Uuid::new_v4();
+
+        // Create a document
+        let request = CreateDocumentRequest {
+            display_name: "Get Test".to_string(),
+        };
+        let create_response = server
+            .post(&format!("/projects/{}/documents/", project_id))
+            .json(&request)
+            .await;
+        let created: CreateDocumentResponse = create_response.json();
+
+        // Get the document
+        let response = server
+            .get(&format!("/documents/{}/", created.document_id))
+            .await;
+        response.assert_status_ok();
+
+        let body: GetDocumentResponse = response.json();
+        assert_eq!(body.id, created.document_id);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_document() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
+
+        let project_id = Uuid::new_v4();
+
+        // Create a document
+        let request = CreateDocumentRequest {
+            display_name: "Delete Test".to_string(),
+        };
+        let create_response = server
+            .post(&format!("/projects/{}/documents/", project_id))
+            .json(&request)
+            .await;
+        let created: CreateDocumentResponse = create_response.json();
+
+        // Delete the document
+        let response = server
+            .delete(&format!("/documents/{}/", created.document_id))
+            .await;
+        response.assert_status_ok();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_document() -> anyhow::Result<()> {
+        let server = create_test_server_with_router(|_| routes()).await?;
+
+        let fake_id = Uuid::new_v4();
+        let response = server.get(&format!("/documents/{}/", fake_id)).await;
+        response.assert_status_not_found();
 
         Ok(())
     }

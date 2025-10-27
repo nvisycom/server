@@ -38,14 +38,14 @@ use axum_extra::headers::authorization::Bearer;
 use axum_extra::typed_header::TypedHeaderRejectionReason;
 use jsonwebtoken::errors::{Error as JwtError, ErrorKind as JwtErrorKind};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use nvisy_postgres::models::{Account, AccountApiToken};
+use nvisy_postgres::model::{Account, AccountApiToken};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::TRACING_TARGET_AUTHENTICATION;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{AuthKeys, RegionalPolicy};
+use crate::service::{AuthKeys, DataCollectionPolicy};
 
 /// JWT authentication header extractor and response generator.
 ///
@@ -258,16 +258,16 @@ pub struct AuthClaims {
     /// Issued at (as UTC timestamp).
     #[serde(rename = "iat")]
     #[serde(with = "time::serde::rfc3339")]
-    issued_at: OffsetDateTime,
+    pub issued_at: OffsetDateTime,
     /// Expiration time (as UTC timestamp).
     #[serde(rename = "exp")]
     #[serde(with = "time::serde::rfc3339")]
-    expired_at: OffsetDateTime,
+    pub expires_at: OffsetDateTime,
 
     // Private (or custom) claims
     /// Regional data collection policy.
     #[serde(rename = "pol")]
-    pub regional_policy: RegionalPolicy,
+    pub data_collection_policy: DataCollectionPolicy,
     /// Is administrator flag.
     #[serde(rename = "cre")]
     pub is_administrator: bool,
@@ -296,19 +296,19 @@ impl AuthClaims {
     ///
     /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
     pub fn new(
-        account: Account,
+        account_model: Account,
         account_api_token: AccountApiToken,
-        regional_policy: RegionalPolicy,
+        data_collection_policy: DataCollectionPolicy,
     ) -> Self {
         Self {
             issued_by: Self::JWT_ISSUER.to_owned(),
             audience: Self::JWT_AUDIENCE.to_owned(),
             token_id: account_api_token.access_seq,
-            account_id: account.id,
+            account_id: account_model.id,
             issued_at: account_api_token.issued_at,
-            expired_at: account_api_token.expired_at,
-            regional_policy,
-            is_administrator: account.is_admin,
+            expires_at: account_api_token.expired_at,
+            data_collection_policy,
+            is_administrator: account_model.is_admin,
         }
     }
 
@@ -320,7 +320,7 @@ impl AuthClaims {
     #[inline]
     #[must_use]
     pub fn is_expired(&self) -> bool {
-        self.expired_at <= OffsetDateTime::now_utc()
+        self.expires_at <= OffsetDateTime::now_utc()
     }
 
     /// Checks if the token will expire soon and should be refreshed.
@@ -331,29 +331,7 @@ impl AuthClaims {
     #[inline]
     #[must_use]
     pub fn expires_soon(&self) -> bool {
-        self.expired_at - OffsetDateTime::now_utc() < Self::SOON_THRESHOLD
-    }
-
-    /// Returns the expiration timestamp of this token.
-    ///
-    /// # Returns
-    ///
-    /// The exact UTC timestamp when this token expires.
-    #[inline]
-    #[must_use]
-    pub fn expires_at(&self) -> OffsetDateTime {
-        self.expired_at
-    }
-
-    /// Returns the issuance timestamp of this token.
-    ///
-    /// # Returns
-    ///
-    /// The exact UTC timestamp when this token was created.
-    #[inline]
-    #[must_use]
-    pub fn issued_at(&self) -> OffsetDateTime {
-        self.issued_at
+        self.expires_at - OffsetDateTime::now_utc() < Self::SOON_THRESHOLD
     }
 
     /// Returns the remaining lifetime of this token.
@@ -364,7 +342,7 @@ impl AuthClaims {
     #[inline]
     #[must_use]
     pub fn remaining_lifetime(&self) -> Duration {
-        let remaining = self.expired_at - OffsetDateTime::now_utc();
+        let remaining = self.expires_at - OffsetDateTime::now_utc();
         if remaining.is_positive() {
             remaining
         } else {
@@ -424,7 +402,7 @@ impl AuthClaims {
                 target: TRACING_TARGET_AUTHENTICATION,
                 token_id = %claims.token_id,
                 account_id = %claims.account_id,
-                expired_at = %claims.expired_at,
+                expired_at = %claims.expires_at,
                 "JWT token validation failed: token expired"
             );
             return Err(ErrorKind::Unauthorized

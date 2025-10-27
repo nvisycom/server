@@ -10,7 +10,7 @@ mod tracing;
 
 pub use auth::{AuthHasher, AuthKeys, AuthKeysConfig};
 pub use error::{Result, ServiceError};
-pub use policy::RegionalPolicy;
+pub use policy::DataCollectionPolicy;
 pub use security::{PasswordStrength, RateLimitKey, RateLimiter};
 pub use service_config::ServiceConfig;
 pub use service_state::ServiceState;

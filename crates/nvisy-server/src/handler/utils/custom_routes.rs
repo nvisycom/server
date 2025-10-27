@@ -4,6 +4,11 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::service::ServiceState;
 
+/// Type alias for a function that maps/transforms an OpenApiRouter.
+///
+/// This is used for applying transformations to routers before or after middlewares.
+pub type RouterMapFn = fn(OpenApiRouter<ServiceState>) -> OpenApiRouter<ServiceState>;
+
 /// Configuration for custom routes that can be merged into the main API router.
 ///
 /// This struct allows you to extend the API with custom private and public routes
@@ -25,6 +30,14 @@ pub struct CustomRoutes {
     pub private_routes: Option<OpenApiRouter<ServiceState>>,
     /// Custom public routes that don't require authentication.
     pub public_routes: Option<OpenApiRouter<ServiceState>>,
+    /// Function to map private routes before middlewares are applied.
+    pub private_before_middleware: Option<RouterMapFn>,
+    /// Function to map private routes after middlewares are applied.
+    pub private_after_middleware: Option<RouterMapFn>,
+    /// Function to map public routes before middlewares are applied.
+    pub public_before_middleware: Option<RouterMapFn>,
+    /// Function to map public routes after middlewares are applied.
+    pub public_after_middleware: Option<RouterMapFn>,
 }
 
 impl CustomRoutes {
@@ -102,6 +115,90 @@ impl CustomRoutes {
     /// Takes the public routes, leaving `None` in their place.
     pub fn take_public_routes(&mut self) -> Option<OpenApiRouter<ServiceState>> {
         self.public_routes.take()
+    }
+
+    /// Sets a function to map private routes before middlewares are applied.
+    ///
+    /// This allows you to transform the router before authentication and other middlewares.
+    pub fn with_private_before_middleware(mut self, f: RouterMapFn) -> Self {
+        self.private_before_middleware = Some(f);
+        self
+    }
+
+    /// Sets a function to map private routes after middlewares are applied.
+    ///
+    /// This allows you to transform the router after authentication and other middlewares.
+    pub fn with_private_after_middleware(mut self, f: RouterMapFn) -> Self {
+        self.private_after_middleware = Some(f);
+        self
+    }
+
+    /// Sets a function to map public routes before middlewares are applied.
+    ///
+    /// This allows you to transform the router before middlewares.
+    pub fn with_public_before_middleware(mut self, f: RouterMapFn) -> Self {
+        self.public_before_middleware = Some(f);
+        self
+    }
+
+    /// Sets a function to map public routes after middlewares are applied.
+    ///
+    /// This allows you to transform the router after middlewares.
+    pub fn with_public_after_middleware(mut self, f: RouterMapFn) -> Self {
+        self.public_after_middleware = Some(f);
+        self
+    }
+
+    /// Applies the before-middleware function to private routes if it exists.
+    /// This applies to ALL private routes (built-in + custom).
+    pub(crate) fn map_private_before_middleware(
+        &self,
+        routes: OpenApiRouter<ServiceState>,
+    ) -> OpenApiRouter<ServiceState> {
+        if let Some(f) = self.private_before_middleware {
+            f(routes)
+        } else {
+            routes
+        }
+    }
+
+    /// Applies the after-middleware function to private routes if it exists.
+    /// This applies to ALL private routes (built-in + custom).
+    pub(crate) fn map_private_after_middleware(
+        &self,
+        routes: OpenApiRouter<ServiceState>,
+    ) -> OpenApiRouter<ServiceState> {
+        if let Some(f) = self.private_after_middleware {
+            f(routes)
+        } else {
+            routes
+        }
+    }
+
+    /// Applies the before-middleware function to public routes if it exists.
+    /// This applies to ALL public routes (built-in + custom).
+    pub(crate) fn map_public_before_middleware(
+        &self,
+        routes: OpenApiRouter<ServiceState>,
+    ) -> OpenApiRouter<ServiceState> {
+        if let Some(f) = self.public_before_middleware {
+            f(routes)
+        } else {
+            routes
+        }
+    }
+
+    /// Applies the after-middleware function to public routes if it exists.
+    /// This applies to ALL public routes (built-in + custom).
+    pub(crate) fn map_public_after_middleware(
+        &self,
+        routes: OpenApiRouter<ServiceState>,
+    ) -> OpenApiRouter<ServiceState> {
+        if let Some(f) = self.public_after_middleware {
+            f(routes)
+        } else {
+            routes
+        }
     }
 }
 

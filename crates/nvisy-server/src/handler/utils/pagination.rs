@@ -1,4 +1,4 @@
-use nvisy_postgres::queries::Pagination as QueryPagination;
+use nvisy_postgres::query::Pagination as QueryPagination;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -34,6 +34,20 @@ impl Pagination {
             offset: Some(offset),
             limit: Some(limit),
         }
+    }
+
+    /// Returns a [`Pagination`] with the given offset.
+    #[inline]
+    pub fn with_offset(mut self, offset: u32) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+
+    /// Returns a [`Pagination`] with the given limit.
+    #[inline]
+    pub fn with_limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
     }
 
     /// Returns the pagination offset.

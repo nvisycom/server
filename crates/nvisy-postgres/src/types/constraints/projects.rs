@@ -35,7 +35,7 @@ pub enum ProjectConstraints {
     MaxMembersMax,
     #[strum(serialize = "projects_max_documents_min")]
     MaxDocumentsMin,
-    #[strum(serialize = "projects_max_storage_mb_min")]
+    #[strum(serialize = "projects_max_storage_min")]
     MaxStorageMbMin,
 
     // Project metadata constraints

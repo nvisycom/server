@@ -12,9 +12,9 @@ pub const TRACING_TARGET_QUERIES: &str = "nvisy_postgres::queries";
 pub const TRACING_TARGET_MIGRATIONS: &str = "nvisy_postgres::migrations";
 pub const TRACING_TARGET_CONNECTION: &str = "nvisy_postgres::connection";
 
-pub mod client;
-pub mod models;
-pub mod queries;
+mod client;
+pub mod model;
+pub mod query;
 mod schema;
 pub mod types;
 
@@ -26,7 +26,9 @@ use diesel::result::Error;
 pub use diesel_async::AsyncPgConnection as PgConnection;
 
 pub use crate::client::{
-    ConnectionPool, PgClient, PgConfig, PgPoolConfig, PoolStatus, PooledConnection, migrate,
+    ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientExt, PgConfig,
+    PgPoolConfig, PgPoolStatus, PooledConnection, get_applied_migrations, get_migration_status,
+    run_pending_migrations, verify_schema_integrity,
 };
 use crate::types::ConstraintViolation;
 

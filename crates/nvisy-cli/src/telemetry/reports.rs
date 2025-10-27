@@ -166,7 +166,7 @@ impl TelemetryClient {
         }
 
         // Sanitize the report
-        report.metadata = self.sanitize_metadata(report.metadata);
+        report.metadata = Self::sanitize_metadata(report.metadata);
 
         let url = format!("{}/usage", self.endpoint);
 
@@ -208,9 +208,12 @@ impl TelemetryClient {
         }
 
         // Sanitize the report
-        report.error_message = self.sanitize_error_message(report.error_message);
-        report.context = self.sanitize_metadata(report.context);
-        report.stack_trace = report.stack_trace.map(|st| self.sanitize_stack_trace(st));
+        report.error_message = Self::sanitize_error_message(report.error_message);
+        report.context = Self::sanitize_metadata(report.context);
+        report.stack_trace = report
+            .stack_trace
+            .as_deref()
+            .map(Self::sanitize_stack_trace);
 
         let url = format!("{}/crash", self.endpoint);
 
@@ -271,7 +274,7 @@ impl TelemetryClient {
 
     /// Sanitizes metadata to remove potentially sensitive information.
     #[must_use]
-    fn sanitize_metadata(&self, mut metadata: HashMap<String, String>) -> HashMap<String, String> {
+    fn sanitize_metadata(mut metadata: HashMap<String, String>) -> HashMap<String, String> {
         // Remove potentially sensitive keys
         let sensitive_keys = ["password", "token", "key", "secret", "auth", "credential"];
 
@@ -294,7 +297,7 @@ impl TelemetryClient {
 
     /// Sanitizes error messages to remove sensitive information.
     #[must_use]
-    fn sanitize_error_message(&self, mut message: String) -> String {
+    fn sanitize_error_message(mut message: String) -> String {
         // Remove file paths that might contain usernames
         if let Some(pos) = message.find("/Users/")
             && let Some(end) = message[pos..].find(' ')
@@ -319,7 +322,7 @@ impl TelemetryClient {
 
     /// Sanitizes stack traces to remove sensitive information.
     #[must_use]
-    fn sanitize_stack_trace(&self, stack_trace: String) -> String {
+    fn sanitize_stack_trace(stack_trace: &str) -> String {
         // Similar sanitization as error messages
         stack_trace
             .lines()
@@ -466,15 +469,12 @@ mod tests {
 
     #[test]
     fn sanitize_metadata() {
-        let config = TelemetryConfig::default();
-        let client = TelemetryClient::new(config).unwrap();
-
         let mut metadata = HashMap::new();
         metadata.insert("normal_field".to_string(), "normal_value".to_string());
         metadata.insert("password".to_string(), "secret123".to_string());
         metadata.insert("long_value".to_string(), "x".repeat(200));
 
-        let sanitized = client.sanitize_metadata(metadata);
+        let sanitized = TelemetryClient::sanitize_metadata(metadata);
 
         assert!(sanitized.contains_key("normal_field"));
         assert!(!sanitized.contains_key("password"));
@@ -488,11 +488,8 @@ mod tests {
 
     #[test]
     fn sanitize_error_message() {
-        let config = TelemetryConfig::default();
-        let client = TelemetryClient::new(config).unwrap();
-
         let message = "Error in file /Users/username/secret/file.txt with data".to_string();
-        let sanitized = client.sanitize_error_message(message);
+        let sanitized = TelemetryClient::sanitize_error_message(message);
 
         assert!(sanitized.contains("/Users/[REDACTED]"));
         assert!(!sanitized.contains("username"));

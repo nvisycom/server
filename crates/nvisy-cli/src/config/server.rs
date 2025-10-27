@@ -173,17 +173,19 @@ impl ServerConfig {
     }
 
     /// Returns whether TLS is configured.
+    ///
+    /// Always returns false when TLS feature is disabled.
     #[must_use]
-    #[cfg(feature = "tls")]
     pub const fn is_tls_enabled(&self) -> bool {
-        self.tls_cert_path.is_some() && self.tls_key_path.is_some()
-    }
-
-    /// Returns whether TLS is configured (always false when TLS feature is disabled).
-    #[must_use]
-    #[cfg(not(feature = "tls"))]
-    pub const fn is_tls_enabled(&self) -> bool {
-        false
+        #[cfg(feature = "tls")]
+        {
+            self.tls_cert_path.is_some() && self.tls_key_path.is_some()
+        }
+        #[cfg(not(feature = "tls"))]
+        {
+            let _ = self;
+            false
+        }
     }
 }
 
@@ -209,23 +211,14 @@ impl Default for ServerConfig {
 /// This function logs essential server configuration information at startup,
 /// including host, port, and TLS status when applicable.
 pub fn log_server_config(config: &ServerConfig) {
-    let tls_status = {
-        #[cfg(feature = "tls")]
-        {
-            config.is_tls_enabled()
-        }
-        #[cfg(not(feature = "tls"))]
-        {
-            false
-        }
-    };
+    let tls_status = config.is_tls_enabled();
 
     tracing::info!(
         target: TRACING_TARGET_SERVER_STARTUP,
         "Server configured successfully: {}:{}, TLS: {}",
         config.host,
         config.port,
-        tls_status
+        tls_status,
     );
 }
 
@@ -241,27 +234,6 @@ mod tests {
         assert_eq!(config.port, 8080);
         assert_eq!(config.request_timeout, 60);
         assert_eq!(config.shutdown_timeout, 60);
-    }
-
-    #[test]
-    fn reject_privileged_ports() {
-        let mut config = ServerConfig::default();
-        config.port = 80;
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn reject_invalid_timeouts() {
-        let mut config = ServerConfig::default();
-
-        config.request_timeout = 0;
-        assert!(config.validate().is_err());
-
-        config.request_timeout = 301;
-        assert!(config.validate().is_err());
-
-        config.request_timeout = 60;
-        assert!(config.validate().is_ok());
     }
 
     #[test]

@@ -1,6 +1,14 @@
+//! System monitoring and health check handlers.
+//!
+//! This module provides endpoints for monitoring the health and status of the
+//! API server and its dependencies. It includes both public health checks and
+//! authenticated detailed status information.
+
 use axum::extract::State;
 use axum::http::StatusCode;
-// use nvisy_openrouter::OpenRouter; // TODO: Implement when nvisy-openrouter is available
+use nvisy_nats::NatsClient;
+// use nvisy_openrouter::OpenRouter;
+// TODO: Implement when nvisy-openrouter is available
 use nvisy_postgres::PgClient;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -9,10 +17,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::extract::{AuthState, Json};
-use crate::service::{RegionalPolicy, ServiceState};
+use crate::service::{DataCollectionPolicy, ServiceState};
 
 /// Tracing target for monitor operations.
-const TRACING_TARGET: &str = "nvisy::handler::monitors";
+const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 
 /// Health status for system components.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,14 +45,16 @@ impl std::fmt::Display for HealthStatus {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "preferPolicy": "Eu"
+}))]
 struct MonitorStatusRequest {
     /// Preferred regional policy for data collection.
-    pub prefer_policy: Option<RegionalPolicy>,
+    pub prefer_policy: Option<DataCollectionPolicy>,
 }
 
 /// Current state and status message for a system feature.
 #[must_use]
-/// Component health status for monitoring.
 #[derive(Debug, Clone)]
 pub struct ComponentStatus {
     pub is_healthy: bool,
@@ -129,7 +139,7 @@ struct FeatureStatuses {
 #[serde(rename_all = "camelCase")]
 struct MonitorStatusResponse {
     /// Current regional data collection policy in effect.
-    pub regional_policy: RegionalPolicy,
+    pub regional_policy: DataCollectionPolicy,
     /// Timestamp when this status was generated.
     pub updated_at: OffsetDateTime,
     /// Detailed component statuses (only included for authenticated requests).
@@ -159,8 +169,10 @@ struct MonitorStatusResponse {
     ),
 )]
 async fn monitor_status(
-    State(pg_database): State<PgClient>,
-    State(regional_policy): State<RegionalPolicy>,
+    State(pg_client): State<PgClient>,
+    // State(_minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    State(_nats_client): State<NatsClient>,
+    State(regional_policy): State<DataCollectionPolicy>,
     auth_state: Option<AuthState>,
     request: Option<Json<MonitorStatusRequest>>,
 ) -> (StatusCode, Json<MonitorStatusResponse>) {
@@ -180,8 +192,8 @@ async fn monitor_status(
     );
 
     if let Some(AuthState(_)) = auth_state {
-        let pg_status = check_database_health(&pg_database).await;
-        let pg_database_status = check_service_status(pg_status, "Postgres");
+        let pg_status = check_database_health(&pg_client).await;
+        let pg_client_status = check_service_status(pg_status, "Postgres");
 
         let openrouter_client = FeatureState {
             is_operational: false,
@@ -196,7 +208,7 @@ async fn monitor_status(
         };
 
         response.features = Some(FeatureStatuses {
-            gateway_server: pg_database_status,
+            gateway_server: pg_client_status,
             assistant_chat: openrouter_client,
             worker_runtime,
         });
@@ -212,8 +224,8 @@ async fn monitor_status(
 }
 
 /// Check database health status.
-async fn check_database_health(pg_database: &PgClient) -> ComponentStatus {
-    match pg_database.get_connection().await {
+async fn check_database_health(pg_client: &PgClient) -> ComponentStatus {
+    match pg_client.get_connection().await {
         Ok(_) => ComponentStatus::healthy(),
         Err(e) => ComponentStatus::unhealthy(format!("Database connection failed: {}", e)),
     }
@@ -230,7 +242,7 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 mod test {
     use crate::handler::monitors::{MonitorStatusRequest, MonitorStatusResponse, routes};
     use crate::handler::test::create_test_server_with_router;
-    use crate::service::RegionalPolicy;
+    use crate::service::DataCollectionPolicy;
 
     #[tokio::test]
     async fn monitor_status_without_auth() -> anyhow::Result<()> {
@@ -255,7 +267,7 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         let request = MonitorStatusRequest {
-            prefer_policy: Some(RegionalPolicy::NormalDataCollection),
+            prefer_policy: Some(DataCollectionPolicy::NormalDataCollection),
         };
 
         // TODO: Add authentication to this test when auth system is available

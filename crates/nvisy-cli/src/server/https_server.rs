@@ -13,6 +13,7 @@ use crate::server::serve_with_shutdown_and_telemetry;
 use crate::server::{ServerError, ServerResult, serve_with_shutdown, shutdown_signal};
 
 /// Starts an HTTPS server with enhanced lifecycle management.
+#[allow(dead_code)]
 pub async fn serve_https(
     app: Router,
     server_config: ServerConfig,
@@ -69,6 +70,7 @@ pub async fn serve_https(
 
 /// Starts an HTTPS server with telemetry support.
 #[cfg(feature = "telemetry")]
+#[allow(dead_code)]
 pub async fn serve_https_with_telemetry(
     app: Router,
     server_config: ServerConfig,
@@ -130,7 +132,7 @@ pub async fn serve_https_with_telemetry(
     .await
 }
 
-pub fn validate_tls_files(cert_path: &Path, key_path: &Path) -> ServerResult<()> {
+fn validate_tls_files(cert_path: &Path, key_path: &Path) -> ServerResult<()> {
     let validate_file = |path: &Path, file_type: &str| -> ServerResult<()> {
         if !path.exists() {
             return Err(ServerError::TlsCertificate(format!(

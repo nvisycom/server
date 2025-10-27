@@ -1,13 +1,11 @@
 use std::path::PathBuf;
 
 use anyhow::{Result as AnyhowResult, anyhow};
-use nvisy_minio::MinioClient;
-use nvisy_postgres::client::PgClientExt;
-use nvisy_postgres::{PgClient, PgConfig};
+use nvisy_postgres::{PgClient, PgClientExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::service::auth::{AuthHasher, AuthKeys, AuthKeysConfig};
-use crate::service::policy::RegionalPolicy;
+use crate::service::policy::DataCollectionPolicy;
 use crate::service::{Result, ServiceError};
 
 /// App [`state`] configuration.
@@ -142,36 +140,25 @@ impl ServiceConfig {
         })
     }
 
-    /// Connects to MinIO file storage.
+    /// Connects to file storage (MinIO functionality removed - migrated to NATS object store).
     #[inline]
-    pub async fn connect_file_storage(&self) -> Result<MinioClient> {
-        use nvisy_minio::{MinioConfig, MinioCredentials};
-
-        let credentials =
-            MinioCredentials::new(self.minio_access_key.clone(), self.minio_secret_key.clone());
-
-        // Parse endpoint URL - MinioConfig enforces HTTPS
-        let endpoint_url = format!("https://{}", self.minio_endpoint);
-
-        let url = endpoint_url
-            .parse::<url::Url>()
-            .map_err(|e| ServiceError::config_with_source("Invalid MinIO endpoint URL", e))?;
-
-        let config = MinioConfig::new(url, credentials)
-            .map_err(|e| ServiceError::config_with_source("Failed to create MinIO config", e))?;
-
-        MinioClient::new(config).map_err(|e| {
-            ServiceError::external_service_with_source("MinIO", "Failed to connect to MinIO", e)
-        })
+    #[deprecated(note = "MinIO support removed - use NATS object store instead")]
+    pub async fn connect_file_storage(&self) -> Result<()> {
+        // MinIO support has been removed in favor of NATS object store
+        // This method is kept for backward compatibility but does nothing
+        tracing::warn!(
+            "connect_file_storage called but MinIO support has been removed - use NATS object store"
+        );
+        Ok(())
     }
 
     /// Returns the configured regional data collection policy.
     #[inline]
-    pub const fn regional_policy(&self) -> RegionalPolicy {
+    pub const fn regional_policy(&self) -> DataCollectionPolicy {
         if self.minimal_data_collection {
-            RegionalPolicy::minimal()
+            DataCollectionPolicy::minimal()
         } else {
-            RegionalPolicy::normal()
+            DataCollectionPolicy::normal()
         }
     }
 

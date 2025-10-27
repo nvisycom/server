@@ -64,18 +64,21 @@ impl TelemetryContext {
 
     /// Gets the request timeout as a Duration.
     #[must_use]
+    #[allow(dead_code)]
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.config.timeout_seconds)
     }
 
     /// Returns whether verbose telemetry logging is enabled.
     #[must_use]
+    #[allow(dead_code)]
     pub fn is_verbose(&self) -> bool {
         self.config.verbose
     }
 
     /// Returns the buffer size for telemetry events.
     #[must_use]
+    #[allow(dead_code)]
     pub fn buffer_size(&self) -> usize {
         self.config.buffer_size
     }
@@ -107,18 +110,21 @@ impl TelemetryContext {
 
     /// Returns whether the configuration appears to be for development/testing.
     #[must_use]
+    #[allow(dead_code)]
     pub fn is_development(&self) -> bool {
         self.config.is_development()
     }
 
     /// Creates a disabled telemetry context.
     #[must_use]
+    #[allow(dead_code)]
     pub fn disabled() -> Self {
         Self::new(TelemetryConfig::default(), false)
     }
 
     /// Creates a context for testing purposes.
     #[must_use]
+    #[allow(dead_code)]
     pub fn for_testing() -> Self {
         Self::new(TelemetryConfig::for_testing(), true)
     }

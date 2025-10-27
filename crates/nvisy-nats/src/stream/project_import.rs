@@ -6,7 +6,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{JobPriority, JobStatus};
+use super::event::{EventPriority, EventStatus};
 
 /// Project import job payload
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,13 +23,13 @@ pub struct ProjectImportPayload {
 pub struct ProjectImportJob {
     pub id: Uuid,
     pub payload: ProjectImportPayload,
-    pub priority: JobPriority,
+    pub priority: EventPriority,
     pub max_retries: u32,
     pub retry_count: u32,
     pub timeout: Duration,
     pub created_at: Timestamp,
     pub scheduled_for: Option<Timestamp>,
-    pub status: JobStatus,
+    pub status: EventStatus,
 }
 
 impl ProjectImportJob {
@@ -38,18 +38,18 @@ impl ProjectImportJob {
         Self {
             id: Uuid::new_v4(),
             payload,
-            priority: JobPriority::Normal,
+            priority: EventPriority::Normal,
             max_retries: 3,
             retry_count: 0,
             timeout: Duration::from_secs(600), // 10 minutes for imports
             created_at: Timestamp::now(),
             scheduled_for: None,
-            status: JobStatus::Pending,
+            status: EventStatus::Pending,
         }
     }
 
     /// Set job priority
-    pub fn with_priority(mut self, priority: JobPriority) -> Self {
+    pub fn with_priority(mut self, priority: EventPriority) -> Self {
         self.priority = priority;
         self
     }

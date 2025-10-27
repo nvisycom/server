@@ -16,6 +16,7 @@ pub enum ServerError {
 
     /// Failed to bind to the specified address.
     #[error("Failed to bind to {address}: {source}")]
+    #[allow(dead_code)]
     BindError {
         address: String,
         #[source]
@@ -33,11 +34,12 @@ pub enum ServerError {
 
 impl ServerError {
     /// Creates an invalid configuration error from an anyhow error.
-    pub fn invalid_config(err: anyhow::Error) -> Self {
+    pub fn invalid_config(err: &anyhow::Error) -> Self {
         Self::InvalidConfig(err.to_string())
     }
 
     /// Creates a bind error with address context.
+    #[allow(dead_code)]
     pub fn bind_error(address: &str, source: io::Error) -> Self {
         Self::BindError {
             address: address.to_string(),
@@ -160,16 +162,6 @@ impl ServerError {
 
         context
     }
-
-    /// Returns the category of this error for grouping and filtering.
-    pub const fn category(&self) -> &'static str {
-        match self {
-            Self::InvalidConfig(_) => "configuration",
-            Self::BindError { .. } => "network",
-            Self::Runtime(_) => "runtime",
-            Self::TlsCertificate(_) => "tls",
-        }
-    }
 }
 
 #[cfg(test)]
@@ -247,18 +239,5 @@ mod tests {
         assert!(runtime_network_err.is_network_error());
         assert!(!runtime_non_network_err.is_network_error());
         assert!(!config_err.is_network_error());
-    }
-
-    #[test]
-    fn error_categories_are_correct() {
-        let config_err = ServerError::InvalidConfig("test".to_string());
-        let bind_err = ServerError::bind_error("127.0.0.1:80", io::Error::other("test"));
-        let runtime_err = ServerError::Runtime(io::Error::other("test"));
-        let tls_err = ServerError::TlsCertificate("test".to_string());
-
-        assert_eq!(config_err.category(), "configuration");
-        assert_eq!(bind_err.category(), "network");
-        assert_eq!(runtime_err.category(), "runtime");
-        assert_eq!(tls_err.category(), "tls");
     }
 }

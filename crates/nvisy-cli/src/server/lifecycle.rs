@@ -62,6 +62,7 @@ where
 /// # Errors
 ///
 /// Returns comprehensive errors with full context and recovery information.
+#[allow(clippy::too_many_lines)]
 pub async fn serve_with_shutdown_and_telemetry<F>(
     server_config: &ServerConfig,
     service_name: &str,
@@ -91,7 +92,7 @@ where
             "Server configuration validation failed"
         );
 
-        let config_error = ServerError::invalid_config(validation_error);
+        let config_error = ServerError::invalid_config(&validation_error);
 
         // Send crash telemetry for config errors
         #[cfg(feature = "telemetry")]
@@ -257,8 +258,10 @@ mod tests {
 
     #[tokio::test]
     async fn serve_with_shutdown_validates_config() {
-        let mut config = ServerConfig::default();
-        config.port = 80; // Invalid port for non-root users
+        let config = ServerConfig {
+            port: 80, // Invalid port for non-root users
+            ..Default::default()
+        };
 
         let result = serve_with_shutdown(&config, "test-service", || async { Ok(()) }).await;
 
@@ -291,6 +294,6 @@ mod tests {
         // Test that the basic serve_with_shutdown delegates to comprehensive version
         // Test that the service versions provide service context
         // This is a compilation test to ensure the API is clean
-        assert!(true);
+        // No runtime assertions needed - this test ensures the module compiles correctly
     }
 }

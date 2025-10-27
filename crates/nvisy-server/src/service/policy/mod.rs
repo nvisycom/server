@@ -5,4 +5,4 @@
 
 mod regional;
 
-pub use regional::RegionalPolicy;
+pub use regional::DataCollectionPolicy;

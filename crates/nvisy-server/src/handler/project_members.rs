@@ -4,54 +4,14 @@
 //! allowing project administrators to view, add, modify, and remove project
 //! members. All operations are secured with proper authorization and follow
 //! role-based access control principles.
-//!
-//! # Security Features
-//!
-//! ## Authorization Requirements
-//! - Project membership required for viewing member lists
-//! - Admin or owner permissions required for member management operations
-//! - Role-based restrictions on permission changes
-//! - Self-management restrictions for role modifications
-//!
-//! ## Role Hierarchy
-//! - **Viewer**: Read-only access to project resources
-//! - **Editor**: Can create and modify documents within the project
-//! - **Admin**: Can manage project settings and members (except owners)
-//! - **Owner**: Full control over project and all members
-//!
-//! ## Member Management Rules
-//! - Only admins and owners can manage members
-//! - Owners cannot be removed or have roles changed by non-owners
-//! - Users cannot modify their own roles
-//! - At least one owner must remain in each project
-//!
-//! # Endpoints
-//!
-//! ## Member Operations
-//! - `GET /projects/{projectId}/members` - List all project members
-//! - `GET /projects/{projectId}/members/{memberId}` - Get specific member details
-//! - `PUT /projects/{projectId}/members/{memberId}` - Update member role
-//! - `DELETE /projects/{projectId}/members/{memberId}` - Remove member from project
-//!
-//! # Data Privacy
-//!
-//! - Member email addresses are only visible to project administrators
-//! - Member activity logs are restricted based on permissions
-//! - Personal information is protected according to privacy policies
-//!
-//! # Audit and Compliance
-//!
-//! - All member management operations are logged for audit trails
-//! - Role changes include timestamps and administrator attribution
-//! - Member removal includes cleanup of associated resources
 
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::models::{ProjectMember, UpdateProjectMember};
-use nvisy_postgres::queries::ProjectMemberRepository;
-use nvisy_postgres::types::ProjectRole;
+use nvisy_postgres::model::{ProjectMember, UpdateProjectMember};
+use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
+use nvisy_postgres::types::{ProjectRole, ProjectVisibility};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
@@ -64,10 +24,10 @@ use crate::extract::auth::AuthProvider;
 use crate::extract::{AuthState, ProjectPermission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::service::ServiceState;
 
 /// Tracing target for project member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_members";
-use crate::service::ServiceState;
 
 /// Path parameters for member-specific endpoints.
 #[must_use]
@@ -116,6 +76,8 @@ impl From<ProjectMember> for ListMembersResponseItem {
 struct ListMembersResponse {
     /// ID of the project.
     pub project_id: Uuid,
+    /// Whether the project is private.
+    pub is_private: bool,
     /// List of project members.
     pub members: Vec<ListMembersResponseItem>,
 }
@@ -217,12 +179,12 @@ struct DeleteMemberResponse {
     ),
 )]
 async fn list_members(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<ListMembersResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -240,26 +202,43 @@ async fn list_members(
         )
         .await?;
 
-    // Retrieve project members with pagination
-    let project_members = ProjectMemberRepository::list_project_members(
-        &mut conn,
-        path_params.project_id,
-        pagination.into(),
-    )
-    .await?;
+    // Fetch project to check if it's private
+    let Some(project) =
+        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_resource("project")
+            .with_message("Project not found")
+            .with_context(format!("Project ID: {}", path_params.project_id)));
+    };
 
-    let members = project_members
-        .into_iter()
-        .map(ListMembersResponseItem::from)
-        .collect();
+    // If project is private, return empty member list
+    let is_private = project.visibility == ProjectVisibility::Private;
+    let members = if is_private {
+        Vec::new()
+    } else {
+        // Retrieve project members with pagination
+        let project_members = ProjectMemberRepository::list_project_members(
+            &mut conn,
+            path_params.project_id,
+            pagination.into(),
+        )
+        .await?;
+
+        project_members
+            .into_iter()
+            .map(ListMembersResponseItem::from)
+            .collect()
+    };
 
     let response = ListMembersResponse {
         project_id: path_params.project_id,
+        is_private,
         members,
     };
 
     tracing::info!(
-        target: "server::handler::project_members",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         member_count = response.members.len(),
@@ -306,11 +285,11 @@ async fn list_members(
     )
 )]
 async fn get_member(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<GetMemberResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -329,6 +308,23 @@ async fn get_member(
         )
         .await?;
 
+    // Check if project is private
+    let Some(project) =
+        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_resource("project")
+            .with_message("Project not found")
+            .with_context(format!("Project ID: {}", path_params.project_id)));
+    };
+
+    if project.visibility == ProjectVisibility::Private {
+        return Err(ErrorKind::Forbidden
+            .with_resource("project")
+            .with_message("Cannot view members of a private project")
+            .with_context(format!("Project ID: {}", path_params.project_id)));
+    }
+
     // Find the specific project member
     let Some(project_member) = ProjectMemberRepository::find_project_member(
         &mut conn,
@@ -337,11 +333,17 @@ async fn get_member(
     )
     .await?
     else {
-        return Err(ErrorKind::NotFound.with_resource("project member"));
+        return Err(ErrorKind::NotFound
+            .with_resource("project member")
+            .with_message("Project member not found")
+            .with_context(format!(
+                "Project ID: {}, Account ID: {}",
+                path_params.project_id, path_params.account_id
+            )));
     };
 
     tracing::debug!(
-        target: "server::handler::project_members",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         member_id = path_params.account_id.to_string(),
@@ -390,11 +392,11 @@ async fn get_member(
     )
 )]
 async fn delete_member(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<DeleteMemberResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::warn!(
         target: TRACING_TARGET,
@@ -437,7 +439,7 @@ async fn delete_member(
         let all_members = ProjectMemberRepository::list_project_members(
             &mut conn,
             path_params.project_id,
-            nvisy_postgres::queries::Pagination {
+            nvisy_postgres::query::Pagination {
                 limit: 1000,
                 offset: 0,
             },
@@ -472,7 +474,7 @@ async fn delete_member(
     };
 
     tracing::warn!(
-        target: "server::handler::project_members",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         member_id = path_params.account_id.to_string(),
@@ -486,6 +488,9 @@ async fn delete_member(
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "role": "Admin"
+}))]
 pub struct UpdateMemberRoleRequest {
     /// New role for the member
     pub role: ProjectRole,
@@ -544,12 +549,12 @@ pub struct UpdateMemberRoleResponse {
     )
 )]
 async fn update_member_role(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMemberRoleRequest>,
 ) -> Result<(StatusCode, Json<UpdateMemberRoleResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -593,7 +598,7 @@ async fn update_member_role(
         let all_members = ProjectMemberRepository::list_project_members(
             &mut conn,
             path_params.project_id,
-            nvisy_postgres::queries::Pagination {
+            nvisy_postgres::query::Pagination {
                 limit: 1000,
                 offset: 0,
             },
@@ -638,7 +643,7 @@ async fn update_member_role(
     .await
     .map_err(|err| {
         tracing::error!(
-            target: "server::handler::project_members",
+            target: TRACING_TARGET,
             error = %err,
             member_id = %path_params.account_id,
             "Failed to update member role"
@@ -647,7 +652,7 @@ async fn update_member_role(
     })?;
 
     tracing::info!(
-        target: "server::handler::project_members",
+        target: TRACING_TARGET,
         member_id = %updated_member.account_id,
         project_id = %updated_member.project_id,
         new_role = ?updated_member.member_role,

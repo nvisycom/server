@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Controls all aspects of telemetry data collection including what data
 /// to collect, where to send it, and how to handle the transmission.
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct TelemetryConfig {
     /// Whether telemetry is enabled.
     ///

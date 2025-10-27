@@ -21,14 +21,14 @@ use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CLIENT};
 /// ## Example
 ///
 /// ```rust,no_run
-/// use nvisy_postgres::client::{DatabaseConfig, PgConfig};
+/// use nvisy_postgres::client::{PgConfig, PgPoolConfig};
 /// use std::time::Duration;
 ///
-/// let config = DatabaseConfig::from_env()?;
+/// let config = PgConfig::from_env()?;
 /// // or
-/// let config = DatabaseConfig::new(
+/// let config = PgConfig::new(
 ///     "postgresql://user:pass@localhost/db".to_string(),
-///     PoolConfig::default()
+///     PgPoolConfig::default()
 /// );
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

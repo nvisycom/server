@@ -116,32 +116,6 @@ impl RequireMode {
         }
     }
 
-    /// Returns a description of what processing this mode requires.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            RequireMode::Text => "Plain text content ready for analysis",
-            RequireMode::Ocr => "Requires optical character recognition to extract text",
-            RequireMode::Transcribe => {
-                "Requires audio/video transcription to convert speech to text"
-            }
-            RequireMode::Mixed => {
-                "May require multiple processing modes (OCR, transcription, etc.)"
-            }
-        }
-    }
-
-    /// Returns a user-friendly explanation of the processing requirements.
-    #[inline]
-    pub fn user_explanation(self) -> &'static str {
-        match self {
-            RequireMode::Text => "Text is already available and ready for processing",
-            RequireMode::Ocr => "Text will be extracted from images or scanned documents",
-            RequireMode::Transcribe => "Audio or video content will be converted to text",
-            RequireMode::Mixed => "Multiple processing techniques may be applied",
-        }
-    }
-
     /// Returns the types of processing that this mode typically involves.
     pub fn processing_types(self) -> &'static [&'static str] {
         match self {

@@ -39,7 +39,7 @@ api/
 │   ├── nvisy-mistral/      # Mistral AI OCR HTTP API client (external, or cloud OCR)
 │   ├── nvisy-nats/         # NATS client (messaging, KV, streams, queues)
 │   ├── nvisy-openrouter/   # OpenRouter AI client (assistant chatbot)
-│   ├── nvisy-paddle/       # PaddleX HTTP API client (internal, or local OCR)
+│   ├── nvisy-paddlex/      # PaddleX HTTP API client (internal, or local OCR)
 │   ├── nvisy-postgres/     # PostgreSQL database layer
 │   └── nvisy-server/       # Core HTTP API server
 ├── migrations/             # Database migrations

@@ -4,7 +4,7 @@
 //! to the `PgClient` struct, keeping migration-related functionality separate
 //! from the core database client implementation.
 
-use crate::migrate::{
+use super::{
     MigrationResult, MigrationStatus, get_migration_status, run_pending_migrations,
     verify_schema_integrity,
 };

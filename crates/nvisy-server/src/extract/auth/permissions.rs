@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-use nvisy_postgres::models::ProjectMember;
+use nvisy_postgres::model::ProjectMember;
 use nvisy_postgres::types::ProjectRole;
 use uuid::Uuid;
 
@@ -86,7 +86,7 @@ impl ProjectPermission {
             Self::ManageRoles => matches!(role, Owner),
 
             // Settings permissions
-            Self::ViewSettings => matches!(role, Viewer | Editor | Admin | Owner),
+            Self::ViewSettings => matches!(role, Editor | Admin | Owner),
             Self::ManageSettings => matches!(role, Admin | Owner),
         }
     }

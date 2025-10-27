@@ -3,10 +3,10 @@
 use derive_more::{Deref, DerefMut};
 
 use super::project_import::ProjectImportJob;
-use super::subscriber::StreamSubscriber;
+use super::subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
 use crate::Result;
 
-/// Project import job subscriber wrapping the base StreamSubscriber
+/// Project import job subscriber wrapping the base StreamSubscriber.
 #[derive(Debug, Clone, Deref, DerefMut)]
 pub struct ProjectImportSubscriber {
     #[deref]
@@ -15,7 +15,7 @@ pub struct ProjectImportSubscriber {
 }
 
 impl ProjectImportSubscriber {
-    /// Create a new project import job subscriber
+    /// Create a new project import job subscriber.
     pub async fn new(
         jetstream: &async_nats::jetstream::Context,
         consumer_name: &str,
@@ -25,8 +25,11 @@ impl ProjectImportSubscriber {
     }
 }
 
-// Re-export the stream and message types from base subscriber
-pub use super::subscriber::{
-    TypedBatchStream as ProjectImportBatchStream, TypedMessage as ProjectImportMessage,
-    TypedMessageStream as ProjectImportStream,
-};
+/// Type alias for project import batch stream.
+pub type ProjectImportBatchStream = TypedBatchStream<ProjectImportJob>;
+
+/// Type alias for project import message.
+pub type ProjectImportMessage = TypedMessage<ProjectImportJob>;
+
+/// Type alias for project import message stream.
+pub type ProjectImportStream = TypedMessageStream<ProjectImportJob>;

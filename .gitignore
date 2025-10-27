@@ -15,21 +15,22 @@ target/
 **/*.rs.bk
 *.pdb
 
-# Generated
+# Generated files
 *.pem
 *.backup
 coverage/
+*.lcov
 
 # Intermediate output
 crates/nvisy-postgres/src/migrations/
 crates/nvisy-postgres/src/schema.rs
 
-# Output
+# Build output
 dist/
 build/
 output/
 
-# Environment
+# Environment files
 .env*
 !.env.example
 
@@ -37,6 +38,13 @@ output/
 logs/
 *.log
 *.log*
+
+# Backup and temporary files
+*.bak
+*.backup
+*.tmp
+tmp/
+temp/
 
 # Other
 .ignore*/

@@ -3,10 +3,10 @@
 use derive_more::{Deref, DerefMut};
 
 use super::document_job::DocumentJob;
-use super::subscriber::StreamSubscriber;
+use super::subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
 use crate::Result;
 
-/// Document job subscriber wrapping the base StreamSubscriber
+/// Document job subscriber wrapping the base StreamSubscriber.
 #[derive(Debug, Clone, Deref, DerefMut)]
 pub struct DocumentJobSubscriber {
     #[deref]
@@ -15,7 +15,7 @@ pub struct DocumentJobSubscriber {
 }
 
 impl DocumentJobSubscriber {
-    /// Create a new document job subscriber
+    /// Create a new document job subscriber.
     pub async fn new(
         jetstream: &async_nats::jetstream::Context,
         consumer_name: &str,
@@ -25,8 +25,11 @@ impl DocumentJobSubscriber {
     }
 }
 
-// Re-export the stream and message types from base subscriber
-pub use super::subscriber::{
-    TypedBatchStream as DocumentJobBatchStream, TypedMessage as DocumentJobMessage,
-    TypedMessageStream as DocumentJobStream,
-};
+/// Type alias for document job batch stream.
+pub type DocumentJobBatchStream = TypedBatchStream<DocumentJob>;
+
+/// Type alias for document job message.
+pub type DocumentJobMessage = TypedMessage<DocumentJob>;
+
+/// Type alias for document job message stream.
+pub type DocumentJobStream = TypedMessageStream<DocumentJob>;

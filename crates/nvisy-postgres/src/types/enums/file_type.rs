@@ -147,20 +147,6 @@ impl FileType {
         }
     }
 
-    /// Returns a description of what files this type includes.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            FileType::Document => "Text documents, PDFs, and office files",
-            FileType::Image => "Photos, graphics, and image files",
-            FileType::Video => "Video files and multimedia content",
-            FileType::Audio => "Audio files and sound recordings",
-            FileType::Archive => "Compressed archives and zip files",
-            FileType::Data => "Structured data files and databases",
-            FileType::Code => "Source code and programming files",
-        }
-    }
-
     /// Attempts to determine file type from a file extension.
     pub fn from_extension(extension: &str) -> Option<FileType> {
         let ext = extension.to_lowercase();

@@ -48,72 +48,59 @@ COMMENT ON TYPE INVITE_STATUS IS
 CREATE TABLE projects
 (
     -- Primary identifiers
-    id                   UUID PRIMARY KEY            DEFAULT gen_random_uuid(),
+    id               UUID PRIMARY KEY            DEFAULT gen_random_uuid(),
 
     -- Project identity and branding
-    display_name         TEXT               NOT NULL,
-    description          TEXT               NOT NULL DEFAULT '',
-    project_code         TEXT                        DEFAULT NULL,
-    avatar_url           TEXT                        DEFAULT NULL,
+    display_name     TEXT               NOT NULL,
+    description      TEXT               NOT NULL DEFAULT '',
+    avatar_url       TEXT                        DEFAULT NULL,
 
     CONSTRAINT projects_display_name_length_min CHECK (length(trim(display_name)) >= 3),
     CONSTRAINT projects_display_name_length_max CHECK (length(trim(display_name)) <= 32),
     CONSTRAINT projects_description_length_max CHECK (length(description) <= 2000),
-    CONSTRAINT projects_project_code_format CHECK (project_code IS NULL OR project_code ~ '^[A-Z0-9_-]{2,20}$'),
 
     -- Project status and visibility
-    status               PROJECT_STATUS     NOT NULL DEFAULT 'active',
-    visibility           PROJECT_VISIBILITY NOT NULL DEFAULT 'private',
+    status           PROJECT_STATUS     NOT NULL DEFAULT 'active',
+    visibility       PROJECT_VISIBILITY NOT NULL DEFAULT 'private',
 
     -- Data retention and cleanup
-    keep_for_sec         INTEGER            NOT NULL DEFAULT 604800,
-    auto_cleanup         BOOLEAN            NOT NULL DEFAULT TRUE,
+    keep_for_sec     INTEGER            NOT NULL DEFAULT 604800,
+    auto_cleanup     BOOLEAN            NOT NULL DEFAULT TRUE,
 
     CONSTRAINT projects_keep_for_sec_min CHECK (keep_for_sec >= 3600),
     CONSTRAINT projects_keep_for_sec_max CHECK (keep_for_sec <= 31536000),
 
     -- Resource limits and quotas
-    max_members          INTEGER            NOT NULL DEFAULT 50,
-    max_documents        INTEGER                     DEFAULT NULL,
-    max_storage_mb       INTEGER                     DEFAULT NULL,
+    max_members      INTEGER                     DEFAULT NULL,
+    max_storage      INTEGER                     DEFAULT NULL,
 
-    CONSTRAINT projects_max_members_min CHECK (max_members >= 1),
-    CONSTRAINT projects_max_members_max CHECK (max_members <= 1000),
-    CONSTRAINT projects_max_documents_min CHECK (max_documents IS NULL OR max_documents >= 1),
-    CONSTRAINT projects_max_storage_mb_min CHECK (max_storage_mb IS NULL OR max_storage_mb >= 1),
+    CONSTRAINT projects_max_members_min CHECK (max_members IS NULL OR max_members >= 1),
+    CONSTRAINT projects_max_members_max CHECK (max_members IS NULL OR max_members <= 1000),
+    CONSTRAINT projects_max_storage_min CHECK (max_storage IS NULL OR max_storage >= 1),
 
     -- Project settings
-    allow_public_signup  BOOLEAN            NOT NULL DEFAULT FALSE,
-    require_approval     BOOLEAN            NOT NULL DEFAULT TRUE,
-    enable_comments      BOOLEAN            NOT NULL DEFAULT TRUE,
-    enable_notifications BOOLEAN            NOT NULL DEFAULT TRUE,
+    require_approval BOOLEAN            NOT NULL DEFAULT TRUE,
+    enable_comments  BOOLEAN            NOT NULL DEFAULT TRUE,
 
-    -- Template and categorization
-    is_template          BOOLEAN            NOT NULL DEFAULT FALSE,
-    template_id          UUID                        DEFAULT NULL REFERENCES projects (id),
-    category             TEXT                        DEFAULT NULL,
-    tags                 TEXT[]             NOT NULL DEFAULT '{}',
+    -- Tags and extended metadata
+    tags             TEXT[]             NOT NULL DEFAULT '{}',
+    metadata         JSONB              NOT NULL DEFAULT '{}'::JSONB,
+    settings         JSONB              NOT NULL DEFAULT '{}'::JSONB,
 
-    CONSTRAINT projects_category_length_max CHECK (category IS NULL OR length(trim(category)) <= 50),
     CONSTRAINT projects_tags_count_max CHECK (array_length(tags, 1) IS NULL OR array_length(tags, 1) <= 20),
-
-    -- Extended metadata
-    metadata             JSONB              NOT NULL DEFAULT '{}'::JSONB,
-    settings             JSONB              NOT NULL DEFAULT '{}'::JSONB,
-
     CONSTRAINT projects_metadata_size_min CHECK (length(metadata::TEXT) >= 2),
     CONSTRAINT projects_metadata_size_max CHECK (length(metadata::TEXT) <= 8192),
     CONSTRAINT projects_settings_size_min CHECK (length(settings::TEXT) >= 2),
     CONSTRAINT projects_settings_size_max CHECK (length(settings::TEXT) <= 8192),
 
     -- Audit and ownership
-    created_by           UUID               NOT NULL REFERENCES accounts (id),
+    created_by       UUID               NOT NULL REFERENCES accounts (id),
 
     -- Lifecycle timestamps
-    created_at           TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
-    updated_at           TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
-    archived_at          TIMESTAMPTZ                 DEFAULT NULL,
-    deleted_at           TIMESTAMPTZ                 DEFAULT NULL,
+    created_at       TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
+    updated_at       TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
+    archived_at      TIMESTAMPTZ                 DEFAULT NULL,
+    deleted_at       TIMESTAMPTZ                 DEFAULT NULL,
 
     -- Chronological integrity constraints
     CONSTRAINT projects_updated_after_created CHECK (updated_at >= created_at),
@@ -123,7 +110,6 @@ CREATE TABLE projects
     CONSTRAINT projects_deleted_after_archived CHECK (deleted_at IS NULL OR archived_at IS NULL OR deleted_at >= archived_at),
 
     -- Business logic constraints
-    CONSTRAINT projects_template_cannot_have_template CHECK (NOT (is_template AND template_id IS NOT NULL)),
     CONSTRAINT projects_active_status_not_archived CHECK (NOT (status = 'active' AND archived_at IS NOT NULL)),
     CONSTRAINT projects_archive_status_consistency CHECK ((archived_at IS NULL) = (status != 'archived'))
 );
@@ -136,10 +122,6 @@ CREATE UNIQUE INDEX projects_display_name_owner_unique_idx
     ON projects (lower(display_name), created_by)
     WHERE deleted_at IS NULL;
 
-CREATE UNIQUE INDEX projects_project_code_unique_idx
-    ON projects (upper(project_code))
-    WHERE project_code IS NOT NULL AND deleted_at IS NULL;
-
 CREATE INDEX projects_active_lookup_idx
     ON projects (id, status, visibility)
     WHERE deleted_at IS NULL;
@@ -151,14 +133,6 @@ CREATE INDEX projects_owner_lookup_idx
 CREATE INDEX projects_visibility_lookup_idx
     ON projects (visibility, status, updated_at DESC)
     WHERE deleted_at IS NULL AND visibility = 'public';
-
-CREATE INDEX projects_template_lookup_idx
-    ON projects (id, display_name, category)
-    WHERE is_template = TRUE AND deleted_at IS NULL;
-
-CREATE INDEX projects_category_lookup_idx
-    ON projects (category, status, created_at DESC)
-    WHERE category IS NOT NULL AND deleted_at IS NULL;
 
 CREATE INDEX projects_tags_lookup_idx
     ON projects USING gin (tags)
@@ -184,9 +158,7 @@ COMMENT ON COLUMN projects.id IS
 COMMENT ON COLUMN projects.display_name IS
     'Human-readable project name (3-100 characters).';
 COMMENT ON COLUMN projects.description IS
-    'Detailed project description (up to 2000 characters).';
-COMMENT ON COLUMN projects.project_code IS
-    'Short alphanumeric code for easy project reference (2-20 chars).';
+    'Detailed project description (up to 200 characters).';
 COMMENT ON COLUMN projects.avatar_url IS
     'URL to project avatar/logo image.';
 
@@ -204,33 +176,19 @@ COMMENT ON COLUMN projects.auto_cleanup IS
 
 -- Resource limits and quotas
 COMMENT ON COLUMN projects.max_members IS
-    'Maximum number of members allowed (1-1000).';
-COMMENT ON COLUMN projects.max_documents IS
-    'Maximum number of documents allowed (NULL = unlimited).';
-COMMENT ON COLUMN projects.max_storage_mb IS
+    'Maximum number of members allowed (NULL = unlimited).';
+COMMENT ON COLUMN projects.max_storage IS
     'Maximum storage in megabytes (NULL = unlimited).';
 
 -- Project settings
-COMMENT ON COLUMN projects.allow_public_signup IS
-    'Allow users to request access to public projects.';
 COMMENT ON COLUMN projects.require_approval IS
     'Require approval for new member requests.';
 COMMENT ON COLUMN projects.enable_comments IS
     'Enable commenting features within the project.';
-COMMENT ON COLUMN projects.enable_notifications IS
-    'Enable notification system for project activities.';
 
--- Template and categorization
-COMMENT ON COLUMN projects.is_template IS
-    'Mark project as a template for creating new projects.';
-COMMENT ON COLUMN projects.template_id IS
-    'Reference to template used to create this project.';
-COMMENT ON COLUMN projects.category IS
-    'Project category for organization and filtering.';
+-- Tags and extended metadata
 COMMENT ON COLUMN projects.tags IS
     'Array of tags for project classification and search.';
-
--- Extended metadata
 COMMENT ON COLUMN projects.metadata IS
     'Extended project metadata (JSON, 2B-8KB).';
 COMMENT ON COLUMN projects.settings IS
@@ -718,34 +676,35 @@ CREATE TYPE INTEGRATION_STATUS AS ENUM (
     'pending',
     'executing',
     'failure'
-);
+    );
 
 COMMENT ON TYPE INTEGRATION_STATUS IS
     'Defines the operational status of project integrations.';
 
 -- Create project_integrations table
-CREATE TABLE project_integrations (
+CREATE TABLE project_integrations
+(
     -- Primary identifier
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id               UUID PRIMARY KEY            DEFAULT gen_random_uuid(),
 
     -- Reference
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    project_id       UUID               NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
 
     -- Integration details
-    integration_name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
+    integration_name TEXT               NOT NULL,
+    description      TEXT               NOT NULL DEFAULT '',
 
     CONSTRAINT project_integrations_name_length_min CHECK (char_length(trim(integration_name)) >= 2),
     CONSTRAINT project_integrations_name_length_max CHECK (char_length(trim(integration_name)) <= 100),
     CONSTRAINT project_integrations_description_length_max CHECK (char_length(description) <= 1000),
 
     -- Status and configuration
-    status INTEGRATION_STATUS NOT NULL DEFAULT 'pending',
-    is_enabled BOOLEAN NOT NULL DEFAULT true,
+    status           INTEGRATION_STATUS NOT NULL DEFAULT 'pending',
+    is_enabled       BOOLEAN            NOT NULL DEFAULT TRUE,
 
     -- Authentication data and metadata
-    auth_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    auth_data        JSONB              NOT NULL DEFAULT '{}'::JSONB,
+    metadata         JSONB              NOT NULL DEFAULT '{}'::JSONB,
 
     CONSTRAINT project_integrations_auth_data_size_min CHECK (length(auth_data::TEXT) >= 2),
     CONSTRAINT project_integrations_auth_data_size_max CHECK (length(auth_data::TEXT) <= 16384),
@@ -753,11 +712,11 @@ CREATE TABLE project_integrations (
     CONSTRAINT project_integrations_metadata_size_max CHECK (length(metadata::TEXT) <= 8192),
 
     -- Audit fields
-    created_by UUID NOT NULL REFERENCES accounts(id),
-    updated_by UUID NOT NULL REFERENCES accounts(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    deleted_at TIMESTAMPTZ,
+    created_by       UUID               NOT NULL REFERENCES accounts (id),
+    updated_by       UUID               NOT NULL REFERENCES accounts (id),
+    created_at       TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
+    updated_at       TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
+    deleted_at       TIMESTAMPTZ,
 
     -- Chronological integrity constraints
     CONSTRAINT project_integrations_updated_after_created CHECK (updated_at >= created_at),
@@ -769,15 +728,15 @@ SELECT setup_updated_at('project_integrations');
 
 -- Create indexes for project_integrations
 CREATE INDEX project_integrations_project_id_idx
-    ON project_integrations(project_id, status)
+    ON project_integrations (project_id, status)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX project_integrations_status_idx
-    ON project_integrations(status, is_enabled)
-    WHERE deleted_at IS NULL AND is_enabled = true;
+    ON project_integrations (status, is_enabled)
+    WHERE deleted_at IS NULL AND is_enabled = TRUE;
 
 CREATE UNIQUE INDEX project_integrations_unique_active_idx
-    ON project_integrations(project_id, lower(integration_name))
+    ON project_integrations (project_id, lower(integration_name))
     WHERE deleted_at IS NULL;
 
 -- Add table and column comments

@@ -11,6 +11,7 @@ mod https_server;
 mod lifecycle;
 mod shutdown;
 
+#[cfg(feature = "telemetry")]
 use axum::Router;
 pub use error::{ServerError, ServerResult};
 pub use http_server::serve_http;
@@ -116,27 +117,27 @@ pub async fn serve_with_telemetry(
 ) -> ServerResult<()> {
     #[cfg(feature = "tls")]
     {
-        let tls_enabled = config.is_tls_enabled();
-        if tls_enabled {
-            let cert_path = config.tls_cert_path.as_ref().ok_or_else(|| {
-                ServerError::InvalidConfig("TLS enabled but no cert path provided".to_string())
-            })?;
-            let key_path = config.tls_key_path.as_ref().ok_or_else(|| {
-                ServerError::InvalidConfig("TLS enabled but no key path provided".to_string())
-            })?;
-
-            let cert_path = cert_path.clone();
-            let key_path = key_path.clone();
-            return serve_https_with_telemetry(
-                app,
-                config,
-                cert_path.as_path(),
-                key_path.as_path(),
-                telemetry_context,
-            )
-            .await;
+        if !config.is_tls_enabled() {
+            return serve_http_with_telemetry(app, config, telemetry_context).await;
         }
-        return serve_http_with_telemetry(app, config, telemetry_context).await;
+
+        let cert_path = config.tls_cert_path.as_ref().ok_or_else(|| {
+            ServerError::InvalidConfig("TLS enabled but no cert path provided".to_string())
+        })?;
+        let key_path = config.tls_key_path.as_ref().ok_or_else(|| {
+            ServerError::InvalidConfig("TLS enabled but no key path provided".to_string())
+        })?;
+
+        let cert_path = cert_path.clone();
+        let key_path = key_path.clone();
+        return serve_https_with_telemetry(
+            app,
+            config,
+            cert_path.as_path(),
+            key_path.as_path(),
+            telemetry_context,
+        )
+        .await;
     }
 
     #[cfg(not(feature = "tls"))]
@@ -152,22 +153,7 @@ pub async fn serve_with_telemetry(
 }
 
 #[cfg(test)]
-pub mod test_utils {
-    use axum::Router;
-    use axum::routing::get;
-
-    async fn hello_handler() -> &'static str {
-        "Hello, World!"
-    }
-
-    pub fn create_test_app() -> Router {
-        Router::new().route("/", get(hello_handler))
-    }
-}
-
-#[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -188,7 +174,6 @@ mod tests {
 
         // Test classification
         assert!(bind_err.is_network_error());
-        assert_eq!(bind_err.category(), "network");
 
         let context = bind_err.context();
         assert!(!context.is_empty());
@@ -202,12 +187,6 @@ mod tests {
         let bind_err = ServerError::bind_error("127.0.0.1:80", std::io::Error::other("test"));
         let runtime_err = ServerError::Runtime(std::io::Error::other("test"));
         let tls_err = ServerError::TlsCertificate("test".to_string());
-
-        // Test categories
-        assert_eq!(config_err.category(), "configuration");
-        assert_eq!(bind_err.category(), "network");
-        assert_eq!(runtime_err.category(), "runtime");
-        assert_eq!(tls_err.category(), "tls");
 
         // Test error codes
         assert_eq!(config_err.error_code(), "E001");

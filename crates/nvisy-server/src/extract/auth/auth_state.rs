@@ -55,7 +55,7 @@
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::Deref;
-use nvisy_postgres::queries::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::{PgClient, PgConnection};
 
 use super::{AuthClaims, AuthHeader};
@@ -185,7 +185,7 @@ impl AuthState {
             target: TRACING_TARGET_AUTHENTICATION,
             token_id = %auth_claims.token_id,
             account_id = %auth_claims.account_id,
-            expires_at = %auth_claims.expires_at(),
+            expires_at = %auth_claims.expires_at,
             is_admin_claim = auth_claims.is_administrator,
             "Beginning comprehensive authentication verification"
         );
@@ -245,7 +245,7 @@ impl AuthState {
     async fn verify_token_validity(
         conn: &mut PgConnection,
         auth_claims: &AuthClaims,
-    ) -> Result<nvisy_postgres::models::AccountApiToken> {
+    ) -> Result<nvisy_postgres::model::AccountApiToken> {
         let api_token =
             AccountApiTokenRepository::find_token_by_access_token(conn, auth_claims.token_id)
                 .await
@@ -332,7 +332,7 @@ impl AuthState {
     async fn verify_account_status(
         conn: &mut PgConnection,
         auth_claims: &AuthClaims,
-    ) -> Result<nvisy_postgres::models::Account> {
+    ) -> Result<nvisy_postgres::model::Account> {
         let account = AccountRepository::find_account_by_id(conn, auth_claims.account_id)
             .await
             .map_err(|db_error| {
@@ -410,7 +410,7 @@ impl AuthState {
     /// Returns [`ErrorKind::Unauthorized`] if privilege claims don't match database.
     fn verify_privilege_consistency(
         auth_claims: &AuthClaims,
-        account: &nvisy_postgres::models::Account,
+        account: &nvisy_postgres::model::Account,
     ) -> Result<()> {
         if auth_claims.is_administrator != account.is_admin {
             tracing::error!(

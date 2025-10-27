@@ -1,23 +1,11 @@
 //! Application state and dependency injection.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use nvisy_minio::MinioClient;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use tokio::sync::{RwLock, broadcast};
-use uuid::Uuid;
 
-use crate::handler::project_websocket::ProjectWsMessage;
 use crate::service::auth::{AuthHasher, AuthKeys};
-use crate::service::policy::RegionalPolicy;
+use crate::service::policy::DataCollectionPolicy;
 use crate::service::{PasswordStrength, Result, ServiceConfig};
-
-/// Shared state for project WebSocket broadcast channels.
-///
-/// Each project has its own broadcast channel for real-time communication.
-pub type ProjectChannels = Arc<RwLock<HashMap<Uuid, broadcast::Sender<ProjectWsMessage>>>>;
 
 /// Application state.
 ///
@@ -28,16 +16,12 @@ pub type ProjectChannels = Arc<RwLock<HashMap<Uuid, broadcast::Sender<ProjectWsM
 #[derive(Clone)]
 pub struct ServiceState {
     pg_client: PgClient,
-    minio_client: MinioClient,
     nats_client: NatsClient,
 
     auth_hasher: AuthHasher,
     password_strength: PasswordStrength,
-    regional_policy: RegionalPolicy,
+    regional_policy: DataCollectionPolicy,
     auth_keys: AuthKeys,
-
-    /// WebSocket broadcast channels for projects.
-    project_channels: ProjectChannels,
 }
 
 impl ServiceState {
@@ -47,15 +31,12 @@ impl ServiceState {
     pub async fn from_config(config: &ServiceConfig) -> Result<Self> {
         let service_state = Self {
             pg_client: config.connect_postgres().await?,
-            minio_client: config.connect_file_storage().await?,
             nats_client: config.connect_nats().await?,
 
             auth_hasher: config.create_password_hasher()?,
             password_strength: PasswordStrength::new(),
             regional_policy: config.regional_policy(),
             auth_keys: config.load_auth_keys().await?,
-
-            project_channels: Arc::new(RwLock::new(HashMap::new())),
         };
 
         Ok(service_state)
@@ -73,11 +54,9 @@ macro_rules! impl_di {
 }
 
 impl_di!(pg_client: PgClient);
-impl_di!(minio_client: MinioClient);
 impl_di!(nats_client: NatsClient);
 
 impl_di!(auth_hasher: AuthHasher);
 impl_di!(password_strength: PasswordStrength);
-impl_di!(regional_policy: RegionalPolicy);
+impl_di!(regional_policy: DataCollectionPolicy);
 impl_di!(auth_keys: AuthKeys);
-impl_di!(project_channels: ProjectChannels);

@@ -66,16 +66,4 @@ impl IntegrationStatus {
         // All statuses allow configuration changes
         true
     }
-
-    /// Returns a description of what the integration status means.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            IntegrationStatus::Pending => "Integration is awaiting configuration or activation",
-            IntegrationStatus::Executing => "Integration is actively running and operational",
-            IntegrationStatus::Failure => {
-                "Integration has encountered an error and requires attention"
-            }
-        }
-    }
 }

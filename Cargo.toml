@@ -4,11 +4,9 @@
 resolver = "2"
 members = [
     "./crates/nvisy-cli",
-    "./crates/nvisy-minio",
-    "./crates/nvisy-mistral",
     "./crates/nvisy-nats",
     "./crates/nvisy-openrouter",
-    "./crates/nvisy-paddle",
+    "./crates/nvisy-paddlex",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
 ]
@@ -31,18 +29,15 @@ documentation = "https://docs.rs/nvisy-server"
 #
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
-# Runtime crates
-nvisy-core = { path = "../runtime/crates/nvisy-core", version = "0.1.0" }
-nvisy-client = { path = "../runtime/crates/nvisy-client", version = "0.1.0" }
-
 # Internal crates
-nvisy-minio = { path = "./crates/nvisy-minio", version = "0.1.0" }
-nvisy-mistral = { path = "./crates/nvisy-mistral", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
-nvisy-paddle = { path = "./crates/nvisy-paddle", version = "0.1.0" }
+nvisy-paddlex = { path = "./crates/nvisy-paddlex", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
+
+# CLI
+clap = { version = "4.5", features = [] }
 
 # Async runtime
 tokio = { version = "1.48", features = [] }
@@ -74,6 +69,7 @@ argon2 = { version = "0.6.0-rc.0", features = ["rand"] }
 base64 = { version = "0.22", features = [] }
 rand = { version = "0.9", features = ["serde"] }
 sha2 = { version = "0.10", features = [] }
+hex = { version = "0.4", features = [] }
 zxcvbn = { version = "3.1", features = ["serde"] }
 
 # Relational database (Postgres)
@@ -93,17 +89,12 @@ async-nats = { version = "0.44", features = [] }
 # Observability
 tracing = { version = "0.1", features = [] }
 tracing-subscriber = { version = "0.3", features = [] }
+anyhow = { version = "1.0", features = [] }
 
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 validator = { version = "0.20", features = ["derive"] }
-
-# Error handling
-anyhow = { version = "1.0", features = [] }
-
-# CLI
-clap = { version = "4.5", features = [] }
 
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }

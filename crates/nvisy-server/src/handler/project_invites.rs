@@ -4,56 +4,12 @@
 //! project administrators to invite users to join projects with specific roles.
 //! All operations are secured with proper authorization and include invitation
 //! lifecycle management.
-//!
-//! # Security Features
-//!
-//! ## Authorization Requirements
-//! - Project admin or owner permissions required for sending invitations
-//! - Invite management restricted to project administrators
-//! - Email validation and domain restrictions
-//! - Rate limiting to prevent invitation spam
-//!
-//! ## Invitation Workflow
-//! 1. **Send Invite**: Admin creates invitation with target email and role
-//! 2. **Email Notification**: Automated email sent to invitee
-//! 3. **Accept/Decline**: Invitee responds through secure link
-//! 4. **Member Creation**: Successful acceptance creates project membership
-//! 5. **Cleanup**: Expired or declined invitations are automatically removed
-//!
-//! # Role-Based Invitations
-//!
-//! - **Viewer**: Read-only access to project and documents
-//! - **Editor**: Can create and modify documents within the project
-//! - **Admin**: Can manage project settings and invite other members
-//! - **Owner**: Full control (typically not assignable through invitations)
-//!
-//! # Invitation States
-//!
-//! - **Pending**: Invitation sent, awaiting response
-//! - **Accepted**: Invitation accepted, membership created
-//! - **Declined**: Invitation declined by invitee
-//! - **Expired**: Invitation expired (typically after 7 days)
-//! - **Revoked**: Invitation cancelled by project administrator
-//!
-//! # Endpoints
-//!
-//! ## Invitation Management
-//! - `POST /projects/{projectId}/invites` - Send invitation to email address
-//! - `GET /projects/{projectId}/invites` - List pending invitations
-//! - `DELETE /projects/{projectId}/invites/{inviteId}` - Cancel pending invitation
-//!
-//! # Security Considerations
-//!
-//! - Email validation prevents invalid invitations
-//! - Time-limited invitation tokens prevent replay attacks
-//! - Project permission validation ensures only authorized users can invite
-//! - Audit logging tracks all invitation activities
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::models::{NewProjectInvite, ProjectInvite};
-use nvisy_postgres::queries::{ProjectInviteRepository, ProjectMemberRepository};
+use nvisy_postgres::model::{NewProjectInvite, ProjectInvite};
+use nvisy_postgres::query::{ProjectInviteRepository, ProjectMemberRepository};
 use nvisy_postgres::types::{InviteStatus, ProjectRole};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -70,7 +26,7 @@ use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project invite operations.
-const TRACING_TARGET: &str = "nvisy::handler::project_invites";
+const TRACING_TARGET: &str = "nvisy_server::handler::project_invites";
 
 /// Path parameters for invite-specific endpoints.
 #[must_use]
@@ -99,6 +55,12 @@ pub struct InviteePathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "inviteeEmail": "colleague@example.com",
+    "invitedRole": "Editor",
+    "inviteMessage": "Join our project to collaborate on documents!",
+    "expiresInDays": 7
+}))]
 struct CreateInviteRequest {
     /// Email address of the person to invite.
     #[validate(email, length(max = 254))]
@@ -107,7 +69,10 @@ struct CreateInviteRequest {
     #[serde(default = "default_invite_role")]
     pub invited_role: ProjectRole,
     /// Optional personal message to include with the invitation.
-    #[validate(length(max = 1000))]
+    ///
+    /// This message will be included in the invitation email. The content is
+    /// validated to prevent XSS and injection attacks.
+    #[validate(length(max = 1000), custom(function = "validate_safe_text"))]
     #[serde(default)]
     pub invite_message: String,
     /// Number of days until the invitation expires (1-30 days, default: 7).
@@ -125,23 +90,51 @@ fn default_expiry_days() -> u8 {
 }
 
 /// Response returned when a project invite is successfully created.
+///
+/// This response includes all the essential information about the newly created
+/// invitation, including the unique invite ID that can be used to track or cancel
+/// the invitation later.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct CreateInviteResponse {
     /// Unique identifier of the created invitation.
+    ///
+    /// This ID can be used to cancel the invitation or track its status.
     pub invite_id: Uuid,
+
     /// ID of the project the invitation is for.
+    ///
+    /// The invitee will become a member of this project if they accept.
     pub project_id: Uuid,
+
     /// Email address of the invitee.
+    ///
+    /// The invitation will be sent to this email address. The email is normalized
+    /// to lowercase for consistency.
     pub invitee_email: String,
+
     /// Role the invitee will have if they accept.
+    ///
+    /// Determines the level of access and permissions the invitee will have
+    /// in the project. Common roles include: Owner, Admin, Editor, Viewer.
     pub invited_role: ProjectRole,
+
     /// Current status of the invitation.
+    ///
+    /// Possible values: Pending, Accepted, Rejected, Cancelled, Expired.
+    /// Newly created invitations start with status Pending.
     pub invite_status: InviteStatus,
+
     /// When the invitation will expire.
+    ///
+    /// After this timestamp, the invitation can no longer be accepted.
+    /// The expiration period is configurable when creating the invite (1-30 days).
     pub expires_at: OffsetDateTime,
+
     /// When the invitation was created.
+    ///
+    /// UTC timestamp of when this invitation record was created.
     pub created_at: OffsetDateTime,
 }
 
@@ -198,15 +191,27 @@ impl From<ProjectInvite> for ListInvitesResponseItem {
 }
 
 /// Response for listing project invitations.
+///
+/// Contains a paginated list of all invitations for a specific project,
+/// including their current status and metadata.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct ListInvitesResponse {
-    /// ID of the project.
+    /// ID of the project these invitations belong to.
     pub project_id: Uuid,
+
     /// List of project invitations.
+    ///
+    /// This list contains all invitations matching the query, subject to
+    /// pagination limits. Each item includes the invitation status and
+    /// details about the invitee.
     pub invites: Vec<ListInvitesResponseItem>,
-    /// Total count of invitations (for pagination).
+
+    /// Total count of invitations for this project.
+    ///
+    /// This count represents all invitations, not just the current page.
+    /// Use this value to implement pagination controls in the UI.
     pub total_count: usize,
 }
 
@@ -214,6 +219,9 @@ struct ListInvitesResponse {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(example = json!({
+    "acceptInvite": true
+}))]
 struct ReplyInviteRequest {
     /// Whether to accept or decline the invitation.
     pub accept_invite: bool,
@@ -322,12 +330,12 @@ impl From<ProjectInvite> for CancelInviteResponse {
     ),
 )]
 async fn send_invite(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInviteRequest>,
 ) -> Result<(StatusCode, Json<CreateInviteResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -337,8 +345,6 @@ async fn send_invite(
         invited_role = ?request.invited_role,
         "creating project invitation"
     );
-
-    // Input validation is handled by ValidateJson extractor
 
     // Verify user has permission to send invitations
     auth_claims
@@ -358,7 +364,13 @@ async fn send_invite(
     .await?
         && existing_member.is_active
     {
-        return Err(ErrorKind::Conflict.with_context("User is already a member of this project"));
+        return Err(ErrorKind::Conflict
+            .with_message("User is already a member of this project")
+            .with_resource("project_member")
+            .with_context(format!(
+                "Project ID: {}, Account ID: {}",
+                path_params.project_id, auth_claims.account_id
+            )));
     }
 
     // Check for existing pending invites to the same email
@@ -367,7 +379,7 @@ async fn send_invite(
         &mut conn,
         None,
         Some(normalized_email.clone()),
-        nvisy_postgres::queries::Pagination {
+        nvisy_postgres::query::Pagination {
             limit: 100,
             offset: 0,
         },
@@ -383,7 +395,7 @@ async fn send_invite(
     // Check if there's already a pending invite
     if let Some(pending_invite) = existing_invites
         .iter()
-        .find(|invite| invite.invite_status == nvisy_postgres::types::InviteStatus::Pending)
+        .find(|invite| invite.invite_status == InviteStatus::Pending)
     {
         return Err(ErrorKind::Conflict
             .with_message("Invitation already sent")
@@ -397,12 +409,15 @@ async fn send_invite(
     let expires_at = OffsetDateTime::now_utc()
         + time::Duration::days(request.expires_in_days.clamp(1, 30) as i64);
 
+    // Sanitize the invite message for additional security
+    let sanitized_message = sanitize_text(&request.invite_message);
+
     let new_invite = NewProjectInvite {
         project_id: path_params.project_id,
         invitee_email: request.invitee_email.to_lowercase(),
         invitee_id: None, // Will be set when user accepts if they have an account
         invited_role: request.invited_role,
-        invite_message: request.invite_message,
+        invite_message: sanitized_message,
         invite_token: generate_invite_token(),
         expires_at,
         max_uses: 1,
@@ -416,7 +431,7 @@ async fn send_invite(
     let response = CreateInviteResponse::from(project_invite);
 
     tracing::info!(
-        target: "server::handler::project_invites",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = response.invite_id.to_string(),
@@ -472,15 +487,15 @@ async fn send_invite(
     ),
 )]
 async fn list_invites(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<ListInvitesResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
-        target: "server::handler::project_invites",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         "listing project invitations"
@@ -515,7 +530,7 @@ async fn list_invites(
     };
 
     tracing::debug!(
-        target: "server::handler::project_invites",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_count = response.invites.len(),
@@ -562,14 +577,14 @@ async fn list_invites(
     ),
 )]
 async fn cancel_invite(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<(StatusCode, Json<CancelInviteResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
-        target: "server::handler::project_invites",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
@@ -596,7 +611,7 @@ async fn cancel_invite(
     let response = CancelInviteResponse::from(project_invite);
 
     tracing::info!(
-        target: "server::handler::project_invites",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
@@ -655,15 +670,15 @@ async fn cancel_invite(
     )
 )]
 async fn reply_to_invite(
-    State(pg_database): State<PgClient>,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInviteRequest>,
 ) -> Result<(StatusCode, Json<ReplyInviteResponse>)> {
-    let mut conn = pg_database.get_connection().await?;
+    let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
-        target: "server::handler::project_invites",
+        target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
@@ -675,19 +690,32 @@ async fn reply_to_invite(
     let Some(invite) =
         ProjectInviteRepository::find_invite_by_id(&mut conn, path_params.invite_id).await?
     else {
-        return Err(ErrorKind::NotFound.with_resource("invitation"));
+        return Err(ErrorKind::NotFound
+            .with_resource("project_invite")
+            .with_message("Project invitation not found")
+            .with_context(format!("Invite ID: {}", path_params.invite_id)));
     };
 
     // Verify invitation belongs to this project
     if invite.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound.with_resource("invitation"));
+        return Err(ErrorKind::NotFound
+            .with_resource("project_invite")
+            .with_message("Project invitation not found in this project")
+            .with_context(format!(
+                "Expected project {}, but invite belongs to project {}",
+                path_params.project_id, invite.project_id
+            )));
     }
 
     // Verify invitation is valid
     if !invite.can_be_used() {
-        return Err(
-            ErrorKind::BadRequest.with_context("This invitation has expired or is no longer valid")
-        );
+        return Err(ErrorKind::BadRequest
+            .with_message("This invitation has expired or is no longer valid")
+            .with_resource("project_invite")
+            .with_context(format!(
+                "Invite status: {:?}, Expires at: {}",
+                invite.invite_status, invite.expires_at
+            )));
     }
 
     let project_invite = if request.accept_invite {
@@ -700,7 +728,7 @@ async fn reply_to_invite(
         .await?;
 
         tracing::info!(
-            target: "server::handler::project_invites",
+            target: TRACING_TARGET,
             account_id = auth_claims.account_id.to_string(),
             project_id = path_params.project_id.to_string(),
             invite_id = path_params.invite_id.to_string(),
@@ -718,7 +746,7 @@ async fn reply_to_invite(
         .await?;
 
         tracing::info!(
-            target: "server::handler::project_invites",
+            target: TRACING_TARGET,
             account_id = auth_claims.account_id.to_string(),
             project_id = path_params.project_id.to_string(),
             invite_id = path_params.invite_id.to_string(),
@@ -732,6 +760,42 @@ async fn reply_to_invite(
         StatusCode::OK,
         Json(ReplyInviteResponse::from(project_invite)),
     ))
+}
+
+/// Validates that text content is safe and doesn't contain potential XSS or injection attacks.
+///
+/// This function performs basic sanitization checks to prevent common security issues.
+fn validate_safe_text(text: &str) -> Result<(), validator::ValidationError> {
+    // Check for script tags
+    if text.to_lowercase().contains("<script") {
+        return Err(validator::ValidationError::new("contains_script_tag"));
+    }
+
+    // Check for common XSS patterns
+    if text.contains("javascript:") || text.contains("data:text/html") {
+        return Err(validator::ValidationError::new("contains_xss_pattern"));
+    }
+
+    // Check for SQL injection patterns (basic check)
+    let suspicious_patterns = ["--", "/*", "*/", "xp_", "sp_", "exec(", "execute("];
+    for pattern in &suspicious_patterns {
+        if text.to_lowercase().contains(pattern) {
+            return Err(validator::ValidationError::new(
+                "contains_suspicious_pattern",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Sanitizes user input by removing potentially dangerous characters.
+///
+/// This is a defense-in-depth measure in addition to validation.
+fn sanitize_text(text: &str) -> String {
+    text.chars()
+        .filter(|c| !matches!(c, '<' | '>' | '{' | '}' | '`'))
+        .collect()
 }
 
 /// Generates a cryptographically secure invite token.

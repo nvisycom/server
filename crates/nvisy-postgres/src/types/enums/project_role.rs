@@ -145,23 +145,6 @@ impl ProjectRole {
     pub fn has_permission_level_of(self, other: ProjectRole) -> bool {
         self.hierarchy_level() >= other.hierarchy_level()
     }
-
-    /// Returns a description of the role's capabilities.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            ProjectRole::Owner => {
-                "Full control over the project, including deletion and all management aspects"
-            }
-            ProjectRole::Admin => {
-                "Administrative access with project management capabilities, cannot delete project"
-            }
-            ProjectRole::Editor => {
-                "Can edit content and manage files, but cannot manage members or project settings"
-            }
-            ProjectRole::Viewer => "Read-only access to project content",
-        }
-    }
 }
 
 impl PartialOrd for ProjectRole {

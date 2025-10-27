@@ -10,37 +10,17 @@ Thank you for your interest in contributing to the Nvisy API Server.
 - MinIO RELEASE.2025 or higher (for object storage)
 - OpenRouter API key (for AI features)
 - PaddleX service (for document processing and OCR)
-- Mistral AI API key (for advanced document understanding)
 - OpenSSL (for key generation)
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/nvisycom/api.git
-cd api
+git clone https://github.com/nvisycom/server.git
+cd server
 make install-all
 ```
 
 ## Development
-
-### Scripts
-
-- `make install-all` - Install required tools and make scripts executable
-- `make generate-keys` - Generate RSA key pair for JWT authentication
-- `make generate-migrations` - Run database migrations and update schema
-- `make clear-migrations` - Revert all database migrations
-
-### Quality Checks
-
-Before submitting changes:
-
-```bash
-make install-all        # Setup development environment
-cargo fmt --all         # Format code
-cargo clippy            # Lint code
-cargo test --workspace  # Run tests
-cargo build --release   # Verify release build
-```
 
 ## Pull Request Process
 
@@ -70,34 +50,6 @@ cargo build --release   # Verify release build
 - Follow workspace patterns established in existing crates
 
 ## Documentation Standards
-
-### README Format
-
-All crate README files should follow this consistent format:
-
-```markdown
-# api.nvisy.com/crate-name
-
-Brief description of the crate's purpose and key functionality.
-
-[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![relevant-badge](https://img.shields.io/badge/Technology-Version+-000000?style=flat-square&logo=tech&logoColor=white)](https://example.com/)
-
-## Features
-
-- **Feature Name** - Brief description of what it does
-- **Another Feature** - Brief description with technical details
-- **Error Handling** - Comprehensive error types with context
-
-## Key Dependencies
-
-- `dependency-name` - Brief description of what it provides
-- `another-dep` - Brief description of its role in the crate
-
-## Architecture/Capabilities
-
-Brief section explaining the crate's architecture or key capabilities.
-```
 
 ### Documentation Requirements
 

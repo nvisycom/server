@@ -95,17 +95,4 @@ impl InviteStatus {
             InviteStatus::Declined | InviteStatus::Expired | InviteStatus::Revoked
         )
     }
-
-    /// Returns a user-friendly description of the invitation status.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            InviteStatus::Pending => "Invitation sent, awaiting response",
-            InviteStatus::Accepted => "Invitation accepted, member added to project",
-            InviteStatus::Declined => "Invitation was declined by the invitee",
-            InviteStatus::Canceled => "Invitation was canceled by the sender",
-            InviteStatus::Expired => "Invitation expired due to timeout",
-            InviteStatus::Revoked => "Invitation was revoked by an administrator",
-        }
-    }
 }

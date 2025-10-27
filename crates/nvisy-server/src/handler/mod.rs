@@ -39,7 +39,6 @@
 
 mod accounts;
 mod authentication;
-mod constraints;
 mod document_files;
 mod document_versions;
 mod documents;
@@ -47,7 +46,7 @@ mod error;
 mod monitors;
 mod project_invites;
 mod project_members;
-pub mod project_websocket;
+mod project_websocket;
 mod projects;
 mod response;
 mod utils;
@@ -59,7 +58,7 @@ use utoipa_axum::router::OpenApiRouter;
 pub use crate::extract::ProjectPermission;
 pub use crate::handler::error::{Error, ErrorKind, Result};
 pub(crate) use crate::handler::response::ErrorResponse;
-pub use crate::handler::utils::{CustomRoutes, Pagination};
+pub use crate::handler::utils::{CustomRoutes, Pagination, RouterMapFn};
 use crate::middleware::{refresh_token_middleware, require_authentication};
 use crate::service::ServiceState;
 
@@ -71,10 +70,10 @@ async fn handler() -> Response {
 /// Returns an [`OpenApiRouter`] with all private routes.
 fn private_routes(
     additional_routes: Option<OpenApiRouter<ServiceState>>,
-    state: ServiceState,
+    service_state: ServiceState,
 ) -> OpenApiRouter<ServiceState> {
     let mut router = OpenApiRouter::new()
-        .merge(accounts::routes(state.clone()))
+        .merge(accounts::routes(service_state.clone()))
         .merge(projects::routes())
         .merge(project_invites::routes())
         .merge(project_members::routes())
@@ -93,6 +92,7 @@ fn private_routes(
 /// Returns an [`OpenApiRouter`] with all public routes.
 fn public_routes(
     additional_routes: Option<OpenApiRouter<ServiceState>>,
+    _service_state: ServiceState,
 ) -> OpenApiRouter<ServiceState> {
     let mut router = OpenApiRouter::new()
         .merge(authentication::routes())
@@ -106,26 +106,28 @@ fn public_routes(
 }
 
 /// Returns an [`OpenApiRouter`] with all routes.
-pub fn openapi_routes(routes: CustomRoutes, state: ServiceState) -> OpenApiRouter<ServiceState> {
+pub fn openapi_routes(
+    mut routes: CustomRoutes,
+    state: ServiceState,
+) -> OpenApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
     let refresh_token_middleware = from_fn_with_state(state.clone(), refresh_token_middleware);
 
-    let mut router = OpenApiRouter::new();
-
-    // Private routes with authentication middleware
-    let private_router = private_routes(routes.private_routes, state.clone())
+    let mut private_router = private_routes(routes.private_routes.take(), state.clone());
+    private_router = routes.map_private_before_middleware(private_router);
+    private_router = private_router
         .route_layer(require_authentication)
         .route_layer(refresh_token_middleware);
+    private_router = routes.map_private_after_middleware(private_router);
 
-    // Public routes without authentication
-    let public_router = public_routes(routes.public_routes);
+    let mut public_router = public_routes(routes.public_routes.take(), state);
+    public_router = routes.map_public_before_middleware(public_router);
+    public_router = routes.map_public_after_middleware(public_router);
 
-    router = router
+    OpenApiRouter::new()
         .merge(private_router)
         .merge(public_router)
-        .fallback(handler);
-
-    router
+        .fallback(handler)
 }
 
 #[cfg(test)]

@@ -54,12 +54,12 @@ CREATE TABLE accounts
     CONSTRAINT accounts_password_hash_length_min CHECK (length(password_hash) >= 60),
 
     -- Optional profile information
-    company_name          TEXT        NOT NULL DEFAULT '',
-    phone_number          TEXT        NOT NULL DEFAULT '',
+    company_name          TEXT                 DEFAULT NULL,
+    phone_number          TEXT                 DEFAULT NULL,
     avatar_url            TEXT                 DEFAULT NULL,
 
-    CONSTRAINT accounts_company_name_length_max CHECK (length(company_name) <= 255),
-    CONSTRAINT accounts_phone_number_length_max CHECK (length(phone_number) <= 50),
+    CONSTRAINT accounts_company_name_length_max CHECK (company_name IS NULL OR length(company_name) <= 255),
+    CONSTRAINT accounts_phone_number_length_max CHECK (phone_number IS NULL OR length(phone_number) <= 50),
 
     -- Preferences and settings
     timezone              TEXT        NOT NULL DEFAULT 'UTC',

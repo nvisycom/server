@@ -7,8 +7,7 @@ use diesel_migrations::MigrationHarness;
 use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, instrument};
 
-use super::{MigrationResult, custom_hooks};
-use crate::migrate::get_migration_status;
+use super::{MigrationResult, custom_hooks, get_migration_status};
 use crate::{MIGRATIONS, PgClient, PgError, PgResult, TRACING_TARGET_MIGRATIONS};
 
 /// Run all pending migrations on the database.

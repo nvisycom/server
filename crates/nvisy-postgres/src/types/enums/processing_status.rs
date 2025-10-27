@@ -142,20 +142,6 @@ impl ProcessingStatus {
         matches!(self, ProcessingStatus::Failed)
     }
 
-    /// Returns a description of what the processing status means.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            ProcessingStatus::Pending => "File is queued for processing",
-            ProcessingStatus::Processing => "File is currently being processed",
-            ProcessingStatus::Completed => "Processing completed successfully",
-            ProcessingStatus::Failed => "Processing failed due to an error",
-            ProcessingStatus::Canceled => "Processing was canceled",
-            ProcessingStatus::Skipped => "Processing was skipped (not required)",
-            ProcessingStatus::Retry => "File is queued for retry after failure",
-        }
-    }
-
     /// Returns processing statuses that are considered active (not final).
     pub fn active_statuses() -> &'static [ProcessingStatus] {
         &[
