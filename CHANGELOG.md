@@ -10,10 +10,6 @@ and this project adheres to
 
 ### Added
 
-- **nvisy-paddle** - PaddleX HTTP API client for comprehensive document
-  processing and OCR
-- **nvisy-mistral** - Mistral AI OCR client for high-accuracy document
-  understanding
 - Added convenience functions `is_valid_nats_url()` and `dev_config()` to
   nvisy-nats
 - Added comprehensive error classification methods to nvisy-nats Error type
@@ -21,7 +17,6 @@ and this project adheres to
 
 ### Changed
 
-- Updated nvisy-mistral README to match project documentation standards
 - Improved nvisy-nats Error type with more granular retry logic and better
   categorization
 - Enhanced nvisy-nats error handling with severity levels and client error
@@ -35,6 +30,9 @@ and this project adheres to
 
 ### Removed
 
+- **nvisy-minio** - Removed MinIO/S3-compatible storage integration
+- **nvisy-mistral** - Removed Mistral AI OCR client
+
 ## [0.1.0] - 2025-01-15
 
 ### Added
@@ -43,7 +41,6 @@ and this project adheres to
 - High-performance HTTP server built with Axum and Tokio
 - PostgreSQL database integration with Diesel ORM and connection pooling
 - JWT-based authentication with RSA key pair signing
-- MinIO/S3-compatible object storage integration
 - OpenRouter AI service integration for document processing
 - NATS messaging system integration
 - Comprehensive CLI with configuration management
@@ -61,7 +58,6 @@ and this project adheres to
 
 - **nvisy-server** - Core HTTP API server with Axum framework
 - **nvisy-postgres** - Type-safe database layer with async connection pooling
-- **nvisy-minio** - MinIO client with S3-compatible operations
 - **nvisy-openrouter** - OpenRouter AI integration client
 - **nvisy-paddlex** - PaddleX HTTP API client for document processing and OCR
 - **nvisy-nats** - NATS messaging client

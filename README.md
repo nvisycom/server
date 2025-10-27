@@ -15,10 +15,8 @@ built with Rust and modern async technologies.
   strict typing
 - **Comprehensive Security** - JWT authentication, session management, and input
   validation
-- **MinIO Storage Integration** - S3-compatible object storage for document
-  management
-- **Dual OCR Processing** - Mistral AI OCR and PaddleX HTTP API integration for
-  flexible, high-accuracy document understanding
+- **OCR Processing** - PaddleX HTTP API integration for high-accuracy document
+  understanding
 - **LLM Chat Assistant** - OpenRouter integration for intelligent document
   analysis and AI-powered features (optional)
 - **NATS Messaging** - Real-time updates, job queues, sessions, and caching via
@@ -35,11 +33,9 @@ built with Rust and modern async technologies.
 api/
 ├── crates/
 │   ├── nvisy-cli/          # HTTP server CLI
-│   ├── nvisy-minio/        # MinIO/S3-compatible storage client
-│   ├── nvisy-mistral/      # Mistral AI OCR HTTP API client (external, or cloud OCR)
 │   ├── nvisy-nats/         # NATS client (messaging, KV, streams, queues)
 │   ├── nvisy-openrouter/   # OpenRouter AI client (assistant chatbot)
-│   ├── nvisy-paddlex/      # PaddleX HTTP API client (internal, or local OCR)
+│   ├── nvisy-paddlex/      # PaddleX HTTP API client (OCR)
 │   ├── nvisy-postgres/     # PostgreSQL database layer
 │   └── nvisy-server/       # Core HTTP API server
 ├── migrations/             # Database migrations
@@ -53,9 +49,7 @@ api/
 - Rust 1.89 or higher
 - PostgreSQL 17 or higher
 - NATS server with JetStream enabled
-- MinIO instance or S3-compatible storage
-- Mistral AI API key (for cloud OCR processing)
-  - AND/OR PaddleX server (for local OCR processing)
+- PaddleX server (for OCR processing)
 - OpenRouter API key (for LLM chat assistant - optional)
 
 ### Installation
@@ -107,15 +101,10 @@ Configure the API server using these environment variables:
 | `POSTGRES_URL`              | PostgreSQL connection string  | Yes      | -                               |
 | `AUTH_PUBLIC_PEM_FILEPATH`  | JWT public key file path      | No       | `./public.pem`                  |
 | `AUTH_PRIVATE_PEM_FILEPATH` | JWT private key file path     | No       | `./private.pem`                 |
-| `MISTRAL_API_KEY`           | Mistral AI API key            | Yes      | -                               |
-| `MISTRAL_BASE_URL`          | Mistral API base URL          | No       | `https://api.mistral.ai/v1/`    |
 | `PADDLEX_API_KEY`           | PaddleX service API key       | No       | -                               |
 | `PADDLEX_BASE_URL`          | PaddleX service base URL      | No       | `http://localhost:8080/api/v1/` |
 | `OPENROUTER_API_KEY`        | OpenRouter API key for LLM    | No       | -                               |
 | `OPENROUTER_BASE_URL`       | OpenRouter API base URL       | No       | `https://openrouter.ai/api/v1/` |
-| `MINIO_ENDPOINT`            | MinIO server endpoint         | No       | `localhost:9000`                |
-| `MINIO_ACCESS_KEY`          | MinIO access key              | No       | `minioadmin`                    |
-| `MINIO_SECRET_KEY`          | MinIO secret key              | No       | `minioadmin`                    |
 | `NATS_URL`                  | NATS server URL               | No       | `nats://127.0.0.1:4222`         |
 | `NATS_CLIENT_NAME`          | NATS client name              | No       | `nvisy-api`                     |
 | `CORS_ALLOWED_ORIGINS`      | Comma-separated CORS origins  | No       | Empty (allows localhost)        |
