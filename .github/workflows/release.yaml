@@ -420,7 +420,7 @@ jobs:
     if: always()
     steps:
       - name: Delete build artifacts
-        uses: geekyeggo/delete-artifact@v4
+        uses: geekyeggo/delete-artifact@v5
         with:
           name: binary-*
           failOnError: false
