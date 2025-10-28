@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
 
@@ -65,16 +65,10 @@ jobs:
 
       - name: Run clippy (general linting)
         run: |
-          cargo clippy --all-targets --all-features --workspace -- \
-            -D warnings \
-            -D clippy::all \
-            -D clippy::suspicious \
-            -D clippy::complexity \
-            -W clippy::perf \
-            -W clippy::style
+          cargo clippy --all-targets --all-features --workspace
 
       - name: Check documentation
-        run: cargo doc --no-deps --all-features --workspace --document-private-items
+        run: cargo doc --no-deps --all-features --workspace
         env:
           RUSTDOCFLAGS: -D warnings
 

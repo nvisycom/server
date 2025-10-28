@@ -24,7 +24,6 @@ support and unified streaming infrastructure.
 - `async-nats` - High-performance async NATS client with JetStream support
 - `tokio` - Async runtime for connection management and streaming
 - `serde` - Type-safe serialization for message payloads
-- `thiserror` - Structured error handling with context
 
 ## Architecture
 

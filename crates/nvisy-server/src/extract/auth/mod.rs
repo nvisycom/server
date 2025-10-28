@@ -23,14 +23,14 @@
 
 // Module declarations
 pub mod auth_provider;
-pub mod auth_state;
-pub mod jwt_header;
-pub mod permissions;
+mod auth_state;
+mod jwt_header;
+mod permission;
 
 pub use self::auth_provider::AuthProvider;
 pub use self::auth_state::AuthState;
 pub use self::jwt_header::{AuthClaims, AuthHeader};
-pub use self::permissions::{AuthContext, AuthResult, ProjectPermission};
+pub use self::permission::{AuthContext, AuthResult, Permission};
 
 impl AuthProvider for AuthClaims {
     fn account_id(&self) -> uuid::Uuid {

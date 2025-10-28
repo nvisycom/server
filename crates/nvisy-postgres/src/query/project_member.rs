@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
-use crate::model::{NewProjectMember, ProjectMember, UpdateProjectMember};
+use crate::model::{NewProjectMember, Project, ProjectMember, UpdateProjectMember};
 use crate::types::ProjectRole;
 use crate::{PgError, PgResult, schema};
 
@@ -142,6 +142,37 @@ impl ProjectMemberRepository {
             .map_err(PgError::from)?;
 
         Ok(memberships)
+    }
+
+    /// Lists all projects a user is a member of with project details.
+    ///
+    /// This method performs a single query with a JOIN to fetch both the project
+    /// and membership data, avoiding N+1 query problems.
+    pub async fn list_user_projects_with_details(
+        conn: &mut AsyncPgConnection,
+        user_id: Uuid,
+        pagination: Pagination,
+    ) -> PgResult<Vec<(Project, ProjectMember)>> {
+        use schema::{project_members, projects};
+
+        let results = project_members::table
+            .inner_join(projects::table.on(projects::id.eq(project_members::project_id)))
+            .filter(project_members::account_id.eq(user_id))
+            .filter(project_members::is_active.eq(true))
+            .filter(projects::deleted_at.is_null())
+            .select((Project::as_select(), ProjectMember::as_select()))
+            .order((
+                project_members::is_favorite.desc(),
+                project_members::last_accessed_at.desc().nulls_last(),
+                project_members::created_at.desc(),
+            ))
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+            .load::<(Project, ProjectMember)>(conn)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(results)
     }
 
     /// Checks a user's role in a project.

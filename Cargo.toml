@@ -60,7 +60,7 @@ http-body-util = { version = "0.1", features = [] }
 # OpenAPI/Documentation
 utoipa = { version = "5.3", features = ["uuid", "time"] }
 utoipa-axum = { version = "0.2", features = [] }
-utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] } # TODO: Remove swagger, keep scalar
 utoipa-scalar = { version = "0.3", features = ["axum"] }
 
 # Authentication & Security
@@ -79,27 +79,32 @@ diesel-async = { version = "0.7", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
 
-# Object storage (Minio)
-minio = { version = "0.3", features = [] }
-tempfile = { version = "3.23", features = [] }
-
 # Messaging (NATS)
 async-nats = { version = "0.44", features = [] }
+
+# AI/OpenAI services (OpenRouter)
+openrouter-rs = { version = "0.4.5", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }
 tracing-subscriber = { version = "0.3", features = [] }
 anyhow = { version = "1.0", features = [] }
 
+# Rate limiting
+governor = { version = "0.10", features = [] }
+tempfile = { version = "3.23", features = [] }
+
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 validator = { version = "0.20", features = ["derive"] }
+schemars = { version = "1.0", features = [] }
 
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }
 derive_more = { version = "1.0", features = [] }
 strum = { version = "0.27", features = ["derive"] }
+derive_builder = { version = "0.20", features = [] }
 
 # Data types
 jiff = { version = "0.2", features = ["serde"] }
@@ -113,3 +118,6 @@ mime = { version = "0.3", features = [] }
 url = { version = "2.5", features = [] }
 semver = { version = "1.0", features = ["serde"] }
 ecow = { version = "0.2", features = ["serde"] }
+
+# Text processing
+regex = { version = "1.0", features = [] }

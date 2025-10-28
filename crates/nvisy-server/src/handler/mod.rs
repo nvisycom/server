@@ -48,17 +48,18 @@ mod project_invites;
 mod project_members;
 mod project_websocket;
 mod projects;
-mod response;
+pub mod request;
+pub mod response;
 mod utils;
 
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use utoipa_axum::router::OpenApiRouter;
 
-pub use crate::extract::ProjectPermission;
+pub use crate::extract::Permission;
 pub use crate::handler::error::{Error, ErrorKind, Result};
 pub(crate) use crate::handler::response::ErrorResponse;
-pub use crate::handler::utils::{CustomRoutes, Pagination, RouterMapFn};
+pub use crate::handler::utils::{CustomRoutes, PaginationRequest, RouterMapFn};
 use crate::middleware::{refresh_token_middleware, require_authentication};
 use crate::service::ServiceState;
 

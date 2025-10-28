@@ -6,34 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- Added convenience functions `is_valid_nats_url()` and `dev_config()` to
-  nvisy-nats
-- Added comprehensive error classification methods to nvisy-nats Error type
-- Added user-friendly error messages and network error detection in nvisy-nats
-
-### Changed
-
-- Improved nvisy-nats Error type with more granular retry logic and better
-  categorization
-- Enhanced nvisy-nats error handling with severity levels and client error
-  detection
-
-### Fixed
-
-- Fixed nvisy-nats test compilation errors with serde_json::Error construction
-- Improved retry logic in nvisy-nats to be more context-aware for different
-  error types
-
-### Removed
-
-- **nvisy-minio** - Removed MinIO/S3-compatible storage integration
-- **nvisy-mistral** - Removed Mistral AI OCR client
-
-## [0.1.0] - 2025-01-15
+## [0.1.0] - Unreleased
 
 ### Added
 
@@ -42,17 +15,12 @@ and this project adheres to
 - PostgreSQL database integration with Diesel ORM and connection pooling
 - JWT-based authentication with RSA key pair signing
 - OpenRouter AI service integration for document processing
-- NATS messaging system integration
-- Comprehensive CLI with configuration management
-- Docker support with multi-stage builds
-- Database migration system with embedded migrations
+- NATS messaging system integration with JetStream and KV support
+- PaddleX HTTP API client for document processing and OCR
 - OpenAPI/Swagger documentation generation
 - CORS middleware with configurable origins
 - Structured logging with tracing
-- Graceful shutdown handling
-- Health check endpoints
-- TLS support (optional feature)
-- Telemetry support (optional feature)
+- Graceful shutdown handling and health check endpoints
 
 ### Features
 
@@ -80,5 +48,4 @@ and this project adheres to
 - Security headers middleware
 - Rate limiting support
 
-[Unreleased]: https://github.com/nvisycom/api/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/nvisycom/api/releases/tag/v0.1.0

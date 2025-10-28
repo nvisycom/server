@@ -7,13 +7,15 @@ use std::borrow::Cow;
 
 use nvisy_postgres::model::ProjectMember;
 use nvisy_postgres::types::ProjectRole;
+use strum::{EnumIter, EnumString, IntoEnumIterator};
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
 
 /// Granular project permissions for authorization checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ProjectPermission {
+#[derive(EnumIter, EnumString)]
+pub enum Permission {
     // Project-level permissions
     /// Can view project basic information.
     ViewProject,
@@ -57,7 +59,7 @@ pub enum ProjectPermission {
     ManageSettings,
 }
 
-impl ProjectPermission {
+impl Permission {
     /// Checks if the given project role satisfies this permission requirement.
     pub const fn is_permitted_by_role(self, role: ProjectRole) -> bool {
         use ProjectRole::{Admin, Editor, Owner, Viewer};
@@ -169,44 +171,7 @@ impl ProjectPermission {
 
     /// Returns all permissions available to the given role.
     pub fn permissions_for_role(role: ProjectRole) -> Vec<Self> {
-        const ALL_PERMISSIONS: &[ProjectPermission] = &[
-            ProjectPermission::ViewProject,
-            ProjectPermission::UpdateProject,
-            ProjectPermission::DeleteProject,
-            ProjectPermission::ViewDocuments,
-            ProjectPermission::CreateDocuments,
-            ProjectPermission::UpdateDocuments,
-            ProjectPermission::DeleteDocuments,
-            ProjectPermission::ViewFiles,
-            ProjectPermission::UploadFiles,
-            ProjectPermission::DeleteFiles,
-            ProjectPermission::ViewMembers,
-            ProjectPermission::InviteMembers,
-            ProjectPermission::RemoveMembers,
-            ProjectPermission::ManageRoles,
-            ProjectPermission::ViewSettings,
-            ProjectPermission::ManageSettings,
-        ];
-
-        // Compile-time assertions to ensure permission hierarchy consistency
-        const _: () = {
-            // Ensure Owner has all permissions
-            assert!(ProjectPermission::ViewProject.is_permitted_by_role(ProjectRole::Owner));
-            assert!(ProjectPermission::DeleteProject.is_permitted_by_role(ProjectRole::Owner));
-            assert!(ProjectPermission::ManageRoles.is_permitted_by_role(ProjectRole::Owner));
-
-            // Ensure Admin cannot delete projects or manage roles
-            assert!(!ProjectPermission::DeleteProject.is_permitted_by_role(ProjectRole::Admin));
-            assert!(!ProjectPermission::ManageRoles.is_permitted_by_role(ProjectRole::Admin));
-
-            // Ensure Viewer can only view
-            assert!(!ProjectPermission::CreateDocuments.is_permitted_by_role(ProjectRole::Viewer));
-            assert!(!ProjectPermission::UpdateDocuments.is_permitted_by_role(ProjectRole::Viewer));
-        };
-
-        ALL_PERMISSIONS
-            .iter()
-            .copied()
+        Self::iter()
             .filter(|perm| perm.is_permitted_by_role(role))
             .collect()
     }
@@ -300,7 +265,7 @@ impl AuthResult {
     /// # Examples
     ///
     /// ```rust
-    /// # use nvisy_server::extract::auth::AuthResult;
+    /// # use nvisy_server::extract::AuthResult;
     /// let result = AuthResult::granted();
     /// assert!(result.into_unit_result().is_ok());
     ///
@@ -328,8 +293,8 @@ impl AuthResult {
 ///
 /// # Patterns
 ///
-/// - `authorize!(project: auth_state, conn, project_id, permission)` - Project authorization
-/// - `authorize!(document: auth_state, conn, document_id, permission)` - Document authorization
+/// - `authorize!(project: project_id, auth_state, conn, permission)` - Project authorization
+/// - `authorize!(document: document_id, auth_state, conn, permission)` - Document authorization
 /// - `authorize!(admin: auth_state)` - Admin authorization
 /// - `authorize!(self: auth_state, target_id)` - Self authorization
 ///
@@ -337,13 +302,13 @@ impl AuthResult {
 ///
 /// ```rust,ignore
 /// // Authorize project viewing
-/// let member = authorize!(project: auth_state, &mut conn, project_id, ProjectPermission::ViewProject);
+/// let member = authorize!(project: project_id, auth_state, &mut conn, ProjectPermission::ViewProject);
 ///
 /// // Authorize document creation
-/// authorize!(document: auth_state, &mut conn, document_id, ProjectPermission::CreateDocuments);
+/// authorize!(document: document_id, auth_state, &mut conn, ProjectPermission::CreateDocuments);
 ///
 /// // Authorize file upload
-/// authorize!(project: auth_state, &mut conn, project_id, ProjectPermission::UploadFiles);
+/// authorize!(project: project_id, auth_state, &mut conn, ProjectPermission::UploadFiles);
 ///
 /// // Require global admin privileges
 /// authorize!(admin: auth_state);
@@ -352,31 +317,31 @@ impl AuthResult {
 /// authorize!(self: auth_state, target_user_id);
 ///
 /// // Authorize member management
-/// let member = authorize!(project: auth_state, &mut conn, project_id, ProjectPermission::ManageRoles);
+/// let member = authorize!(project: project_id, auth_state, &mut conn, ProjectPermission::ManageRoles,);
 /// ```
 #[macro_export]
 macro_rules! authorize {
     // Project authorization
-    (project: $auth_state:expr, $conn:expr, $project_id:expr, $permission:expr) => {
+    (project: $project_id:expr, $auth_state:expr, $conn:expr, $permission:expr $(,)?) => {
         $auth_state
             .authorize_project($conn, $project_id, $permission)
             .await?
     };
 
     // Document authorization
-    (document: $auth_state:expr, $conn:expr, $document_id:expr, $permission:expr) => {
+    (document: $document_id:expr, $auth_state:expr, $conn:expr, $permission:expr $(,)?) => {
         $auth_state
             .authorize_document($conn, $document_id, $permission)
             .await?
     };
 
     // Self authorization
-    (self: $auth_state:expr, $target_id:expr) => {
+    (self: $auth_state:expr, $target_id:expr $(,)?) => {
         $auth_state.authorize_self($target_id)?
     };
 
     // Admin authorization
-    (admin: $auth_state:expr) => {
+    (admin: $auth_state:expr $(,)?) => {
         $auth_state.authorize_admin()?
     };
 }
@@ -390,112 +355,112 @@ mod tests {
     #[test]
     fn test_project_level_permissions() {
         // View project - all roles can view
-        assert!(ProjectPermission::ViewProject.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::ViewProject.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::ViewProject.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ViewProject.is_permitted_by_role(ProjectRole::Owner));
+        assert!(Permission::ViewProject.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::ViewProject.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::ViewProject.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ViewProject.is_permitted_by_role(ProjectRole::Owner));
 
         // Update project - only admin and owner
-        assert!(!ProjectPermission::UpdateProject.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(!ProjectPermission::UpdateProject.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::UpdateProject.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::UpdateProject.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::UpdateProject.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(!Permission::UpdateProject.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::UpdateProject.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::UpdateProject.is_permitted_by_role(ProjectRole::Owner));
 
         // Delete project - only owner
-        assert!(!ProjectPermission::DeleteProject.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(!ProjectPermission::DeleteProject.is_permitted_by_role(ProjectRole::Editor));
-        assert!(!ProjectPermission::DeleteProject.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::DeleteProject.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::DeleteProject.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(!Permission::DeleteProject.is_permitted_by_role(ProjectRole::Editor));
+        assert!(!Permission::DeleteProject.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::DeleteProject.is_permitted_by_role(ProjectRole::Owner));
     }
 
     #[test]
     fn test_document_permissions() {
         // View documents - all roles can view
-        assert!(ProjectPermission::ViewDocuments.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::ViewDocuments.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::ViewDocuments.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ViewDocuments.is_permitted_by_role(ProjectRole::Owner));
+        assert!(Permission::ViewDocuments.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::ViewDocuments.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::ViewDocuments.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ViewDocuments.is_permitted_by_role(ProjectRole::Owner));
 
         // Create documents - editor and above
-        assert!(!ProjectPermission::CreateDocuments.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::CreateDocuments.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::CreateDocuments.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::CreateDocuments.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::CreateDocuments.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::CreateDocuments.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::CreateDocuments.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::CreateDocuments.is_permitted_by_role(ProjectRole::Owner));
 
         // Update documents - editor and above
-        assert!(!ProjectPermission::UpdateDocuments.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::UpdateDocuments.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::UpdateDocuments.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::UpdateDocuments.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::UpdateDocuments.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::UpdateDocuments.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::UpdateDocuments.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::UpdateDocuments.is_permitted_by_role(ProjectRole::Owner));
 
         // Delete documents - editor and above
-        assert!(!ProjectPermission::DeleteDocuments.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::DeleteDocuments.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::DeleteDocuments.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::DeleteDocuments.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::DeleteDocuments.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::DeleteDocuments.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::DeleteDocuments.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::DeleteDocuments.is_permitted_by_role(ProjectRole::Owner));
     }
 
     #[test]
     fn test_file_permissions() {
         // View files - all roles can view
-        assert!(ProjectPermission::ViewFiles.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::ViewFiles.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::ViewFiles.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ViewFiles.is_permitted_by_role(ProjectRole::Owner));
+        assert!(Permission::ViewFiles.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::ViewFiles.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::ViewFiles.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ViewFiles.is_permitted_by_role(ProjectRole::Owner));
 
         // Upload files - editor and above
-        assert!(!ProjectPermission::UploadFiles.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::UploadFiles.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::UploadFiles.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::UploadFiles.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::UploadFiles.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::UploadFiles.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::UploadFiles.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::UploadFiles.is_permitted_by_role(ProjectRole::Owner));
 
         // Delete files - editor and above
-        assert!(!ProjectPermission::DeleteFiles.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::DeleteFiles.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::DeleteFiles.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::DeleteFiles.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::DeleteFiles.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::DeleteFiles.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::DeleteFiles.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::DeleteFiles.is_permitted_by_role(ProjectRole::Owner));
     }
 
     #[test]
     fn test_member_management_permissions() {
         // View members - all roles can view
-        assert!(ProjectPermission::ViewMembers.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::ViewMembers.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::ViewMembers.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ViewMembers.is_permitted_by_role(ProjectRole::Owner));
+        assert!(Permission::ViewMembers.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::ViewMembers.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::ViewMembers.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ViewMembers.is_permitted_by_role(ProjectRole::Owner));
 
         // Invite members - admin and above
-        assert!(!ProjectPermission::InviteMembers.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(!ProjectPermission::InviteMembers.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::InviteMembers.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::InviteMembers.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::InviteMembers.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(!Permission::InviteMembers.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::InviteMembers.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::InviteMembers.is_permitted_by_role(ProjectRole::Owner));
 
         // Remove members - admin and above
-        assert!(!ProjectPermission::RemoveMembers.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(!ProjectPermission::RemoveMembers.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::RemoveMembers.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::RemoveMembers.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::RemoveMembers.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(!Permission::RemoveMembers.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::RemoveMembers.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::RemoveMembers.is_permitted_by_role(ProjectRole::Owner));
 
         // Manage roles - only owner
-        assert!(!ProjectPermission::ManageRoles.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(!ProjectPermission::ManageRoles.is_permitted_by_role(ProjectRole::Editor));
-        assert!(!ProjectPermission::ManageRoles.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ManageRoles.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::ManageRoles.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(!Permission::ManageRoles.is_permitted_by_role(ProjectRole::Editor));
+        assert!(!Permission::ManageRoles.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ManageRoles.is_permitted_by_role(ProjectRole::Owner));
     }
 
     #[test]
     fn test_settings_permissions() {
         // View settings - all roles can view
-        assert!(ProjectPermission::ViewSettings.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(ProjectPermission::ViewSettings.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::ViewSettings.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ViewSettings.is_permitted_by_role(ProjectRole::Owner));
+        assert!(Permission::ViewSettings.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(Permission::ViewSettings.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::ViewSettings.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ViewSettings.is_permitted_by_role(ProjectRole::Owner));
 
         // Manage settings - admin and above
-        assert!(!ProjectPermission::ManageSettings.is_permitted_by_role(ProjectRole::Viewer));
-        assert!(!ProjectPermission::ManageSettings.is_permitted_by_role(ProjectRole::Editor));
-        assert!(ProjectPermission::ManageSettings.is_permitted_by_role(ProjectRole::Admin));
-        assert!(ProjectPermission::ManageSettings.is_permitted_by_role(ProjectRole::Owner));
+        assert!(!Permission::ManageSettings.is_permitted_by_role(ProjectRole::Viewer));
+        assert!(!Permission::ManageSettings.is_permitted_by_role(ProjectRole::Editor));
+        assert!(Permission::ManageSettings.is_permitted_by_role(ProjectRole::Admin));
+        assert!(Permission::ManageSettings.is_permitted_by_role(ProjectRole::Owner));
     }
 
     #[test]
@@ -511,41 +476,41 @@ mod tests {
     fn test_minimum_required_role() {
         // Viewer permissions
         assert_eq!(
-            ProjectPermission::ViewProject.minimum_required_role(),
+            Permission::ViewProject.minimum_required_role(),
             ProjectRole::Viewer
         );
         assert_eq!(
-            ProjectPermission::ViewDocuments.minimum_required_role(),
+            Permission::ViewDocuments.minimum_required_role(),
             ProjectRole::Viewer
         );
 
         // Editor permissions
         assert_eq!(
-            ProjectPermission::CreateDocuments.minimum_required_role(),
+            Permission::CreateDocuments.minimum_required_role(),
             ProjectRole::Editor
         );
         assert_eq!(
-            ProjectPermission::UpdateDocuments.minimum_required_role(),
+            Permission::UpdateDocuments.minimum_required_role(),
             ProjectRole::Editor
         );
 
         // Admin permissions
         assert_eq!(
-            ProjectPermission::InviteMembers.minimum_required_role(),
+            Permission::InviteMembers.minimum_required_role(),
             ProjectRole::Admin
         );
         assert_eq!(
-            ProjectPermission::UpdateProject.minimum_required_role(),
+            Permission::UpdateProject.minimum_required_role(),
             ProjectRole::Admin
         );
 
         // Owner permissions
         assert_eq!(
-            ProjectPermission::ManageRoles.minimum_required_role(),
+            Permission::ManageRoles.minimum_required_role(),
             ProjectRole::Owner
         );
         assert_eq!(
-            ProjectPermission::DeleteProject.minimum_required_role(),
+            Permission::DeleteProject.minimum_required_role(),
             ProjectRole::Owner
         );
     }
@@ -553,82 +518,82 @@ mod tests {
     #[test]
     fn test_permission_categories() {
         // Read-only permissions
-        assert!(ProjectPermission::ViewProject.is_read_only());
-        assert!(ProjectPermission::ViewDocuments.is_read_only());
-        assert!(ProjectPermission::ViewFiles.is_read_only());
-        assert!(ProjectPermission::ViewMembers.is_read_only());
-        assert!(ProjectPermission::ViewSettings.is_read_only());
-        assert!(!ProjectPermission::CreateDocuments.is_read_only());
-        assert!(!ProjectPermission::UpdateProject.is_read_only());
+        assert!(Permission::ViewProject.is_read_only());
+        assert!(Permission::ViewDocuments.is_read_only());
+        assert!(Permission::ViewFiles.is_read_only());
+        assert!(Permission::ViewMembers.is_read_only());
+        assert!(Permission::ViewSettings.is_read_only());
+        assert!(!Permission::CreateDocuments.is_read_only());
+        assert!(!Permission::UpdateProject.is_read_only());
 
         // Write operations
-        assert!(ProjectPermission::CreateDocuments.is_write_operation());
-        assert!(ProjectPermission::UpdateDocuments.is_write_operation());
-        assert!(ProjectPermission::DeleteDocuments.is_write_operation());
-        assert!(ProjectPermission::UploadFiles.is_write_operation());
-        assert!(ProjectPermission::UpdateProject.is_write_operation());
-        assert!(!ProjectPermission::ViewProject.is_write_operation());
-        assert!(!ProjectPermission::ViewMembers.is_write_operation());
+        assert!(Permission::CreateDocuments.is_write_operation());
+        assert!(Permission::UpdateDocuments.is_write_operation());
+        assert!(Permission::DeleteDocuments.is_write_operation());
+        assert!(Permission::UploadFiles.is_write_operation());
+        assert!(Permission::UpdateProject.is_write_operation());
+        assert!(!Permission::ViewProject.is_write_operation());
+        assert!(!Permission::ViewMembers.is_write_operation());
 
         // Admin-only permissions
-        assert!(ProjectPermission::UpdateProject.is_admin_only());
-        assert!(ProjectPermission::DeleteProject.is_admin_only());
-        assert!(ProjectPermission::InviteMembers.is_admin_only());
-        assert!(ProjectPermission::ManageRoles.is_admin_only());
-        assert!(ProjectPermission::ManageSettings.is_admin_only());
-        assert!(!ProjectPermission::ViewProject.is_admin_only());
-        assert!(!ProjectPermission::CreateDocuments.is_admin_only());
+        assert!(Permission::UpdateProject.is_admin_only());
+        assert!(Permission::DeleteProject.is_admin_only());
+        assert!(Permission::InviteMembers.is_admin_only());
+        assert!(Permission::ManageRoles.is_admin_only());
+        assert!(Permission::ManageSettings.is_admin_only());
+        assert!(!Permission::ViewProject.is_admin_only());
+        assert!(!Permission::CreateDocuments.is_admin_only());
 
         // Owner-only permissions
-        assert!(ProjectPermission::DeleteProject.is_owner_only());
-        assert!(ProjectPermission::ManageRoles.is_owner_only());
-        assert!(!ProjectPermission::UpdateProject.is_owner_only());
-        assert!(!ProjectPermission::InviteMembers.is_owner_only());
+        assert!(Permission::DeleteProject.is_owner_only());
+        assert!(Permission::ManageRoles.is_owner_only());
+        assert!(!Permission::UpdateProject.is_owner_only());
+        assert!(!Permission::InviteMembers.is_owner_only());
     }
 
     #[test]
     fn test_permissions_for_role() {
-        let viewer_perms = ProjectPermission::permissions_for_role(ProjectRole::Viewer);
-        assert!(viewer_perms.contains(&ProjectPermission::ViewProject));
-        assert!(viewer_perms.contains(&ProjectPermission::ViewDocuments));
-        assert!(!viewer_perms.contains(&ProjectPermission::CreateDocuments));
-        assert!(!viewer_perms.contains(&ProjectPermission::ManageRoles));
+        let viewer_perms = Permission::permissions_for_role(ProjectRole::Viewer);
+        assert!(viewer_perms.contains(&Permission::ViewProject));
+        assert!(viewer_perms.contains(&Permission::ViewDocuments));
+        assert!(!viewer_perms.contains(&Permission::CreateDocuments));
+        assert!(!viewer_perms.contains(&Permission::ManageRoles));
 
-        let editor_perms = ProjectPermission::permissions_for_role(ProjectRole::Editor);
-        assert!(editor_perms.contains(&ProjectPermission::ViewProject));
-        assert!(editor_perms.contains(&ProjectPermission::CreateDocuments));
-        assert!(editor_perms.contains(&ProjectPermission::UpdateDocuments));
-        assert!(!editor_perms.contains(&ProjectPermission::InviteMembers));
-        assert!(!editor_perms.contains(&ProjectPermission::ManageRoles));
+        let editor_perms = Permission::permissions_for_role(ProjectRole::Editor);
+        assert!(editor_perms.contains(&Permission::ViewProject));
+        assert!(editor_perms.contains(&Permission::CreateDocuments));
+        assert!(editor_perms.contains(&Permission::UpdateDocuments));
+        assert!(!editor_perms.contains(&Permission::InviteMembers));
+        assert!(!editor_perms.contains(&Permission::ManageRoles));
 
-        let admin_perms = ProjectPermission::permissions_for_role(ProjectRole::Admin);
-        assert!(admin_perms.contains(&ProjectPermission::ViewProject));
-        assert!(admin_perms.contains(&ProjectPermission::CreateDocuments));
-        assert!(admin_perms.contains(&ProjectPermission::InviteMembers));
-        assert!(admin_perms.contains(&ProjectPermission::ManageSettings));
-        assert!(!admin_perms.contains(&ProjectPermission::ManageRoles));
-        assert!(!admin_perms.contains(&ProjectPermission::DeleteProject));
+        let admin_perms = Permission::permissions_for_role(ProjectRole::Admin);
+        assert!(admin_perms.contains(&Permission::ViewProject));
+        assert!(admin_perms.contains(&Permission::CreateDocuments));
+        assert!(admin_perms.contains(&Permission::InviteMembers));
+        assert!(admin_perms.contains(&Permission::ManageSettings));
+        assert!(!admin_perms.contains(&Permission::ManageRoles));
+        assert!(!admin_perms.contains(&Permission::DeleteProject));
 
-        let owner_perms = ProjectPermission::permissions_for_role(ProjectRole::Owner);
-        assert!(owner_perms.contains(&ProjectPermission::ViewProject));
-        assert!(owner_perms.contains(&ProjectPermission::CreateDocuments));
-        assert!(owner_perms.contains(&ProjectPermission::InviteMembers));
-        assert!(owner_perms.contains(&ProjectPermission::ManageRoles));
-        assert!(owner_perms.contains(&ProjectPermission::DeleteProject));
+        let owner_perms = Permission::permissions_for_role(ProjectRole::Owner);
+        assert!(owner_perms.contains(&Permission::ViewProject));
+        assert!(owner_perms.contains(&Permission::CreateDocuments));
+        assert!(owner_perms.contains(&Permission::InviteMembers));
+        assert!(owner_perms.contains(&Permission::ManageRoles));
+        assert!(owner_perms.contains(&Permission::DeleteProject));
     }
 
     #[test]
     fn test_permission_descriptions() {
         assert_eq!(
-            ProjectPermission::ViewProject.description(),
+            Permission::ViewProject.description(),
             "View project information"
         );
         assert_eq!(
-            ProjectPermission::ManageRoles.description(),
+            Permission::ManageRoles.description(),
             "Change member roles and permissions"
         );
         assert_eq!(
-            ProjectPermission::DeleteProject.description(),
+            Permission::DeleteProject.description(),
             "Delete the entire project"
         );
     }

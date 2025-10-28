@@ -1,7 +1,7 @@
 # Nvisy.com API Server
 
 [![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![build](https://img.shields.io/github/actions/workflow/status/nvisycom/api/build.yml?branch=main&color=000000&style=flat-square)](https://github.com/nvisycom/api/actions/workflows/build.yml)
+[![build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&color=000000&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 [![axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
 
 High-performance backend API server for the Nvisy document redaction platform,

@@ -12,13 +12,11 @@ use axum_extra::headers::UserAgent;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
-use uuid::Uuid;
-use validator::Validate;
 
+use super::request::authentication::{LoginRequest, SignupRequest};
+use super::response::authentication::{LoginResponse, SignupResponse};
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::{AuthHasher, AuthKeys, DataCollectionPolicy, PasswordStrength, ServiceState};
@@ -40,41 +38,6 @@ fn create_auth_header(
     let auth_claims = AuthClaims::new(account_model, account_api_token, data_collection);
     let auth_header = AuthHeader::new(auth_claims, auth_secret_keys);
     Ok(auth_header)
-}
-
-/// Request payload for login.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "emailAddress": "user@example.com",
-    "password": "SecurePassword123!",
-    "rememberMe": true
-}))]
-struct LoginRequest {
-    /// Email address of the account.
-    #[validate(email)]
-    pub email_address: String,
-    /// Password of the account.
-    pub password: String,
-    /// Whether to remember this device.
-    pub remember_me: bool,
-}
-
-/// Response returned after successful login.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct LoginResponse {
-    /// ID of the account.
-    pub account_id: Uuid,
-    /// Regional policy.
-    pub data_collection: bool,
-
-    /// Timestamp when the token was issued.
-    pub issued_at: time::OffsetDateTime,
-    /// Timestamp when the token expires.
-    pub expires_at: time::OffsetDateTime,
 }
 
 /// Creates a new account API token.
@@ -235,50 +198,6 @@ async fn login(
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
-}
-
-/// Request payload for signup.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "John Doe",
-    "emailAddress": "john.doe@example.com",
-    "password": "SecurePassword123!",
-    "rememberMe": true
-}))]
-struct SignupRequest {
-    /// Display name of the account.
-    #[validate(length(min = 2, max = 32))]
-    pub display_name: String,
-    /// Email address of the account.
-    #[validate(email)]
-    pub email_address: String,
-    /// Password of the account.
-    pub password: String,
-    /// Whether to remember the device.
-    pub remember_me: bool,
-}
-
-/// Response returned after successful signup.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct SignupResponse {
-    /// ID of the account.
-    pub account_id: Uuid,
-
-    /// Region policy of the account.
-    pub regional_policy: String,
-    /// Display name of the account.
-    pub display_name: String,
-    /// Email address of the account.
-    pub email_address: String,
-
-    /// Timestamp when the token was issued.
-    pub issued_at: time::OffsetDateTime,
-    /// Timestamp when the token expires.
-    pub expired_at: time::OffsetDateTime,
 }
 
 /// Creates a new account and API token.
@@ -506,7 +425,11 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use axum::http::StatusCode;
+
+    use super::super::request::authentication::{LoginRequest, SignupRequest};
+    use super::super::response::authentication::{LoginResponse, SignupResponse};
+    use super::routes;
     use crate::handler::test::create_test_server_with_router;
 
     #[tokio::test]

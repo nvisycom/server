@@ -19,26 +19,32 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
+utoipa = ["dep:utoipa"]
 
 [dependencies]
 # Async runtime
 tokio = { workspace = true, features = ["time"] }
 
 # AI/OpenAI services
-openrouter_api = { version = "0.1", features = ["rustls", "tracing"] }
+openrouter-rs = { workspace = true, features = [] }
+governor = { workspace = true, features = [] }
 
-# Rate limiting
-governor = { version = "0.10", features = [] }
-
-# Error handling
+# Derive macros & utilities
 thiserror = { workspace = true, features = [] }
+derive_builder = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
 
-# Serialization
+# (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
+schemars = { workspace = true, features = ["derive"] }
 
 # Text processing
-regex = { version = "1.0", features = [] }
+regex = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# OpenAPI documentation (optional)
+utoipa = { workspace = true, features = [], optional = true }

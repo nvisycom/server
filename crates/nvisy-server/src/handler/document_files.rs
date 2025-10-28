@@ -7,23 +7,26 @@
 
 use axum::extract::{Multipart, State};
 use axum::http::StatusCode;
+use axum_extra::TypedHeader;
+use axum_extra::headers::ContentType;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{InputFiles, IntermediateFiles, OutputFiles};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::UpdateDocumentFile;
 use nvisy_postgres::query::DocumentFileRepository;
-use nvisy_postgres::types::{FileType, ProcessingStatus};
+use nvisy_postgres::types::FileType;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
-use validator::Validate;
 
+use crate::authorize;
 use crate::extract::auth::AuthProvider;
-use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson, Version};
+use crate::extract::{AuthState, Json, Path, Permission, ValidateJson, Version};
 use crate::handler::documents::DocumentPathParams;
+use crate::handler::request::document_file::UpdateFileRequest;
+use crate::handler::response::document_file::{UpdateFileResponse, UploadFileResponse};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
 
@@ -42,32 +45,6 @@ pub struct DocFileIdPathParams {
     pub document_id: Uuid,
     /// Unique identifier of the document file.
     pub file_id: Uuid,
-}
-
-/// Response for a single uploaded file.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadedFile {
-    /// Unique file identifier
-    pub file_id: Uuid,
-    /// Display name
-    pub display_name: String,
-    /// File size in bytes
-    pub file_size: i64,
-    /// Processing status
-    pub status: ProcessingStatus,
-}
-
-/// Response returned after successful file upload.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadFileResponse {
-    /// List of successfully uploaded files
-    pub files: Vec<UploadedFile>,
-    /// Number of files uploaded
-    pub count: usize,
 }
 
 /// Uploads input files to a document for processing.
@@ -107,6 +84,7 @@ async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocumentPathParams>,
+    TypedHeader(content_type): TypedHeader<ContentType>,
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<UploadFileResponse>)> {
@@ -116,13 +94,11 @@ async fn upload_file(
     let output_fs = nats_client.document_store::<OutputFiles>().await?;
 
     // Verify document exists and user has editor permissions
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::UploadFiles,
-        )
-        .await?;
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::UploadFiles,
+    );
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -222,34 +198,6 @@ async fn upload_file(
     Err(ErrorKind::NotImplemented.with_message("File upload not implemented"))
 }
 
-/// Request to update file metadata.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "renamed-document.pdf",
-    "processingPriority": 10
-}))]
-pub struct UpdateFileRequest {
-    /// New display name for the file
-    #[validate(length(min = 1, max = 255))]
-    pub display_name: Option<String>,
-    /// New processing priority
-    pub processing_priority: Option<i32>,
-}
-
-/// Response after updating file metadata.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateFileResponse {
-    /// Updated file information
-    pub file_id: Uuid,
-    pub display_name: String,
-    pub processing_priority: i32,
-    pub updated_at: OffsetDateTime,
-}
-
 /// Updates file metadata.
 #[tracing::instrument(skip(pg_client))]
 #[utoipa::path(
@@ -295,13 +243,11 @@ async fn update_file(
 
     // Verify permissions
     // Verify document write permissions
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::UpdateDocuments,
-        )
-        .await?;
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::UpdateDocuments,
+    );
 
     // Get existing file
     let Some(file) =
@@ -348,7 +294,7 @@ async fn update_file(
 }
 
 /// Downloads a document file.
-#[tracing::instrument(skip(_pg_client))]
+#[tracing::instrument(skip(pg_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
     params(DocFileIdPathParams),
@@ -376,12 +322,14 @@ async fn update_file(
     )
 )]
 async fn download_file(
-    State(_pg_client): State<PgClient>,
-    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
-    Path(_path_params): Path<DocFileIdPathParams>,
-    AuthState(_auth_claims): AuthState,
-    _version: Version,
+    State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
+    Path(path_params): Path<DocFileIdPathParams>,
+    AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Vec<u8>)> {
+    let object_store = nats_client.document_store::<InputFiles>().await?;
+    // object_store.
+
     // TODO: Replace with NATS object store implementation
     Err(ErrorKind::NotImplemented
         .with_message("File download not implemented - MinIO removed, use NATS object store"))
@@ -423,13 +371,11 @@ async fn delete_file(
 ) -> Result<StatusCode> {
     let mut conn = pg_client.get_connection().await?;
 
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::DeleteFiles,
-        )
-        .await?;
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::DeleteFiles,
+    );
 
     // Get file metadata
     let Some(file) =

@@ -49,7 +49,7 @@ mod connection_info;
 mod version;
 
 pub use crate::extract::auth::{
-    AuthClaims, AuthContext, AuthHeader, AuthProvider, AuthResult, AuthState, ProjectPermission,
+    AuthClaims, AuthContext, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
 };
 pub use crate::extract::connection_info::AppConnectInfo;
 pub use crate::extract::reject::{Form, Json, Path, Query, ValidateJson};

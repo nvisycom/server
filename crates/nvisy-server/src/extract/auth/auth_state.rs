@@ -55,6 +55,7 @@
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::Deref;
+use nvisy_postgres::model::{Account, AccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::{PgClient, PgConnection};
 
@@ -174,8 +175,9 @@ impl AuthState {
                 error = %db_error,
                 account_id = %auth_claims.account_id,
                 token_id = %auth_claims.token_id,
-                "Critical: Database connection failed during authentication verification"
+                "Database connection failed during authentication verification"
             );
+
             ErrorKind::InternalServerError
                 .with_message("Authentication verification is temporarily unavailable")
                 .with_context("Unable to connect to authentication database")
@@ -245,7 +247,7 @@ impl AuthState {
     async fn verify_token_validity(
         conn: &mut PgConnection,
         auth_claims: &AuthClaims,
-    ) -> Result<nvisy_postgres::model::AccountApiToken> {
+    ) -> Result<AccountApiToken> {
         let api_token =
             AccountApiTokenRepository::find_token_by_access_token(conn, auth_claims.token_id)
                 .await
@@ -332,7 +334,7 @@ impl AuthState {
     async fn verify_account_status(
         conn: &mut PgConnection,
         auth_claims: &AuthClaims,
-    ) -> Result<nvisy_postgres::model::Account> {
+    ) -> Result<Account> {
         let account = AccountRepository::find_account_by_id(conn, auth_claims.account_id)
             .await
             .map_err(|db_error| {
@@ -408,10 +410,7 @@ impl AuthState {
     /// # Errors
     ///
     /// Returns [`ErrorKind::Unauthorized`] if privilege claims don't match database.
-    fn verify_privilege_consistency(
-        auth_claims: &AuthClaims,
-        account: &nvisy_postgres::model::Account,
-    ) -> Result<()> {
+    fn verify_privilege_consistency(auth_claims: &AuthClaims, account: &Account) -> Result<()> {
         if auth_claims.is_administrator != account.is_admin {
             tracing::error!(
                 target: TRACING_TARGET_AUTHENTICATION,

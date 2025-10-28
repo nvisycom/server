@@ -7,19 +7,23 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{Document, NewDocument, UpdateDocument};
+use nvisy_postgres::model::{NewDocument, UpdateDocument};
 use nvisy_postgres::query::DocumentRepository;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
-use validator::Validate;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, ProjectPermission, ValidateJson};
+use crate::authorize;
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::request::document::{CreateDocumentRequest, UpdateDocumentRequest};
+use crate::handler::response::document::{
+    CreateDocumentResponse, DeleteDocumentResponse, GetDocumentResponse, ListDocumentsResponse,
+    ListDocumentsResponseItem, UpdateDocumentResponse,
+};
+use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document operations.
@@ -32,49 +36,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::documents";
 pub struct DocumentPathParams {
     /// Unique identifier of the document.
     pub document_id: Uuid,
-}
-
-/// Request payload for creating a new document.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "Q4 Financial Report"
-}))]
-struct CreateDocumentRequest {
-    /// Display name of the document.
-    #[validate(length(min = 1, max = 255))]
-    pub display_name: String,
-}
-
-/// Response returned when a document is successfully created.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateDocumentResponse {
-    /// ID of the document.
-    pub document_id: Uuid,
-    /// Timestamp when the document was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the document was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl CreateDocumentResponse {
-    /// Creates a new instance of [`CreateDocumentResponse`].
-    pub fn new(document: Document) -> Self {
-        Self {
-            document_id: document.id,
-            created_at: document.created_at,
-            updated_at: document.updated_at,
-        }
-    }
-}
-
-impl From<Document> for CreateDocumentResponse {
-    fn from(document: Document) -> Self {
-        Self::new(document)
-    }
 }
 
 /// Creates a new document.
@@ -121,13 +82,11 @@ async fn create_document(
 
     let mut conn = pg_client.get_connection().await?;
 
-    auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            ProjectPermission::CreateDocuments,
-        )
-        .await?;
+    authorize!(
+        project: path_params.project_id,
+        auth_claims, &mut conn,
+        Permission::CreateDocuments,
+    );
 
     let new_document = NewDocument {
         project_id: path_params.project_id,
@@ -154,55 +113,13 @@ async fn create_document(
     Ok((StatusCode::CREATED, Json(document.into())))
 }
 
-/// Represents a document in a project.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ListDocumentsResponseItem {
-    /// ID of the document.
-    pub document_id: Uuid,
-    /// ID of the account that owns the document.
-    pub account_id: Uuid,
-    /// Display name of the document.
-    pub display_name: String,
-}
-
-impl From<Document> for ListDocumentsResponseItem {
-    fn from(document: Document) -> Self {
-        Self {
-            document_id: document.id,
-            account_id: document.account_id,
-            display_name: document.display_name,
-        }
-    }
-}
-
-/// Response for listing all documents in a project.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ListDocumentsResponse {
-    pub project_id: Uuid,
-    pub documents: Vec<ListDocumentsResponseItem>,
-}
-
-impl ListDocumentsResponse {
-    /// Returns a new [`ListDocumentsResponse`].
-    pub fn new(project_id: Uuid, documents: Vec<ListDocumentsResponseItem>) -> Self {
-        Self {
-            project_id,
-            documents,
-        }
-    }
-}
-
 /// Returns all documents for a project.
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     get, path = "/projects/{projectId}/documents/", tag = "documents",
     params(ProjectPathParams),
     request_body(
-        content = Pagination,
+        content = PaginationRequest,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -228,17 +145,15 @@ async fn get_all_documents(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    Json(pagination): Json<Pagination>,
+    Json(pagination): Json<PaginationRequest>,
 ) -> Result<(StatusCode, Json<ListDocumentsResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            ProjectPermission::ViewDocuments,
-        )
-        .await?;
+    authorize!(
+        project: path_params.project_id,
+        auth_claims, &mut conn,
+        Permission::ViewDocuments,
+    );
 
     let documents = DocumentRepository::find_documents_by_project(
         &mut conn,
@@ -263,32 +178,6 @@ async fn get_all_documents(
     );
 
     Ok((StatusCode::OK, Json(response)))
-}
-
-/// Response for getting a single document.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct GetDocumentResponse {
-    /// ID of the document.
-    pub id: Uuid,
-    /// ID of the project that the document belongs to.
-    pub project_id: Uuid,
-    /// ID of the account that owns the document.
-    pub account_id: Uuid,
-    /// Display name of the document.
-    pub display_name: String,
-}
-
-impl From<Document> for GetDocumentResponse {
-    fn from(document: Document) -> Self {
-        Self {
-            id: document.id,
-            project_id: document.project_id,
-            account_id: document.account_id,
-            display_name: document.display_name,
-        }
-    }
 }
 
 /// Gets a document by its document ID.
@@ -321,13 +210,11 @@ async fn get_document(
 ) -> Result<(StatusCode, Json<GetDocumentResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::ViewDocuments,
-        )
-        .await?;
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::ViewDocuments,
+    );
 
     let Some(document) =
         DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
@@ -343,48 +230,6 @@ async fn get_document(
     );
 
     Ok((StatusCode::OK, Json(document.into())))
-}
-
-/// Request payload to update a document.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "Updated Report Name"
-}))]
-struct UpdateDocumentRequest {
-    #[validate(length(min = 1, max = 255))]
-    pub display_name: Option<String>,
-}
-
-/// Response for updated document.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct UpdateDocumentResponse {
-    /// ID of the updated document.
-    pub document_id: Uuid,
-    /// Timestamp when the document was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the document was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl UpdateDocumentResponse {
-    /// Creates a new instance of `UpdateDocumentResponse`.
-    pub fn new(document: Document) -> Self {
-        Self {
-            document_id: document.id,
-            created_at: document.created_at,
-            updated_at: document.updated_at,
-        }
-    }
-}
-
-impl From<Document> for UpdateDocumentResponse {
-    fn from(document: Document) -> Self {
-        Self::new(document)
-    }
 }
 
 /// Updates a document by its document ID.
@@ -430,13 +275,11 @@ async fn update_document(
         "updating document",
     );
 
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::UpdateDocuments,
-        )
-        .await?;
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::UpdateDocuments,
+    );
 
     // Verify document exists before updating
     let Some(_existing_document) =
@@ -462,26 +305,6 @@ async fn update_document(
     );
 
     Ok((StatusCode::OK, Json(document.into())))
-}
-
-/// Response returned after deleting a document.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct DeleteDocumentResponse {
-    pub document_id: Uuid,
-    pub created_at: OffsetDateTime,
-    pub deleted_at: OffsetDateTime,
-}
-
-impl From<Document> for DeleteDocumentResponse {
-    fn from(document: Document) -> Self {
-        Self {
-            document_id: document.id,
-            created_at: document.created_at,
-            deleted_at: document.deleted_at.unwrap_or_else(OffsetDateTime::now_utc),
-        }
-    }
 }
 
 /// Deletes a document by its document ID.
@@ -522,13 +345,11 @@ async fn delete_document(
 
     let mut conn = pg_client.get_connection().await?;
 
-    auth_claims
-        .authorize_document(
-            &mut conn,
-            path_params.document_id,
-            ProjectPermission::DeleteDocuments,
-        )
-        .await?;
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::DeleteDocuments,
+    );
 
     // Verify document exists before deleting
     let Some(_existing_document) =
@@ -624,7 +445,7 @@ mod test {
             .await;
 
         // List documents
-        let pagination = Pagination {
+        let pagination = PaginationRequest {
             offset: Some(0),
             limit: Some(10),
         };

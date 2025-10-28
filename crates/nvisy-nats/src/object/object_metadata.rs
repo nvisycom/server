@@ -171,7 +171,7 @@ impl ObjectMetadata {
             && self.created_at.is_none()
             && self.updated_at.is_none()
             && self.version.is_none()
-            && self.tags.as_ref().map_or(true, |t| t.is_empty())
+            && self.tags.as_ref().is_none_or(|t| t.is_empty())
             && self.original_filename.is_none()
     }
 
@@ -191,12 +191,12 @@ impl ObjectMetadata {
 
     /// Removes a tag from the tags set.
     pub fn remove_tag(&mut self, tag: &str) -> bool {
-        self.tags.as_mut().map_or(false, |tags| tags.remove(tag))
+        self.tags.as_mut().is_some_and(|tags| tags.remove(tag))
     }
 
     /// Checks if a tag exists.
     pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.as_ref().map_or(false, |tags| tags.contains(tag))
+        self.tags.as_ref().is_some_and(|tags| tags.contains(tag))
     }
 
     /// Clears all tags.

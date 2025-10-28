@@ -137,16 +137,15 @@ async fn run_application() -> anyhow::Result<()> {
     #[cfg(feature = "telemetry")]
     {
         if telemetry_context.is_some() {
-            server::serve_http_with_telemetry(router, cli.server, telemetry_context.as_ref())
-                .await?;
+            server::serve_with_telemetry(router, cli.server, telemetry_context.as_ref()).await?;
         } else {
-            server::serve_http(router, cli.server).await?;
+            server::serve(router, cli.server).await?;
         }
     }
 
     #[cfg(not(feature = "telemetry"))]
     {
-        server::serve_http(router, cli.server).await?;
+        server::serve(router, cli.server).await?;
     }
 
     Ok(())

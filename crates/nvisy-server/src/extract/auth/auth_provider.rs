@@ -18,7 +18,7 @@ use nvisy_postgres::query::{DocumentRepository, ProjectMemberRepository};
 use nvisy_postgres::{PgConnection, PgError};
 use uuid::Uuid;
 
-use super::{AuthContext, AuthResult, ProjectPermission};
+use super::{AuthContext, AuthResult, Permission};
 use crate::TRACING_TARGET_AUTHORIZATION;
 use crate::handler::Result;
 
@@ -74,7 +74,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         project_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Global administrators bypass project-level permissions
         if self.is_admin() {
@@ -85,6 +85,7 @@ pub trait AuthProvider {
                 permission = ?permission,
                 "Access granted: global administrator"
             );
+
             return Ok(AuthResult::granted());
         }
 
@@ -101,6 +102,7 @@ pub trait AuthProvider {
                 permission = ?permission,
                 "Access denied: not a project member"
             );
+
             return Ok(AuthResult::denied(Cow::Borrowed("Not a project member")));
         };
 
@@ -114,6 +116,7 @@ pub trait AuthProvider {
                 role = ?member.member_role,
                 "Access granted: sufficient role"
             );
+
             Ok(AuthResult::granted_with_member(member))
         } else {
             tracing::warn!(
@@ -124,10 +127,11 @@ pub trait AuthProvider {
                 role = ?member.member_role,
                 "Access denied: insufficient role"
             );
-            Ok(AuthResult::denied(Cow::Owned(format!(
+
+            Ok(AuthResult::denied(format!(
                 "Role {member_role:?} insufficient for {permission:?} permission",
                 member_role = member.member_role
-            ))))
+            )))
         }
     }
 
@@ -154,7 +158,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         document_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Get the document to find its project
         let document = DocumentRepository::find_document_by_id(conn, document_id).await?;
@@ -173,7 +177,7 @@ pub trait AuthProvider {
         let is_document_owner = document.account_id == self.account_id();
         let requires_ownership = matches!(
             permission,
-            ProjectPermission::UpdateDocuments | ProjectPermission::DeleteDocuments
+            Permission::UpdateDocuments | Permission::DeleteDocuments
         );
 
         if requires_ownership && !is_document_owner && !self.is_admin() {
@@ -185,7 +189,7 @@ pub trait AuthProvider {
 
         // For all other cases, verify basic project access
         let base_permission = if permission.is_read_only() {
-            ProjectPermission::ViewDocuments
+            Permission::ViewDocuments
         } else {
             permission
         };
@@ -283,7 +287,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         project_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
             .check_project_permission(conn, project_id, permission)
@@ -316,7 +320,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         document_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
             .check_document_permission(conn, document_id, permission)

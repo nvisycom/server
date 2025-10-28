@@ -55,7 +55,7 @@ make install-all
 - Keep README files concise and focused on essential information
 - Use consistent badge formatting with the project color scheme
 - Include Features and Key Dependencies sections for all crates
-- Avoid excessive code examples - link to docs.rs instead
+- Avoid excessive code examples, link to docs.rs instead
 - Use present tense and active voice
 - Follow the established pattern from nvisy-postgres, nvisy-nats
 

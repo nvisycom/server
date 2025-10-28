@@ -11,12 +11,12 @@ use nvisy_nats::NatsClient;
 // TODO: Implement when nvisy-openrouter is available
 use nvisy_postgres::PgClient;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::extract::{AuthState, Json};
+use super::request::monitor::MonitorStatusRequest;
+use super::response::monitor::{FeatureState, FeatureStatuses, MonitorStatusResponse};
+use crate::extract::{AuthState, Json, Version};
 use crate::service::{DataCollectionPolicy, ServiceState};
 
 /// Tracing target for monitor operations.
@@ -39,18 +39,6 @@ impl std::fmt::Display for HealthStatus {
             HealthStatus::Offline => write!(f, "offline"),
         }
     }
-}
-
-/// Request payload for monitoring status endpoint.
-#[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "preferPolicy": "Eu"
-}))]
-struct MonitorStatusRequest {
-    /// Preferred regional policy for data collection.
-    pub prefer_policy: Option<DataCollectionPolicy>,
 }
 
 /// Current state and status message for a system feature.
@@ -81,33 +69,6 @@ impl ComponentStatus {
     }
 }
 
-/// Feature monitoring state with health information.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct FeatureState {
-    /// Whether the feature is operational
-    pub is_operational: bool,
-    /// Human-readable status description
-    pub status: String,
-    /// Optional status message with additional details
-    pub message: Option<String>,
-}
-
-impl FeatureState {
-    /// Creates a new [`FeatureState`].
-    #[inline]
-    pub fn new(status: ComponentStatus) -> Self {
-        Self {
-            is_operational: status.is_operational(),
-            status: if status.is_healthy {
-                "healthy".to_string()
-            } else {
-                "unhealthy".to_string()
-            },
-            message: status.message,
-        }
-    }
-}
-
 /// Converts a service status result into a feature state with proper logging.
 fn check_service_status(status: ComponentStatus, service_name: &str) -> FeatureState {
     tracing::debug!(
@@ -118,33 +79,6 @@ fn check_service_status(status: ComponentStatus, service_name: &str) -> FeatureS
     );
 
     FeatureState::new(status)
-}
-
-/// Detailed system component statuses (requires authentication).
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct FeatureStatuses {
-    /// Database and API gateway server status.
-    pub gateway_server: FeatureState,
-    /// Background worker runtime status.
-    pub worker_runtime: FeatureState,
-    /// AI assistant chat service status.
-    pub assistant_chat: FeatureState,
-}
-
-/// System monitoring status response with optional detailed component information.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct MonitorStatusResponse {
-    /// Current regional data collection policy in effect.
-    pub regional_policy: DataCollectionPolicy,
-    /// Timestamp when this status was generated.
-    pub updated_at: OffsetDateTime,
-    /// Detailed component statuses (only included for authenticated requests).
-    #[serde(flatten)]
-    pub features: Option<FeatureStatuses>,
 }
 
 /// Returns the current status of the API server and its external components.
@@ -170,17 +104,17 @@ struct MonitorStatusResponse {
 )]
 async fn monitor_status(
     State(pg_client): State<PgClient>,
-    // State(_minio_client): State<MinioClient>, // TODO: Replace with NATS object store
-    State(_nats_client): State<NatsClient>,
+    State(nats_client): State<NatsClient>,
     State(regional_policy): State<DataCollectionPolicy>,
     auth_state: Option<AuthState>,
+    version: Version,
     request: Option<Json<MonitorStatusRequest>>,
 ) -> (StatusCode, Json<MonitorStatusResponse>) {
     let Json(request) = request.unwrap_or_default();
     let mut response = MonitorStatusResponse {
         regional_policy,
         features: None,
-        updated_at: OffsetDateTime::now_utc(),
+        updated_at: time::OffsetDateTime::now_utc(),
     };
 
     let prefer_policy = request.prefer_policy.unwrap_or_default();
@@ -240,7 +174,7 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod test {
-    use crate::handler::monitors::{MonitorStatusRequest, MonitorStatusResponse, routes};
+    use super::{MonitorStatusRequest, MonitorStatusResponse, routes};
     use crate::handler::test::create_test_server_with_router;
     use crate::service::DataCollectionPolicy;
 

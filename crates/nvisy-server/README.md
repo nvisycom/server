@@ -20,8 +20,6 @@ built with Axum and Tokio.
 - `axum` - Modern web framework with excellent async performance
 - `tokio` - Async runtime for concurrent request handling
 - `tower` - Middleware ecosystem for HTTP services
-- `serde` - JSON serialization/deserialization
-- `validator` - Input validation with custom rules
 - `utoipa` - OpenAPI documentation generation
 
 ## API Documentation

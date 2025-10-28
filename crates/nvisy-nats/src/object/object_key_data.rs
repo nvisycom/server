@@ -19,6 +19,8 @@ pub struct ObjectKeyData {
     document_uuid: Uuid,
     /// Unique identifier for the file within the document
     file_uuid: Uuid,
+    /// Optional version number (if None, uses the base key without version)
+    version: Option<u64>,
 }
 
 impl ObjectKeyData {
@@ -28,6 +30,7 @@ impl ObjectKeyData {
             project_uuid,
             document_uuid,
             file_uuid,
+            version: None,
         }
     }
 
@@ -44,6 +47,17 @@ impl ObjectKeyData {
     /// Get the file UUID
     pub fn file_uuid(&self) -> Uuid {
         self.file_uuid
+    }
+
+    /// Get the version
+    pub fn version(&self) -> Option<u64> {
+        self.version
+    }
+
+    /// Set the version (None means no version in the key)
+    pub fn with_version(mut self, version: Option<u64>) -> Self {
+        self.version = version;
+        self
     }
 
     /// Build an ObjectKey from this data with the specified stage
@@ -102,5 +116,48 @@ mod tests {
 
         let prefix = ObjectKeyData::create_prefix(project_uuid, None);
         assert_eq!(prefix, format!("{}/", project_uuid));
+    }
+
+    #[test]
+    fn test_version_support() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        // Test default (no version)
+        let data = ObjectKeyData::new(project_uuid, document_uuid, file_uuid);
+        assert_eq!(data.version(), None);
+
+        // Test with version
+        let data = data.with_version(Some(5));
+        assert_eq!(data.version(), Some(5));
+
+        // Test setting version to None
+        let data = data.with_version(None);
+        assert_eq!(data.version(), None);
+    }
+
+    #[test]
+    fn test_build_key_with_version() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        // Without version
+        let data = ObjectKeyData::new(project_uuid, document_uuid, file_uuid);
+        let key = data.build::<InputFiles>().unwrap();
+        assert_eq!(
+            key.as_str(),
+            format!("{}/{}/{}", project_uuid, document_uuid, file_uuid)
+        );
+
+        // With version
+        let data =
+            ObjectKeyData::new(project_uuid, document_uuid, file_uuid).with_version(Some(10));
+        let key = data.build::<InputFiles>().unwrap();
+        assert_eq!(
+            key.as_str(),
+            format!("{}/{}/{}/v10", project_uuid, document_uuid, file_uuid)
+        );
     }
 }

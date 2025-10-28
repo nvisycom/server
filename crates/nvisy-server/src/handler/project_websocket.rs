@@ -32,7 +32,8 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Path, ProjectPermission};
+use crate::authorize;
+use crate::extract::{AuthProvider, AuthState, Path, Permission};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
@@ -155,26 +156,26 @@ async fn check_event_permission(
     let permission = match msg {
         // Read-only events - require ViewDocuments permission
         ProjectWsMessage::Typing(_) | ProjectWsMessage::MemberPresence(_) => {
-            ProjectPermission::ViewDocuments
+            Permission::ViewDocuments
         }
 
         // Document write events - require UpdateDocuments permission
-        ProjectWsMessage::DocumentUpdate(_) => ProjectPermission::UpdateDocuments,
-        ProjectWsMessage::DocumentCreated(_) => ProjectPermission::CreateDocuments,
-        ProjectWsMessage::DocumentDeleted(_) => ProjectPermission::DeleteDocuments,
+        ProjectWsMessage::DocumentUpdate(_) => Permission::UpdateDocuments,
+        ProjectWsMessage::DocumentCreated(_) => Permission::CreateDocuments,
+        ProjectWsMessage::DocumentDeleted(_) => Permission::DeleteDocuments,
 
         // File events - require appropriate file permissions
         ProjectWsMessage::FileProcessed(_) | ProjectWsMessage::FileVerified(_) => {
-            ProjectPermission::ViewFiles
+            Permission::ViewFiles
         }
-        ProjectWsMessage::FileRedacted(_) => ProjectPermission::DeleteFiles,
+        ProjectWsMessage::FileRedacted(_) => Permission::DeleteFiles,
 
         // Member management - require InviteMembers/RemoveMembers permission
-        ProjectWsMessage::MemberAdded(_) => ProjectPermission::InviteMembers,
-        ProjectWsMessage::MemberRemoved(_) => ProjectPermission::RemoveMembers,
+        ProjectWsMessage::MemberAdded(_) => Permission::InviteMembers,
+        ProjectWsMessage::MemberRemoved(_) => Permission::RemoveMembers,
 
         // Project settings - require UpdateProject permission
-        ProjectWsMessage::ProjectUpdated(_) => ProjectPermission::UpdateProject,
+        ProjectWsMessage::ProjectUpdated(_) => Permission::UpdateProject,
 
         // System events - always allowed (sent by server)
         ProjectWsMessage::Join(_) | ProjectWsMessage::Leave(_) | ProjectWsMessage::Error(_) => {
@@ -811,9 +812,11 @@ async fn project_websocket_handler(
     let mut conn = pg_client.get_connection().await?;
 
     // Check if user has minimum permission to view documents
-    auth_claims
-        .authorize_project(&mut conn, project_id, ProjectPermission::ViewDocuments)
-        .await?;
+    authorize!(
+        project: project_id,
+        auth_claims, &mut conn,
+        Permission::ViewDocuments,
+    );
 
     // Verify the project exists
     if ProjectRepository::find_project_by_id(&mut conn, project_id)

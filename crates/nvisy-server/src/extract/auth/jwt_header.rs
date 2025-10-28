@@ -267,7 +267,7 @@ pub struct AuthClaims {
     // Private (or custom) claims
     /// Regional data collection policy.
     #[serde(rename = "pol")]
-    pub data_collection_policy: DataCollectionPolicy,
+    pub data_collection: DataCollectionPolicy,
     /// Is administrator flag.
     #[serde(rename = "cre")]
     pub is_administrator: bool,
@@ -307,7 +307,7 @@ impl AuthClaims {
             account_id: account_model.id,
             issued_at: account_api_token.issued_at,
             expires_at: account_api_token.expired_at,
-            data_collection_policy,
+            data_collection: data_collection_policy,
             is_administrator: account_model.is_admin,
         }
     }

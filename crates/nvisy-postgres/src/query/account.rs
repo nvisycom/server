@@ -86,16 +86,18 @@ impl AccountRepository {
     }
 
     /// Soft deletes an account by setting deleted_at timestamp.
-    pub async fn delete_account(conn: &mut AsyncPgConnection, account_id: Uuid) -> PgResult<()> {
+    pub async fn delete_account(
+        conn: &mut AsyncPgConnection,
+        account_id: Uuid,
+    ) -> PgResult<Account> {
         use schema::accounts::{self, dsl};
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .returning(Account::as_returning())
+            .get_result(conn)
             .await
-            .map_err(PgError::from)?;
-
-        Ok(())
+            .map_err(PgError::from)
     }
 
     /// Lists all accounts with pagination.

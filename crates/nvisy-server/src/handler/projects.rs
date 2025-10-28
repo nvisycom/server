@@ -6,22 +6,26 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewProject, NewProjectMember, Project, ProjectMember, UpdateProject};
+use nvisy_postgres::model::{NewProject, NewProjectMember, UpdateProject};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
 use nvisy_postgres::{PgClient, PgError};
 use scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
-use validator::Validate;
 
+use crate::authorize;
 use crate::extract::auth::AuthProvider;
-use crate::extract::{AuthState, Json, Path, ProjectPermission, ValidateJson};
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::extract::{AuthState, Json, Path, Permission, ValidateJson};
+use crate::handler::request::project::{CreateProjectRequest, UpdateProjectRequest};
+use crate::handler::response::project::{
+    CreateProjectResponse, DeleteProjectResponse, GetProjectResponse, ListProjectsResponse,
+    ListProjectsResponseItem, UpdateProjectResponse,
+};
+use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project operations.
@@ -34,72 +38,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::projects";
 pub struct ProjectPathParams {
     /// Unique identifier of the project.
     pub project_id: Uuid,
-}
-
-/// Request payload for creating a new project.
-#[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "My Project",
-    "description": "A project for document processing",
-    "keepForSec": 86400,
-    "autoCleanup": true,
-    "requireApproval": false
-}))]
-struct CreateProjectRequest {
-    /// Display name of the project.
-    #[validate(length(min = 3, max = 100))]
-    pub display_name: String,
-    /// Description of the project.
-    #[validate(length(min = 1, max = 200))]
-    pub description: Option<String>,
-    /// Duration in seconds to keep the original files.
-    #[validate(range(min = 60, max = 604800))]
-    pub keep_for_sec: Option<i32>,
-    /// Whether to automatically delete processed files after expiration.
-    pub auto_cleanup: Option<bool>,
-    /// Whether approval is required to processed files to be visible.
-    pub require_approval: Option<bool>,
-    /// Maximum number of members allowed in the project.
-    #[validate(range(min = 1, max = 1000))]
-    pub max_members: Option<i32>,
-    /// Maximum storage size in megabytes allowed for the project.
-    #[validate(range(min = 1, max = 1048576))]
-    pub max_storage: Option<i32>,
-    /// Whether comments are enabled for this project.
-    pub enable_comments: Option<bool>,
-}
-
-/// Response returned when a project is successfully created.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateProjectResponse {
-    /// ID of the created project.
-    pub project_id: Uuid,
-    /// Timestamp when the project was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the project was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl CreateProjectResponse {
-    /// Creates a new instance of [`CreateProjectResponse`].
-    pub fn new(project: Project) -> Self {
-        Self {
-            project_id: project.id,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
-        }
-    }
-}
-
-impl From<Project> for CreateProjectResponse {
-    #[inline]
-    fn from(project: Project) -> Self {
-        Self::new(project)
-    }
 }
 
 /// Creates a new project.
@@ -160,6 +98,7 @@ async fn create_project(
                     ..Default::default()
                 };
                 let project = ProjectRepository::create_project(conn, new_project).await?;
+
                 let new_member = NewProjectMember {
                     project_id: project.id,
                     account_id: auth_claims.account_id,
@@ -183,57 +122,12 @@ async fn create_project(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// Describes a project with role information.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ListProjectsResponseItem {
-    /// ID of the project.
-    pub project_id: Uuid,
-    /// Display name of the project.
-    pub display_name: String,
-    /// Role of the member in the project.
-    pub member_role: ProjectRole,
-    /// Timestamp when the project was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the project was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl ListProjectsResponseItem {
-    /// Creates a new [`ListProjectsResponseItem`].
-    pub fn new(project: Project, member: ProjectMember) -> Self {
-        Self {
-            project_id: project.id,
-            display_name: project.display_name,
-            member_role: member.member_role,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
-        }
-    }
-}
-
-impl From<(Project, ProjectMember)> for ListProjectsResponseItem {
-    fn from((project, member): (Project, ProjectMember)) -> Self {
-        Self::new(project, member)
-    }
-}
-
-/// Response for listing all projects associated with the account.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ListProjectsResponse {
-    /// List of projects associated with the account.
-    pub projects: Vec<ListProjectsResponseItem>,
-}
-
 /// Returns all projects for an account.
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     get, path = "/projects/", tag = "projects",
     request_body(
-        content = Pagination,
+        content = PaginationRequest,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -255,34 +149,28 @@ struct ListProjectsResponse {
         ),
     ),
 )]
-async fn list_all_projects(
+async fn list_projects(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-    Json(pagination): Json<Pagination>,
+    Json(pagination): Json<PaginationRequest>,
 ) -> Result<(StatusCode, Json<ListProjectsResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    let memberships = ProjectMemberRepository::list_user_projects(
+    // Use the combined query to fetch both project and membership data in a single query
+    let project_memberships = ProjectMemberRepository::list_user_projects_with_details(
         &mut conn,
         auth_claims.account_id,
         pagination.into(),
     )
     .await?;
 
-    // Convert memberships to response items
-    let mut project_items = Vec::new();
-    for membership in memberships {
-        // Get project details for each membership
-        if let Some(project) =
-            ProjectRepository::find_project_by_id(&mut conn, membership.project_id).await?
-        {
-            project_items.push((project, membership).into());
-        }
-    }
+    // Convert to response items
+    let projects: Vec<ListProjectsResponseItem> = project_memberships
+        .into_iter()
+        .map(|(project, membership)| (project, membership).into())
+        .collect();
 
-    let response = ListProjectsResponse {
-        projects: project_items,
-    };
+    let response = ListProjectsResponse::new(projects);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -292,23 +180,6 @@ async fn list_all_projects(
     );
 
     Ok((StatusCode::OK, Json(response)))
-}
-
-/// Response for getting a single project.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct GetProjectResponse {
-    /// ID of the project.
-    pub project_id: Uuid,
-}
-
-impl From<Project> for GetProjectResponse {
-    fn from(project: Project) -> Self {
-        Self {
-            project_id: project.id,
-        }
-    }
 }
 
 /// Gets a project by its project ID.
@@ -341,13 +212,11 @@ async fn read_project(
 ) -> Result<(StatusCode, Json<GetProjectResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            ProjectPermission::ViewDocuments,
-        )
-        .await?;
+    authorize!(
+        project: path_params.project_id,
+        auth_claims, &mut conn,
+        Permission::ViewDocuments,
+    );
 
     let Some(project) =
         ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
@@ -363,68 +232,6 @@ async fn read_project(
     );
 
     Ok((StatusCode::OK, Json(project.into())))
-}
-
-/// Request payload to update project.
-#[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "Updated Project Name",
-    "description": "Updated description"
-}))]
-struct UpdateProjectRequest {
-    /// Display name of the project.
-    #[validate(length(min = 3, max = 100))]
-    pub display_name: Option<String>,
-    /// Description of the project.
-    #[validate(length(min = 1, max = 200))]
-    pub description: Option<String>,
-    /// Duration in seconds to keep the original files.
-    #[validate(range(min = 60, max = 604800))]
-    pub keep_for_sec: Option<i32>,
-    /// Whether to automatically delete processed files after expiration.
-    pub auto_cleanup: Option<bool>,
-    /// Whether approval is required to processed files to be visible.
-    pub require_approval: Option<bool>,
-    /// Maximum number of members allowed in the project.
-    #[validate(range(min = 1, max = 1000))]
-    pub max_members: Option<i32>,
-    /// Maximum storage size in megabytes allowed for the project.
-    #[validate(range(min = 1, max = 1048576))]
-    pub max_storage: Option<i32>,
-    /// Whether comments are enabled for this project.
-    pub enable_comments: Option<bool>,
-}
-
-/// Response for updated project.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct UpdateProjectResponse {
-    /// ID of the project.
-    pub project_id: Uuid,
-    /// Timestamp when the project was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the project was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl UpdateProjectResponse {
-    /// Creates a new instance of `UpdateProjectResponse`.
-    pub fn new(project: Project) -> Self {
-        Self {
-            project_id: project.id,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
-        }
-    }
-}
-
-impl From<Project> for UpdateProjectResponse {
-    fn from(project: Project) -> Self {
-        Self::new(project)
-    }
 }
 
 /// Updates a project by the project ID.
@@ -470,13 +277,11 @@ async fn update_project(
         "updating project",
     );
 
-    auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            ProjectPermission::UpdateProject,
-        )
-        .await?;
+    authorize!(
+        project: path_params.project_id,
+        auth_claims, &mut conn,
+        Permission::UpdateProject,
+    );
 
     let update_data = UpdateProject {
         display_name: request.display_name,
@@ -501,36 +306,6 @@ async fn update_project(
     );
 
     Ok((StatusCode::OK, Json(project.into())))
-}
-
-/// Response returned after deleting an account.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct DeleteProjectResponse {
-    /// ID of the project.
-    pub project_id: Uuid,
-    /// Timestamp when the project was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the project was deleted.
-    pub deleted_at: OffsetDateTime,
-}
-
-impl DeleteProjectResponse {
-    /// Creates a new instance of [`DeleteProjectResponse`].
-    pub fn new(project: Project) -> Self {
-        Self {
-            project_id: project.id,
-            created_at: project.created_at,
-            deleted_at: project.deleted_at.unwrap_or_else(OffsetDateTime::now_utc),
-        }
-    }
-}
-
-impl From<Project> for DeleteProjectResponse {
-    fn from(project: Project) -> Self {
-        Self::new(project)
-    }
 }
 
 /// Deletes a project by its project ID.
@@ -561,22 +336,20 @@ async fn delete_project(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<DeleteProjectResponse>)> {
+    let mut conn = pg_client.get_connection().await?;
+
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "project deletion requested - this is a destructive operation",
+        "Project deletion requested",
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            ProjectPermission::DeleteProject,
-        )
-        .await?;
+    authorize!(
+        project: path_params.project_id,
+        auth_claims, &mut conn,
+        Permission::DeleteProject,
+    );
 
     ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
     let Some(deleted_project) =
@@ -600,7 +373,7 @@ async fn delete_project(
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> OpenApiRouter<ServiceState> {
     OpenApiRouter::new()
-        .routes(routes!(create_project, list_all_projects))
+        .routes(routes!(create_project, list_projects))
         .routes(routes!(read_project, update_project, delete_project))
 }
 
@@ -658,7 +431,7 @@ mod test {
         server.post("/projects/").json(&request).await;
 
         // List projects
-        let pagination = Pagination::default().with_limit(10);
+        let pagination = PaginationRequest::default().with_limit(10);
         let response = server.get("/projects/").json(&pagination).await;
         response.assert_status_ok();
 

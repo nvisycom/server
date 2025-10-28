@@ -23,58 +23,30 @@ services:
     networks:
       - nvisy-network
 
-  # NATS with JetStream
+  # NATS with JetStream and KV
   nats:
     image: nats:2.10-alpine
     container_name: nvisy-nats
     restart: unless-stopped
     ports:
-      - "4222:4222" # Client connections
-      - "8222:8222" # HTTP monitoring
-      - "6222:6222" # Cluster routing
+      - "${NATS_CLIENT_PORT:-4222}:4222" # Client connections
+      - "${NATS_HTTP_PORT:-8222}:8222" # HTTP monitoring
+      - "${NATS_ROUTE_PORT:-6222}:6222" # Cluster routing
     command:
       - "--jetstream"
       - "--store_dir=/data"
       - "--http_port=8222"
       - "--max_payload=8MB"
+      - "--max_mem_store=1GB"
+      - "--max_file_store=10GB"
     volumes:
       - nats_data:/data
     healthcheck:
-      test: [
-        "CMD",
-        "wget",
-        "--no-verbose",
-        "--tries=1",
-        "--spider",
-        "http://localhost:8222/healthz",
-      ]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
-    networks:
-      - nvisy-network
-
-  # MinIO Object Storage
-  minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
-    container_name: nvisy-minio
-    restart: unless-stopped
-    ports:
-      - "9000:9000" # API
-      - "9001:9001" # Console
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
     networks:
       - nvisy-network
 
@@ -89,30 +61,37 @@ services:
     container_name: nvisy-server
     restart: unless-stopped
     ports:
-      - "${HTTP_PORT:-8080}:8080"
+      - "${PORT:-8080}:8080"
     environment:
       # Server configuration
-      HTTP_HOST: ${HTTP_HOST:-0.0.0.0}
-      HTTP_PORT: ${HTTP_PORT:-8080}
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-8080}
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-30}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-30}
 
       # Database configuration
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-nvisy}
-      DATABASE_MAX_CONNECTIONS: ${DATABASE_MAX_CONNECTIONS:-10}
-      DATABASE_MIN_CONNECTIONS: ${DATABASE_MIN_CONNECTIONS:-2}
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-nvisy}
+
+      # Auth configuration
+      AUTH_PUBLIC_PEM_FILEPATH: ${AUTH_PUBLIC_PEM_FILEPATH:-./public.pem}
+      AUTH_PRIVATE_PEM_FILEPATH: ${AUTH_PRIVATE_PEM_FILEPATH:-./private.pem}
 
       # NATS configuration
       NATS_URL: nats://nats:4222
-      NATS_CLIENT_NAME: ${NATS_CLIENT_NAME:-nvisy-server}
+      NATS_CLIENT_NAME: ${NATS_CLIENT_NAME:-nvisy-api}
 
-      # MinIO configuration
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_USE_SSL: "false"
-      MINIO_BUCKET: ${MINIO_BUCKET:-documents}
+      # PaddleX API
+      PADDLEX_API_KEY: ${PADDLEX_API_KEY}
+      PADDLEX_BASE_URL: ${PADDLEX_BASE_URL:-http://paddlex:8080/api/v1/}
 
       # OpenRouter API
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1/}
+
+      # CORS configuration
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      CORS_MAX_AGE: ${CORS_MAX_AGE:-3600}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
 
       # Logging
       RUST_LOG: ${RUST_LOG:-info}
@@ -121,8 +100,6 @@ services:
       postgres:
         condition: service_healthy
       nats:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     networks:
       - nvisy-network
@@ -137,8 +114,6 @@ volumes:
   postgres_data:
     driver: local
   nats_data:
-    driver: local
-  minio_data:
     driver: local
 
 networks:

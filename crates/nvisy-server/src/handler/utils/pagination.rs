@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 /// `Pagination` allows clients to retrieve data in chunks, which helps manage
 /// large datasets by specifying how many records to skip and how many to fetch.
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Pagination {
+pub struct PaginationRequest {
     /// The number of records to skip before starting to return results.
     ///
     /// Useful for implementing paged responses where you want to skip a
@@ -21,7 +21,7 @@ pub struct Pagination {
     pub limit: Option<u32>,
 }
 
-impl Pagination {
+impl PaginationRequest {
     /// Default pagination limit.
     const DEFAULT_LIMIT: u32 = 10;
     /// Default pagination offset.
@@ -61,9 +61,8 @@ impl Pagination {
     }
 }
 
-impl From<Pagination> for QueryPagination {
-    #[inline]
-    fn from(pagination: Pagination) -> Self {
+impl From<PaginationRequest> for QueryPagination {
+    fn from(pagination: PaginationRequest) -> Self {
         Self {
             limit: pagination.limit() as i64,
             offset: pagination.offset() as i64,

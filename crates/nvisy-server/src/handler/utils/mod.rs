@@ -4,4 +4,4 @@ mod custom_routes;
 mod pagination;
 
 pub use crate::handler::utils::custom_routes::{CustomRoutes, RouterMapFn};
-pub use crate::handler::utils::pagination::Pagination;
+pub use crate::handler::utils::pagination::PaginationRequest;

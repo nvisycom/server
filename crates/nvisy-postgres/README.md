@@ -21,7 +21,6 @@ pooling and embedded migrations.
 - `diesel` - Safe, extensible ORM and query builder for Rust
 - `diesel-async` - Async support for Diesel with PostgreSQL
 - `deadpool` - Async connection pooling for high-concurrency workloads
-- `tokio` - Async runtime integration
 
 ## Schema Management
 
