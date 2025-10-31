@@ -9,10 +9,8 @@ use std::time::Duration;
 
 use derive_builder::Builder;
 
-use crate::error::{Error, Result};
-
 /// Default values for configuration options.
-pub mod defaults {
+mod defaults {
     /// Default rate limit (requests per second).
     pub const RATE_LIMIT: u32 = 10;
 
@@ -32,6 +30,71 @@ pub mod defaults {
     pub const BASE_URL: &str = "https://openrouter.ai/api/v1";
 }
 
+/// Validates the LlmConfig before building.
+///
+/// This function validates configuration values and returns an error
+/// for invalid configurations.
+fn validate_config(builder: &LlmConfigBuilder) -> std::result::Result<(), String> {
+    // Validate temperature range [0.0, 2.0]
+    if let Some(Some(temp)) = builder.default_temperature {
+        if !(0.0..=2.0).contains(&temp) {
+            return Err(format!(
+                "Temperature must be between 0.0 and 2.0, got {}",
+                temp
+            ));
+        }
+    }
+
+    // Validate presence penalty range [-2.0, 2.0]
+    if let Some(Some(penalty)) = builder.default_presence_penalty {
+        if !(-2.0..=2.0).contains(&penalty) {
+            return Err(format!(
+                "Presence penalty must be between -2.0 and 2.0, got {}",
+                penalty
+            ));
+        }
+    }
+
+    // Validate frequency penalty range [-2.0, 2.0]
+    if let Some(Some(penalty)) = builder.default_frequency_penalty {
+        if !(-2.0..=2.0).contains(&penalty) {
+            return Err(format!(
+                "Frequency penalty must be between -2.0 and 2.0, got {}",
+                penalty
+            ));
+        }
+    }
+
+    // Validate top-p range (0.0, 1.0]
+    if let Some(Some(top_p)) = builder.default_top_p {
+        if !(0.001..=1.0).contains(&top_p) {
+            return Err(format!(
+                "Top-p must be between 0.001 and 1.0, got {}",
+                top_p
+            ));
+        }
+    }
+
+    // Validate max tokens
+    if let Some(Some(max_tokens)) = builder.default_max_tokens {
+        if max_tokens == 0 {
+            return Err("Max tokens must be greater than 0".to_string());
+        }
+    }
+
+    // Validate base URL format
+    if let Some(Some(base_url)) = &builder.base_url {
+        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+            return Err(format!(
+                "Base URL must start with http:// or https://, got {}",
+                base_url
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Configuration for OpenRouter client behavior.
 ///
 /// This configuration allows customization of rate limiting, timeouts, model preferences,
@@ -45,7 +108,7 @@ pub mod defaults {
 /// use std::time::Duration;
 /// use std::num::NonZeroU32;
 ///
-/// // Basic configuration
+/// // Basic configuration with validation
 /// let config = LlmConfig::builder()
 ///     .with_rate_limit(NonZeroU32::new(15).unwrap())
 ///     .with_default_model("openai/gpt-4o")
@@ -53,55 +116,59 @@ pub mod defaults {
 ///     .unwrap();
 /// ```
 #[derive(Debug, Clone, Builder)]
-#[builder(pattern = "owned", setter(into, strip_option, prefix = "with"))]
+#[builder(
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(validate = "validate_config")
+)]
 pub struct LlmConfig {
     /// Maximum requests per second (default: 10)
     #[builder(default)]
-    pub rate_limit: Option<NonZeroU32>,
+    rate_limit: Option<NonZeroU32>,
 
     /// Default timeout for API requests (default: 30s)
     #[builder(default)]
-    pub request_timeout: Option<Duration>,
+    request_timeout: Option<Duration>,
 
     /// Default model to use for completions
     #[builder(default)]
-    pub default_model: Option<String>,
+    default_model: Option<String>,
 
     /// Default base URL for API requests
     #[builder(default)]
-    pub base_url: Option<String>,
+    base_url: Option<String>,
 
     /// Default maximum tokens for completions
     #[builder(default)]
-    pub default_max_tokens: Option<u32>,
+    default_max_tokens: Option<u32>,
 
     /// Default temperature for completions (0.0-2.0)
     #[builder(default)]
-    pub default_temperature: Option<f32>,
+    default_temperature: Option<f32>,
 
     /// Default presence penalty (-2.0 to 2.0)
     #[builder(default)]
-    pub default_presence_penalty: Option<f32>,
+    default_presence_penalty: Option<f32>,
 
     /// Default frequency penalty (-2.0 to 2.0)
     #[builder(default)]
-    pub default_frequency_penalty: Option<f32>,
+    default_frequency_penalty: Option<f32>,
 
     /// Default top-p value (0.0-1.0)
     #[builder(default)]
-    pub default_top_p: Option<f32>,
+    default_top_p: Option<f32>,
 
     /// Whether to enable streaming by default
     #[builder(default)]
-    pub default_stream: bool,
+    default_stream: bool,
 
     /// HTTP Referer header for OpenRouter
     #[builder(default)]
-    pub http_referer: Option<String>,
+    http_referer: Option<String>,
 
     /// X-Title header for OpenRouter
     #[builder(default)]
-    pub x_title: Option<String>,
+    x_title: Option<String>,
 }
 
 impl Default for LlmConfig {
@@ -142,72 +209,6 @@ impl LlmConfig {
         LlmConfigBuilder::default()
     }
 
-    /// Validates and normalizes the configuration values.
-    ///
-    /// This method clamps float values to valid ranges and returns an error
-    /// for invalid configurations that cannot be auto-corrected.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(())` if the configuration is valid
-    /// - `Err(Error)` with details about validation failures
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::LlmConfig;
-    ///
-    /// let mut config = LlmConfig::builder()
-    ///     .with_default_temperature(0.7)
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// config.validate()?;
-    /// # Ok::<(), nvisy_openrouter::Error>(())
-    /// ```
-    pub fn validate(&mut self) -> Result<()> {
-        // Clamp temperature to valid range [0.0, 2.0]
-        if let Some(temp) = self.default_temperature {
-            self.default_temperature = Some(temp.clamp(0.0, 2.0));
-        }
-
-        // Clamp presence penalty to valid range [-2.0, 2.0]
-        if let Some(penalty) = self.default_presence_penalty {
-            self.default_presence_penalty = Some(penalty.clamp(-2.0, 2.0));
-        }
-
-        // Clamp frequency penalty to valid range [-2.0, 2.0]
-        if let Some(penalty) = self.default_frequency_penalty {
-            self.default_frequency_penalty = Some(penalty.clamp(-2.0, 2.0));
-        }
-
-        // Clamp top-p to valid range (0.0, 1.0]
-        if let Some(top_p) = self.default_top_p {
-            self.default_top_p = Some(top_p.clamp(0.001, 1.0));
-        }
-
-        // Validate max tokens (cannot be auto-corrected)
-        if let Some(max_tokens) = self.default_max_tokens {
-            if max_tokens == 0 {
-                return Err(Error::config(
-                    "Max tokens must be greater than 0".to_string(),
-                ));
-            }
-        }
-
-        // Validate base URL format (cannot be auto-corrected)
-        if let Some(base_url) = &self.base_url {
-            if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-                return Err(Error::config(format!(
-                    "Base URL must start with http:// or https://, got {}",
-                    base_url
-                )));
-            }
-        }
-
-        Ok(())
-    }
-
     /// Returns the effective rate limit (considering defaults).
     pub fn effective_rate_limit(&self) -> u32 {
         self.rate_limit
@@ -232,6 +233,68 @@ impl LlmConfig {
     pub fn effective_base_url(&self) -> &str {
         self.base_url.as_deref().unwrap_or(defaults::BASE_URL)
     }
+
+    /// Returns the effective maximum tokens (considering defaults).
+    pub fn effective_max_tokens(&self) -> u32 {
+        self.default_max_tokens
+            .unwrap_or(defaults::DEFAULT_MAX_TOKENS)
+    }
+
+    /// Returns the effective temperature (considering defaults).
+    pub fn effective_temperature(&self) -> f32 {
+        self.default_temperature
+            .unwrap_or(defaults::DEFAULT_TEMPERATURE)
+    }
+
+    /// Returns the effective presence penalty (considering defaults).
+    pub fn effective_presence_penalty(&self) -> f32 {
+        self.default_presence_penalty.unwrap_or(0.0)
+    }
+
+    /// Returns the effective frequency penalty (considering defaults).
+    pub fn effective_frequency_penalty(&self) -> f32 {
+        self.default_frequency_penalty.unwrap_or(0.0)
+    }
+
+    /// Returns the effective top-p (considering defaults).
+    pub fn effective_top_p(&self) -> f32 {
+        self.default_top_p.unwrap_or(1.0)
+    }
+
+    /// Returns the effective stream setting (considering defaults).
+    pub fn effective_stream(&self) -> bool {
+        self.default_stream
+    }
+
+    /// Returns the default presence penalty setting.
+    pub fn default_presence_penalty(&self) -> Option<f32> {
+        self.default_presence_penalty
+    }
+
+    /// Returns the default frequency penalty setting.
+    pub fn default_frequency_penalty(&self) -> Option<f32> {
+        self.default_frequency_penalty
+    }
+
+    /// Returns the default top-p setting.
+    pub fn default_top_p(&self) -> Option<f32> {
+        self.default_top_p
+    }
+
+    /// Returns whether streaming is enabled by default.
+    pub fn default_stream(&self) -> bool {
+        self.default_stream
+    }
+
+    /// Returns the HTTP referer header setting.
+    pub fn http_referer(&self) -> Option<&str> {
+        self.http_referer.as_deref()
+    }
+
+    /// Returns the X-Title header setting.
+    pub fn x_title(&self) -> Option<&str> {
+        self.x_title.as_deref()
+    }
 }
 
 #[cfg(test)]
@@ -246,7 +309,7 @@ mod tests {
             config.effective_request_timeout(),
             Duration::from_secs(defaults::REQUEST_TIMEOUT_SECS)
         );
-        assert!(!config.default_stream);
+        assert!(!config.default_stream());
     }
 
     #[test]
@@ -260,17 +323,17 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(config.rate_limit.unwrap().get(), 5);
-        assert_eq!(config.default_model.as_ref().unwrap(), "openai/gpt-4");
-        assert_eq!(config.request_timeout.unwrap(), Duration::from_secs(45));
-        assert_eq!(config.default_max_tokens.unwrap(), 1000);
-        assert_eq!(config.default_temperature.unwrap(), 0.7);
+        assert_eq!(config.effective_rate_limit(), 5);
+        assert_eq!(config.effective_model(), "openai/gpt-4");
+        assert_eq!(config.effective_request_timeout(), Duration::from_secs(45));
+        assert_eq!(config.effective_max_tokens(), 1000);
+        assert_eq!(config.effective_temperature(), 0.7);
     }
 
     #[test]
-    fn test_validate() {
-        // Valid configuration - float values should be clamped
-        let mut valid_config = LlmConfig::builder()
+    fn test_builder_validation() {
+        // Valid configuration should build successfully
+        let valid_config = LlmConfig::builder()
             .with_default_temperature(0.7)
             .with_default_presence_penalty(0.1)
             .with_default_frequency_penalty(-0.1)
@@ -278,36 +341,55 @@ mod tests {
             .with_default_max_tokens(1000u32)
             .build()
             .unwrap();
-        assert!(valid_config.validate().is_ok());
 
-        // Temperature should be clamped to valid range
-        let mut clamped_temp = LlmConfig::builder()
-            .with_default_temperature(3.0)
+        assert_eq!(valid_config.effective_temperature(), 0.7);
+
+        // Invalid temperature should fail during build
+        let invalid_temp_result = LlmConfig::builder().with_default_temperature(3.0).build();
+        assert!(invalid_temp_result.is_err());
+
+        // Invalid top-p should fail during build
+        let invalid_top_p_result = LlmConfig::builder().with_default_top_p(0.0).build();
+        assert!(invalid_top_p_result.is_err());
+
+        // Invalid max tokens should fail during build
+        let invalid_max_tokens_result = LlmConfig::builder().with_default_max_tokens(0u32).build();
+        assert!(invalid_max_tokens_result.is_err());
+
+        // Invalid base URL should fail during build
+        let invalid_base_url_result = LlmConfig::builder().with_base_url("invalid-url").build();
+        assert!(invalid_base_url_result.is_err());
+    }
+
+    #[test]
+    fn test_effective_values() {
+        let config = LlmConfig::builder()
+            .with_rate_limit(NonZeroU32::new(20).unwrap())
+            .with_default_model("custom/model")
             .build()
             .unwrap();
-        clamped_temp.validate().unwrap();
-        assert_eq!(clamped_temp.default_temperature, Some(2.0));
 
-        // Top-p should be clamped to valid range
-        let mut clamped_top_p = LlmConfig::builder()
-            .with_default_top_p(0.0)
+        assert_eq!(config.effective_rate_limit(), 20);
+        assert_eq!(config.effective_model(), "custom/model");
+        assert_eq!(config.effective_base_url(), defaults::BASE_URL);
+        assert_eq!(config.effective_max_tokens(), defaults::DEFAULT_MAX_TOKENS);
+    }
+
+    #[test]
+    fn test_getter_methods() {
+        let config = LlmConfig::builder()
+            .with_rate_limit(NonZeroU32::new(15).unwrap())
+            .with_default_stream(true)
+            .with_http_referer("https://example.com")
+            .with_default_presence_penalty(0.5)
             .build()
             .unwrap();
-        clamped_top_p.validate().unwrap();
-        assert_eq!(clamped_top_p.default_top_p, Some(0.001));
 
-        // Invalid max tokens should return error
-        let mut invalid_max_tokens = LlmConfig::builder()
-            .with_default_max_tokens(0u32)
-            .build()
-            .unwrap();
-        assert!(invalid_max_tokens.validate().is_err());
-
-        // Invalid base URL should return error
-        let mut invalid_base_url = LlmConfig::builder()
-            .with_base_url("invalid-url")
-            .build()
-            .unwrap();
-        assert!(invalid_base_url.validate().is_err());
+        assert_eq!(config.effective_rate_limit(), 15);
+        assert!(config.default_stream());
+        assert_eq!(config.http_referer().unwrap(), "https://example.com");
+        assert!(config.x_title().is_none());
+        assert_eq!(config.default_presence_penalty().unwrap(), 0.5);
+        assert_eq!(config.effective_presence_penalty(), 0.5);
     }
 }

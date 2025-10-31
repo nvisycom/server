@@ -173,8 +173,6 @@ pub struct CancelInviteResponse {
     pub project_id: Uuid,
     /// Email address of the invitee.
     pub invitee_email: String,
-    /// Reason for cancellation.
-    pub status_reason: Option<String>,
 }
 
 impl From<ProjectInvite> for CancelInviteResponse {
@@ -183,7 +181,6 @@ impl From<ProjectInvite> for CancelInviteResponse {
             invite_id: invite.id,
             project_id: invite.project_id,
             invitee_email: invite.invitee_email,
-            status_reason: invite.status_reason,
         }
     }
 }

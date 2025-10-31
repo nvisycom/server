@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::categories::RedactionCategory;
-use crate::REDACTION_TARGET;
-use crate::error::Error;
+use crate::{Error, REDACTION_TARGET};
 
 /// An entity identified in the redaction analysis.
 #[derive(
@@ -275,31 +274,18 @@ impl RedactionResponse {
     fn parse_json(cleaned: &str) -> Result<RedactionResponseRaw, Error> {
         match serde_json::from_str::<RedactionResponseRaw>(cleaned) {
             Ok(response) => Ok(response),
-            Err(_) => {
+            Err(original_error) => {
                 // Fallback: try to extract JSON object from text
                 if let Some(start) = cleaned.find('{') {
                     if let Some(end) = cleaned.rfind('}') {
                         let json_part = &cleaned[start..=end];
-                        serde_json::from_str::<RedactionResponseRaw>(json_part).map_err(|e| {
-                            Error::Api {
-                                message: format!("Failed to parse LLM response: {}", e),
-                                status_code: None,
-                                error_code: Some("parse_error".to_string()),
-                            }
-                        })
+                        serde_json::from_str::<RedactionResponseRaw>(json_part)
+                            .map_err(|_| Error::Serialization(original_error))
                     } else {
-                        Err(Error::Api {
-                            message: "No JSON object found in response".to_string(),
-                            status_code: None,
-                            error_code: Some("no_json".to_string()),
-                        })
+                        Err(Error::Serialization(original_error))
                     }
                 } else {
-                    Err(Error::Api {
-                        message: "No JSON object found in response".to_string(),
-                        status_code: None,
-                        error_code: Some("no_json".to_string()),
-                    })
+                    Err(Error::Serialization(original_error))
                 }
             }
         }
@@ -337,8 +323,7 @@ impl RedactionResponse {
     fn parse_redacted_data(raw_data: Vec<RedactedDataWithStringCategory>) -> Vec<RedactedData> {
         raw_data
             .into_iter()
-            .filter_map(|raw| {
-                // Skip entries with invalid UUIDs
+            .map(|raw| {
                 let category =
                     raw.category
                         .and_then(|cat_str| match RedactionCategory::from_str(&cat_str) {
@@ -355,12 +340,12 @@ impl RedactionResponse {
                             }
                         });
 
-                Some(RedactedData {
+                RedactedData {
                     id: raw.id,
                     data: raw.data,
                     category,
                     entity: raw.entity,
-                })
+                }
             })
             .collect()
     }

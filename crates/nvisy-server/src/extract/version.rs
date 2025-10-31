@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::fmt;
 use std::num::NonZeroU32;
 
 use axum::RequestPartsExt;
@@ -68,8 +69,9 @@ impl Version {
     /// # Examples
     ///
     /// ```rust
+    /// # use std::num::NonZeroU32;
     /// # use nvisy_server::extract::Version;
-    /// assert_eq!(Version::new("v1"), Version::Stable(std::num::NonZeroU32::new(1).unwrap()));
+    /// assert_eq!(Version::new("v1"), Version::Stable(NonZeroU32::new(1).unwrap()));
     /// assert_eq!(Version::new("v0"), Version::Unstable);
     /// assert_eq!(Version::new("invalid"), Version::Unrecognized);
     /// ```
@@ -189,11 +191,11 @@ impl Version {
     }
 }
 
-impl std::fmt::Display for Version {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unrecognized => write!(f, "unrecognized"),
-            Self::Unstable => write!(f, "v{}", UNSTABLE_VERSION),
+            Self::Unstable => write!(f, "unstable"),
             Self::Stable(x) => write!(f, "v{}", x.get()),
         }
     }

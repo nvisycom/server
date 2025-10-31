@@ -3117,6 +3117,7 @@ version = "0.1.0"
 dependencies = [
  "bigdecimal",
  "deadpool",
+ "derive_more",
  "diesel",
  "diesel-async",
  "diesel-derive-enum",
@@ -3146,6 +3147,7 @@ dependencies = [
  "axum-test",
  "base64 0.22.1",
  "bigdecimal",
+ "derive_builder",
  "derive_more",
  "ecow",
  "futures",

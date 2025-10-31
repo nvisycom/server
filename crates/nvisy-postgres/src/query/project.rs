@@ -219,22 +219,6 @@ impl ProjectRepository {
         Ok(project_list)
     }
 
-    /// Lists all available project templates.
-    pub async fn list_project_templates(conn: &mut AsyncPgConnection) -> PgResult<Vec<Project>> {
-        use schema::projects::dsl::*;
-
-        let templates = projects
-            .filter(deleted_at.is_null())
-            .filter(status.eq(ProjectStatus::Template))
-            .select(Project::as_select())
-            .order(display_name.asc())
-            .load(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(templates)
-    }
-
     /// Finds projects by tags.
     pub async fn find_projects_by_tags(
         conn: &mut AsyncPgConnection,
@@ -278,7 +262,6 @@ impl ProjectRepository {
         let pending_invites: i64 = project_invites::table
             .filter(project_invites::project_id.eq(project_id))
             .filter(project_invites::invite_status.eq(crate::types::InviteStatus::Pending))
-            .filter(project_invites::deleted_at.is_null())
             .count()
             .get_result(conn)
             .await

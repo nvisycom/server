@@ -17,7 +17,6 @@ pub mod project_visibility;
 
 // Document-related enumerations
 pub mod document_status;
-pub mod file_type;
 pub mod processing_status;
 pub mod require_mode;
 pub mod virus_scan_status;
@@ -25,7 +24,6 @@ pub mod virus_scan_status;
 pub use action_token_type::ActionTokenType;
 pub use api_token_type::ApiTokenType;
 pub use document_status::DocumentStatus;
-pub use file_type::FileType;
 pub use integration_status::IntegrationStatus;
 pub use invite_status::InviteStatus;
 pub use processing_status::ProcessingStatus;

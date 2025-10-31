@@ -55,7 +55,7 @@ pub struct Account {
 }
 
 /// Data for creating a new account.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = accounts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount {
@@ -66,15 +66,15 @@ pub struct NewAccount {
     /// Securely hashed password (bcrypt recommended, minimum 60 characters)
     pub password_hash: String,
     /// Optional company affiliation for business accounts
-    pub company_name: String,
+    pub company_name: Option<String>,
     /// Optional phone number for 2FA or emergency contact
-    pub phone_number: String,
+    pub phone_number: Option<String>,
     /// Optional URL to profile avatar image
     pub avatar_url: Option<String>,
     /// Timezone identifier
-    pub timezone: String,
+    pub timezone: Option<String>,
     /// Preferred locale code
-    pub locale: String,
+    pub locale: Option<String>,
 }
 
 /// Data for updating an account.
@@ -114,21 +114,6 @@ pub struct UpdateAccount {
     pub last_login_at: Option<OffsetDateTime>,
     /// IP address of the last successful login
     pub last_login_ip: Option<IpNet>,
-}
-
-impl Default for NewAccount {
-    fn default() -> Self {
-        Self {
-            display_name: String::new(),
-            email_address: String::new(),
-            password_hash: String::new(),
-            company_name: String::new(),
-            phone_number: String::new(),
-            avatar_url: None,
-            timezone: "UTC".to_string(),
-            locale: "en".to_string(),
-        }
-    }
 }
 
 impl Account {

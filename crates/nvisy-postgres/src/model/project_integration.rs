@@ -20,24 +20,24 @@ pub struct ProjectIntegration {
     pub integration_name: String,
     /// Description of what this integration does
     pub description: String,
-    /// Current operational status
-    pub status: IntegrationStatus,
-    /// Whether the integration is enabled
-    pub is_enabled: bool,
-    /// Authentication data (credentials, tokens, etc.)
-    pub auth_data: serde_json::Value,
-    /// Additional metadata and configuration
-    pub metadata: serde_json::Value,
+    /// Type of integration
+    pub integration_type: String,
+    /// Configuration data
+    pub config_data: serde_json::Value,
+    /// Authentication credentials
+    pub credentials: serde_json::Value,
+    /// Whether the integration is active
+    pub is_active: bool,
+    /// Last sync timestamp
+    pub last_sync_at: Option<OffsetDateTime>,
+    /// Current sync status
+    pub sync_status: Option<IntegrationStatus>,
     /// Account that created the integration
     pub created_by: Uuid,
-    /// Account that last updated the integration
-    pub updated_by: Uuid,
     /// Timestamp when the integration was created
     pub created_at: OffsetDateTime,
     /// Timestamp when the integration was last updated
     pub updated_at: OffsetDateTime,
-    /// Timestamp when the integration was soft-deleted
-    pub deleted_at: Option<OffsetDateTime>,
 }
 
 /// Data for creating a new project integration.
@@ -51,18 +51,20 @@ pub struct NewProjectIntegration {
     pub integration_name: String,
     /// Integration description
     pub description: String,
-    /// Integration status
-    pub status: IntegrationStatus,
-    /// Is enabled
-    pub is_enabled: bool,
-    /// Authentication data
-    pub auth_data: serde_json::Value,
-    /// Metadata
-    pub metadata: serde_json::Value,
+    /// Integration type
+    pub integration_type: String,
+    /// Configuration data
+    pub config_data: serde_json::Value,
+    /// Credentials
+    pub credentials: serde_json::Value,
+    /// Is active
+    pub is_active: bool,
+    /// Last sync at
+    pub last_sync_at: Option<OffsetDateTime>,
+    /// Sync status
+    pub sync_status: Option<IntegrationStatus>,
     /// Created by
     pub created_by: Uuid,
-    /// Updated by
-    pub updated_by: Uuid,
 }
 
 /// Data for updating a project integration.
@@ -74,16 +76,18 @@ pub struct UpdateProjectIntegration {
     pub integration_name: Option<String>,
     /// Description
     pub description: Option<String>,
-    /// Status
-    pub status: Option<IntegrationStatus>,
-    /// Is enabled
-    pub is_enabled: Option<bool>,
-    /// Authentication data
-    pub auth_data: Option<serde_json::Value>,
-    /// Metadata
-    pub metadata: Option<serde_json::Value>,
-    /// Updated by
-    pub updated_by: Option<Uuid>,
+    /// Integration type
+    pub integration_type: Option<String>,
+    /// Configuration data
+    pub config_data: Option<serde_json::Value>,
+    /// Credentials
+    pub credentials: Option<serde_json::Value>,
+    /// Is active
+    pub is_active: Option<bool>,
+    /// Last sync at
+    pub last_sync_at: Option<OffsetDateTime>,
+    /// Sync status
+    pub sync_status: Option<IntegrationStatus>,
 }
 
 impl Default for NewProjectIntegration {
@@ -92,54 +96,52 @@ impl Default for NewProjectIntegration {
             project_id: Uuid::new_v4(),
             integration_name: String::new(),
             description: String::new(),
-            status: IntegrationStatus::Pending,
-            is_enabled: true,
-            auth_data: serde_json::Value::Object(serde_json::Map::new()),
-            metadata: serde_json::Value::Object(serde_json::Map::new()),
+            integration_type: String::new(),
+            config_data: serde_json::Value::Object(serde_json::Map::new()),
+            credentials: serde_json::Value::Object(serde_json::Map::new()),
+            is_active: true,
+            last_sync_at: None,
+            sync_status: Some(IntegrationStatus::Pending),
             created_by: Uuid::new_v4(),
-            updated_by: Uuid::new_v4(),
         }
     }
 }
 
 impl ProjectIntegration {
-    /// Returns whether the integration is currently active.
-    pub fn is_active(&self) -> bool {
-        self.deleted_at.is_none() && self.is_enabled && self.status == IntegrationStatus::Executing
-    }
-
-    /// Returns whether the integration is deleted.
-    pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some()
-    }
-
     /// Returns whether the integration has errors.
     pub fn has_error(&self) -> bool {
-        self.status == IntegrationStatus::Failure
+        matches!(self.sync_status, Some(IntegrationStatus::Failure))
     }
 
     /// Returns whether the integration is pending setup.
     pub fn is_pending(&self) -> bool {
-        self.status == IntegrationStatus::Pending
+        matches!(self.sync_status, Some(IntegrationStatus::Pending))
     }
 
     /// Returns whether the integration can be activated.
     pub fn can_activate(&self) -> bool {
-        !self.is_deleted() && self.status.can_activate()
-    }
-
-    /// Returns whether the integration can be configured.
-    pub fn can_configure(&self) -> bool {
-        !self.is_deleted()
+        self.sync_status
+            .map_or(true, |status| status.can_activate())
     }
 
     /// Returns whether the integration is operational (active and executing).
     pub fn is_operational(&self) -> bool {
-        self.is_active() && self.status.is_operational()
+        self.is_active && matches!(self.sync_status, Some(IntegrationStatus::Executing))
     }
 
     /// Returns whether the integration needs attention (has errors or is disabled).
     pub fn needs_attention(&self) -> bool {
-        self.has_error() || (!self.is_enabled && !self.is_deleted())
+        self.has_error() || !self.is_active
+    }
+
+    /// Returns whether the integration was synced recently (within last hour).
+    pub fn is_recently_synced(&self) -> bool {
+        if let Some(last_sync) = self.last_sync_at {
+            let now = OffsetDateTime::now_utc();
+            let duration = now - last_sync;
+            duration.whole_hours() < 1
+        } else {
+            false
+        }
     }
 }

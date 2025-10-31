@@ -6,8 +6,6 @@ use strum::{Display, EnumIter, EnumString};
 #[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
 
-use crate::types::FileType;
-
 /// Defines the processing requirements for input files.
 ///
 /// This enumeration corresponds to the `REQUIRE_MODE` PostgreSQL enum and is used
@@ -129,33 +127,6 @@ impl RequireMode {
                 "image_processing",
                 "audio_processing",
             ],
-        }
-    }
-
-    /// Determines the appropriate require mode based on file type and content.
-    pub fn from_file_type_and_content(
-        file_type: Option<FileType>,
-        has_text: bool,
-        has_images: bool,
-        has_audio: bool,
-    ) -> RequireMode {
-        match file_type {
-            Some(FileType::Document) if has_text && !has_images => RequireMode::Text,
-            Some(FileType::Document) if has_images => RequireMode::Ocr,
-            Some(FileType::Image) => RequireMode::Ocr,
-            Some(FileType::Audio) => RequireMode::Transcribe,
-            Some(FileType::Video) => RequireMode::Transcribe,
-            Some(FileType::Code) | Some(FileType::Data) => RequireMode::Text,
-            Some(FileType::Archive) => RequireMode::Mixed,
-            _ => {
-                // Determine based on content flags
-                match (has_text, has_images, has_audio) {
-                    (true, false, false) => RequireMode::Text,
-                    (false, true, false) => RequireMode::Ocr,
-                    (false, false, true) => RequireMode::Transcribe,
-                    _ => RequireMode::Mixed,
-                }
-            }
         }
     }
 

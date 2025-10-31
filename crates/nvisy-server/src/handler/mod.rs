@@ -39,6 +39,7 @@
 
 mod accounts;
 mod authentication;
+pub mod daemon;
 mod document_files;
 mod document_versions;
 mod documents;

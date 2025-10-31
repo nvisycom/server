@@ -6,6 +6,7 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewDocument, UpdateDocument};
 use nvisy_postgres::query::DocumentRepository;
@@ -92,12 +93,7 @@ async fn create_document(
         project_id: path_params.project_id,
         account_id: auth_claims.account_id,
         display_name: Some(request.display_name.clone()),
-        description: None,
-        is_template: Some(false),
-        settings: Some(serde_json::Value::Null),
-        tags: None,
-        metadata: Some(serde_json::Value::Null),
-        status: Default::default(),
+        ..Default::default()
     };
 
     let document = DocumentRepository::create_document(&mut conn, new_document).await?;
@@ -332,7 +328,7 @@ async fn update_document(
 )]
 async fn delete_document(
     State(pg_client): State<PgClient>,
-    // State(_storage): State<MinioClient>, // TODO: Replace with NATS object store
+    State(_nats_client): State<NatsClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<DeleteDocumentResponse>)> {

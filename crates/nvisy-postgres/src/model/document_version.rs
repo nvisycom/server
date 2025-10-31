@@ -1,12 +1,10 @@
 //! Document version model for PostgreSQL database operations.
 
-use bigdecimal::BigDecimal;
 use diesel::prelude::*;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::document_versions;
-use crate::types::FileType;
 
 /// Document version model representing a specific version of a document file.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -25,38 +23,22 @@ pub struct DocumentVersion {
     pub display_name: String,
     /// File extension (without the dot)
     pub file_extension: String,
-    /// MIME type of the version file
-    pub mime_type: String,
-    /// File type categorization
-    pub file_type: FileType,
     /// Processing credits used
     pub processing_credits: i32,
     /// Processing duration in milliseconds
-    pub processing_duration_ms: i32,
-    /// Processing cost in USD
-    pub processing_cost_usd: Option<BigDecimal>,
+    pub processing_duration: i32,
     /// Number of API calls made during processing
     pub api_calls_made: i32,
-    /// Accuracy score for the processing
-    pub accuracy_score: BigDecimal,
-    /// Completeness score
-    pub completeness_score: BigDecimal,
-    /// Confidence score
-    pub confidence_score: BigDecimal,
     /// File size in bytes
     pub file_size_bytes: i64,
+    /// SHA-256 hash of the file
+    pub file_hash_sha256: Vec<u8>,
     /// Storage path or identifier for the version file
     pub storage_path: String,
     /// Storage bucket location
     pub storage_bucket: String,
-    /// SHA-256 hash of the file
-    pub file_hash_sha256: Vec<u8>,
-    /// Whether the file is encrypted
-    pub is_encrypted: bool,
-    /// Encryption key identifier
-    pub encryption_key_id: Option<String>,
     /// Processing results and extracted data (JSON)
-    pub processing_results: serde_json::Value,
+    pub results: serde_json::Value,
     /// Version metadata (JSON)
     pub metadata: serde_json::Value,
     /// Timestamp when the version was created
@@ -72,7 +54,7 @@ pub struct DocumentVersion {
 }
 
 /// Data for creating a new document version.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = document_versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentVersion {
@@ -83,45 +65,29 @@ pub struct NewDocumentVersion {
     /// Version number
     pub version_number: i32,
     /// Display name
-    pub display_name: String,
+    pub display_name: Option<String>,
     /// File extension
-    pub file_extension: String,
-    /// MIME type
-    pub mime_type: String,
-    /// File type
-    pub file_type: FileType,
+    pub file_extension: Option<String>,
     /// Processing credits
-    pub processing_credits: i32,
+    pub processing_credits: Option<i32>,
     /// Processing duration
-    pub processing_duration_ms: i32,
-    /// Processing cost
-    pub processing_cost_usd: Option<BigDecimal>,
+    pub processing_duration: Option<i32>,
     /// API calls made
-    pub api_calls_made: i32,
-    /// Accuracy score
-    pub accuracy_score: BigDecimal,
-    /// Completeness score
-    pub completeness_score: BigDecimal,
-    /// Confidence score
-    pub confidence_score: BigDecimal,
+    pub api_calls_made: Option<i32>,
     /// File size in bytes
-    pub file_size_bytes: i64,
+    pub file_size_bytes: Option<i64>,
+    /// File hash
+    pub file_hash_sha256: Vec<u8>,
     /// Storage path
     pub storage_path: String,
     /// Storage bucket
-    pub storage_bucket: String,
-    /// File hash
-    pub file_hash_sha256: Vec<u8>,
-    /// Is encrypted
-    pub is_encrypted: bool,
-    /// Encryption key ID
-    pub encryption_key_id: Option<String>,
+    pub storage_bucket: Option<String>,
     /// Processing results
-    pub processing_results: serde_json::Value,
+    pub results: Option<serde_json::Value>,
     /// Metadata
-    pub metadata: serde_json::Value,
+    pub metadata: Option<serde_json::Value>,
     /// Keep for seconds
-    pub keep_for_sec: i32,
+    pub keep_for_sec: Option<i32>,
     /// Auto delete timestamp
     pub auto_delete_at: Option<OffsetDateTime>,
 }
@@ -134,42 +100,11 @@ pub struct UpdateDocumentVersion {
     /// Display name
     pub display_name: Option<String>,
     /// Processing results
-    pub processing_results: Option<serde_json::Value>,
+    pub results: Option<serde_json::Value>,
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Auto delete timestamp
     pub auto_delete_at: Option<OffsetDateTime>,
-}
-
-impl Default for NewDocumentVersion {
-    fn default() -> Self {
-        Self {
-            document_id: Uuid::new_v4(),
-            account_id: Uuid::new_v4(),
-            version_number: 1,
-            display_name: String::new(),
-            file_extension: String::new(),
-            mime_type: String::from("application/octet-stream"),
-            file_type: FileType::Document,
-            processing_credits: 0,
-            processing_duration_ms: 0,
-            processing_cost_usd: None,
-            api_calls_made: 0,
-            accuracy_score: BigDecimal::from(0),
-            completeness_score: BigDecimal::from(0),
-            confidence_score: BigDecimal::from(0),
-            file_size_bytes: 0,
-            storage_path: String::new(),
-            storage_bucket: String::new(),
-            file_hash_sha256: Vec::new(),
-            is_encrypted: false,
-            encryption_key_id: None,
-            processing_results: serde_json::Value::Object(serde_json::Map::new()),
-            metadata: serde_json::Value::Object(serde_json::Map::new()),
-            keep_for_sec: 0,
-            auto_delete_at: None,
-        }
-    }
 }
 
 impl DocumentVersion {
@@ -211,56 +146,36 @@ impl DocumentVersion {
         }
     }
 
-    /// Returns the file size in human-readable format.
-    pub fn file_size_human(&self) -> String {
-        let bytes = if self.file_size_bytes >= 0 {
-            self.file_size_bytes as u64
-        } else {
-            0
-        };
-
-        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-        let mut size = bytes as f64;
-        let mut unit_index = 0;
-
-        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
-            size /= 1024.0;
-            unit_index += 1;
-        }
-
-        if unit_index == 0 {
-            format!("{} {}", bytes, UNITS[unit_index])
-        } else {
-            format!("{:.1} {}", size, UNITS[unit_index])
-        }
-    }
-
-    /// Returns whether the version is an image.
+    /// Returns whether the version is an image based on file extension.
     pub fn is_image(&self) -> bool {
-        self.mime_type.starts_with("image/")
-    }
-
-    /// Returns whether the version is a document.
-    pub fn is_document(&self) -> bool {
         matches!(
-            self.mime_type.as_str(),
-            "application/pdf"
-                | "application/msword"
-                | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                | "text/plain"
-                | "text/html"
-                | "text/markdown"
+            self.file_extension.to_lowercase().as_str(),
+            "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg"
         )
     }
 
-    /// Returns whether the version is a video.
-    pub fn is_video(&self) -> bool {
-        self.mime_type.starts_with("video/")
+    /// Returns whether the version is a document based on file extension.
+    pub fn is_document(&self) -> bool {
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "pdf" | "doc" | "docx" | "txt" | "html" | "md" | "rtf"
+        )
     }
 
-    /// Returns whether the version is audio.
+    /// Returns whether the version is a video based on file extension.
+    pub fn is_video(&self) -> bool {
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "mp4" | "avi" | "mov" | "wmv" | "flv" | "mkv" | "webm"
+        )
+    }
+
+    /// Returns whether the version is audio based on file extension.
     pub fn is_audio(&self) -> bool {
-        self.mime_type.starts_with("audio/")
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "mp3" | "wav" | "ogg" | "m4a" | "flac" | "aac"
+        )
     }
 
     /// Returns whether the version was created recently (within last 24 hours).
@@ -288,10 +203,7 @@ impl DocumentVersion {
 
     /// Returns whether the version has processing results.
     pub fn has_processing_results(&self) -> bool {
-        !self
-            .processing_results
-            .as_object()
-            .is_none_or(|obj| obj.is_empty())
+        !self.results.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the version has metadata.

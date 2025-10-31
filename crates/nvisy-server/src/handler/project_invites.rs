@@ -192,7 +192,6 @@ async fn send_invite(
         invite_message: sanitized_message,
         invite_token: generate_invite_token(),
         expires_at,
-        max_uses: 1,
         created_by: auth_claims.account_id,
         updated_by: auth_claims.account_id,
     };

@@ -3,8 +3,6 @@
 //! This module provides comprehensive error handling for the service layer,
 //! covering configuration, database, external service, and system errors.
 
-use thiserror::Error;
-
 /// Result type for service operations.
 pub type Result<T> = std::result::Result<T, ServiceError>;
 
@@ -12,7 +10,7 @@ pub type Result<T> = std::result::Result<T, ServiceError>;
 ///
 /// These errors represent failures in the service layer, such as configuration
 /// issues, database connectivity problems, external service failures, etc.
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
     /// Configuration error (invalid config values, missing files, etc.).
     #[error("Configuration error: {message}")]
@@ -30,7 +28,7 @@ pub enum ServiceError {
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
-    /// External service error (MinIO, OpenRouter, etc.).
+    /// External service error (NATS, OpenRouter, etc.).
     #[error("External service error ({service}): {message}")]
     ExternalService {
         service: String,
@@ -208,47 +206,6 @@ impl ServiceError {
             source: Some(Box::new(source)),
         }
     }
-
-    /// Returns the error category.
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::Config { .. } => "configuration",
-            Self::Database { .. } => "database",
-            Self::ExternalService { .. } => "external_service",
-            Self::Auth { .. } => "authentication",
-            Self::FileSystem { .. } => "file_system",
-            Self::Network { .. } => "network",
-            Self::Internal { .. } => "internal",
-        }
-    }
-
-    /// Converts this service error into a handler error.
-    ///
-    /// This is used when service errors need to be returned from HTTP handlers.
-    pub fn into_handler_error(self) -> crate::handler::Error<'static> {
-        use crate::handler::ErrorKind;
-
-        match self {
-            Self::Config { message, .. } => ErrorKind::InternalServerError.with_context(message),
-            Self::Database { message, .. } => ErrorKind::InternalServerError.with_context(message),
-            Self::ExternalService { message, .. } => {
-                ErrorKind::InternalServerError.with_context(message)
-            }
-            Self::Auth { message, .. } => ErrorKind::Unauthorized.with_context(message),
-            Self::FileSystem { message, .. } => {
-                ErrorKind::InternalServerError.with_context(message)
-            }
-            Self::Network { message, .. } => ErrorKind::InternalServerError.with_context(message),
-            Self::Internal { message, .. } => ErrorKind::InternalServerError.with_context(message),
-        }
-    }
-}
-
-/// Conversion from service error to handler error.
-impl From<ServiceError> for crate::handler::Error<'static> {
-    fn from(error: ServiceError) -> Self {
-        error.into_handler_error()
-    }
 }
 
 #[cfg(test)]
@@ -258,7 +215,6 @@ mod tests {
     #[test]
     fn test_error_creation() {
         let error = ServiceError::config("Invalid configuration");
-        assert_eq!(error.category(), "configuration");
         assert!(error.to_string().contains("Invalid configuration"));
     }
 
@@ -266,24 +222,6 @@ mod tests {
     fn test_error_with_source() {
         let source = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let error = ServiceError::file_system_with_source("Cannot read config file", source);
-
-        assert_eq!(error.category(), "file_system");
         assert!(std::error::Error::source(&error).is_some());
-    }
-
-    #[test]
-    fn test_handler_error_conversion() {
-        let service_error = ServiceError::auth("Invalid credentials");
-        let handler_error = service_error.into_handler_error();
-
-        // Test that it converts to the expected handler error type
-        assert!(handler_error.to_string().contains("Invalid credentials"));
-    }
-
-    #[test]
-    fn test_external_service_error() {
-        let error = ServiceError::external_service("MinIO", "Connection failed");
-        assert!(error.to_string().contains("MinIO"));
-        assert!(error.to_string().contains("Connection failed"));
     }
 }

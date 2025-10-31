@@ -190,46 +190,6 @@ impl DocumentRepository {
             .map_err(PgError::from)
     }
 
-    /// Finds template documents.
-    pub async fn find_template_documents(
-        conn: &mut AsyncPgConnection,
-        pagination: Pagination,
-    ) -> PgResult<Vec<Document>> {
-        use schema::documents::{self, dsl};
-
-        documents::table
-            .filter(dsl::is_template.eq(true))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::display_name.asc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Document::as_select())
-            .load(conn)
-            .await
-            .map_err(PgError::from)
-    }
-
-    // NOTE: Commented out because template_id field no longer exists in schema
-    // /// Finds documents created from a specific template.
-    // pub async fn find_documents_by_template(
-    //     conn: &mut AsyncPgConnection,
-    //     template_id: Uuid,
-    //     pagination: Pagination,
-    // ) -> PgResult<Vec<Document>> {
-    //     use schema::documents::{self, dsl};
-    //
-    //     documents::table
-    //         .filter(dsl::template_id.eq(template_id))
-    //         .filter(dsl::deleted_at.is_null())
-    //         .order(dsl::created_at.desc())
-    //         .limit(pagination.limit)
-    //         .offset(pagination.offset)
-    //         .select(Document::as_select())
-    //         .load(conn)
-    //         .await
-    //         .map_err(PgError::from)
-    // }
-
     /// Finds recently created documents.
     pub async fn find_recently_created_documents(
         conn: &mut AsyncPgConnection,
@@ -339,21 +299,10 @@ impl DocumentRepository {
             .await
             .map_err(PgError::from)?;
 
-        // Template documents
-        let template_count: i64 = documents::table
-            .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::is_template.eq(true))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
         Ok(DocumentProjectStats {
             total_count,
             archived_count,
             recent_count,
-            template_count,
         })
     }
 
@@ -386,20 +335,9 @@ impl DocumentRepository {
             .await
             .map_err(PgError::from)?;
 
-        // Templates created by user
-        let template_count: i64 = documents::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::is_template.eq(true))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
         Ok(DocumentUserStats {
             total_count,
             recent_count,
-            template_count,
         })
     }
 
@@ -433,8 +371,6 @@ pub struct DocumentProjectStats {
     pub archived_count: i64,
     /// Number of documents created in last 7 days
     pub recent_count: i64,
-    /// Number of template documents
-    pub template_count: i64,
 }
 
 impl DocumentProjectStats {
@@ -444,15 +380,6 @@ impl DocumentProjectStats {
             0.0
         } else {
             (self.archived_count as f64 / self.total_count as f64) * 100.0
-        }
-    }
-
-    /// Returns the template ratio as a percentage (0-100).
-    pub fn template_ratio(&self) -> f64 {
-        if self.total_count == 0 {
-            0.0
-        } else {
-            (self.template_count as f64 / self.total_count as f64) * 100.0
         }
     }
 
@@ -469,18 +396,11 @@ pub struct DocumentUserStats {
     pub total_count: i64,
     /// Number of documents created in last 30 days
     pub recent_count: i64,
-    /// Number of templates created by user
-    pub template_count: i64,
 }
 
 impl DocumentUserStats {
     /// Returns whether the user is actively creating documents.
     pub fn is_active_creator(&self) -> bool {
         self.recent_count > 0
-    }
-
-    /// Returns whether the user creates templates.
-    pub fn creates_templates(&self) -> bool {
-        self.template_count > 0
     }
 }

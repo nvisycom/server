@@ -14,9 +14,8 @@ use super::chat_request::TypedChatRequest;
 use super::redaction_prompts::{create_system_prompt, create_user_prompt};
 use super::redaction_request::RedactionRequest;
 use super::redaction_response::RedactionResponse;
-use crate::REDACTION_TARGET;
 use crate::client::LlmClient;
-use crate::error::{Error, Result};
+use crate::{Error, REDACTION_TARGET, Result};
 
 /// A service for performing data redaction tasks with OpenRouter LLMs.
 ///
@@ -144,7 +143,7 @@ impl RedactionService {
             .with_messages(messages)
             .with_request(EmptyRequest)
             .build()
-            .map_err(|e| Error::api(format!("Failed to build typed request: {}", e)))?;
+            .map_err(|e| Error::config(format!("Failed to build typed request: {}", e)))?;
 
         let typed_response = typed_completion.chat_completion(typed_request).await?;
 
@@ -196,7 +195,7 @@ impl RedactionService {
                     valid_ids = ?valid_ids,
                     "LLM returned invalid UUID not present in request"
                 );
-                return Err(Error::api(format!(
+                return Err(Error::invalid_response(format!(
                     "Invalid redaction ID in response: {}",
                     data.id
                 )));

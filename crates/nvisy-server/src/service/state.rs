@@ -1,11 +1,12 @@
 //! Application state and dependency injection.
 
 use nvisy_nats::NatsClient;
+use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgClient;
 
 use crate::service::auth::{AuthHasher, AuthKeys};
 use crate::service::policy::DataCollectionPolicy;
-use crate::service::{PasswordStrength, Result, ServiceConfig};
+use crate::service::{HealthService, PasswordStrength, Result, ServiceConfig};
 
 /// Application state.
 ///
@@ -16,12 +17,14 @@ use crate::service::{PasswordStrength, Result, ServiceConfig};
 #[derive(Clone)]
 pub struct ServiceState {
     pg_client: PgClient,
+    llm_client: LlmClient,
     nats_client: NatsClient,
 
     auth_hasher: AuthHasher,
     password_strength: PasswordStrength,
     regional_policy: DataCollectionPolicy,
     auth_keys: AuthKeys,
+    health_service: HealthService,
 }
 
 impl ServiceState {
@@ -31,12 +34,14 @@ impl ServiceState {
     pub async fn from_config(config: &ServiceConfig) -> Result<Self> {
         let service_state = Self {
             pg_client: config.connect_postgres().await?,
+            llm_client: config.connect_llm().await?,
             nats_client: config.connect_nats().await?,
 
             auth_hasher: config.create_password_hasher()?,
             password_strength: PasswordStrength::new(),
             regional_policy: config.regional_policy(),
             auth_keys: config.load_auth_keys().await?,
+            health_service: HealthService::new(),
         };
 
         Ok(service_state)
@@ -54,9 +59,11 @@ macro_rules! impl_di {
 }
 
 impl_di!(pg_client: PgClient);
+impl_di!(llm_client: LlmClient);
 impl_di!(nats_client: NatsClient);
 
 impl_di!(auth_hasher: AuthHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(regional_policy: DataCollectionPolicy);
 impl_di!(auth_keys: AuthKeys);
+impl_di!(health_service: HealthService);

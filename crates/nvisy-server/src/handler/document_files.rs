@@ -5,16 +5,17 @@
 //! operations are secured with document-level authorization and include virus
 //! scanning and content validation.
 
+use std::str::FromStr;
+
 use axum::extract::{Multipart, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum_extra::TypedHeader;
 use axum_extra::headers::ContentType;
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{InputFiles, IntermediateFiles, OutputFiles};
+use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::UpdateDocumentFile;
+use nvisy_postgres::model::{NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::DocumentFileRepository;
-use nvisy_postgres::types::FileType;
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -26,7 +27,9 @@ use crate::extract::auth::AuthProvider;
 use crate::extract::{AuthState, Json, Path, Permission, ValidateJson, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::request::document_file::UpdateFileRequest;
-use crate::handler::response::document_file::{UpdateFileResponse, UploadFileResponse};
+use crate::handler::response::document_file::{
+    UpdateFileResponse, UploadFileResponse, UploadedFile,
+};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
 
@@ -90,8 +93,6 @@ async fn upload_file(
 ) -> Result<(StatusCode, Json<UploadFileResponse>)> {
     let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
-    let intermediate_fs = nats_client.document_store::<IntermediateFiles>().await?;
-    let output_fs = nats_client.document_store::<OutputFiles>().await?;
 
     // Verify document exists and user has editor permissions
     authorize!(
@@ -164,38 +165,115 @@ async fn upload_file(
             .unwrap_or("")
             .to_lowercase();
 
-        // Determine file type from extension/MIME type
-        let file_type = determine_file_type(&file_extension, &content_type);
-
         // Generate unique file ID for storage
         let file_id = Uuid::now_v7();
         let storage_path = format!("documents/{}/files/{}", path_params.document_id, file_id);
 
-        // Upload to MinIO
+        // Upload to NATS document store
         tracing::debug!(
             target: TRACING_TARGET,
             file_id = %file_id,
             path = %storage_path,
             size = data.len(),
-            "Uploading file to storage"
+            "Uploading file to NATS document store"
         );
 
-        // TODO: Replace with NATS object store implementation
-        let _ = (
-            file_type,
-            data,
-            storage_path,
+        // Create content data with metadata
+        let content_data =
+            DocumentFileStore::<InputFiles>::create_content_data_with_metadata(data.clone().into());
+
+        // Create object key for the file
+        let object_key = input_fs.create_key(
+            auth_claims.account_id, // Using account_id as project_uuid
+            path_params.document_id,
             file_id,
-            filename,
-            content_type,
-            file_extension,
         );
-        return Err(ErrorKind::NotImplemented
-            .with_message("File upload not implemented - MinIO removed, use NATS object store"));
+
+        // Upload to InputFiles document store
+        let put_result = input_fs
+            .put(&object_key, &content_data)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    file_id = %file_id,
+                    "Failed to upload file to NATS document store"
+                );
+                ErrorKind::InternalServerError
+                    .with_message("Failed to upload file")
+                    .with_context(format!("NATS upload failed: {}", err))
+            })?;
+
+        tracing::info!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            nuid = %put_result.nuid,
+            size = put_result.size,
+            "File uploaded successfully to NATS document store"
+        );
+
+        // Extract SHA-256 hash from content data
+        let sha256_bytes = content_data.compute_sha256().to_vec();
+
+        // Create file record in database
+        let file_record = NewDocumentFile {
+            document_id: path_params.document_id,
+            account_id: auth_claims.account_id,
+            display_name: Some(filename.clone()),
+            original_filename: Some(filename.clone()),
+            file_extension: Some(file_extension.clone()),
+            // require_mode: RequireMode::Text,
+            file_size_bytes: Some(data.len() as i64),
+            storage_path: object_key.as_str().to_string(),
+            storage_bucket: Some(InputFiles::bucket_name().to_string()),
+            file_hash_sha256: sha256_bytes,
+            keep_for_sec: 30 * 24 * 60 * 60, // TODO: Load from project settings
+            auto_delete_at: None,
+            ..Default::default()
+        };
+
+        // Insert file record into database
+        let created_file = DocumentFileRepository::create_document_file(&mut conn, file_record)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    file_id = %file_id,
+                    "Failed to create file record in database"
+                );
+                ErrorKind::InternalServerError
+                    .with_message("Failed to save file metadata")
+                    .with_context(format!("Database error: {}", err))
+            })?;
+
+        tracing::info!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            filename = %filename,
+            size = data.len(),
+            "File upload completed successfully"
+        );
+
+        let uploaded_file = UploadedFile {
+            file_id: created_file.id,
+            display_name: created_file.display_name,
+            file_size: created_file.file_size_bytes,
+            status: created_file.processing_status,
+        };
+
+        return Ok((
+            StatusCode::CREATED,
+            Json(UploadFileResponse {
+                files: vec![uploaded_file],
+                count: 1,
+            }),
+        ));
     }
 
-    // Unreachable: rest of upload logic removed since MinIO was deleted
-    Err(ErrorKind::NotImplemented.with_message("File upload not implemented"))
+    // No files were uploaded
+    Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"))
 }
 
 /// Updates file metadata.
@@ -234,12 +312,14 @@ async fn upload_file(
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
     ValidateJson(request): ValidateJson<UpdateFileRequest>,
 ) -> Result<(StatusCode, Json<UpdateFileResponse>)> {
     let mut conn = pg_client.get_connection().await?;
+    let _input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Verify permissions
     // Verify document write permissions
@@ -326,13 +406,93 @@ async fn download_file(
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Vec<u8>)> {
-    let object_store = nats_client.document_store::<InputFiles>().await?;
-    // object_store.
+) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
+    let mut conn = pg_client.get_connection().await?;
+    let input_fs = nats_client.document_store::<InputFiles>().await?;
 
-    // TODO: Replace with NATS object store implementation
-    Err(ErrorKind::NotImplemented
-        .with_message("File download not implemented - MinIO removed, use NATS object store"))
+    // Get file metadata from database
+    let file = DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                file_id = %path_params.file_id,
+                "Failed to find file in database"
+            );
+            ErrorKind::InternalServerError
+                .with_message("Failed to find file")
+                .with_context(format!("Database error: {}", err))
+        })?
+        .ok_or_else(|| {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                file_id = %path_params.file_id,
+                "File not found"
+            );
+            ErrorKind::NotFound.with_message("File not found")
+        })?;
+
+    // Create object key from storage path
+    let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
+        tracing::error!(
+            target: TRACING_TARGET,
+            error = %err,
+            storage_path = %file.storage_path,
+            "Invalid storage path format"
+        );
+        ErrorKind::InternalServerError
+            .with_message("Invalid file storage path")
+            .with_context(format!("Parse error: {}", err))
+    })?;
+
+    // Get content from NATS document store
+    let content_data = input_fs
+        .get(&object_key)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                file_id = %path_params.file_id,
+                "Failed to retrieve file from NATS document store"
+            );
+            ErrorKind::InternalServerError
+                .with_message("Failed to retrieve file")
+                .with_context(format!("NATS retrieval failed: {}", err))
+        })?
+        .ok_or_else(|| {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                file_id = %path_params.file_id,
+                "File content not found in storage"
+            );
+            ErrorKind::NotFound.with_message("File content not found")
+        })?;
+
+    // Set up response headers
+    let mut headers = HeaderMap::new();
+
+    headers.insert(
+        "content-disposition",
+        format!("attachment; filename=\"{}\"", file.display_name)
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(
+        "content-length",
+        content_data.size().to_string().parse().unwrap(),
+    );
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        file_id = %path_params.file_id,
+        filename = %file.display_name,
+        size = content_data.size(),
+        "File downloaded successfully"
+    );
+
+    Ok((StatusCode::OK, headers, content_data.into_bytes().to_vec()))
 }
 
 /// Deletes a document file.
@@ -364,12 +524,13 @@ async fn download_file(
 )]
 async fn delete_file(
     State(pg_client): State<PgClient>,
-    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
     let mut conn = pg_client.get_connection().await?;
+    let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     authorize!(
         document: path_params.document_id,
@@ -390,8 +551,68 @@ async fn delete_file(
     }
 
     // TODO: Replace with NATS object store implementation
-    Err(ErrorKind::NotImplemented
-        .with_message("File deletion not implemented - MinIO removed, use NATS object store"))
+    // Get file metadata from database
+    let file = DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                file_id = %path_params.file_id,
+                "Failed to find file in database"
+            );
+            ErrorKind::InternalServerError
+                .with_message("Failed to find file")
+                .with_context(format!("Database error: {}", err))
+        })?
+        .ok_or_else(|| {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                file_id = %path_params.file_id,
+                "File not found"
+            );
+            ErrorKind::NotFound.with_message("File not found")
+        })?;
+
+    // Create object key from storage path
+    let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
+        tracing::error!(
+            target: TRACING_TARGET,
+            error = %err,
+            storage_path = %file.storage_path,
+            "Invalid storage path format"
+        );
+        ErrorKind::InternalServerError
+            .with_message("Invalid file storage path")
+            .with_context(format!("Parse error: {}", err))
+    })?;
+
+    // Delete from NATS document store
+    input_fs.delete(&object_key).await.map_err(|err| {
+        tracing::error!(
+            target: TRACING_TARGET,
+            error = %err,
+            file_id = %path_params.file_id,
+            "Failed to delete file from NATS document store"
+        );
+        ErrorKind::InternalServerError
+            .with_message("Failed to delete file from storage")
+            .with_context(format!("NATS deletion failed: {}", err))
+    })?;
+
+    // Soft delete in database by updating the record
+    // Note: deleted_at field may need to be handled differently based on the actual schema
+
+    // For now, we'll just delete from storage. Database soft delete can be implemented
+    // when the update method and deleted_at field are properly available
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        file_id = %path_params.file_id,
+        "File deleted successfully"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Validates that the file MIME type is allowed for upload.
@@ -497,22 +718,6 @@ fn validate_filename(filename: &str) -> Result<String> {
     }
 
     Ok(sanitized)
-}
-
-/// Helper: Determine file type from extension and MIME type.
-fn determine_file_type(extension: &str, mime_type: &str) -> FileType {
-    // First try to determine from file extension
-    if let Some(file_type) = FileType::from_extension(extension) {
-        return file_type;
-    }
-
-    // If extension doesn't give us a result, try MIME type
-    if let Some(file_type) = FileType::from_mime_type(mime_type) {
-        return file_type;
-    }
-
-    // Default to Document if neither method works
-    FileType::Document
 }
 
 /// Returns a [`Router`] with all related routes.

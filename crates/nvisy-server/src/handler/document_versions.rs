@@ -5,6 +5,7 @@
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::DocumentVersionRepository;
 use serde::{Deserialize, Serialize};
@@ -171,7 +172,6 @@ async fn get_version_info(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
-    _version: Version,
 ) -> Result<(StatusCode, Json<VersionInfo>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -235,15 +235,14 @@ async fn get_version_info(
 )]
 async fn download_version_file(
     State(_pg_client): State<PgClient>,
-    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    State(_nats_client): State<NatsClient>,
     Path(_path_params): Path<DocVersionIdPathParams>,
     AuthState(_auth_claims): AuthState,
     _version: Version,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     // TODO: Replace with NATS object store implementation
-    Err(ErrorKind::NotImplemented.with_message(
-        "Version file download not implemented - MinIO removed, use NATS object store",
-    ))
+    Err(ErrorKind::NotImplemented
+        .with_message("Version file download not implemented - use NATS object store"))
 }
 
 /// Deletes a document version.
@@ -280,7 +279,7 @@ async fn download_version_file(
 )]
 async fn delete_version(
     State(pg_client): State<PgClient>,
-    // State(minio_client): State<MinioClient>, // TODO: Replace with NATS object store
+    State(_nats_client): State<NatsClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
@@ -321,7 +320,7 @@ async fn delete_version(
 
     // TODO: Replace with NATS object store implementation
     Err(ErrorKind::NotImplemented
-        .with_message("Version deletion not implemented - MinIO removed, use NATS object store"))
+        .with_message("Version deletion not implemented - use NATS object store"))
 }
 
 /// Returns a [`Router`] with all related routes.

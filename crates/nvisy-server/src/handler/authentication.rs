@@ -12,6 +12,7 @@ use axum_extra::headers::UserAgent;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::types::ApiTokenType;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -173,7 +174,8 @@ async fn login(
         account_id: account.id,
         ip_address: ip_address.into(),
         user_agent: user_agent.to_string(),
-        is_remembered: request.remember_me,
+        is_remembered: Some(request.remember_me),
+        session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
 
@@ -292,7 +294,8 @@ async fn signup(
         account_id: account.id,
         ip_address: ip_address.into(),
         user_agent: user_agent.to_string(),
-        is_remembered: request.remember_me,
+        is_remembered: Some(request.remember_me),
+        session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
     let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
@@ -306,7 +309,6 @@ async fn signup(
     let auth_claims = auth_header.as_auth_claims();
     let response = SignupResponse {
         account_id: auth_claims.account_id,
-
         regional_policy: regional_policy.to_string(),
         display_name,
         email_address,

@@ -1,7 +1,6 @@
 //! Document version response types.
 
 use nvisy_postgres::model::DocumentVersion;
-use nvisy_postgres::types::FileType;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -20,16 +19,12 @@ pub struct VersionInfo {
     pub display_name: String,
     /// File extension
     pub file_extension: String,
-    /// MIME type
-    pub mime_type: String,
-    /// File type
-    pub file_type: FileType,
     /// File size in bytes
     pub file_size: i64,
     /// Processing credits used
     pub processing_credits: i32,
     /// Processing duration in milliseconds
-    pub processing_duration_ms: i32,
+    pub processing_duration: i32,
     /// Creation timestamp
     pub created_at: OffsetDateTime,
 }
@@ -41,11 +36,9 @@ impl From<DocumentVersion> for VersionInfo {
             version_number: version.version_number,
             display_name: version.display_name,
             file_extension: version.file_extension,
-            mime_type: version.mime_type,
-            file_type: version.file_type,
             file_size: version.file_size_bytes,
             processing_credits: version.processing_credits,
-            processing_duration_ms: version.processing_duration_ms,
+            processing_duration: version.processing_duration,
             created_at: version.created_at,
         }
     }

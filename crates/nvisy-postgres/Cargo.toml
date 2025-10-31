@@ -48,6 +48,7 @@ serde_json = { workspace = true, features = [] }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
+derive_more = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 
 # Data types

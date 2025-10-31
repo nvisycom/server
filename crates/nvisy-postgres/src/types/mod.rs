@@ -11,6 +11,6 @@ pub use constraints::{
     ProjectMemberConstraints,
 };
 pub use enums::{
-    ActionTokenType, ApiTokenType, DocumentStatus, FileType, IntegrationStatus, InviteStatus,
+    ActionTokenType, ApiTokenType, DocumentStatus, IntegrationStatus, InviteStatus,
     ProcessingStatus, ProjectRole, ProjectStatus, ProjectVisibility, RequireMode, VirusScanStatus,
 };

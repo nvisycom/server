@@ -5,8 +5,8 @@ use openrouter_rs::api::chat::{ChatCompletionRequest, Message};
 use openrouter_rs::types::{ResponseFormat, Role};
 use serde::Serialize;
 
+use crate::Error;
 use crate::client::LlmConfig;
-use crate::error::Error;
 
 /// A typed chat completion request.
 ///
@@ -138,25 +138,15 @@ where
             .response_format(response_format);
 
         // Apply config defaults first
-        if let Some(max_tokens) = config.default_max_tokens {
-            builder.max_tokens(max_tokens);
-        }
+        builder.max_tokens(config.effective_max_tokens());
 
-        if let Some(temperature) = config.default_temperature {
-            builder.temperature(temperature as f64);
-        }
+        builder.temperature(config.effective_temperature() as f64);
 
-        if let Some(top_p) = config.default_top_p {
-            builder.top_p(top_p as f64);
-        }
+        builder.top_p(config.effective_top_p() as f64);
 
-        if let Some(presence_penalty) = config.default_presence_penalty {
-            builder.presence_penalty(presence_penalty as f64);
-        }
+        builder.presence_penalty(config.effective_presence_penalty() as f64);
 
-        if let Some(frequency_penalty) = config.default_frequency_penalty {
-            builder.frequency_penalty(frequency_penalty as f64);
-        }
+        builder.frequency_penalty(config.effective_frequency_penalty() as f64);
 
         // Request-specific overrides take precedence over config defaults
         if let Some(temperature) = self.temperature {
@@ -169,7 +159,7 @@ where
 
         builder
             .build()
-            .map_err(|e| Error::api(format!("Failed to build chat completion request: {}", e)))
+            .map_err(|e| Error::config(format!("Failed to build chat completion request: {}", e)))
     }
 
     /// Prepares the final message list for the chat completion request.
@@ -233,7 +223,7 @@ mod tests {
                 value: "test".to_string(),
             })
             .build()
-            .map_err(|e| crate::Error::builder(e.to_string()))?;
+            .map_err(|e| crate::Error::config(e.to_string()))?;
 
         assert_eq!(request.messages.len(), 1);
         assert!(request.system_prompt.is_none());
@@ -252,7 +242,7 @@ mod tests {
             .with_temperature(0.8f32)
             .with_max_tokens(1000u32)
             .build()
-            .map_err(|e| crate::Error::builder(e.to_string()))?;
+            .map_err(|e| crate::Error::config(e.to_string()))?;
 
         assert_eq!(
             request.system_prompt.as_deref(),
@@ -275,7 +265,7 @@ mod tests {
                 value: "test".to_string(),
             })
             .build()
-            .map_err(|e| crate::Error::builder(e.to_string()))?;
+            .map_err(|e| crate::Error::config(e.to_string()))?;
 
         let messages = request.prepare_messages();
 
@@ -295,7 +285,7 @@ mod tests {
             })
             .with_system_prompt("You are a helpful assistant")
             .build()
-            .map_err(|e| crate::Error::builder(e.to_string()))?;
+            .map_err(|e| crate::Error::config(e.to_string()))?;
 
         let messages = request.prepare_messages();
 

@@ -13,14 +13,14 @@ use crate::{PgError, PgResult, schema};
 /// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
 pub struct LogEntityActivityParams {
-    /// The entity ID (integration, member, or document)
-    pub entity_id: Uuid,
     /// The actor performing the activity
     pub actor_id: Option<Uuid>,
     /// The type of activity
     pub activity_type: String,
-    /// Additional activity data
-    pub activity_data: serde_json::Value,
+    /// Description of the activity
+    pub description: String,
+    /// Additional metadata
+    pub metadata: serde_json::Value,
     /// IP address of the actor
     pub ip_address: Option<IpNet>,
     /// User agent of the actor
@@ -142,20 +142,16 @@ impl ProjectActivityRepository {
         Ok(activities)
     }
 
-    /// Gets activity for a specific entity within a project.
-    pub async fn get_entity_activity(
+    /// Gets activities for a project.
+    pub async fn get_activities_by_project(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
-        entity_type_filter: &str,
-        entity_id_filter: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activity_log::dsl::*;
 
         let activities = project_activity_log
             .filter(project_id.eq(proj_id))
-            .filter(entity_type.eq(entity_type_filter))
-            .filter(entity_id.eq(entity_id_filter))
             .select(ProjectActivity::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)
@@ -177,9 +173,8 @@ impl ProjectActivityRepository {
             project_id,
             actor_id: params.actor_id,
             activity_type: params.activity_type,
-            activity_data: params.activity_data,
-            entity_type: Some("integration".to_string()),
-            entity_id: Some(params.entity_id),
+            description: params.description,
+            metadata: params.metadata,
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -197,9 +192,8 @@ impl ProjectActivityRepository {
             project_id,
             actor_id: params.actor_id,
             activity_type: params.activity_type,
-            activity_data: params.activity_data,
-            entity_type: Some("member".to_string()),
-            entity_id: Some(params.entity_id),
+            description: params.description,
+            metadata: params.metadata,
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -217,9 +211,8 @@ impl ProjectActivityRepository {
             project_id,
             actor_id: params.actor_id,
             activity_type: params.activity_type,
-            activity_data: params.activity_data,
-            entity_type: Some("document".to_string()),
-            entity_id: Some(params.entity_id),
+            description: params.description,
+            metadata: params.metadata,
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };

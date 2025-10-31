@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::Error;
+use crate::Error;
 
 /// A typed chat completion response.
 ///
@@ -126,12 +126,12 @@ where
         let choice = response
             .choices
             .first()
-            .ok_or_else(|| Error::api("No response choices returned from LLM"))?;
+            .ok_or_else(|| Error::invalid_response("No response choices returned from LLM"))?;
 
         choice
             .content()
             .map(|s| s.to_string())
-            .ok_or_else(|| Error::api("No content in LLM response"))
+            .ok_or_else(|| Error::invalid_response("No content in LLM response"))
     }
 
     /// Parses a JSON response string into the typed data.
@@ -169,24 +169,12 @@ where
                 if let Some(start) = cleaned.find('{') {
                     if let Some(end) = cleaned.rfind('}') {
                         let json_part = &cleaned[start..=end];
-                        serde_json::from_str::<T>(json_part).map_err(|e| Error::Api {
-                            message: format!("Failed to parse LLM response: {}", e),
-                            status_code: None,
-                            error_code: Some("parse_error".to_string()),
-                        })
+                        serde_json::from_str::<T>(json_part).map_err(Error::Serialization)
                     } else {
-                        Err(Error::Api {
-                            message: "No JSON object found in response".to_string(),
-                            status_code: None,
-                            error_code: Some("no_json".to_string()),
-                        })
+                        Err(Error::invalid_response("No JSON object found in response"))
                     }
                 } else {
-                    Err(Error::Api {
-                        message: "No JSON object found in response".to_string(),
-                        status_code: None,
-                        error_code: Some("no_json".to_string()),
-                    })
+                    Err(Error::invalid_response("No JSON object found in response"))
                 }
             }
         }
@@ -228,7 +216,7 @@ mod tests {
                 value: "test".to_string(),
             })
             .build()
-            .map_err(|e| crate::Error::builder(e.to_string()))?;
+            .map_err(|e| crate::Error::config(e.to_string()))?;
 
         assert_eq!(response.data.value, "test");
         assert!(response.raw_response.is_none());
@@ -246,7 +234,7 @@ mod tests {
             .with_completion_tokens(20u32)
             .with_total_tokens(30u32)
             .build()
-            .map_err(|e| crate::Error::builder(e.to_string()))?;
+            .map_err(|e| crate::Error::config(e.to_string()))?;
 
         assert_eq!(response.prompt_tokens, Some(10));
         assert_eq!(response.completion_tokens, Some(20));

@@ -9,9 +9,8 @@ use serde::de::DeserializeOwned;
 
 use super::chat_request::TypedChatRequest;
 use super::chat_response::TypedChatResponse;
-use crate::SCHEMA_TARGET;
 use crate::client::LlmClient;
-use crate::error::{Error, Result};
+use crate::{Error, Result, SCHEMA_TARGET};
 
 /// A typed chat completion handler that enforces request and response schemas.
 ///
@@ -211,7 +210,7 @@ where
                 schema_name = %schema_name,
                 "Failed to serialize JSON schema"
             );
-            Error::api(format!("Failed to serialize schema: {}", e))
+            Error::Serialization(e)
         })?;
 
         let response_format = ResponseFormat::json_schema(schema_name, true, json_value);

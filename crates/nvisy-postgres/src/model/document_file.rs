@@ -1,12 +1,11 @@
 //! Document file model for PostgreSQL database operations.
 
-use bigdecimal::BigDecimal;
 use diesel::prelude::*;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::document_files;
-use crate::types::{FileType, ProcessingStatus, RequireMode, VirusScanStatus};
+use crate::types::{ProcessingStatus, RequireMode, VirusScanStatus};
 
 /// Document file model representing a file attached to a document.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -25,58 +24,38 @@ pub struct DocumentFile {
     pub original_filename: String,
     /// File extension (without the dot)
     pub file_extension: String,
-    /// MIME type of the file
-    pub mime_type: String,
-    /// File type category for processing
-    pub file_type: FileType,
     /// Processing mode requirements
     pub require_mode: RequireMode,
     /// Processing priority (higher numbers = higher priority)
     pub processing_priority: i32,
-    /// File metadata (JSON)
-    pub metadata: serde_json::Value,
+    /// Current processing status
+    pub processing_status: ProcessingStatus,
+    /// Virus scan status
+    pub virus_scan_status: VirusScanStatus,
     /// File size in bytes
     pub file_size_bytes: i64,
+    /// SHA-256 hash of the file
+    pub file_hash_sha256: Vec<u8>,
     /// Storage path or identifier for the file
     pub storage_path: String,
     /// Storage bucket name
     pub storage_bucket: String,
-    /// SHA-256 hash of the file
-    pub file_hash_sha256: Vec<u8>,
-    /// Current processing status
-    pub processing_status: ProcessingStatus,
-    /// Number of processing attempts
-    pub processing_attempts: i32,
-    /// Processing error message if any
-    pub processing_error: Option<String>,
-    /// Processing duration in milliseconds
-    pub processing_duration_ms: Option<i32>,
-    /// Processing quality score
-    pub processing_score: BigDecimal,
-    /// Completeness score
-    pub completeness_score: BigDecimal,
-    /// Confidence score
-    pub confidence_score: BigDecimal,
-    /// Is the file sensitive
-    pub is_sensitive: bool,
-    /// Is the file encrypted
-    pub is_encrypted: bool,
-    /// Virus scan status
-    pub virus_scan_status: Option<VirusScanStatus>,
+    /// File metadata (JSON)
+    pub metadata: serde_json::Value,
+    /// Keep file for this many seconds
+    pub keep_for_sec: i32,
+    /// Auto delete timestamp
+    pub auto_delete_at: Option<OffsetDateTime>,
     /// Timestamp when the file was uploaded
     pub created_at: OffsetDateTime,
     /// Timestamp when the file was last updated
     pub updated_at: OffsetDateTime,
     /// Timestamp when the file was soft-deleted
     pub deleted_at: Option<OffsetDateTime>,
-    /// Keep file for this many seconds
-    pub keep_for_sec: i32,
-    /// Auto delete timestamp
-    pub auto_delete_at: Option<OffsetDateTime>,
 }
 
 /// Data for creating a new document file.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentFile {
@@ -85,49 +64,29 @@ pub struct NewDocumentFile {
     /// Account ID
     pub account_id: Uuid,
     /// Display name
-    pub display_name: String,
+    pub display_name: Option<String>,
     /// Original filename
-    pub original_filename: String,
+    pub original_filename: Option<String>,
     /// File extension
-    pub file_extension: String,
-    /// MIME type
-    pub mime_type: String,
-    /// File type
-    pub file_type: FileType,
+    pub file_extension: Option<String>,
     /// Require mode
-    pub require_mode: RequireMode,
+    pub require_mode: Option<RequireMode>,
     /// Processing priority
-    pub processing_priority: i32,
-    /// Metadata
-    pub metadata: serde_json::Value,
+    pub processing_priority: Option<i32>,
+    /// Processing status
+    pub processing_status: Option<ProcessingStatus>,
+    /// Virus scan status
+    pub virus_scan_status: Option<VirusScanStatus>,
     /// File size in bytes
-    pub file_size_bytes: i64,
+    pub file_size_bytes: Option<i64>,
+    /// SHA-256 hash
+    pub file_hash_sha256: Vec<u8>,
     /// Storage path
     pub storage_path: String,
     /// Storage bucket
-    pub storage_bucket: String,
-    /// SHA-256 hash
-    pub file_hash_sha256: Vec<u8>,
-    /// Processing status
-    pub processing_status: ProcessingStatus,
-    /// Processing attempts
-    pub processing_attempts: i32,
-    /// Processing error
-    pub processing_error: Option<String>,
-    /// Processing duration in ms
-    pub processing_duration_ms: Option<i32>,
-    /// Processing score
-    pub processing_score: BigDecimal,
-    /// Completeness score
-    pub completeness_score: BigDecimal,
-    /// Confidence score
-    pub confidence_score: BigDecimal,
-    /// Is sensitive
-    pub is_sensitive: bool,
-    /// Is encrypted
-    pub is_encrypted: bool,
-    /// Virus scan status
-    pub virus_scan_status: Option<VirusScanStatus>,
+    pub storage_bucket: Option<String>,
+    /// Metadata
+    pub metadata: Option<serde_json::Value>,
     /// Keep for seconds
     pub keep_for_sec: i32,
     /// Auto delete at
@@ -145,61 +104,12 @@ pub struct UpdateDocumentFile {
     pub require_mode: Option<RequireMode>,
     /// Processing priority
     pub processing_priority: Option<i32>,
-    /// Metadata
-    pub metadata: Option<serde_json::Value>,
     /// Processing status
     pub processing_status: Option<ProcessingStatus>,
-    /// Processing attempts
-    pub processing_attempts: Option<i32>,
-    /// Processing error
-    pub processing_error: Option<String>,
-    /// Processing duration
-    pub processing_duration_ms: Option<i32>,
-    /// Processing score
-    pub processing_score: Option<BigDecimal>,
-    /// Completeness score
-    pub completeness_score: Option<BigDecimal>,
-    /// Confidence score
-    pub confidence_score: Option<BigDecimal>,
-    /// Is sensitive
-    pub is_sensitive: Option<bool>,
-    /// Is encrypted
-    pub is_encrypted: Option<bool>,
     /// Virus scan status
     pub virus_scan_status: Option<VirusScanStatus>,
-}
-
-impl Default for NewDocumentFile {
-    fn default() -> Self {
-        Self {
-            document_id: Uuid::new_v4(),
-            account_id: Uuid::new_v4(),
-            display_name: String::new(),
-            original_filename: String::new(),
-            file_extension: String::new(),
-            mime_type: String::from("application/octet-stream"),
-            file_type: FileType::Document,
-            require_mode: RequireMode::Text,
-            processing_priority: 0,
-            metadata: serde_json::Value::Object(serde_json::Map::new()),
-            file_size_bytes: 0,
-            storage_path: String::new(),
-            storage_bucket: String::new(),
-            file_hash_sha256: Vec::new(),
-            processing_status: ProcessingStatus::Pending,
-            processing_attempts: 0,
-            processing_error: None,
-            processing_duration_ms: None,
-            processing_score: BigDecimal::from(0),
-            completeness_score: BigDecimal::from(0),
-            confidence_score: BigDecimal::from(0),
-            is_sensitive: false,
-            is_encrypted: false,
-            virus_scan_status: Some(VirusScanStatus::Clean),
-            keep_for_sec: 0,
-            auto_delete_at: None,
-        }
-    }
+    /// Metadata
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl DocumentFile {
@@ -228,25 +138,17 @@ impl DocumentFile {
 
     /// Returns whether the file is safe (virus scan passed).
     pub fn is_safe(&self) -> bool {
-        matches!(self.virus_scan_status, Some(VirusScanStatus::Clean))
+        self.virus_scan_status.is_safe()
     }
 
-    /// Returns whether the file is infected with a virus.
-    pub fn is_infected(&self) -> bool {
-        matches!(self.virus_scan_status, Some(VirusScanStatus::Infected))
+    // Returns whether the file is dangerous and should be blocked.
+    pub fn is_unsafe(&self) -> bool {
+        self.virus_scan_status.is_unsafe()
     }
 
-    /// Returns whether the file is suspicious.
-    pub fn is_suspicious(&self) -> bool {
-        matches!(self.virus_scan_status, Some(VirusScanStatus::Suspicious))
-    }
-
-    /// Returns whether the virus scan status is unknown.
-    pub fn is_virus_scan_unknown(&self) -> bool {
-        matches!(
-            self.virus_scan_status,
-            Some(VirusScanStatus::Unknown) | None
-        )
+    /// Returns whether the virus scan status is unknown or inconclusive.
+    pub fn is_conclusive(&self) -> bool {
+        self.virus_scan_status.is_conclusive()
     }
 
     /// Returns whether the file is deleted.
@@ -267,54 +169,6 @@ impl DocumentFile {
     /// Returns whether the file processing can be canceled.
     pub fn can_be_canceled(&self) -> bool {
         self.processing_status.can_be_canceled()
-    }
-
-    /// Returns the file size in human-readable format.
-    pub fn file_size_human(&self) -> String {
-        let bytes = self.file_size_bytes.to_string().parse::<u64>().unwrap_or(0);
-
-        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-        let mut size = bytes as f64;
-        let mut unit_index = 0;
-
-        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
-            size /= 1024.0;
-            unit_index += 1;
-        }
-
-        if unit_index == 0 {
-            format!("{} {}", bytes, UNITS[unit_index])
-        } else {
-            format!("{:.1} {}", size, UNITS[unit_index])
-        }
-    }
-
-    /// Returns whether the file is an image.
-    pub fn is_image(&self) -> bool {
-        self.mime_type.starts_with("image/")
-    }
-
-    /// Returns whether the file is a document.
-    pub fn is_document(&self) -> bool {
-        matches!(
-            self.mime_type.as_str(),
-            "application/pdf"
-                | "application/msword"
-                | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                | "text/plain"
-                | "text/html"
-                | "text/markdown"
-        )
-    }
-
-    /// Returns whether the file is a video.
-    pub fn is_video(&self) -> bool {
-        self.mime_type.starts_with("video/")
-    }
-
-    /// Returns whether the file is audio.
-    pub fn is_audio(&self) -> bool {
-        self.mime_type.starts_with("audio/")
     }
 
     /// Returns whether the file has a high processing priority.
@@ -353,13 +207,6 @@ impl DocumentFile {
     /// Returns whether the file has metadata.
     pub fn has_metadata(&self) -> bool {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
-    }
-
-    /// Returns the processing duration if available.
-    pub fn processing_duration(&self) -> Option<time::Duration> {
-        // Return processing duration from processing_duration_ms field if available
-        self.processing_duration_ms
-            .map(|ms| time::Duration::milliseconds(ms as i64))
     }
 
     /// Returns whether the file is large (over 10MB).

@@ -26,8 +26,6 @@ pub struct Document {
     pub tags: Vec<Option<String>>,
     /// Current status of the document
     pub status: DocumentStatus,
-    /// Whether this document is a template for creating new documents
-    pub is_template: bool,
     /// Additional document metadata
     pub metadata: serde_json::Value,
     /// Document settings
@@ -41,7 +39,7 @@ pub struct Document {
 }
 
 /// Data for creating a new document.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = documents)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocument {
@@ -57,8 +55,7 @@ pub struct NewDocument {
     pub tags: Option<Vec<String>>,
     /// Document status
     pub status: Option<DocumentStatus>,
-    /// Is template
-    pub is_template: Option<bool>,
+
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Settings
@@ -78,28 +75,11 @@ pub struct UpdateDocument {
     pub tags: Option<Vec<String>>,
     /// Document status
     pub status: Option<DocumentStatus>,
-    /// Is template
-    pub is_template: Option<bool>,
+
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Settings
     pub settings: Option<serde_json::Value>,
-}
-
-impl Default for NewDocument {
-    fn default() -> Self {
-        Self {
-            project_id: Uuid::new_v4(),
-            account_id: Uuid::new_v4(),
-            display_name: None,
-            description: None,
-            tags: None,
-            status: Some(DocumentStatus::Draft),
-            is_template: Some(false),
-            metadata: Some(serde_json::Value::Object(serde_json::Map::new())),
-            settings: Some(serde_json::Value::Object(serde_json::Map::new())),
-        }
-    }
 }
 
 impl Document {
@@ -181,11 +161,6 @@ impl Document {
     /// Returns whether the document status indicates a stable state.
     pub fn is_stable(&self) -> bool {
         self.status.is_stable()
-    }
-
-    /// Returns whether this document serves as a template.
-    pub fn is_template(&self) -> bool {
-        self.is_template
     }
 
     /// Returns whether the document has tags.

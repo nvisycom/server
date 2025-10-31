@@ -13,8 +13,7 @@ use governor::{Quota, RateLimiter};
 use openrouter_rs::{Model, OpenRouterClient};
 
 use super::llm_config::LlmConfig;
-use crate::OPENROUTER_TARGET;
-use crate::error::{Error, Result};
+use crate::{Error, OPENROUTER_TARGET, Result};
 
 /// OpenRouter API client with rate limiting and configuration.
 ///
@@ -84,7 +83,8 @@ impl LlmClient {
     ///
     /// Returns an error if the rate limiter cannot be initialized with the provided configuration.
     pub fn new(client: OpenRouterClient, config: LlmConfig) -> Result<Self, Error> {
-        let quota_limit = config.rate_limit.unwrap_or(NonZeroU32::new(10).unwrap());
+        let quota_limit =
+            NonZeroU32::new(config.effective_rate_limit()).unwrap_or(NonZeroU32::new(10).unwrap());
         let rate_limiter = RateLimiter::new(
             Quota::per_second(quota_limit),
             InMemoryState::default(),
@@ -133,16 +133,14 @@ impl LlmClient {
         let mut builder = OpenRouterClient::builder();
         builder.api_key(api_key.into());
 
-        if let Some(base_url) = &config.base_url {
-            builder.base_url(base_url.clone());
+        builder.base_url(config.effective_base_url());
+
+        if let Some(referer) = config.http_referer() {
+            builder.http_referer(referer);
         }
 
-        if let Some(referer) = &config.http_referer {
-            builder.http_referer(referer.clone());
-        }
-
-        if let Some(title) = &config.x_title {
-            builder.x_title(title.clone());
+        if let Some(title) = config.x_title() {
+            builder.x_title(title);
         }
 
         let client = builder.build()?;

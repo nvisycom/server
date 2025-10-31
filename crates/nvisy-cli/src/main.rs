@@ -43,7 +43,7 @@ struct Cli {
 
     /// Service and business logic configuration options.
     ///
-    /// Contains settings for external services like `PostgreSQL` and `MinIO`,
+    /// Contains settings for external services like `PostgreSQL` and `NATS`,
     /// as well as API documentation and CORS policy configuration.
     #[command(flatten)]
     service: CliConfig,
@@ -124,7 +124,7 @@ async fn run_application() -> anyhow::Result<()> {
     tracing::info!(
         target: TRACING_TARGET_CONFIG,
         postgres_url = %service_config.postgres_endpoint,
-        minio_endpoint = %service_config.minio_endpoint,
+        nats_url = %service_config.nats_url,
         minimal_data_collection = service_config.minimal_data_collection,
         cors_origins = ?cors_config.allowed_origins,
         cors_credentials = cors_config.allow_credentials,

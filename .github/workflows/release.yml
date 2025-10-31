@@ -4,6 +4,18 @@ on:
   push:
     tags:
       - "v*"
+    paths:
+      - "crates/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "diesel.toml"
+      - "rustfmt.toml"
+      - "Dockerfile"
+      - "Makefile"
+      - ".github/actions/setup-postgres/**"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
     inputs:
       release_type:
@@ -36,6 +48,7 @@ jobs:
   prepare-release:
     name: Prepare Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
       should_release: ${{ steps.version.outputs.should_release }}
@@ -48,25 +61,42 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v ]]; then
-            version="${GITHUB_REF#refs/tags/v}"
-            echo "version=$version" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Release version: $VERSION"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            current=$(grep '^version = ' Cargo.toml | head -n1 | cut -d'"' -f2)
-            IFS='.' read -r major minor patch <<< "$current"
+            if [[ -f "Cargo.toml" ]]; then
+              CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+              echo "Current version: $CURRENT_VERSION"
 
-            case "${{ github.event.inputs.release_type }}" in
-              major) version="$((major + 1)).0.0" ;;
-              minor) version="$major.$((minor + 1)).0" ;;
-              patch) version="$major.$minor.$((patch + 1))" ;;
-              prerelease) version="$major.$minor.$((patch + 1))-rc.1" ;;
-            esac
+              case "${{ github.event.inputs.release_type }}" in
+                patch)
+                  NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print $1"."$2"."($3+1)}')
+                  ;;
+                minor)
+                  NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print $1"."($2+1)".0"}')
+                  ;;
+                major)
+                  NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print ($1+1)".0.0"}')
+                  ;;
+                prerelease)
+                  NEW_VERSION="${CURRENT_VERSION}-pre.$(date +%s)"
+                  ;;
+              esac
 
-            echo "version=$version" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "New version: $NEW_VERSION"
+            else
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "Cargo.toml not found"
+              exit 1
+            fi
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Not a release trigger"
           fi
 
   update-version:
@@ -74,48 +104,50 @@ jobs:
     runs-on: ubuntu-latest
     needs: prepare-release
     if: needs.prepare-release.outputs.should_release == 'true' && github.event.inputs.dry_run != 'true' && github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
       - name: Update version in Cargo.toml
         run: |
-          version="${{ needs.prepare-release.outputs.version }}"
-          sed -i "s/^version = .*/version = \"$version\"/" Cargo.toml
+          sed -i 's/^version = ".*"/version = "${{ needs.prepare-release.outputs.version }}"/' Cargo.toml
+          echo "Updated version to ${{ needs.prepare-release.outputs.version }}"
 
       - name: Update Cargo.lock
         run: |
-          cargo check
+          cargo check --quiet
+          echo "Updated Cargo.lock"
 
       - name: Generate changelog
         run: |
-          if [ ! -f CHANGELOG.md ]; then
-            echo "# Changelog" > CHANGELOG.md
-            echo "" >> CHANGELOG.md
+          cat > CHANGELOG_ENTRY.md << EOF
+          ## [${{ needs.prepare-release.outputs.version }}] - $(date +%Y-%m-%d)
+
+          ### Added
+          - Version ${{ needs.prepare-release.outputs.version }} release
+
+          ### Changed
+          - Updated dependencies
+
+          ### Fixed
+          - Bug fixes and improvements
+
+          EOF
+
+          if [[ -f "CHANGELOG.md" ]]; then
+            echo "Updating existing CHANGELOG.md"
+            (cat CHANGELOG_ENTRY.md; echo ""; cat CHANGELOG.md) > CHANGELOG_NEW.md
+            mv CHANGELOG_NEW.md CHANGELOG.md
+          else
+            echo "Creating new CHANGELOG.md"
+            mv CHANGELOG_ENTRY.md CHANGELOG.md
           fi
-
-          version="${{ needs.prepare-release.outputs.version }}"
-          date=$(date -u +"%Y-%m-%d")
-
-          temp_file=$(mktemp)
-          echo "# Changelog" > $temp_file
-          echo "" >> $temp_file
-          echo "## [$version] - $date" >> $temp_file
-          echo "" >> $temp_file
-
-          if git tag --list | grep -q "v"; then
-            last_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-            if [ -n "$last_tag" ]; then
-              echo "### Changes" >> $temp_file
-              git log --pretty=format:"- %s" $last_tag..HEAD >> $temp_file || true
-              echo "" >> $temp_file
-            fi
-          fi
-
-          tail -n +3 CHANGELOG.md >> $temp_file
-          mv $temp_file CHANGELOG.md
 
       - name: Commit changes
         run: |
@@ -123,15 +155,16 @@ jobs:
           git config --local user.name "GitHub Action"
           git add Cargo.toml Cargo.lock CHANGELOG.md
           git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
-          git tag "v${{ needs.prepare-release.outputs.version }}"
-          git push
-          git push --tags
+          git tag -a "v${{ needs.prepare-release.outputs.version }}" -m "Release ${{ needs.prepare-release.outputs.version }}"
+          git push origin main
+          git push origin "v${{ needs.prepare-release.outputs.version }}"
 
   build-binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
     needs: prepare-release
     if: needs.prepare-release.outputs.should_release == 'true'
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -172,18 +205,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+          cache-all-crates: true
+
       - name: Install cross
         if: matrix.use_cross
         run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build binary
         run: |
@@ -196,19 +226,21 @@ jobs:
       - name: Strip binary
         if: runner.os != 'Windows'
         run: |
-          if command -v strip > /dev/null; then
+          if [[ "${{ matrix.use_cross }}" == "true" ]]; then
+            echo "Skipping strip for cross-compiled binary"
+          else
             strip target/${{ matrix.target }}/release/${{ matrix.artifact }}
           fi
 
       - name: Create archive
         run: |
-          mkdir -p release
+          mkdir -p dist
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} release/
-            cd release && 7z a ../${{ matrix.archive }} ${{ matrix.artifact }}
+            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/
+            cd dist && 7z a ../${{ matrix.archive }} ${{ matrix.artifact }}
           else
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} release/
-            cd release && tar -czf ../${{ matrix.archive }} ${{ matrix.artifact }}
+            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/
+            cd dist && tar czf ../${{ matrix.archive }} ${{ matrix.artifact }}
           fi
 
       - name: Upload binary artifact
@@ -216,13 +248,14 @@ jobs:
         with:
           name: binary-${{ matrix.target }}
           path: ${{ matrix.archive }}
-          retention-days: 1
+          retention-days: 7
 
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: [prepare-release, build-binaries]
     if: needs.prepare-release.outputs.should_release == 'true'
+    timeout-minutes: 30
     outputs:
       image: ${{ steps.image.outputs.image }}
       digest: ${{ steps.build.outputs.digest }}
@@ -238,10 +271,9 @@ jobs:
 
       - name: Prepare binary
         run: |
-          tar -xzf nvisy-server-linux-x86_64.tar.gz
-          mkdir -p target/release
-          mv nvisy-server target/release/
-          chmod +x target/release/nvisy-server
+          tar xzf nvisy-server-linux-x86_64.tar.gz
+          chmod +x nvisy-server
+          ls -la nvisy-server
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -261,9 +293,9 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=semver,pattern={{version}},value=v${{ needs.prepare-release.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.prepare-release.outputs.version }}
-            type=semver,pattern={{major}},value=v${{ needs.prepare-release.outputs.version }}
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push Docker image
         id: build
@@ -272,6 +304,7 @@ jobs:
           context: .
           push: ${{ github.event.inputs.dry_run != 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
@@ -280,13 +313,14 @@ jobs:
       - name: Output image
         id: image
         run: |
-          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
+          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare-release.outputs.version }}" >> $GITHUB_OUTPUT
 
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: build-docker
     if: needs.prepare-release.outputs.should_release == 'true'
+    timeout-minutes: 15
     steps:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
@@ -294,23 +328,22 @@ jobs:
           image-ref: ${{ needs.build-docker.outputs.image }}
           format: "sarif"
           output: "trivy-results.sarif"
-          severity: "CRITICAL,HIGH"
+          severity: "CRITICAL,HIGH,MEDIUM"
 
       - name: Upload scan results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: "trivy-results.sarif"
+          sarif_file: trivy-results.sarif
 
       - name: Check for critical vulnerabilities
         run: |
-          if [ -f trivy-results.sarif ]; then
-            critical_count=$(jq '[.runs[0].results[] | select(.level == "error")] | length' trivy-results.sarif)
-            if [ "$critical_count" -gt 0 ]; then
-              echo "CRITICAL: $critical_count critical vulnerabilities found"
-              echo "Release blocked due to critical vulnerabilities"
-              exit 1
-            fi
+          if grep -q '"level": "error"' trivy-results.sarif; then
+            echo "Critical vulnerabilities found in the container image"
+            echo "Please review the security scan results"
+            exit 1
+          else
+            echo "No critical vulnerabilities found"
           fi
 
   create-release:
@@ -318,6 +351,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare-release, build-binaries, build-docker, security-scan]
     if: needs.prepare-release.outputs.should_release == 'true' && github.event.inputs.dry_run != 'true'
+    timeout-minutes: 15
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -327,52 +361,60 @@ jobs:
         with:
           pattern: binary-*
           path: release-assets
+          merge-multiple: true
 
       - name: Prepare release assets
         run: |
-          mkdir -p final-assets
-          find release-assets -name "*.tar.gz" -o -name "*.zip" | while read file; do
-            cp "$file" final-assets/
+          mkdir -p release-assets-final
+          cd release-assets
+          for file in *.tar.gz *.zip; do
+            if [[ -f "$file" ]]; then
+              mv "$file" ../release-assets-final/
+              echo "Prepared $file"
+            fi
           done
-
-          cd final-assets
-          sha256sum * > checksums.txt
+          cd ../release-assets-final
+          ls -la
 
       - name: Generate release notes
         run: |
-          version="${{ needs.prepare-release.outputs.version }}"
+          cat > release_notes.md << EOF
+          # Release v${{ needs.prepare-release.outputs.version }}
 
-          cat << EOF > release_notes.md
-          # Release $version
+          This release includes improvements and bug fixes.
 
           ## Assets
 
-          - **Linux (x86_64)**: \`nvisy-server-linux-x86_64.tar.gz\`
-          - **Linux (musl)**: \`nvisy-server-linux-musl-x86_64.tar.gz\`
-          - **Linux (ARM64)**: \`nvisy-server-linux-aarch64.tar.gz\`
-          - **Windows**: \`nvisy-server-windows-x86_64.zip\`
-          - **macOS (Intel)**: \`nvisy-server-macos-x86_64.tar.gz\`
-          - **macOS (Apple Silicon)**: \`nvisy-server-macos-aarch64.tar.gz\`
+          ### Binaries
+          - **Linux x86_64**: nvisy-server-linux-x86_64.tar.gz
+          - **Linux x86_64 (musl)**: nvisy-server-linux-musl-x86_64.tar.gz
+          - **Linux ARM64**: nvisy-server-linux-aarch64.tar.gz
+          - **Windows x86_64**: nvisy-server-windows-x86_64.zip
+          - **macOS x86_64**: nvisy-server-macos-x86_64.tar.gz
+          - **macOS ARM64**: nvisy-server-macos-aarch64.tar.gz
 
-          ## Docker Image
+          ### Container Images
+          - \`${{ needs.build-docker.outputs.image }}\`
+
+          ## Installation
+
+          Download the appropriate binary for your platform from the assets below.
+
+          ## Docker Usage
 
           \`\`\`bash
           docker pull ${{ needs.build-docker.outputs.image }}
+          docker run -p 8080:8080 ${{ needs.build-docker.outputs.image }}
           \`\`\`
-
-          ## Verification
-
-          SHA256 checksums are provided for all assets.
           EOF
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.prepare-release.outputs.version }}
           name: Release v${{ needs.prepare-release.outputs.version }}
           body_path: release_notes.md
-          files: |
-            final-assets/*
+          files: release-assets-final/*
           draft: false
           prerelease: ${{ contains(needs.prepare-release.outputs.version, '-') }}
         env:
@@ -381,11 +423,12 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: [prepare-release, security-scan]
-    if: >
+    needs: [prepare-release, create-release]
+    if: |
       needs.prepare-release.outputs.should_release == 'true' &&
-      !contains(needs.prepare-release.outputs.version, '-') &&
-      github.event.inputs.dry_run != 'true'
+      github.event.inputs.dry_run != 'true' &&
+      !contains(needs.prepare-release.outputs.version, '-')
+    timeout-minutes: 15
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -393,22 +436,20 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: publish
+          cache-all-crates: true
 
       - name: Publish to crates.io
         run: |
-          if [ -n "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
-            cargo publish --dry-run
-            cargo publish
+          echo "Publishing to crates.io"
+          cargo publish --dry-run --allow-dirty
+          if [[ "${{ github.event.inputs.dry_run }}" != "true" ]]; then
+            cargo publish --allow-dirty
           else
-            echo "CARGO_REGISTRY_TOKEN not set, skipping crates.io publication"
+            echo "Dry run mode - skipping actual publish"
           fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -416,11 +457,12 @@ jobs:
   cleanup:
     name: Cleanup
     runs-on: ubuntu-latest
-    needs: [create-release, publish-crates]
+    needs: [prepare-release, create-release, publish-crates]
     if: always()
+    timeout-minutes: 10
     steps:
       - name: Delete build artifacts
-        uses: geekyeggo/delete-artifact@v4
+        uses: geekyeggo/delete-artifact@v5
         with:
           name: binary-*
           failOnError: false
@@ -428,55 +470,60 @@ jobs:
       - name: Delete old container images
         continue-on-error: true
         run: |
-          gh api \
-            -H "Accept: application/vnd.github+json" \
-            /orgs/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions \
-            --paginate \
-            --jq '.[] | select(.metadata.container.tags | length > 0) | .id' \
-            | tail -n +10 \
-            | xargs -I {} gh api \
-              --method DELETE \
-              -H "Accept: application/vnd.github+json" \
-              /orgs/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions/{} \
-            || true
+          echo "Cleaning up old container images"
+          PACKAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/vnd.github.v3+json" \
+               "https://api.github.com/user/packages/container/$PACKAGE_NAME/versions" \
+               | jq -r '.[] | select(.metadata.container.tags | length == 0) | .id' \
+               | head -10 | while read -r version_id; do
+            echo "Deleting untagged image version: $version_id"
+            curl -X DELETE \
+                 -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                 -H "Accept: application/vnd.github.v3+json" \
+                 "https://api.github.com/user/packages/container/$PACKAGE_NAME/versions/$version_id" || true
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [
-      prepare-release,
-      build-binaries,
-      build-docker,
-      security-scan,
-      create-release,
-      publish-crates,
-    ]
+    needs: [prepare-release, build-binaries, build-docker, security-scan, create-release, publish-crates, cleanup]
     if: always() && needs.prepare-release.outputs.should_release == 'true'
+    timeout-minutes: 5
     steps:
       - name: Create summary
         run: |
           echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version**: ${{ needs.prepare-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Docker Image**: ${{ needs.build-docker.outputs.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ needs.prepare-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry Run:** ${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Status" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Binaries | ${{ needs.build-binaries.result == 'success' && 'PASS' || 'FAIL' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Docker | ${{ needs.build-docker.result == 'success' && 'PASS' || 'FAIL' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security Scan | ${{ needs.security-scan.result == 'success' && 'PASS' || 'FAIL' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| GitHub Release | ${{ needs.create-release.result == 'success' && 'PASS' || (needs.create-release.result == 'skipped' && 'SKIP' || 'FAIL') }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Crates.io | ${{ needs.publish-crates.result == 'success' && 'PASS' || (needs.publish-crates.result == 'skipped' && 'SKIP' || 'FAIL') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Binaries | ${{ needs.build-binaries.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Docker | ${{ needs.build-docker.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Create Release | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Publish Crates | ${{ needs.publish-crates.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup | ${{ needs.cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
-            echo "**Note**: This was a dry run - no actual publishing occurred" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.create-release.result }}" == "success" ]]; then
-            echo "**Result**: Release published successfully" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.create-release.result }}" == "success" ]]; then
+            echo "## Release Created Successfully" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Release v${{ needs.prepare-release.outputs.version }} has been created and published." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Assets Available:" >> $GITHUB_STEP_SUMMARY
+            echo "- Multi-platform binaries" >> $GITHUB_STEP_SUMMARY
+            echo "- Container images" >> $GITHUB_STEP_SUMMARY
+            echo "- Source code archives" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**Result**: Release failed or partially completed" >> $GITHUB_STEP_SUMMARY
+            echo "## Release Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The release process encountered errors. Please check the job logs for details." >> $GITHUB_STEP_SUMMARY
           fi

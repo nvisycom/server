@@ -10,9 +10,9 @@ use crate::service::DataCollectionPolicy;
 #[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[schema(example = json!({
-    "preferPolicy": "Eu"
+    "dataCollection": "minimal"
 }))]
 pub struct MonitorStatusRequest {
-    /// Preferred regional policy for data collection.
-    pub prefer_policy: Option<DataCollectionPolicy>,
+    /// Preferred data collection policy.
+    pub data_collection: Option<DataCollectionPolicy>,
 }
