@@ -53,6 +53,68 @@ CREATE TYPE INTEGRATION_STATUS AS ENUM (
 COMMENT ON TYPE INTEGRATION_STATUS IS
     'Defines the operational status of project integrations.';
 
+-- Create integration type enum
+CREATE TYPE INTEGRATION_TYPE AS ENUM (
+    'webhook',      -- Generic webhook integration
+    'storage',      -- External storage integration (S3, etc.)
+    'other'         -- Other integration types
+);
+
+COMMENT ON TYPE INTEGRATION_TYPE IS
+    'Defines the type/category of project integrations.';
+
+-- Create activity type enum
+CREATE TYPE ACTIVITY_TYPE AS ENUM (
+    -- Project activities
+    'project_created',
+    'project_updated',
+    'project_deleted',
+    'project_archived',
+    'project_restored',
+    'project_settings_changed',
+    'project_exported',
+    'project_imported',
+
+    -- Member activities
+    'member_added',
+    'member_kicked',
+    'member_updated',
+    'member_invited',
+    'member_invite_accepted',
+    'member_invite_declined',
+    'member_invite_canceled',
+
+    -- Integration activities
+    'integration_created',
+    'integration_updated',
+    'integration_deleted',
+    'integration_enabled',
+    'integration_disabled',
+    'integration_synced',
+    'integration_succeeded',
+    'integration_failed',
+
+    -- Document activities
+    'document_created',
+    'document_updated',
+    'document_deleted',
+    'document_processed',
+    'document_uploaded',
+    'document_downloaded',
+    'document_verified',
+
+    -- Comment activities
+    'comment_added',
+    'comment_updated',
+    'comment_deleted',
+
+    -- Custom activities
+    'custom'
+);
+
+COMMENT ON TYPE ACTIVITY_TYPE IS
+    'Defines the type of activity performed in a project for audit logging.';
+
 -- Create enhanced projects table
 CREATE TABLE projects (
     -- Primary identifiers
@@ -268,10 +330,7 @@ CREATE TABLE project_invites (
 
     -- References
     project_id     UUID          NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    invitee_email  TEXT          NOT NULL,
     invitee_id     UUID          DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
-
-    CONSTRAINT project_invites_email_valid CHECK (is_valid_email(invitee_email)),
 
     -- Invitation details
     invited_role   PROJECT_ROLE  NOT NULL DEFAULT 'viewer',
@@ -303,10 +362,6 @@ CREATE TABLE project_invites (
 SELECT setup_updated_at('project_invites');
 
 -- Create indexes for project invites
-CREATE UNIQUE INDEX project_invites_project_email_pending_idx
-    ON project_invites (project_id, lower(invitee_email))
-    WHERE invite_status = 'pending';
-
 CREATE INDEX project_invites_token_lookup_idx
     ON project_invites (invite_token)
     WHERE invite_status = 'pending';
@@ -325,7 +380,6 @@ COMMENT ON TABLE project_invites IS
 
 COMMENT ON COLUMN project_invites.id IS 'Unique invite identifier (UUID)';
 COMMENT ON COLUMN project_invites.project_id IS 'Reference to the project being invited to';
-COMMENT ON COLUMN project_invites.invitee_email IS 'Email of invited user (may not have account yet)';
 COMMENT ON COLUMN project_invites.invitee_id IS 'Reference to invitee account (if exists)';
 COMMENT ON COLUMN project_invites.invited_role IS 'Role that will be assigned upon acceptance';
 COMMENT ON COLUMN project_invites.invite_message IS 'Custom message from inviter (up to 1000 chars)';
@@ -345,14 +399,13 @@ CREATE TABLE project_activity_log (
 
     -- References
     project_id    UUID        NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    actor_id      UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
+    account_id    UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
 
     -- Activity details
-    activity_type TEXT        NOT NULL,
-    description   TEXT        NOT NULL DEFAULT '',
-    metadata      JSONB       NOT NULL DEFAULT '{}',
+    activity_type ACTIVITY_TYPE NOT NULL,
+    description   TEXT          NOT NULL DEFAULT '',
+    metadata      JSONB         NOT NULL DEFAULT '{}',
 
-    CONSTRAINT project_activity_log_activity_type_not_empty CHECK (trim(activity_type) <> ''),
     CONSTRAINT project_activity_log_description_length_max CHECK (length(description) <= 500),
     CONSTRAINT project_activity_log_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
 
@@ -368,9 +421,9 @@ CREATE TABLE project_activity_log (
 CREATE INDEX project_activity_log_project_recent_idx
     ON project_activity_log (project_id, created_at DESC);
 
-CREATE INDEX project_activity_log_actor_recent_idx
-    ON project_activity_log (actor_id, created_at DESC)
-    WHERE actor_id IS NOT NULL;
+CREATE INDEX project_activity_log_account_recent_idx
+    ON project_activity_log (account_id, created_at DESC)
+    WHERE account_id IS NOT NULL;
 
 CREATE INDEX project_activity_log_activity_type_idx
     ON project_activity_log (activity_type, project_id, created_at DESC);
@@ -381,7 +434,7 @@ COMMENT ON TABLE project_activity_log IS
 
 COMMENT ON COLUMN project_activity_log.id IS 'Unique activity log entry identifier';
 COMMENT ON COLUMN project_activity_log.project_id IS 'Reference to the project';
-COMMENT ON COLUMN project_activity_log.actor_id IS 'Account that performed the activity (NULL for system)';
+COMMENT ON COLUMN project_activity_log.account_id IS 'Account that performed the activity (NULL for system)';
 COMMENT ON COLUMN project_activity_log.activity_type IS 'Type of activity performed';
 COMMENT ON COLUMN project_activity_log.description IS 'Human-readable description of the activity';
 COMMENT ON COLUMN project_activity_log.metadata IS 'Additional activity context (JSON, 2B-4KB)';
@@ -400,17 +453,16 @@ CREATE TABLE project_integrations (
     -- Integration details
     integration_name TEXT             NOT NULL,
     description      TEXT             NOT NULL DEFAULT '',
-    integration_type TEXT             NOT NULL,
+    integration_type INTEGRATION_TYPE NOT NULL,
 
     CONSTRAINT project_integrations_integration_name_not_empty CHECK (trim(integration_name) <> ''),
     CONSTRAINT project_integrations_description_length_max CHECK (length(description) <= 500),
-    CONSTRAINT project_integrations_integration_type_not_empty CHECK (trim(integration_type) <> ''),
 
     -- Configuration and credentials
-    config_data      JSONB            NOT NULL DEFAULT '{}',
+    metadata         JSONB            NOT NULL DEFAULT '{}',
     credentials      JSONB            NOT NULL DEFAULT '{}',
 
-    CONSTRAINT project_integrations_config_data_size CHECK (length(config_data::TEXT) BETWEEN 2 AND 8192),
+    CONSTRAINT project_integrations_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 8192),
     CONSTRAINT project_integrations_credentials_size CHECK (length(credentials::TEXT) BETWEEN 2 AND 4096),
 
     -- Integration status
@@ -449,7 +501,7 @@ COMMENT ON COLUMN project_integrations.project_id IS 'Reference to the project';
 COMMENT ON COLUMN project_integrations.integration_name IS 'Human-readable integration name';
 COMMENT ON COLUMN project_integrations.description IS 'Integration description (up to 500 chars)';
 COMMENT ON COLUMN project_integrations.integration_type IS 'Type/category of integration';
-COMMENT ON COLUMN project_integrations.config_data IS 'Integration configuration (JSON, 2B-8KB)';
+COMMENT ON COLUMN project_integrations.metadata IS 'Integration configuration and metadata (JSON, 2B-8KB)';
 COMMENT ON COLUMN project_integrations.credentials IS 'Encrypted credentials (JSON, 2B-4KB)';
 COMMENT ON COLUMN project_integrations.is_active IS 'Integration active status';
 COMMENT ON COLUMN project_integrations.last_sync_at IS 'Timestamp of last synchronization';
@@ -485,7 +537,6 @@ SELECT
     pi.id,
     pi.project_id,
     p.display_name                      AS project_name,
-    pi.invitee_email,
     pi.invited_role,
     pi.invite_message,
     pi.created_by,

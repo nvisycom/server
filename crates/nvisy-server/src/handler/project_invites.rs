@@ -150,7 +150,6 @@ async fn send_invite(
     let all_invites = ProjectInviteRepository::list_user_invites(
         &mut conn,
         None,
-        Some(normalized_email.clone()),
         nvisy_postgres::query::Pagination {
             limit: 100,
             offset: 0,
@@ -186,14 +185,13 @@ async fn send_invite(
 
     let new_invite = NewProjectInvite {
         project_id: path_params.project_id,
-        invitee_email: request.invitee_email.to_lowercase(),
         invitee_id: None, // Will be set when user accepts if they have an account
-        invited_role: request.invited_role,
-        invite_message: sanitized_message,
-        invite_token: generate_invite_token(),
-        expires_at,
+        invited_role: Some(request.invited_role),
+        invite_message: Some(sanitized_message),
+        expires_at: Some(expires_at),
         created_by: auth_claims.account_id,
         updated_by: auth_claims.account_id,
+        ..Default::default()
     };
 
     let project_invite =
@@ -206,7 +204,6 @@ async fn send_invite(
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = response.invite_id.to_string(),
-        invitee_email = %response.invitee_email,
         "project invitation created successfully"
     );
 
@@ -382,7 +379,6 @@ async fn cancel_invite(
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
-        invitee_email = %response.invitee_email,
         "project invitation cancelled successfully"
     );
 
@@ -536,13 +532,6 @@ fn sanitize_text(text: &str) -> String {
     text.chars()
         .filter(|c| !matches!(c, '<' | '>' | '{' | '}' | '`'))
         .collect()
-}
-
-/// Generates a cryptographically secure invite token.
-fn generate_invite_token() -> String {
-    use uuid::Uuid;
-    // In production, this should use a proper cryptographic token generator
-    format!("invite_{}", Uuid::new_v4().to_string().replace('-', ""))
 }
 
 /// Returns a [`Router`] with all project invite related routes.

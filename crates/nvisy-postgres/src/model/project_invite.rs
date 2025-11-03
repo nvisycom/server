@@ -16,8 +16,6 @@ pub struct ProjectInvite {
     pub id: Uuid,
     /// Reference to the project
     pub project_id: Uuid,
-    /// Email address of the invitee
-    pub invitee_email: String,
     /// Account ID if invitee is already registered
     pub invitee_id: Option<Uuid>,
     /// Role to be assigned upon acceptance
@@ -43,24 +41,22 @@ pub struct ProjectInvite {
 }
 
 /// Data for creating a new project invitation.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = project_invites)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProjectInvite {
     /// Project ID
     pub project_id: Uuid,
-    /// Invitee email
-    pub invitee_email: String,
     /// Invitee ID
     pub invitee_id: Option<Uuid>,
     /// Invited role
-    pub invited_role: ProjectRole,
+    pub invited_role: Option<ProjectRole>,
     /// Invite message
-    pub invite_message: String,
+    pub invite_message: Option<String>,
     /// Invite token
-    pub invite_token: String,
+    pub invite_token: Option<String>,
     /// Expires at
-    pub expires_at: OffsetDateTime,
+    pub expires_at: Option<OffsetDateTime>,
     /// Created by
     pub created_by: Uuid,
     /// Updated by
@@ -80,22 +76,6 @@ pub struct UpdateProjectInvite {
     pub updated_by: Option<Uuid>,
     /// Responded at
     pub responded_at: Option<OffsetDateTime>,
-}
-
-impl Default for NewProjectInvite {
-    fn default() -> Self {
-        Self {
-            project_id: Uuid::new_v4(),
-            invitee_email: String::new(),
-            invitee_id: None,
-            invited_role: ProjectRole::Viewer,
-            invite_message: String::new(),
-            invite_token: String::new(),
-            expires_at: OffsetDateTime::now_utc() + time::Duration::days(7),
-            created_by: Uuid::new_v4(),
-            updated_by: Uuid::new_v4(),
-        }
-    }
 }
 
 impl ProjectInvite {

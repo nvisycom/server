@@ -7,6 +7,8 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+// TODO: Add invitee emails
+
 /// Response returned when a project invite is successfully created.
 ///
 /// This response includes all the essential information about the newly created
@@ -25,12 +27,6 @@ pub struct CreateInviteResponse {
     ///
     /// The invitee will become a member of this project if they accept.
     pub project_id: Uuid,
-
-    /// Email address of the invitee.
-    ///
-    /// The invitation will be sent to this email address. The email is normalized
-    /// to lowercase for consistency.
-    pub invitee_email: String,
 
     /// Role the invitee will have if they accept.
     ///
@@ -61,7 +57,6 @@ impl From<ProjectInvite> for CreateInviteResponse {
         Self {
             invite_id: invite.id,
             project_id: invite.project_id,
-            invitee_email: invite.invitee_email,
             invited_role: invite.invited_role,
             invite_status: invite.invite_status,
             expires_at: invite.expires_at,
@@ -77,8 +72,6 @@ impl From<ProjectInvite> for CreateInviteResponse {
 pub struct ListInvitesResponseItem {
     /// Unique identifier of the invitation.
     pub invite_id: Uuid,
-    /// Email address of the invitee.
-    pub invitee_email: String,
     /// Account ID if the invitee has an account.
     pub invitee_id: Option<Uuid>,
     /// Role the invitee will have if they accept.
@@ -97,7 +90,6 @@ impl From<ProjectInvite> for ListInvitesResponseItem {
     fn from(invite: ProjectInvite) -> Self {
         Self {
             invite_id: invite.id,
-            invitee_email: invite.invitee_email,
             invitee_id: invite.invitee_id,
             invited_role: invite.invited_role,
             invite_status: invite.invite_status,
@@ -142,8 +134,6 @@ pub struct ReplyInviteResponse {
     pub invite_id: Uuid,
     /// ID of the project.
     pub project_id: Uuid,
-    /// Email address of the invitee.
-    pub invitee_email: String,
     /// Current status of the invitation.
     pub invite_status: InviteStatus,
     /// When the invitation was accepted or declined.
@@ -155,7 +145,6 @@ impl From<ProjectInvite> for ReplyInviteResponse {
         Self {
             invite_id: invite.id,
             project_id: invite.project_id,
-            invitee_email: invite.invitee_email,
             invite_status: invite.invite_status,
             updated_at: invite.updated_at,
         }
@@ -171,8 +160,6 @@ pub struct CancelInviteResponse {
     pub invite_id: Uuid,
     /// ID of the project.
     pub project_id: Uuid,
-    /// Email address of the invitee.
-    pub invitee_email: String,
 }
 
 impl From<ProjectInvite> for CancelInviteResponse {
@@ -180,7 +167,6 @@ impl From<ProjectInvite> for CancelInviteResponse {
         Self {
             invite_id: invite.id,
             project_id: invite.project_id,
-            invitee_email: invite.invitee_email,
         }
     }
 }

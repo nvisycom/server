@@ -9,7 +9,9 @@ pub mod action_token_type;
 pub mod api_token_type;
 
 // Project-related enumerations
+pub mod activity_type;
 pub mod integration_status;
+pub mod integration_type;
 pub mod invite_status;
 pub mod project_role;
 pub mod project_status;
@@ -22,9 +24,11 @@ pub mod require_mode;
 pub mod virus_scan_status;
 
 pub use action_token_type::ActionTokenType;
+pub use activity_type::{ActivityCategory, ActivityType};
 pub use api_token_type::ApiTokenType;
 pub use document_status::DocumentStatus;
 pub use integration_status::IntegrationStatus;
+pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;
 pub use processing_status::ProcessingStatus;
 pub use project_role::ProjectRole;

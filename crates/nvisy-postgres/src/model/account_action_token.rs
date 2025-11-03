@@ -2,7 +2,7 @@
 
 use diesel::prelude::*;
 use ipnet::IpNet;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::schema::account_action_tokens;
@@ -40,7 +40,7 @@ pub struct AccountActionToken {
 }
 
 /// Data for creating a new account action token.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = account_action_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountActionToken {
@@ -49,7 +49,7 @@ pub struct NewAccountActionToken {
     /// Type of action this token authorizes
     pub action_type: ActionTokenType,
     /// Additional context data for the token action
-    pub action_data: serde_json::Value,
+    pub action_data: Option<serde_json::Value>,
     /// IP address where the token was generated
     pub ip_address: IpNet,
     /// User agent of the client that generated the token
@@ -57,9 +57,9 @@ pub struct NewAccountActionToken {
     /// Optional device identifier for additional security tracking
     pub device_id: Option<String>,
     /// Maximum allowed attempts before token becomes invalid
-    pub max_attempts: i32,
+    pub max_attempts: Option<i32>,
     /// Timestamp when the token expires
-    pub expired_at: OffsetDateTime,
+    pub expired_at: Option<OffsetDateTime>,
 }
 
 /// Data for updating an account action token.
@@ -71,21 +71,6 @@ pub struct UpdateAccountActionToken {
     pub attempt_count: Option<i32>,
     /// Timestamp when the token was successfully used
     pub used_at: Option<OffsetDateTime>,
-}
-
-impl Default for NewAccountActionToken {
-    fn default() -> Self {
-        Self {
-            account_id: Uuid::new_v4(),
-            action_type: ActionTokenType::ActivateAccount,
-            action_data: serde_json::Value::Object(serde_json::Map::new()),
-            ip_address: "127.0.0.1/32".parse().unwrap(),
-            user_agent: String::new(),
-            device_id: None,
-            max_attempts: 3,
-            expired_at: OffsetDateTime::now_utc() + time::Duration::hours(24), // 24 hour default
-        }
-    }
 }
 
 impl AccountActionToken {
@@ -115,7 +100,7 @@ impl AccountActionToken {
     }
 
     /// Returns the remaining time until token expires.
-    pub fn time_until_expiry(&self) -> Option<time::Duration> {
+    pub fn time_until_expiry(&self) -> Option<Duration> {
         let now = OffsetDateTime::now_utc();
         if self.expired_at > now {
             Some(self.expired_at - now)
@@ -200,13 +185,8 @@ impl AccountActionToken {
     }
 
     /// Returns the recommended expiry time for this token type.
-    pub fn recommended_expiry_duration(&self) -> time::Duration {
-        time::Duration::seconds(self.action_type.default_expiration_seconds() as i64)
-    }
-
-    /// Returns a user-friendly description of the token action.
-    pub fn action_description(&self) -> String {
-        format!("{:?}", self.action_type)
+    pub fn recommended_expiry_duration(&self) -> Duration {
+        Duration::seconds(self.action_type.default_expiration_seconds() as i64)
     }
 
     /// Returns whether the token has context data.
@@ -218,7 +198,7 @@ impl AccountActionToken {
     }
 
     /// Returns the duration since the token was created.
-    pub fn age(&self) -> time::Duration {
+    pub fn age(&self) -> Duration {
         OffsetDateTime::now_utc() - self.issued_at
     }
 

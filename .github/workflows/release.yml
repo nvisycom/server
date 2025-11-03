@@ -18,21 +18,17 @@ on:
       - ".github/workflows/release.yml"
   workflow_dispatch:
     inputs:
-      release_type:
-        description: "Type of release"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-          - prerelease
       dry_run:
         description: "Dry run (no actual publishing)"
         required: false
         default: false
         type: boolean
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -45,125 +41,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare-release:
-    name: Prepare Release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      should_release: ${{ steps.version.outputs.should_release }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "Release version: $VERSION"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if [[ -f "Cargo.toml" ]]; then
-              CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-              echo "Current version: $CURRENT_VERSION"
-
-              case "${{ github.event.inputs.release_type }}" in
-                patch)
-                  NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print $1"."$2"."($3+1)}')
-                  ;;
-                minor)
-                  NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print $1"."($2+1)".0"}')
-                  ;;
-                major)
-                  NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print ($1+1)".0.0"}')
-                  ;;
-                prerelease)
-                  NEW_VERSION="${CURRENT_VERSION}-pre.$(date +%s)"
-                  ;;
-              esac
-
-              echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-              echo "should_release=true" >> $GITHUB_OUTPUT
-              echo "New version: $NEW_VERSION"
-            else
-              echo "should_release=false" >> $GITHUB_OUTPUT
-              echo "Cargo.toml not found"
-              exit 1
-            fi
-          else
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "Not a release trigger"
-          fi
-
-  update-version:
-    name: Update Version
-    runs-on: ubuntu-latest
-    needs: prepare-release
-    if: needs.prepare-release.outputs.should_release == 'true' && github.event.inputs.dry_run != 'true' && github.event_name == 'workflow_dispatch'
-    timeout-minutes: 15
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Update version in Cargo.toml
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ needs.prepare-release.outputs.version }}"/' Cargo.toml
-          echo "Updated version to ${{ needs.prepare-release.outputs.version }}"
-
-      - name: Update Cargo.lock
-        run: |
-          cargo check --quiet
-          echo "Updated Cargo.lock"
-
-      - name: Generate changelog
-        run: |
-          cat > CHANGELOG_ENTRY.md << EOF
-          ## [${{ needs.prepare-release.outputs.version }}] - $(date +%Y-%m-%d)
-
-          ### Added
-          - Version ${{ needs.prepare-release.outputs.version }} release
-
-          ### Changed
-          - Updated dependencies
-
-          ### Fixed
-          - Bug fixes and improvements
-
-          EOF
-
-          if [[ -f "CHANGELOG.md" ]]; then
-            echo "Updating existing CHANGELOG.md"
-            (cat CHANGELOG_ENTRY.md; echo ""; cat CHANGELOG.md) > CHANGELOG_NEW.md
-            mv CHANGELOG_NEW.md CHANGELOG.md
-          else
-            echo "Creating new CHANGELOG.md"
-            mv CHANGELOG_ENTRY.md CHANGELOG.md
-          fi
-
-      - name: Commit changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add Cargo.toml Cargo.lock CHANGELOG.md
-          git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
-          git tag -a "v${{ needs.prepare-release.outputs.version }}" -m "Release ${{ needs.prepare-release.outputs.version }}"
-          git push origin main
-          git push origin "v${{ needs.prepare-release.outputs.version }}"
-
   build-binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
-    needs: prepare-release
-    if: needs.prepare-release.outputs.should_release == 'true'
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -253,8 +133,7 @@ jobs:
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: [prepare-release, build-binaries]
-    if: needs.prepare-release.outputs.should_release == 'true'
+    needs: build-binaries
     timeout-minutes: 30
     outputs:
       image: ${{ steps.image.outputs.image }}
@@ -305,21 +184,27 @@ jobs:
           push: ${{ github.event.inputs.dry_run != 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+          # Enhanced caching strategy for faster builds
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=gha,mode=max
           platforms: linux/amd64
           provenance: false
+          # Build arguments for better layer caching
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
       - name: Output image
         id: image
         run: |
-          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare-release.outputs.version }}" >> $GITHUB_OUTPUT
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}" >> $GITHUB_OUTPUT
 
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: build-docker
-    if: needs.prepare-release.outputs.should_release == 'true'
     timeout-minutes: 15
     steps:
       - name: Run Trivy vulnerability scanner
@@ -349,8 +234,8 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [prepare-release, build-binaries, build-docker, security-scan]
-    if: needs.prepare-release.outputs.should_release == 'true' && github.event.inputs.dry_run != 'true'
+    needs: [build-binaries, build-docker, security-scan]
+    if: github.event.inputs.dry_run != 'true'
     timeout-minutes: 15
     steps:
       - name: Checkout sources
@@ -378,8 +263,9 @@ jobs:
 
       - name: Generate release notes
         run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
           cat > release_notes.md << EOF
-          # Release v${{ needs.prepare-release.outputs.version }}
+          # Release v${VERSION}
 
           This release includes improvements and bug fixes.
 
@@ -411,23 +297,53 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.prepare-release.outputs.version }}
-          name: Release v${{ needs.prepare-release.outputs.version }}
           body_path: release_notes.md
           files: release-assets-final/*
           draft: false
-          prerelease: ${{ contains(needs.prepare-release.outputs.version, '-') }}
+          prerelease: ${{ contains(github.ref, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-docs:
+    name: Deploy Documentation
+    runs-on: ubuntu-latest
+    needs: create-release
+    if: github.event.inputs.dry_run != 'true'
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: docs
+          cache-all-crates: true
+
+      - name: Generate documentation
+        run: |
+          cargo doc --no-deps --all-features --workspace
+          echo '<meta http-equiv=refresh content=0;url=nvisy_server/index.html>' > target/doc/index.html
+        env:
+          RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./target/doc
+          destination_dir: api-docs
 
   publish-crates:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: [prepare-release, create-release]
+    needs: create-release
     if: |
-      needs.prepare-release.outputs.should_release == 'true' &&
       github.event.inputs.dry_run != 'true' &&
-      !contains(needs.prepare-release.outputs.version, '-')
+      !contains(github.ref, '-')
     timeout-minutes: 15
     steps:
       - name: Checkout sources
@@ -453,77 +369,3 @@ jobs:
           fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  cleanup:
-    name: Cleanup
-    runs-on: ubuntu-latest
-    needs: [prepare-release, create-release, publish-crates]
-    if: always()
-    timeout-minutes: 10
-    steps:
-      - name: Delete build artifacts
-        uses: geekyeggo/delete-artifact@v5
-        with:
-          name: binary-*
-          failOnError: false
-
-      - name: Delete old container images
-        continue-on-error: true
-        run: |
-          echo "Cleaning up old container images"
-          PACKAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-
-          curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-               -H "Accept: application/vnd.github.v3+json" \
-               "https://api.github.com/user/packages/container/$PACKAGE_NAME/versions" \
-               | jq -r '.[] | select(.metadata.container.tags | length == 0) | .id' \
-               | head -10 | while read -r version_id; do
-            echo "Deleting untagged image version: $version_id"
-            curl -X DELETE \
-                 -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-                 -H "Accept: application/vnd.github.v3+json" \
-                 "https://api.github.com/user/packages/container/$PACKAGE_NAME/versions/$version_id" || true
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release-summary:
-    name: Release Summary
-    runs-on: ubuntu-latest
-    needs: [prepare-release, build-binaries, build-docker, security-scan, create-release, publish-crates, cleanup]
-    if: always() && needs.prepare-release.outputs.should_release == 'true'
-    timeout-minutes: 5
-    steps:
-      - name: Create summary
-        run: |
-          echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** v${{ needs.prepare-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Dry Run:** ${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Binaries | ${{ needs.build-binaries.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Docker | ${{ needs.build-docker.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Create Release | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Publish Crates | ${{ needs.publish-crates.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cleanup | ${{ needs.cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [[ "${{ needs.create-release.result }}" == "success" ]]; then
-            echo "## Release Created Successfully" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Release v${{ needs.prepare-release.outputs.version }} has been created and published." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Assets Available:" >> $GITHUB_STEP_SUMMARY
-            echo "- Multi-platform binaries" >> $GITHUB_STEP_SUMMARY
-            echo "- Container images" >> $GITHUB_STEP_SUMMARY
-            echo "- Source code archives" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## Release Failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "The release process encountered errors. Please check the job logs for details." >> $GITHUB_STEP_SUMMARY
-          fi

@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::project_integrations;
-use crate::types::IntegrationStatus;
+use crate::types::{IntegrationStatus, IntegrationType};
 
 /// Project integration model representing a third-party integration connected to a project.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -21,9 +21,9 @@ pub struct ProjectIntegration {
     /// Description of what this integration does
     pub description: String,
     /// Type of integration
-    pub integration_type: String,
-    /// Configuration data
-    pub config_data: serde_json::Value,
+    pub integration_type: IntegrationType,
+    /// Configuration and metadata
+    pub metadata: serde_json::Value,
     /// Authentication credentials
     pub credentials: serde_json::Value,
     /// Whether the integration is active
@@ -41,7 +41,7 @@ pub struct ProjectIntegration {
 }
 
 /// Data for creating a new project integration.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = project_integrations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProjectIntegration {
@@ -52,13 +52,13 @@ pub struct NewProjectIntegration {
     /// Integration description
     pub description: String,
     /// Integration type
-    pub integration_type: String,
-    /// Configuration data
-    pub config_data: serde_json::Value,
+    pub integration_type: IntegrationType,
+    /// Configuration and metadata
+    pub metadata: Option<serde_json::Value>,
     /// Credentials
-    pub credentials: serde_json::Value,
+    pub credentials: Option<serde_json::Value>,
     /// Is active
-    pub is_active: bool,
+    pub is_active: Option<bool>,
     /// Last sync at
     pub last_sync_at: Option<OffsetDateTime>,
     /// Sync status
@@ -77,9 +77,9 @@ pub struct UpdateProjectIntegration {
     /// Description
     pub description: Option<String>,
     /// Integration type
-    pub integration_type: Option<String>,
-    /// Configuration data
-    pub config_data: Option<serde_json::Value>,
+    pub integration_type: Option<IntegrationType>,
+    /// Configuration and metadata
+    pub metadata: Option<serde_json::Value>,
     /// Credentials
     pub credentials: Option<serde_json::Value>,
     /// Is active
@@ -88,23 +88,6 @@ pub struct UpdateProjectIntegration {
     pub last_sync_at: Option<OffsetDateTime>,
     /// Sync status
     pub sync_status: Option<IntegrationStatus>,
-}
-
-impl Default for NewProjectIntegration {
-    fn default() -> Self {
-        Self {
-            project_id: Uuid::new_v4(),
-            integration_name: String::new(),
-            description: String::new(),
-            integration_type: String::new(),
-            config_data: serde_json::Value::Object(serde_json::Map::new()),
-            credentials: serde_json::Value::Object(serde_json::Map::new()),
-            is_active: true,
-            last_sync_at: None,
-            sync_status: Some(IntegrationStatus::Pending),
-            created_by: Uuid::new_v4(),
-        }
-    }
 }
 
 impl ProjectIntegration {

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - "main"
-      - "develop"
+      - "release"
     paths:
       - "crates/**"
       - "migrations/**"
@@ -20,7 +20,7 @@ on:
   pull_request:
     branches:
       - "main"
-      - "develop"
+      - "release"
     paths:
       - "crates/**"
       - "migrations/**"
@@ -49,6 +49,12 @@ on:
           - secrets
           - containers
           - compliance
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -80,9 +86,22 @@ jobs:
           key: security-deps
           cache-all-crates: true
 
+      - name: Cache security tools
+        id: cache-security-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/bin/cargo-outdated
+          key: security-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            security-tools-${{ runner.os }}-
+
       - name: Install security tools
+        if: steps.cache-security-tools.outputs.cache-hit != 'true'
         run: |
-          echo "Installing security audit tools"
+          echo "Installing security audit tools (not cached)"
           cargo install cargo-audit --locked
           cargo install cargo-deny --locked
           cargo install cargo-outdated --locked
@@ -141,8 +160,20 @@ jobs:
           key: license-compliance
           cache-all-crates: true
 
+      - name: Cache cargo-license
+        id: cache-cargo-license
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-license
+          key: cargo-license-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-license-${{ runner.os }}-
+
       - name: Install cargo-license
-        run: cargo install cargo-license --locked
+        if: steps.cache-cargo-license.outputs.cache-hit != 'true'
+        run: |
+          echo "Installing cargo-license (not cached)"
+          cargo install cargo-license --locked
 
       - name: Generate license report
         run: |
@@ -408,176 +439,3 @@ jobs:
             trivy-results.sarif
             trivy-results.json
           retention-days: 30
-
-  security-summary:
-    name: Security Assessment Summary
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [dependency-security, license-compliance, code-security-analysis, secret-detection, container-security]
-    if: always()
-    steps:
-      - name: Generate security report
-        id: report
-        run: |
-          echo "Generating comprehensive security report"
-
-          # Initialize counters
-          CRITICAL_ISSUES=0
-          HIGH_ISSUES=0
-          WARNINGS=0
-
-          # Check job results
-          DEP_STATUS="${{ needs.dependency-security.result }}"
-          LICENSE_STATUS="${{ needs.license-compliance.result }}"
-          CODE_STATUS="${{ needs.code-security-analysis.result }}"
-          SECRET_STATUS="${{ needs.secret-detection.result }}"
-          CONTAINER_STATUS="${{ needs.container-security.result }}"
-
-          echo "Job Results:"
-          echo "============"
-          echo "Dependency Security: $DEP_STATUS"
-          echo "License Compliance: $LICENSE_STATUS"
-          echo "Code Security: $CODE_STATUS"
-          echo "Secret Detection: $SECRET_STATUS"
-          echo "Container Security: $CONTAINER_STATUS"
-
-          # Count failures as critical issues
-          [ "$DEP_STATUS" = "failure" ] && CRITICAL_ISSUES=$((CRITICAL_ISSUES + 1))
-          [ "$SECRET_STATUS" = "failure" ] && CRITICAL_ISSUES=$((CRITICAL_ISSUES + 1))
-          [ "$CONTAINER_STATUS" = "failure" ] && CRITICAL_ISSUES=$((CRITICAL_ISSUES + 1))
-
-          # Count other issues as high priority
-          [ "$CODE_STATUS" = "failure" ] && HIGH_ISSUES=$((HIGH_ISSUES + 1))
-          [ "$LICENSE_STATUS" = "failure" ] && HIGH_ISSUES=$((HIGH_ISSUES + 1))
-
-          # Set outputs
-          echo "critical_issues=$CRITICAL_ISSUES" >> $GITHUB_OUTPUT
-          echo "high_issues=$HIGH_ISSUES" >> $GITHUB_OUTPUT
-          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
-
-          # Generate report
-          cat > security-assessment.md << EOF
-          # Security Assessment Report
-
-          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Repository:** ${{ github.repository }}
-          **Branch:** ${{ github.ref_name }}
-          **Commit:** ${{ github.sha }}
-
-          ## Summary
-
-          - Critical Issues: $CRITICAL_ISSUES
-          - High Priority Issues: $HIGH_ISSUES
-          - Warnings: $WARNINGS
-
-          ## Job Results
-
-          | Assessment | Status | Result |
-          |------------|--------|--------|
-          | Dependency Security | $DEP_STATUS | $([ "$DEP_STATUS" = "success" ] && echo "PASS" || echo "FAIL") |
-          | License Compliance | $LICENSE_STATUS | $([ "$LICENSE_STATUS" = "success" ] && echo "PASS" || echo "FAIL") |
-          | Code Security Analysis | $CODE_STATUS | $([ "$CODE_STATUS" = "success" ] && echo "PASS" || echo "FAIL") |
-          | Secret Detection | $SECRET_STATUS | $([ "$SECRET_STATUS" = "success" ] && echo "PASS" || echo "FAIL") |
-          | Container Security | $CONTAINER_STATUS | $([ "$CONTAINER_STATUS" = "success" ] && echo "PASS" || echo "FAIL") |
-
-          ## Recommendations
-
-          $(if [ $CRITICAL_ISSUES -gt 0 ]; then
-            echo "- **URGENT**: Address critical security issues immediately"
-            echo "- Review dependency vulnerabilities and secret detection results"
-            echo "- Consider blocking deployment until issues are resolved"
-          fi)
-
-          $(if [ $HIGH_ISSUES -gt 0 ]; then
-            echo "- Address high priority security issues"
-            echo "- Review code security analysis and license compliance"
-          fi)
-
-          $(if [ $CRITICAL_ISSUES -eq 0 ] && [ $HIGH_ISSUES -eq 0 ]; then
-            echo "- All security checks passed"
-            echo "- Continue monitoring for new vulnerabilities"
-          fi)
-
-          ---
-          *Generated by GitHub Actions Security Workflow*
-          EOF
-
-      - name: Upload security assessment
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-assessment-report
-          path: security-assessment.md
-          retention-days: 90
-
-      - name: Create security summary
-        run: |
-          echo "# Security Assessment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Critical Issues:** ${{ steps.report.outputs.critical_issues }}" >> $GITHUB_STEP_SUMMARY
-          echo "**High Priority Issues:** ${{ steps.report.outputs.high_issues }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Dependency Security | ${{ needs.dependency-security.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| License Compliance | ${{ needs.license-compliance.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Code Security | ${{ needs.code-security-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Secret Detection | ${{ needs.secret-detection.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Container Security | ${{ needs.container-security.result }} |" >> $GITHUB_STEP_SUMMARY
-
-      - name: Create security issue for critical failures
-        if: steps.report.outputs.critical_issues > 0
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issue_body = `
-            ## Security Alert - Critical Issues Found
-
-            **Repository:** ${{ github.repository }}
-            **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            **Critical Issues Found:** ${{ steps.report.outputs.critical_issues }}
-            **High Priority Issues:** ${{ steps.report.outputs.high_issues }}
-
-            ### Failed Security Checks:
-
-            ${{ needs.dependency-security.result == 'failure' && '- Dependency Security: FAILED' || '' }}
-            ${{ needs.secret-detection.result == 'failure' && '- Secret Detection: FAILED' || '' }}
-            ${{ needs.container-security.result == 'failure' && '- Container Security: FAILED' || '' }}
-            ${{ needs.code-security-analysis.result == 'failure' && '- Code Security Analysis: FAILED' || '' }}
-            ${{ needs.license-compliance.result == 'failure' && '- License Compliance: FAILED' || '' }}
-
-            ### Action Required:
-
-            1. Review the security assessment artifacts
-            2. Address all critical security issues immediately
-            3. Consider blocking deployments until resolved
-            4. Update dependencies and fix vulnerabilities
-
-            This issue was automatically created by the security workflow.
-            `;
-
-            const existingIssues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ['security', 'critical', 'automated'],
-              state: 'open'
-            });
-
-            if (existingIssues.data.length === 0) {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `Security Alert: Critical issues found in ${context.ref}`,
-                body: issue_body,
-                labels: ['security', 'critical', 'automated', 'bug']
-              });
-            }
-
-      - name: Fail workflow on critical security issues
-        if: steps.report.outputs.critical_issues > 0
-        run: |
-          echo "Critical security issues found: ${{ steps.report.outputs.critical_issues }}"
-          echo "Failing workflow to prevent deployment of vulnerable code"
-          exit 1

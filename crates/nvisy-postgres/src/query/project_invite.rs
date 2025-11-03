@@ -162,7 +162,6 @@ impl ProjectInviteRepository {
     pub async fn list_user_invites(
         conn: &mut AsyncPgConnection,
         user_id: Option<Uuid>,
-        email: Option<String>,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
@@ -171,10 +170,6 @@ impl ProjectInviteRepository {
 
         if let Some(uid) = user_id {
             query = query.filter(invitee_id.eq(uid));
-        }
-
-        if let Some(user_email) = email {
-            query = query.filter(invitee_email.eq(user_email));
         }
 
         let invites = query

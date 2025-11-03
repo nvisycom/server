@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - "main"
-      - "develop"
+      - "release"
     paths:
       - "crates/**"
       - "migrations/**"
@@ -20,7 +20,7 @@ on:
   pull_request:
     branches:
       - "main"
-      - "develop"
+      - "release"
     paths:
       - "crates/**"
       - "migrations/**"
@@ -36,22 +36,12 @@ on:
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
-    inputs:
-      full_test_matrix:
-        description: "Run full test matrix (all OS/Rust versions)"
-        required: false
-        default: false
-        type: boolean
-      performance_tests:
-        description: "Run performance regression tests"
-        required: false
-        default: false
-        type: boolean
-      skip_cache:
-        description: "Skip cargo cache for fresh build"
-        required: false
-        default: false
-        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  pages: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -59,9 +49,6 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  POSTGRES_PASSWORD: postgres
-  POSTGRES_USER: postgres
-  POSTGRES_DB: nvisy_test
   DATABASE_URL: postgres://postgres:postgres@localhost/nvisy_test
 
 concurrency:
@@ -76,11 +63,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: nvisy_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -102,7 +89,6 @@ jobs:
           components: rustfmt, clippy
 
       - name: Setup Rust cache
-        if: github.event.inputs.skip_cache != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           key: check
@@ -114,20 +100,11 @@ jobs:
           postgres-timeout: 120
 
       - name: Check code formatting
-        run: |
-          echo "Checking code formatting"
-          cargo fmt --all -- --check
-
-      - name: Run cargo check
-        run: |
-          echo "Running cargo check"
-          cargo check --all-targets --all-features --workspace --message-format=json
+        run: cargo fmt --all -- --check
 
       - name: Run clippy
         run: |
-          echo "Running clippy lints"
-          cargo clippy --all-targets --all-features --workspace \
-            --message-format=json -- \
+          cargo clippy --all-targets --all-features --workspace -- \
             -D warnings \
             -D clippy::security \
             -D clippy::correctness \
@@ -136,9 +113,7 @@ jobs:
             -W clippy::style
 
       - name: Check documentation
-        run: |
-          echo "Checking documentation"
-          cargo doc --no-deps --all-features --workspace --document-private-items
+        run: cargo doc --no-deps --all-features --workspace
         env:
           RUSTDOCFLAGS: "-D warnings -D rustdoc::broken-intra-doc-links"
 
@@ -158,21 +133,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event.inputs.full_test_matrix == 'true' && fromJson('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJson('["ubuntu-latest"]') }}
-        rust: ${{ github.event.inputs.full_test_matrix == 'true' && fromJson('["stable", "beta"]') || fromJson('["stable"]') }}
-        exclude:
-          - os: windows-latest
-            rust: beta
-          - os: macos-latest
-            rust: beta
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: nvisy_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -187,15 +156,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Rust cache
-        if: github.event.inputs.skip_cache != 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          key: test-${{ matrix.os }}-${{ matrix.rust }}
+          key: test-${{ matrix.os }}
           cache-all-crates: true
 
       - name: Setup PostgreSQL (Ubuntu only)
@@ -229,11 +195,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: nvisy_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -253,7 +219,6 @@ jobs:
           components: llvm-tools-preview
 
       - name: Setup Rust cache
-        if: github.event.inputs.skip_cache != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           key: coverage
@@ -298,15 +263,15 @@ jobs:
     name: Performance Tests
     runs-on: ubuntu-latest
     needs: check
-    if: github.event.inputs.performance_tests == 'true' || github.event_name == 'schedule'
+    if: github.event_name == 'schedule'
     timeout-minutes: 45
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
           POSTGRES_DB: nvisy_perf
         options: >-
           --health-cmd pg_isready
@@ -374,10 +339,10 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
           POSTGRES_DB: nvisy_integration
         options: >-
           --health-cmd pg_isready
@@ -441,152 +406,3 @@ jobs:
             rm server.pid
           fi
 
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    needs: check
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: docs
-          cache-all-crates: true
-
-      - name: Generate documentation
-        run: |
-          echo "Generating API documentation"
-          cargo doc --no-deps --all-features --workspace --document-private-items
-          echo '<meta http-equiv=refresh content=0;url=nvisy_server/index.html>' > target/doc/index.html
-        env:
-          RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
-
-      - name: Deploy documentation
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./target/doc
-          destination_dir: api-docs
-
-  build-summary:
-    name: Build Summary
-    runs-on: ubuntu-latest
-    needs: [check, test, coverage, performance, integration-tests, docs]
-    if: always()
-    timeout-minutes: 5
-
-    steps:
-      - name: Determine overall status
-        id: status
-        run: |
-          echo "Determining overall build status"
-
-          check_status="${{ needs.check.result }}"
-          test_status="${{ needs.test.result }}"
-          coverage_status="${{ needs.coverage.result }}"
-          performance_status="${{ needs.performance.result }}"
-          integration_status="${{ needs.integration-tests.result }}"
-          docs_status="${{ needs.docs.result }}"
-
-          echo "check_status=$check_status" >> $GITHUB_OUTPUT
-          echo "test_status=$test_status" >> $GITHUB_OUTPUT
-          echo "coverage_status=$coverage_status" >> $GITHUB_OUTPUT
-          echo "performance_status=$performance_status" >> $GITHUB_OUTPUT
-          echo "integration_status=$integration_status" >> $GITHUB_OUTPUT
-          echo "docs_status=$docs_status" >> $GITHUB_OUTPUT
-
-          if [[ "$check_status" == "success" && "$test_status" == "success" ]]; then
-            echo "build_success=true" >> $GITHUB_OUTPUT
-            echo "Build successful"
-          else
-            echo "build_success=false" >> $GITHUB_OUTPUT
-            echo "Build failed"
-          fi
-
-      - name: Create build summary
-        run: |
-          echo "# Build & Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Job | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|---------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Code Quality | ${{ steps.status.outputs.check_status == 'success' && 'Passed' || 'Failed' }} | Format, lint, docs, security |" >> $GITHUB_STEP_SUMMARY
-          echo "| Unit Tests | ${{ steps.status.outputs.test_status == 'success' && 'Passed' || 'Failed' }} | Cross-platform test suite |" >> $GITHUB_STEP_SUMMARY
-          echo "| Coverage | ${{ steps.status.outputs.coverage_status == 'success' && 'Passed' || (steps.status.outputs.coverage_status == 'skipped' && 'Skipped' || 'Failed') }} | Code coverage analysis |" >> $GITHUB_STEP_SUMMARY
-          echo "| Performance | ${{ steps.status.outputs.performance_status == 'success' && 'Passed' || (steps.status.outputs.performance_status == 'skipped' && 'Skipped' || 'Failed') }} | Benchmark regression tests |" >> $GITHUB_STEP_SUMMARY
-          echo "| Integration | ${{ steps.status.outputs.integration_status == 'success' && 'Passed' || (steps.status.outputs.integration_status == 'skipped' && 'Skipped' || 'Failed') }} | End-to-end testing |" >> $GITHUB_STEP_SUMMARY
-          echo "| Documentation | ${{ steps.status.outputs.docs_status == 'success' && 'Passed' || (steps.status.outputs.docs_status == 'skipped' && 'Skipped' || 'Failed') }} | API docs generation |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [[ "${{ steps.status.outputs.build_success }}" == "true" ]]; then
-            echo "## Build Successful" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "All required checks have passed. The code is ready for deployment." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## Build Failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "One or more required checks have failed. Please review the job outputs and fix any issues." >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "_Check individual job logs for detailed information about failures._" >> $GITHUB_STEP_SUMMARY
-
-      - name: Notify on failure
-        if: steps.status.outputs.build_success != 'true' && github.event_name == 'push'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            if (!['refs/heads/main', 'refs/heads/develop'].includes(context.ref)) {
-              return;
-            }
-
-            const issue_body = `
-            ## Build Failure Alert
-
-            **Branch:** ${context.ref}
-            **Commit:** ${context.sha}
-            **Workflow:** ${context.workflow}
-            **Run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
-
-            ### Failed Jobs:
-            - Code Quality: ${{ steps.status.outputs.check_status }}
-            - Unit Tests: ${{ steps.status.outputs.test_status }}
-
-            Please investigate and fix the failing tests.
-
-            _This issue was automatically created by the build workflow._
-            `;
-
-            const existingIssues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ['build-failure', 'automated'],
-              state: 'open'
-            });
-
-            if (existingIssues.data.length === 0) {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `Build failure on ${context.ref}`,
-                body: issue_body,
-                labels: ['build-failure', 'automated', 'bug']
-              });
-            }

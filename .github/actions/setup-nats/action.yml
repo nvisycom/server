@@ -71,9 +71,10 @@ runs:
     - name: Wait for NATS
       id: wait-nats
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
-        chmod +x ${{ github.action_path }}/wait-for-nats.sh
-        if ${{ github.action_path }}/wait-for-nats.sh; then
+        chmod +x scripts/wait-for-nats.sh
+        if scripts/wait-for-nats.sh; then
           echo "ready=true" >> $GITHUB_OUTPUT
         else
           echo "ready=false" >> $GITHUB_OUTPUT

@@ -6,6 +6,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::project_activity_log;
+use crate::types::ActivityType;
 
 /// Project activity log entry representing an action performed in a project.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -17,9 +18,9 @@ pub struct ProjectActivity {
     /// Reference to the project where activity occurred
     pub project_id: Uuid,
     /// Reference to the account that performed the activity (NULL for system actions)
-    pub actor_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
     /// Type of activity performed
-    pub activity_type: String,
+    pub activity_type: ActivityType,
     /// Description of the activity
     pub description: String,
     /// Additional metadata (JSON)
@@ -33,49 +34,35 @@ pub struct ProjectActivity {
 }
 
 /// Data for creating a new project activity log entry.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = project_activity_log)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProjectActivity {
     /// Project ID
     pub project_id: Uuid,
-    /// Actor ID
-    pub actor_id: Option<Uuid>,
+    /// Account ID
+    pub account_id: Option<Uuid>,
     /// Activity type
-    pub activity_type: String,
+    pub activity_type: ActivityType,
     /// Description
-    pub description: String,
+    pub description: Option<String>,
     /// Metadata
-    pub metadata: serde_json::Value,
+    pub metadata: Option<serde_json::Value>,
     /// IP address
     pub ip_address: Option<IpNet>,
     /// User agent
     pub user_agent: Option<String>,
 }
 
-impl Default for NewProjectActivity {
-    fn default() -> Self {
-        Self {
-            project_id: Uuid::new_v4(),
-            actor_id: None,
-            activity_type: String::new(),
-            description: String::new(),
-            metadata: serde_json::Value::Object(serde_json::Map::new()),
-            ip_address: None,
-            user_agent: None,
-        }
-    }
-}
-
 impl ProjectActivity {
     /// Returns whether this activity was performed by a user.
     pub fn has_actor(&self) -> bool {
-        self.actor_id.is_some()
+        self.account_id.is_some()
     }
 
     /// Returns whether this is a system-generated activity.
     pub fn is_system_activity(&self) -> bool {
-        self.actor_id.is_none()
+        self.account_id.is_none()
     }
 
     /// Returns whether this activity has metadata.

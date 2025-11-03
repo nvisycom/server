@@ -79,9 +79,10 @@ runs:
     - name: Wait for PostgreSQL
       id: wait-postgres
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
-        chmod +x ${{ github.action_path }}/wait-for-postgres.sh
-        if ${{ github.action_path }}/wait-for-postgres.sh; then
+        chmod +x scripts/wait-for-postgres.sh
+        if scripts/wait-for-postgres.sh; then
           echo "ready=true" >> $GITHUB_OUTPUT
         else
           echo "ready=false" >> $GITHUB_OUTPUT

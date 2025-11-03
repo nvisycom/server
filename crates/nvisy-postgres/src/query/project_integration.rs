@@ -306,7 +306,7 @@ impl ProjectIntegrationRepository {
         _updated_by: Uuid,
     ) -> PgResult<ProjectIntegration> {
         let changes = UpdateProjectIntegration {
-            config_data: Some(metadata),
+            metadata: Some(metadata),
             ..Default::default()
         };
 
