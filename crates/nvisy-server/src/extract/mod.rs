@@ -38,18 +38,13 @@
 //! - [`AppConnectInfo`] - Client connection information with IP analysis
 //! - [`Version`] - API version extraction and validation
 
-// Authentication and Authorization
-pub mod auth;
-
-// Request Data Extraction
-pub mod reject;
-
-// Connection and Metadata
+mod auth;
 mod connection_info;
+mod reject;
 mod version;
 
 pub use crate::extract::auth::{
-    AuthClaims, AuthContext, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
+    AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
 };
 pub use crate::extract::connection_info::AppConnectInfo;
 pub use crate::extract::reject::{Form, Json, Path, Query, ValidateJson};

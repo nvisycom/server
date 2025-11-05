@@ -6,11 +6,13 @@ use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 
 use crate::extract::{AuthClaims, AuthHeader, AuthState};
 use crate::handler::{ErrorKind, Result};
+use crate::middleware::TRACING_TARGET_AUTH;
 use crate::service::{AuthKeys, DataCollectionPolicy};
 
 /// Refreshes the session token if it's close to expiration.
 ///
 /// This middleware will:
+/// 
 /// - Check if the token is expired and return an error if so
 /// - Refresh the token if it's within the refresh window (5 minutes before expiration)
 /// - Return the response with a new token in the Authorization header if refreshed
@@ -25,12 +27,14 @@ pub async fn refresh_token_middleware(
     // If token is expired, return unauthorized error
     if auth_claims.is_expired() {
         tracing::warn!(
-            target: "server::middleware::auth",
+            target: TRACING_TARGET_AUTH,
             account_id = auth_claims.account_id.to_string(),
             token_id = auth_claims.token_id.to_string(),
-            "Expired token used in request"
+            "expired token used in request"
         );
-        return Err(ErrorKind::Unauthorized.with_context("Authentication token has expired"));
+        return Err(ErrorKind::Unauthorized
+            .with_context("Authentication token has expired")
+            .with_resource("authorization"));
     }
 
     let mut response = next.run(request).await;
@@ -40,11 +44,11 @@ pub async fn refresh_token_middleware(
         match refresh_token(&auth_claims, pg_database, auth_secret_keys, regional_policy).await {
             Ok(new_auth_header) => {
                 tracing::info!(
-                    target: "server::middleware::auth",
+                    target: TRACING_TARGET_AUTH,
                     account_id = auth_claims.account_id.to_string(),
                     old_token_id = auth_claims.token_id.to_string(),
                     new_token_id = new_auth_header.as_auth_claims().token_id.to_string(),
-                    "Token refreshed successfully"
+                    "token refreshed successfully"
                 );
 
                 // Add the new token to the response by converting it to a full response
@@ -64,11 +68,11 @@ pub async fn refresh_token_middleware(
             }
             Err(err) => {
                 tracing::error!(
-                    target: "server::middleware::auth",
+                    target: TRACING_TARGET_AUTH,
                     account_id = auth_claims.account_id.to_string(),
                     token_id = auth_claims.token_id.to_string(),
                     error = err.to_string(),
-                    "Failed to refresh token"
+                    "failed to refresh token"
                 );
             }
         }
@@ -90,7 +94,12 @@ async fn refresh_token(
     let current_token =
         AccountApiTokenRepository::find_token_by_access_token(&mut conn, auth_claims.token_id)
             .await?
-            .ok_or_else(|| ErrorKind::Unauthorized.into_error())?;
+            .ok_or_else(|| {
+                ErrorKind::Unauthorized
+                    .with_message("Account API token not found")
+                    .with_context(format!("Account API token ID: {}", auth_claims.token_id))
+                    .with_resource("authentication")
+            })?;
 
     // Refresh the API token using the refresh token
     let updated_token =
@@ -99,7 +108,12 @@ async fn refresh_token(
     // Get the account information
     let account = AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id)
         .await?
-        .ok_or_else(|| ErrorKind::Unauthorized.into_error())?;
+        .ok_or_else(|| {
+            ErrorKind::Unauthorized
+                .with_message("Account not found")
+                .with_context(format!("Account ID: {}", auth_claims.account_id))
+                .with_resource("authentication")
+        })?;
 
     // Create new auth claims with updated expiration
     let new_auth_claims = AuthClaims::new(account, updated_token, regional_policy);

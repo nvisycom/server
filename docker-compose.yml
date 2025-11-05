@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # PostgreSQL Database
   postgres:
@@ -25,7 +23,7 @@ services:
 
   # NATS with JetStream and KV
   nats:
-    image: nats:2.10-alpine
+    image: nats:2.12-alpine
     container_name: nvisy-nats
     restart: unless-stopped
     ports:
@@ -56,8 +54,8 @@ services:
       context: .
       dockerfile: Dockerfile
       cache_from:
-        - nvisy/api:latest
-    image: nvisy/api:latest
+        - nvisy/server:latest
+    image: nvisy/server:latest
     container_name: nvisy-server
     restart: unless-stopped
     ports:

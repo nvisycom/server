@@ -10,10 +10,11 @@ use crate::handler::{Error, ErrorKind};
 /// Maximum allowed JSON payload size in bytes (1MB).
 const MAX_JSON_PAYLOAD_SIZE: usize = 1024 * 1024;
 
-/// Enhanced JSON extractor with improved error handling and type safety.
+/// Enhanced JSON extractor with improved error handling.
 ///
 /// This extractor provides better error messages compared to the
 /// default Axum JSON extractor. It includes:
+///
 /// - Detailed error messages for different failure types
 /// - Type-safe deserialization with proper error context
 ///
@@ -22,25 +23,10 @@ const MAX_JSON_PAYLOAD_SIZE: usize = 1024 * 1024;
 /// The extractor enforces a maximum payload size of 1MB to prevent
 /// memory exhaustion attacks.
 ///
-/// # Examples
+/// All errors are automatically converted to appropriate HTTP responses
+/// with detailed error messages for better API debugging and user experience.
 ///
-/// ```rust,no_run
-/// use nvisy_server::extract::Json;
-/// use serde::Deserialize;
-///
-/// #[derive(Deserialize)]
-/// struct CreateUser {
-///     name: String,
-///     email: String,
-/// }
-///
-/// async fn create_user(Json(payload): Json<CreateUser>) -> Result<(), ()> {
-///     // payload is now a validated CreateUser struct
-///     Ok(())
-/// }
-/// ```
-///
-/// [`Json`]: axum::extract::Json
+/// [`Json`]: AxumJson
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]
 pub struct Json<T>(pub T);
@@ -56,7 +42,7 @@ impl<T> Json<T> {
         Self(inner)
     }
 
-    /// Consumes the wrapper and returns the inner value.
+    /// Returns the inner value.
     #[inline]
     pub fn into_inner(self) -> T {
         self.0
@@ -168,13 +154,8 @@ impl From<JsonRejection> for Error<'static> {
 
 /// Sanitizes error messages to prevent information leakage while keeping them useful.
 fn sanitize_error_message(message: &str) -> String {
-    // Remove potentially sensitive information while keeping the core error message
-    message
-        .lines()
-        .take(3) // Limit to first 3 lines to prevent excessive verbosity
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(200) // Limit message length
-        .collect()
+    // Limit to first 3 lines to prevent excessive verbosity.
+    let lines = message.lines().take(3).collect::<Vec<_>>();
+    // Limit message length.
+    lines.join(" ").chars().take(200).collect()
 }

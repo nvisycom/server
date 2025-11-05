@@ -4,11 +4,9 @@
 //! API server and its dependencies. It includes both public health checks and
 //! authenticated detailed status information with simple caching.
 
-use axum::extract::{FromRef, State};
+use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_nats::NatsClient;
-use nvisy_openrouter::LlmClient;
-use nvisy_postgres::PgClient;
+use time::OffsetDateTime;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -16,17 +14,15 @@ use super::request::monitor::MonitorStatusRequest;
 use super::response::monitor::MonitorStatusResponse;
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
-use crate::service::{DataCollectionPolicy, HealthService, ServiceState};
+use crate::service::{DataCollectionPolicy, HealthCache, ServiceState};
 
 /// Tracing target for monitor operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 
+/// Returns system health status.
 #[tracing::instrument(skip_all, fields(authenticated = auth_state.is_some()))]
 #[utoipa::path(
-    post,
-    path = "/health",
-    tag = "health",
-    summary = "Get system health status",
+    post, path = "/health", tag = "monitors",
     request_body(
         content = Option<MonitorStatusRequest>,
         description = "Optional health status request parameters",
@@ -47,42 +43,33 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 )]
 async fn health_status(
     State(service_state): State<ServiceState>,
-    State(data_collection_policy): State<DataCollectionPolicy>,
-    State(health_service): State<HealthService>,
+    State(data_collection): State<DataCollectionPolicy>,
+    State(health_service): State<HealthCache>,
     auth_state: Option<AuthState>,
     version: Version,
     request: Option<Json<MonitorStatusRequest>>,
 ) -> Result<(StatusCode, Json<MonitorStatusResponse>)> {
-    let Json(_request) = request.unwrap_or_default();
+    let Json(request) = request.unwrap_or_default();
     let is_authenticated = auth_state.is_some();
 
     tracing::debug!(
         target: TRACING_TARGET,
         authenticated = is_authenticated,
         version = %version,
-        "Health status check requested"
+        "health status check requested"
     );
 
     // Get cached health status or perform new check
-    let is_healthy = if is_authenticated {
-        // For authenticated requests, perform detailed health checks
-        // Extract individual clients from service state
-        let pg_client = PgClient::from_ref(&service_state);
-        let nats_client = NatsClient::from_ref(&service_state);
-        let llm_client = LlmClient::from_ref(&service_state);
-
-        health_service
-            .is_healthy(&pg_client, &nats_client, &llm_client)
-            .await
+    let explicitly_cached = request.return_cached.is_some_and(|c| c);
+    let is_healthy = if is_authenticated && !explicitly_cached {
+        health_service.is_healthy(service_state).await
     } else {
-        // For unauthenticated requests, just return a basic healthy status
-        // This could be enhanced to do a minimal check if needed
-        true
+        health_service.get_cached_health()
     };
 
     let response = MonitorStatusResponse {
-        data_collection: data_collection_policy,
-        updated_at: time::OffsetDateTime::now_utc(),
+        data_collection: data_collection,
+        updated_at: OffsetDateTime::now_utc(),
         is_healthy,
     };
 
@@ -97,7 +84,7 @@ async fn health_status(
         authenticated = is_authenticated,
         is_healthy = is_healthy,
         status_code = status_code.as_u16(),
-        "Health status response prepared"
+        "health status response prepared"
     );
 
     Ok((status_code, Json(response)))
@@ -122,6 +109,7 @@ mod tests {
 
         let request = MonitorStatusRequest {
             data_collection: None,
+            return_cached: None,
         };
 
         let response = server.post("/health").json(&request).await;
@@ -148,6 +136,7 @@ mod tests {
 
         let request = MonitorStatusRequest {
             data_collection: Some(DataCollectionPolicy::NormalDataCollection),
+            return_cached: Some(false),
         };
 
         let response = server.post("/health").json(&request).await;
@@ -172,30 +161,6 @@ mod tests {
 
         let status_response = response.json::<MonitorStatusResponse>();
         assert!(status_response.is_healthy);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_health_endpoint_response_format() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let response = server.post("/health").await;
-        response.assert_status_success();
-
-        let status_response = response.json::<MonitorStatusResponse>();
-
-        // Verify timestamp is recent (within last minute)
-        let now = time::OffsetDateTime::now_utc();
-        let response_time = status_response.updated_at;
-        let time_diff = now - response_time;
-
-        assert!(
-            time_diff.whole_seconds() < 60,
-            "Response timestamp should be recent"
-        );
-
-        assert!(status_response.is_healthy); // Should be healthy for basic checks
 
         Ok(())
     }

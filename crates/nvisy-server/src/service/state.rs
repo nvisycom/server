@@ -4,9 +4,10 @@ use nvisy_nats::NatsClient;
 use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgClient;
 
-use crate::service::auth::{AuthHasher, AuthKeys};
-use crate::service::policy::DataCollectionPolicy;
-use crate::service::{HealthService, PasswordStrength, Result, ServiceConfig};
+use crate::service::{
+    AuthHasher, AuthKeys, DataCollectionPolicy, HealthCache, PasswordStrength, Result,
+    ServiceConfig,
+};
 
 /// Application state.
 ///
@@ -24,7 +25,7 @@ pub struct ServiceState {
     password_strength: PasswordStrength,
     regional_policy: DataCollectionPolicy,
     auth_keys: AuthKeys,
-    health_service: HealthService,
+    health_cache: HealthCache,
 }
 
 impl ServiceState {
@@ -41,7 +42,7 @@ impl ServiceState {
             password_strength: PasswordStrength::new(),
             regional_policy: config.regional_policy(),
             auth_keys: config.load_auth_keys().await?,
-            health_service: HealthService::new(),
+            health_cache: HealthCache::new(),
         };
 
         Ok(service_state)
@@ -66,4 +67,4 @@ impl_di!(auth_hasher: AuthHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(regional_policy: DataCollectionPolicy);
 impl_di!(auth_keys: AuthKeys);
-impl_di!(health_service: HealthService);
+impl_di!(health_cache: HealthCache);

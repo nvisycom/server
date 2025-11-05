@@ -23,13 +23,13 @@ use crate::handler::{Error, ErrorKind};
 pub struct ValidateJson<T>(pub T);
 
 impl<T> ValidateJson<T> {
-    /// Creates a new [`ValidateJson`] wrapper around the provided validated value.
+    /// Creates a new instance of [`ValidateJson`].
     #[inline]
     pub fn new(inner: T) -> Self {
         Self(inner)
     }
 
-    /// Consumes the wrapper and returns the inner validated value.
+    /// Returns the inner validated value.
     #[inline]
     pub fn into_inner(self) -> T {
         self.0

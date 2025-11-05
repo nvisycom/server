@@ -178,13 +178,16 @@ where
                 let error = match rejection.reason() {
                     TypedHeaderRejectionReason::Missing => ErrorKind::MissingAuthToken
                         .with_message("Authentication required")
-                        .with_context("Missing Authorization header with Bearer token"),
+                        .with_context("Missing Authorization header with Bearer token")
+                        .with_resource("authentication"),
                     TypedHeaderRejectionReason::Error(_) => ErrorKind::MalformedAuthToken
                         .with_message("Invalid token format")
-                        .with_context("Authorization header must contain a valid Bearer token"),
+                        .with_context("Authorization header must contain a valid Bearer token")
+                        .with_resource("authentication"),
                     _ => ErrorKind::InternalServerError
                         .with_message("Authentication processing failed")
-                        .with_context("Unexpected error during header extraction"),
+                        .with_context("Unexpected error during header extraction")
+                        .with_resource("authentication"),
                 };
                 Err(error)
             }
@@ -275,7 +278,7 @@ pub struct AuthClaims {
 
 impl AuthClaims {
     /// Default JWT audience identifier for authentication tokens.
-    const JWT_AUDIENCE: &str = "nvisy:api";
+    const JWT_AUDIENCE: &str = "nvisy:server";
     /// Default JWT issuer identifier for authentication tokens.
     const JWT_ISSUER: &str = "nvisy";
     /// Default threshold for token expiration.

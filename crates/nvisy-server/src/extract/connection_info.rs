@@ -5,6 +5,8 @@ use axum::extract::connect_info::Connected;
 use axum::serve::IncomingStream;
 use tokio::net::TcpListener;
 
+// TODO: Delete it?
+
 /// Enhanced connection information extractor for incoming HTTP requests.
 ///
 /// This extractor provides comprehensive information about client connections,
@@ -18,19 +20,6 @@ use tokio::net::TcpListener;
 /// - IP address classification (IPv4/IPv6, private/public)
 /// - Real IP detection (handles proxy headers)
 /// - Connection metadata for security analysis
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use axum::extract::ConnectInfo;
-/// use nvisy_server::extract::AppConnectInfo;
-///
-/// async fn handler(ConnectInfo(conn): ConnectInfo<AppConnectInfo>) {
-///     println!("Client IP: {}", conn.client_ip());
-///     println!("Is private IP: {}", conn.is_private_ip());
-///     println!("Connection time: {:?}", conn.connected_at);
-/// }
-/// ```
 ///
 /// # Security Considerations
 ///

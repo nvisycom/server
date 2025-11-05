@@ -1,5 +1,7 @@
 //! Password strength evaluation using zxcvbn.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use zxcvbn::feedback::Feedback;
 use zxcvbn::time_estimates::CrackTimeSeconds;
@@ -76,22 +78,25 @@ impl PasswordStrength {
         let entropy = zxcvbn(password, user_inputs);
 
         let crack_times = CrackTimes {
-            offline_fast_hashing_seconds: Self::crack_time_to_f64(
+            offline_fast_hashing_seconds: Self::crack_time(
                 entropy.crack_times().offline_fast_hashing_1e10_per_second(),
-            ),
-            offline_slow_hashing_seconds: Self::crack_time_to_f64(
+            )
+            .as_secs_f64(),
+            offline_slow_hashing_seconds: Self::crack_time(
                 entropy.crack_times().offline_slow_hashing_1e4_per_second(),
-            ),
-            online_no_throttling_seconds: Self::crack_time_to_f64(
+            )
+            .as_secs_f64(),
+            online_no_throttling_seconds: Self::crack_time(
                 entropy.crack_times().online_no_throttling_10_per_second(),
-            ),
-            online_throttling_seconds: Self::crack_time_to_f64(
+            )
+            .as_secs_f64(),
+            online_throttling_seconds: Self::crack_time(
                 entropy.crack_times().online_throttling_100_per_hour(),
-            ),
+            )
+            .as_secs_f64(),
         };
 
         let feedback = entropy.feedback().map(Self::convert_feedback);
-
         PasswordStrengthResult {
             score: entropy.score().into(),
             guesses: entropy.guesses(),
@@ -148,13 +153,23 @@ impl PasswordStrength {
         result.score >= self.min_score
     }
 
-    fn crack_time_to_f64(crack_time: CrackTimeSeconds) -> f64 {
+    /// Converts a `CrackTimeSeconds` value to a `Duration`.
+    ///
+    /// # Arguments
+    ///
+    /// * `crack_time` - The crack time to convert
+    fn crack_time(crack_time: CrackTimeSeconds) -> Duration {
         match crack_time {
-            CrackTimeSeconds::Integer(i) => i as f64,
-            CrackTimeSeconds::Float(f) => f,
+            CrackTimeSeconds::Integer(i) => Duration::from_secs(i),
+            CrackTimeSeconds::Float(f) => Duration::from_secs_f64(f),
         }
     }
 
+    /// Converts a `Feedback` value to a `PasswordFeedback`.
+    ///
+    /// # Arguments
+    ///
+    /// * `feedback` - The feedback to convert
     fn convert_feedback(feedback: &Feedback) -> PasswordFeedback {
         PasswordFeedback {
             warning: feedback.warning().map(|w| w.to_string()),

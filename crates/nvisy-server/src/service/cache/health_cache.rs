@@ -3,10 +3,12 @@
 //! Provides centralized health checking for all system components with
 //! atomic boolean caching to avoid repeated expensive operations.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use axum::extract::FromRef;
 use nvisy_nats::NatsClient;
 use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgClient;
@@ -39,10 +41,10 @@ impl HealthCacheEntry {
     async fn get_or_update<F, Fut>(&self, check_fn: F) -> bool
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = bool>,
+        Fut: Future<Output = bool>,
     {
         let now = Instant::now();
-        let last_check = *self.last_check.read().await;
+        let last_check = { *self.last_check.read().await };
 
         // Check if cache is still valid
         if now.duration_since(last_check) < self.cache_duration {
@@ -75,11 +77,11 @@ impl HealthCacheEntry {
 /// Provides centralized health checking for all system components with
 /// simple caching to avoid repeated expensive operations.
 #[derive(Debug, Clone)]
-pub struct HealthService {
+pub struct HealthCache {
     cache: Arc<HealthCacheEntry>,
 }
 
-impl HealthService {
+impl HealthCache {
     /// Create a new health service with default cache duration.
     pub fn new() -> Self {
         Self::with_cache_duration(DEFAULT_CACHE_DURATION)
@@ -90,7 +92,7 @@ impl HealthService {
         tracing::info!(
             target: TRACING_TARGET,
             cache_duration_secs = cache_duration.as_secs(),
-            "Health service initialized"
+            "health service initialized"
         );
 
         Self {
@@ -99,14 +101,18 @@ impl HealthService {
     }
 
     /// Check overall system health with caching.
-    pub async fn is_healthy(
-        &self,
-        pg_client: &PgClient,
-        nats_client: &NatsClient,
-        llm_client: &LlmClient,
-    ) -> bool {
+    pub async fn is_healthy<S>(&self, service_state: S) -> bool
+    where
+        PgClient: FromRef<S>,
+        NatsClient: FromRef<S>,
+        LlmClient: FromRef<S>,
+    {
+        let pg_client = PgClient::from_ref(&service_state);
+        let nats_client = NatsClient::from_ref(&service_state);
+        let llm_client = LlmClient::from_ref(&service_state);
+
         self.cache
-            .get_or_update(|| self.check_all_components(pg_client, nats_client, llm_client))
+            .get_or_update(|| self.check_all_components(&pg_client, &nats_client, &llm_client))
             .await
     }
 
@@ -162,14 +168,14 @@ impl HealthService {
     async fn check_database(&self, pg_client: &PgClient) -> bool {
         match pg_client.get_connection().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET, "Database health check passed");
+                tracing::debug!(target: TRACING_TARGET, "postgres health check passed");
                 true
             }
             Err(e) => {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     error = %e,
-                    "Database health check failed"
+                    "postgres health check failed"
                 );
                 false
             }
@@ -183,8 +189,9 @@ impl HealthService {
         if !stats.is_connected {
             tracing::warn!(
                 target: TRACING_TARGET,
-                "NATS is not connected"
+                "nats is not connected"
             );
+
             return false;
         }
 
@@ -194,7 +201,7 @@ impl HealthService {
                 tracing::debug!(
                     target: TRACING_TARGET,
                     ping_ms = duration.as_millis(),
-                    "NATS health check passed"
+                    "nats health check passed"
                 );
                 true
             }
@@ -202,7 +209,7 @@ impl HealthService {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     error = %e,
-                    "NATS health check failed"
+                    "nats health check failed"
                 );
                 false
             }
@@ -213,14 +220,14 @@ impl HealthService {
     async fn check_openrouter(&self, llm_client: &LlmClient) -> bool {
         match llm_client.list_models().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET, "OpenRouter health check passed");
+                tracing::debug!(target: TRACING_TARGET, "openrouter health check passed");
                 true
             }
             Err(e) => {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     error = %e,
-                    "OpenRouter health check failed"
+                    "openrouter health check failed"
                 );
                 false
             }
@@ -228,7 +235,7 @@ impl HealthService {
     }
 }
 
-impl Default for HealthService {
+impl Default for HealthCache {
     fn default() -> Self {
         Self::new()
     }
@@ -290,24 +297,9 @@ mod tests {
         assert!(!result);
     }
 
-    #[test]
-    fn test_health_service_creation() {
-        let service = HealthService::new();
-        assert!(!service.get_cached_health()); // Should start as unhealthy
-
-        let service_with_duration = HealthService::with_cache_duration(Duration::from_secs(10));
-        assert!(!service_with_duration.get_cached_health());
-    }
-
-    #[test]
-    fn test_health_service_default() {
-        let service = HealthService::default();
-        assert!(!service.get_cached_health());
-    }
-
     #[tokio::test]
     async fn test_health_service_invalidation() {
-        let service = HealthService::new();
+        let service = HealthCache::new();
 
         // This should work without panicking
         service.invalidate().await;
@@ -317,21 +309,21 @@ mod tests {
     #[test]
     fn test_health_service_creation_variants() {
         // Test default creation
-        let service1 = HealthService::new();
+        let service1 = HealthCache::new();
         assert!(!service1.get_cached_health());
 
         // Test with custom duration
-        let service2 = HealthService::with_cache_duration(Duration::from_secs(5));
+        let service2 = HealthCache::with_cache_duration(Duration::from_secs(5));
         assert!(!service2.get_cached_health());
 
         // Test default trait
-        let service3: HealthService = Default::default();
+        let service3: HealthCache = Default::default();
         assert!(!service3.get_cached_health());
     }
 
     #[test]
     fn test_health_service_cached_health_initially_false() {
-        let service = HealthService::new();
+        let service = HealthCache::new();
 
         // Cached value should start as false
         assert!(!service.get_cached_health());

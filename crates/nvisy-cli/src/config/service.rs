@@ -11,7 +11,6 @@
 //! # Basic usage with custom database
 //! nvisy-cli --postgres-url "postgresql://user:pass@localhost:5432/nvisy"
 //!
-
 //! # CORS configuration
 //! nvisy-cli --cors-origins "https://app.example.com,https://dashboard.example.com" \
 //!           --cors-max-age 7200 \
@@ -27,7 +26,6 @@
 //!
 //! ```bash
 //! export POSTGRES_URL="postgresql://user:pass@localhost:5432/nvisy"
-
 //! export CORS_ORIGINS="https://app.example.com,https://dashboard.example.com"
 //! export OPENROUTER_API_KEY="sk-or-v1-your-key-here"
 //! export STRIPE_API_KEY="sk_live_your-stripe-key-here"

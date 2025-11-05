@@ -6,7 +6,7 @@
 pub(crate) const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
     diesel_migrations::embed_migrations!();
 
-// Tracing target constants for consistent logging
+// Tracing target constants for consistent logging.
 pub const TRACING_TARGET_CLIENT: &str = "nvisy_postgres::client";
 pub const TRACING_TARGET_QUERIES: &str = "nvisy_postgres::queries";
 pub const TRACING_TARGET_MIGRATIONS: &str = "nvisy_postgres::migrations";

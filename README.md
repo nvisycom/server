@@ -18,7 +18,7 @@ built with Rust and modern async technologies.
 - **OCR Processing** - PaddleX HTTP API integration for high-accuracy document
   understanding
 - **LLM Chat Assistant** - OpenRouter integration for intelligent document
-  analysis and AI-powered features (optional)
+  analysis and AI-powered features
 - **NATS Messaging** - Real-time updates, job queues, sessions, and caching via
   NATS with JetStream and KV
 - **Production Ready** - Health checks, graceful shutdown, connection pooling,
@@ -30,15 +30,15 @@ built with Rust and modern async technologies.
 ## Architecture
 
 ```
-api/
+server/
 ├── crates/
 │   ├── nvisy-cli/          # HTTP server CLI
-│   ├── nvisy-nats/         # NATS client (messaging, KV, streams, queues)
-│   ├── nvisy-openrouter/   # OpenRouter AI client (assistant chatbot)
-│   ├── nvisy-paddlex/      # PaddleX HTTP API client (OCR)
+│   ├── nvisy-nats/         # NATS client (streams, KV, queues)
+│   ├── nvisy-openrouter/   # OpenRouter AI HTTP API client (assistant chatbot)
+│   ├── nvisy-paddlex/      # PaddleX HTTP API client (OCR, image recognition)
 │   ├── nvisy-postgres/     # PostgreSQL database layer
 │   └── nvisy-server/       # Core HTTP API server
-├── migrations/             # Database migrations
+├── migrations/             # PostgreSQL database migrations
 └── Cargo.toml              # Workspace configuration
 ```
 
@@ -49,29 +49,24 @@ api/
 - Rust 1.89 or higher
 - PostgreSQL 17 or higher
 - NATS server with JetStream enabled
-- PaddleX server (for OCR processing)
-- OpenRouter API key (for LLM chat assistant - optional)
+- PaddleX server with OCR pipeline enabled
+- OpenRouter/OpenAI-compatible API key
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/nvisycom/api.git
-cd api
+git clone https://github.com/nvisycom/server.git
+cd server
 
 # Install required tools
 make install-all
-
-# Generate auth keys
+# Generate auth keys and migrations
 make generate-keys
-
-# Build the workspace
-cargo build --release
-
-# Run database migrations
 make generate-migrations
 
-# Start the server
+# Build the workspace and start the server
+cargo build --release
 cargo run --bin nvisy-cli
 ```
 
@@ -79,8 +74,8 @@ cargo run --bin nvisy-cli
 
 ```bash
 # Build and run with Docker
-docker build -t nvisy-api .
-docker run -p 3000:3000 nvisy-api
+docker build -t nvisy-server .
+docker run -p 3000:3000 nvisy-server
 
 # Or use docker-compose
 docker-compose up -d
@@ -128,51 +123,6 @@ When the server is running, access the interactive API documentation:
 - **Scalar UI**: `http://localhost:3000/api/scalar`
 - **OpenAPI JSON**: `http://localhost:3000/api/openapi.json`
 - **Health Check**: `http://localhost:3000/health`
-
-## Testing
-
-```bash
-# Run all tests
-cargo test --workspace
-
-# Run tests with coverage
-cargo tarpaulin --workspace --out Html
-
-# Run specific crate tests
-cargo test --package nvisy-server
-```
-
-### Code Quality
-
-```bash
-# Format code
-cargo fmt --all
-
-# Run linter
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Security audit
-cargo audit
-
-# Check dependencies
-cargo deny check
-```
-
-### Database Operations
-
-```bash
-# Generate auth keys
-make generate-keys
-
-# Run migrations and update schema
-make generate-migrations
-
-# Revert all migrations
-make clear-migrations
-
-# Create new migration
-diesel migration generate migration_name
-```
 
 ## Changelog
 

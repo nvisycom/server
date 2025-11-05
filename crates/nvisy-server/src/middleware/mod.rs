@@ -30,12 +30,10 @@ pub mod open_api;
 mod rate_limiting;
 pub mod security;
 
-// Re-export authentication middleware
 pub use auth::{refresh_token_middleware, require_admin, require_authentication};
-// Internal re-exports used by extension trait implementations
-// Re-export extension traits (main API for applying middleware)
 pub use extensions::RouterExt;
-// Re-export OpenAPI
 pub use open_api::{OpenApiConfig, RouterOpenApiExt};
-// Re-export security configuration (needed for custom config)
 pub use security::{CorsConfig, SecurityHeadersConfig};
+
+// Tracing target constants for consistent logging.
+pub const TRACING_TARGET_AUTH: &str = "nvisy_server::middleware::auth";

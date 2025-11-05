@@ -15,4 +15,6 @@ use crate::service::DataCollectionPolicy;
 pub struct MonitorStatusRequest {
     /// Preferred data collection policy.
     pub data_collection: Option<DataCollectionPolicy>,
+    /// Whether to return cached health status.
+    pub return_cached: Option<bool>,
 }

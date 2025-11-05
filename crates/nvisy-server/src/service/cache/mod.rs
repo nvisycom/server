@@ -6,8 +6,8 @@
 //!
 //! ## Available Services
 //!
-//! - [`HealthService`] - Health check caching with configurable TTL
+//! - [`HealthCache`] - Health check caching with configurable TTL
 
-mod health;
+mod health_cache;
 
-pub use health::HealthService;
+pub use health_cache::HealthCache;

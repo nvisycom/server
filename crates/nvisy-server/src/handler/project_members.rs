@@ -19,8 +19,7 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::authorize;
-use crate::extract::auth::AuthProvider;
-use crate::extract::{AuthState, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::project_member::UpdateMemberRoleRequest;
 use crate::handler::response::project_member::{

@@ -45,6 +45,7 @@ tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [], optional = true }
 
 # Error handling
 anyhow = { workspace = true, features = ["backtrace"] }
@@ -53,4 +54,3 @@ thiserror = { workspace = true, features = [] }
 # Telemetry (optional)
 uuid = { workspace = true, features = ["v4", "serde"], optional = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls"], optional = true }
-serde_json = { workspace = true, features = [], optional = true }

@@ -23,8 +23,7 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::authorize;
-use crate::extract::auth::AuthProvider;
-use crate::extract::{AuthState, Json, Path, Permission, ValidateJson, Version};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::request::document_file::UpdateFileRequest;
 use crate::handler::response::document_file::{

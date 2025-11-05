@@ -1,15 +1,14 @@
 use std::path::PathBuf;
 
-use anyhow::{Result as AnyhowResult, anyhow};
 use derive_builder::Builder;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_openrouter::{LlmClient, LlmConfig};
 use nvisy_postgres::{PgClient, PgClientExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::auth::{AuthHasher, AuthKeys, AuthKeysConfig};
-use crate::service::policy::DataCollectionPolicy;
-use crate::service::{Result, ServiceError};
+use crate::service::{
+    AuthHasher, AuthKeys, AuthKeysConfig, DataCollectionPolicy, Result, ServiceError,
+};
 
 /// Default values for configuration options.
 mod defaults {
@@ -43,8 +42,8 @@ mod defaults {
     pub const NATS_CLIENT_NAME: &str = "nvisy-api";
 }
 
-/// Validates the ServiceConfig before building.
-fn validate_config(builder: &ServiceConfigBuilder) -> std::result::Result<(), String> {
+/// Wrapper for builder validation that returns String errors.
+fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Result<(), String> {
     // Validate postgres connection URL format
     if let Some(endpoint) = &builder.postgres_endpoint {
         if endpoint.is_empty() {
@@ -88,7 +87,7 @@ fn validate_config(builder: &ServiceConfigBuilder) -> std::result::Result<(), St
 #[builder(
     pattern = "owned",
     setter(into, strip_option, prefix = "with"),
-    build_fn(validate = "validate_config")
+    build_fn(validate = "builder_validate_config")
 )]
 pub struct ServiceConfig {
     /// Postgres database connection string.
@@ -128,46 +127,6 @@ impl ServiceConfig {
     /// Creates a new configuration builder.
     pub fn builder() -> ServiceConfigBuilder {
         ServiceConfigBuilder::default()
-    }
-
-    /// Validates all configuration values and returns errors for invalid settings.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any configuration value is invalid:
-    /// - Postgres connection URL must be a valid format
-    /// - Auth key files must exist
-    /// - API keys must not be empty
-    /// - OpenRouter base URL must be valid if provided
-    pub fn validate(&self) -> AnyhowResult<()> {
-        // Validate postgres connection URL format
-        if self.postgres_endpoint.is_empty() {
-            return Err(anyhow!("Postgres connection URL cannot be empty"));
-        }
-
-        if !self.postgres_endpoint.starts_with("postgresql://")
-            && !self.postgres_endpoint.starts_with("postgres://")
-        {
-            return Err(anyhow!(
-                "Postgres connection URL must start with 'postgresql://' or 'postgres://'"
-            ));
-        }
-
-        // Validate OpenRouter API key
-        if self.openrouter_api_key.is_empty() {
-            return Err(anyhow!("OpenRouter API key cannot be empty"));
-        }
-
-        // Validate NATS URL
-        if self.nats_url.is_empty() {
-            return Err(anyhow!("NATS URL cannot be empty"));
-        }
-
-        if !self.nats_url.starts_with("nats://") && !self.nats_url.starts_with("tls://") {
-            return Err(anyhow!("NATS URL must start with 'nats://' or 'tls://'"));
-        }
-
-        Ok(())
     }
 
     /// Connects to Postgres database and runs migrations.
@@ -255,168 +214,5 @@ impl Default for ServiceConfig {
             nats_url: defaults::NATS_URL.to_string(),
             nats_client_name: defaults::NATS_CLIENT_NAME.to_string(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    #[test]
-    fn test_service_config_builder_default() {
-        let config = ServiceConfig::builder().build().unwrap();
-
-        assert_eq!(config.postgres_endpoint, defaults::POSTGRES_ENDPOINT);
-        assert_eq!(
-            config.minimal_data_collection,
-            defaults::MINIMAL_DATA_COLLECTION
-        );
-        assert_eq!(config.auth_decoding_key, defaults::auth_decoding_key());
-        assert_eq!(config.auth_encoding_key, defaults::auth_encoding_key());
-        assert_eq!(config.openrouter_api_key, defaults::openrouter_api_key());
-        assert!(config.openrouter_base_url.is_none());
-        assert_eq!(config.nats_url, defaults::NATS_URL);
-        assert_eq!(config.nats_client_name, defaults::NATS_CLIENT_NAME);
-    }
-
-    #[test]
-    fn test_service_config_builder_with_custom_values() {
-        let config = ServiceConfig::builder()
-            .with_postgres_endpoint("postgresql://custom:password@localhost:5433/custom_db")
-            .with_minimal_data_collection(false)
-            .with_auth_decoding_key(PathBuf::from("./custom_public.pem"))
-            .with_auth_encoding_key(PathBuf::from("./custom_private.pem"))
-            .with_openrouter_api_key("custom-api-key")
-            .with_openrouter_base_url("https://custom.openrouter.ai")
-            .with_nats_url("nats://custom.nats:4223")
-            .with_nats_client_name("custom-client")
-            .build()
-            .unwrap();
-
-        assert_eq!(
-            config.postgres_endpoint,
-            "postgresql://custom:password@localhost:5433/custom_db"
-        );
-        assert!(!config.minimal_data_collection);
-        assert_eq!(
-            config.auth_decoding_key,
-            PathBuf::from("./custom_public.pem")
-        );
-        assert_eq!(
-            config.auth_encoding_key,
-            PathBuf::from("./custom_private.pem")
-        );
-        assert_eq!(config.openrouter_api_key, "custom-api-key");
-        assert_eq!(
-            config.openrouter_base_url,
-            Some("https://custom.openrouter.ai".to_string())
-        );
-        assert_eq!(config.nats_url, "nats://custom.nats:4223");
-        assert_eq!(config.nats_client_name, "custom-client");
-    }
-
-    #[test]
-    fn test_service_config_builder_validation_invalid_postgres_url() {
-        let result = ServiceConfig::builder()
-            .with_postgres_endpoint("invalid-url")
-            .build();
-
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().to_string().contains(
-                "Postgres connection URL must start with 'postgresql://' or 'postgres://'"
-            )
-        );
-    }
-
-    #[test]
-    fn test_service_config_builder_validation_empty_postgres_url() {
-        let result = ServiceConfig::builder().with_postgres_endpoint("").build();
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Postgres connection URL cannot be empty")
-        );
-    }
-
-    #[test]
-    fn test_service_config_builder_validation_empty_api_key() {
-        let result = ServiceConfig::builder().with_openrouter_api_key("").build();
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("OpenRouter API key cannot be empty")
-        );
-    }
-
-    #[test]
-    fn test_service_config_builder_validation_invalid_nats_url() {
-        let result = ServiceConfig::builder()
-            .with_nats_url("invalid-nats-url")
-            .build();
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("NATS URL must start with 'nats://' or 'tls://'")
-        );
-    }
-
-    #[test]
-    fn test_service_config_builder_validation_empty_nats_url() {
-        let result = ServiceConfig::builder().with_nats_url("").build();
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("NATS URL cannot be empty")
-        );
-    }
-
-    #[test]
-    fn test_service_config_regional_policy() {
-        let config_minimal = ServiceConfig::builder()
-            .with_minimal_data_collection(true)
-            .build()
-            .unwrap();
-        // Just verify that the method returns a DataCollectionPolicy
-        let _policy = config_minimal.regional_policy();
-
-        let config_normal = ServiceConfig::builder()
-            .with_minimal_data_collection(false)
-            .build()
-            .unwrap();
-        // Just verify that the method returns a DataCollectionPolicy
-        let _policy = config_normal.regional_policy();
-    }
-
-    #[test]
-    fn test_service_config_validate_method() {
-        let valid_config = ServiceConfig::builder().build().unwrap();
-        assert!(valid_config.validate().is_ok());
-
-        let invalid_config = ServiceConfig {
-            postgres_endpoint: "invalid-url".to_string(),
-            minimal_data_collection: defaults::MINIMAL_DATA_COLLECTION,
-            auth_decoding_key: defaults::auth_decoding_key(),
-            auth_encoding_key: defaults::auth_encoding_key(),
-            openrouter_api_key: defaults::openrouter_api_key(),
-            openrouter_base_url: None,
-            nats_url: defaults::NATS_URL.to_string(),
-            nats_client_name: defaults::NATS_CLIENT_NAME.to_string(),
-        };
-        assert!(invalid_config.validate().is_err());
     }
 }

@@ -175,12 +175,13 @@ impl AuthState {
                 error = %db_error,
                 account_id = %auth_claims.account_id,
                 token_id = %auth_claims.token_id,
-                "Database connection failed during authentication verification"
+                "database connection failed during authentication verification"
             );
 
             ErrorKind::InternalServerError
                 .with_message("Authentication verification is temporarily unavailable")
                 .with_context("Unable to connect to authentication database")
+                .with_resource("authentication")
         })?;
 
         tracing::debug!(
@@ -189,7 +190,7 @@ impl AuthState {
             account_id = %auth_claims.account_id,
             expires_at = %auth_claims.expires_at,
             is_admin_claim = auth_claims.is_administrator,
-            "Beginning comprehensive authentication verification"
+            "beginning authentication verification"
         );
 
         // Step 1: Verify API token exists and is active
@@ -207,7 +208,7 @@ impl AuthState {
             token_id = %auth_claims.token_id,
             is_admin = account.is_admin,
             token_expires = %api_token.expired_at,
-            "Authentication verification completed successfully"
+            "authentication verification completed successfully"
         );
 
         Ok(Self::from_verified_claims(auth_claims))
@@ -257,22 +258,26 @@ impl AuthState {
                         error = %db_error,
                         token_id = %auth_claims.token_id,
                         account_id = %auth_claims.account_id,
-                        "Database error occurred during API token validation query"
+                        "database error occurred during API token validation query"
                     );
+
                     ErrorKind::InternalServerError
                         .with_message("Authentication verification encountered an error")
                         .with_context("Unable to validate API token credentials")
+                        .with_resource("authentication")
                 })?
                 .ok_or_else(|| {
                     tracing::warn!(
                         target: TRACING_TARGET_AUTHENTICATION,
                         token_id = %auth_claims.token_id,
                         account_id = %auth_claims.account_id,
-                        "Authentication failed: API token not found in database"
+                        "authentication failed: API token not found in database"
                     );
+
                     ErrorKind::Unauthorized
                         .with_message("Authentication token is invalid")
                         .with_context("Your token may have been revoked or expired")
+                        .with_resource("authentication")
                 })?;
 
         // Verify API token hasn't expired at the database level
@@ -285,9 +290,11 @@ impl AuthState {
                 current_time = %time::OffsetDateTime::now_utc(),
                 "Authentication failed: API token expired at database level"
             );
+
             return Err(ErrorKind::Unauthorized
                 .with_message("Your token has expired")
-                .with_context("Please sign in again to continue"));
+                .with_context("Please sign in again to continue")
+                .with_resource("authentication"));
         }
 
         tracing::debug!(
@@ -343,22 +350,26 @@ impl AuthState {
                     error = %db_error,
                     account_id = %auth_claims.account_id,
                     token_id = %auth_claims.token_id,
-                    "Database error occurred during account validation query"
+                    "database error occurred during account validation query"
                 );
+
                 ErrorKind::InternalServerError
                     .with_message("Account verification encountered an error")
                     .with_context("Unable to validate account credentials")
+                    .with_resource("authentication")
             })?
             .ok_or_else(|| {
                 tracing::warn!(
                     target: TRACING_TARGET_AUTHENTICATION,
                     account_id = %auth_claims.account_id,
                     token_id = %auth_claims.token_id,
-                    "Authentication failed: account referenced in token no longer exists"
+                    "authentication failed: account referenced in token no longer exists"
                 );
+
                 ErrorKind::Unauthorized
                     .with_message("Account not found")
                     .with_context("Your account may have been deactivated")
+                    .with_resource("authentication")
             })?;
 
         // Verify account email has been confirmed
@@ -368,11 +379,13 @@ impl AuthState {
                 account_id = %auth_claims.account_id,
                 email = %account.email_address,
                 token_id = %auth_claims.token_id,
-                "Authentication failed: account email verification not completed"
+                "authentication failed: account email verification not completed"
             );
+
             return Err(ErrorKind::Unauthorized
                 .with_message("Email verification required")
-                .with_context("Please check your email and verify your account"));
+                .with_context("Please check your email and verify your account")
+                .with_resource("authentication"));
         }
 
         tracing::debug!(
@@ -380,7 +393,7 @@ impl AuthState {
             account_id = %auth_claims.account_id,
             email = %account.email_address,
             is_admin = account.is_admin,
-            "Account validation successful"
+            "account validation successful"
         );
 
         Ok(account)
@@ -419,18 +432,20 @@ impl AuthState {
                 token_admin_claim = auth_claims.is_administrator,
                 current_admin_status = account.is_admin,
                 email = %account.email_address,
-                "Critical: Admin privilege mismatch detected between token and database"
+                "critical: admin privilege mismatch detected between token and database"
             );
+            
             return Err(ErrorKind::Unauthorized
                 .with_message("Your account privileges have changed")
-                .with_context("Please sign in again to access your updated permissions"));
+                .with_context("Please sign in again to access your updated permissions")
+                .with_resource("authentication"));
         }
 
         tracing::debug!(
             target: TRACING_TARGET_AUTHENTICATION,
             account_id = %auth_claims.account_id,
             is_admin = account.is_admin,
-            "Privilege consistency verification successful"
+            "privilege consistency verification successful"
         );
 
         Ok(())

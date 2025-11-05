@@ -6,7 +6,7 @@
 //!
 //! # Pagination
 //!
-//! All queries that may return large result sets now use the [`Pagination`] struct
+//! All queries that may return large result sets use the [`Pagination`] struct
 //! to provide consistent, bounded pagination across the system.
 
 pub mod account;
@@ -38,9 +38,9 @@ use serde::{Deserialize, Serialize};
 /// Pagination parameters for database queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pagination {
-    /// Maximum number of records to return
+    /// Maximum number of records to return.
     pub limit: i64,
-    /// Number of records to skip
+    /// Number of records to skip.
     pub offset: i64,
 }
 

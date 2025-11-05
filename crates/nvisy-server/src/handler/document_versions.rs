@@ -15,8 +15,7 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::authorize;
-use crate::extract::auth::AuthProvider;
-use crate::extract::{AuthState, Json, Path, Permission, Version};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::response::document_version::{ReadAllVersionsResponse, VersionInfo};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};

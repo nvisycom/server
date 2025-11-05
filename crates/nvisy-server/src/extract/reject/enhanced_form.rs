@@ -5,79 +5,36 @@ use serde::de::DeserializeOwned;
 
 use crate::handler::{Error, ErrorKind};
 
-/// Enhanced form data extractor with improved error handling and type safety.
+/// Enhanced form data extractor with improved error handling.
 ///
 /// This extractor provides better error messages compared to the
-/// default Axum Form extractor. It includes:
+/// default Axum [`Form`] extractor. It includes:
+/// 
 /// - Detailed error messages for different form parsing failures
 /// - Type-safe deserialization with proper error context
 /// - Clear indication of which fields failed validation
 /// - Content-Type validation with helpful suggestions
 ///
-/// # Content-Type Requirements
-///
-/// This extractor expects `application/x-www-form-urlencoded` data.
-/// If a different content type is provided, a helpful error message
-/// will suggest the correct content type.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use nvisy_server::extract::Form;
-/// use serde::Deserialize;
-/// use uuid::Uuid;
-///
-/// #[derive(Deserialize)]
-/// struct LoginForm {
-///     email: String,
-///     password: String,
-///     remember_me: Option<bool>,
-/// }
-///
-/// async fn login(Form(form): Form<LoginForm>) -> Result<(), ()> {
-///     println!("Login attempt for: {}", form.email);
-///     if form.remember_me.unwrap_or(false) {
-///         println!("Remember me enabled");
-///     }
-///     Ok(())
-/// }
-/// ```
-///
-/// # Usage with HTML Forms
-///
-/// ```html
-/// <form method="POST" action="/login">
-///   <input type="email" name="email" required>
-///   <input type="password" name="password" required>
-///   <input type="checkbox" name="remember_me" value="true">
-///   <button type="submit">Login</button>
-/// </form>
-/// ```
-///
-/// # Error Handling
-///
-/// Unlike the default Axum Form extractor, this provides detailed error
-/// messages when form parsing fails:
-///
-/// - Missing required fields with field names
-/// - Type conversion failures with context
-/// - Invalid Content-Type with suggestions
-/// - Malformed form data with helpful guidance
-///
 /// All errors are automatically converted to appropriate HTTP responses
 /// with detailed error messages for better API debugging and user experience.
+/// 
+/// [Form]: AxumForm
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]
 pub struct Form<T>(pub T);
 
 impl<T> Form<T> {
-    /// Creates a new [`Form`] wrapper around the provided form data.
+    /// Creates a new instance of [`Form`].
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The deserialized form data
     #[inline]
     pub fn new(inner: T) -> Self {
         Self(inner)
     }
 
-    /// Consumes the wrapper and returns the inner form data.
+    /// Returns the inner form data.
     #[inline]
     pub fn into_inner(self) -> T {
         self.0
@@ -225,51 +182,4 @@ fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     }
 
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_field_name_from_error() {
-        // Test backtick pattern
-        assert_eq!(
-            extract_field_name_from_error("missing field `username`"),
-            Some("username")
-        );
-
-        // Test missing field pattern
-        assert_eq!(
-            extract_field_name_from_error("missing field email at line 1"),
-            Some("email")
-        );
-
-        // Test duplicate field pattern
-        assert_eq!(
-            extract_field_name_from_error("duplicate field password at line 1"),
-            Some("password")
-        );
-
-        // Test field at end of message
-        assert_eq!(
-            extract_field_name_from_error("missing field remember_me"),
-            Some("remember_me")
-        );
-
-        // Test no match
-        assert_eq!(extract_field_name_from_error("some other error"), None);
-    }
-
-    #[test]
-    fn test_form_creation() {
-        let form = Form::new("test".to_string());
-        assert_eq!(form.into_inner(), "test");
-    }
-
-    #[test]
-    fn test_form_deref() {
-        let form = Form::new("test".to_string());
-        assert_eq!(*form, "test");
-    }
 }

@@ -3,6 +3,8 @@
 //! This module provides comprehensive error handling for the service layer,
 //! covering configuration, database, external service, and system errors.
 
+use std::error::Error;
+
 /// Result type for service operations.
 pub type Result<T> = std::result::Result<T, ServiceError>;
 
@@ -17,7 +19,7 @@ pub enum ServiceError {
     Config {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 
     /// Database connection or query error.
@@ -25,7 +27,7 @@ pub enum ServiceError {
     Database {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 
     /// External service error (NATS, OpenRouter, etc.).
@@ -34,7 +36,7 @@ pub enum ServiceError {
         service: String,
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 
     /// Authentication or authorization error.
@@ -42,7 +44,7 @@ pub enum ServiceError {
     Auth {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 
     /// File system operation error.
@@ -50,23 +52,15 @@ pub enum ServiceError {
     FileSystem {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
-
-    /// Network or connectivity error.
-    #[error("Network error: {message}")]
-    Network {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 
     /// Internal service error.
     #[error("Internal service error: {message}")]
-    Internal {
+    InternalService {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 }
 
@@ -82,7 +76,7 @@ impl ServiceError {
     /// Creates a new configuration error with source.
     pub fn config_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Error + Send + Sync + 'static,
     ) -> Self {
         Self::Config {
             message: message.into(),
@@ -101,7 +95,7 @@ impl ServiceError {
     /// Creates a new database error with source.
     pub fn database_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Error + Send + Sync + 'static,
     ) -> Self {
         Self::Database {
             message: message.into(),
@@ -122,7 +116,7 @@ impl ServiceError {
     pub fn external_service_with_source(
         service: impl Into<String>,
         message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Error + Send + Sync + 'static,
     ) -> Self {
         Self::ExternalService {
             service: service.into(),
@@ -142,7 +136,7 @@ impl ServiceError {
     /// Creates a new authentication error with source.
     pub fn auth_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Error + Send + Sync + 'static,
     ) -> Self {
         Self::Auth {
             message: message.into(),
@@ -161,7 +155,7 @@ impl ServiceError {
     /// Creates a new file system error with source.
     pub fn file_system_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Error + Send + Sync + 'static,
     ) -> Self {
         Self::FileSystem {
             message: message.into(),
@@ -169,28 +163,9 @@ impl ServiceError {
         }
     }
 
-    /// Creates a new network error.
-    pub fn network(message: impl Into<String>) -> Self {
-        Self::Network {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new network error with source.
-    pub fn network_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::Network {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-
     /// Creates a new internal error.
     pub fn internal(message: impl Into<String>) -> Self {
-        Self::Internal {
+        Self::InternalService {
             message: message.into(),
             source: None,
         }
@@ -199,9 +174,9 @@ impl ServiceError {
     /// Creates a new internal error with source.
     pub fn internal_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Error + Send + Sync + 'static,
     ) -> Self {
-        Self::Internal {
+        Self::InternalService {
             message: message.into(),
             source: Some(Box::new(source)),
         }
