@@ -1,7 +1,9 @@
 //! Health monitoring service with simple caching.
 //!
-//! Provides centralized health checking for all system components with
-//! atomic boolean caching to avoid repeated expensive operations.
+//! This module provides a centralized health checking system for monitoring the status
+//! of all critical system components including PostgreSQL, NATS, and OpenRouter services.
+//! It uses atomic boolean caching with configurable TTL to avoid repeated expensive
+//! health check operations while ensuring timely detection of service degradation.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -15,16 +17,26 @@ use nvisy_postgres::PgClient;
 use tokio::sync::RwLock;
 
 /// Tracing target for health service operations.
-const TRACING_TARGET: &str = "nvisy_server::service::health";
+const TRACING_TARGET_HEALTH: &str = "nvisy_server::service::health";
 
 /// Default cache duration for health checks.
 const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(30);
 
-/// Simple health cache entry with atomic boolean and timestamp.
+/// Internal health cache entry with atomic boolean and timestamp.
+///
+/// This structure stores the cached health status using an atomic boolean for
+/// lock-free reads, combined with a RwLock-protected timestamp for cache expiration.
+/// This design optimizes for the common case of reading cached values while still
+/// allowing safe concurrent updates.
 #[derive(Debug)]
 struct HealthCacheEntry {
+    /// Cached health status. Uses relaxed ordering since health status doesn't
+    /// require strict ordering guarantees - eventual consistency is acceptable.
     is_healthy: AtomicBool,
+    /// Timestamp of the last successful health check. Protected by RwLock to
+    /// allow concurrent reads while preventing data races during updates.
     last_check: RwLock<Instant>,
+    /// How long cached values remain valid before requiring a fresh check.
     cache_duration: Duration,
 }
 
@@ -37,7 +49,21 @@ impl HealthCacheEntry {
         }
     }
 
-    /// Get cached value or update with new check.
+    /// Retrieves the cached health status or performs a fresh check if the cache has expired.
+    ///
+    /// This method implements a check-then-act pattern for cache validation:
+    /// 1. Reads the last check timestamp (shared lock)
+    /// 2. Compares against cache duration
+    /// 3. Returns cached value if still valid
+    /// 4. Otherwise performs health check and updates cache (exclusive lock)
+    ///
+    /// # Arguments
+    ///
+    /// * `check_fn` - Async function that performs the actual health check
+    ///
+    /// # Returns
+    ///
+    /// Current health status (either cached or freshly checked)
     async fn get_or_update<F, Fut>(&self, check_fn: F) -> bool
     where
         F: FnOnce() -> Fut,
@@ -61,36 +87,94 @@ impl HealthCacheEntry {
         healthy
     }
 
-    /// Get current cached value without updating.
+    /// Returns the current cached value without triggering any health checks.
+    ///
+    /// This is a lock-free operation that simply reads the atomic boolean.
+    /// The value may be stale if the cache has expired but no check has been
+    /// performed since expiration.
     fn get_cached(&self) -> bool {
         self.is_healthy.load(Ordering::Relaxed)
     }
 
-    /// Force invalidate the cache.
+    /// Forces cache invalidation by backdating the last check timestamp.
+    ///
+    /// After calling this method, the next call to `get_or_update` will
+    /// perform a fresh health check regardless of when the last check occurred.
+    /// This is useful when you know a service state has changed and want to
+    /// ensure the next health check reflects current reality.
     async fn invalidate(&self) {
         *self.last_check.write().await = Instant::now() - self.cache_duration;
     }
 }
 
-/// Health monitoring service with atomic boolean caching.
+/// Health monitoring service with efficient atomic boolean caching.
 ///
-/// Provides centralized health checking for all system components with
-/// simple caching to avoid repeated expensive operations.
+/// This service provides centralized health checking for all critical system components
+/// (PostgreSQL, NATS, OpenRouter) with intelligent caching to balance responsiveness
+/// and performance. Health checks are expensive operations that involve network calls,
+/// so caching prevents excessive load while still detecting failures within the TTL window.
+///
+/// # Caching Strategy
+///
+/// - Health status is cached for a configurable duration (default: 30 seconds)
+/// - Concurrent health checks are performed across all services
+/// - Cache can be explicitly invalidated when service state changes are known
+/// - Atomic operations ensure thread-safe access without locks on reads
+///
+/// # Thread Safety
+///
+/// This type is `Clone` and all clones share the same underlying cache through `Arc`.
+/// All operations are thread-safe and can be called concurrently from multiple tasks.
+///
+/// # Example
+///
+/// ```no_run
+/// # use nvisy_server::service::cache::HealthCache;
+/// # use std::time::Duration;
+/// # async fn example() {
+/// let health = HealthCache::with_cache_duration(Duration::from_secs(60));
+///
+/// // Check health (performs actual checks or returns cached value)
+/// // let is_healthy = health.is_healthy(app_state).await;
+///
+/// // Fast cached read without any checks
+/// let cached = health.get_cached_health();
+///
+/// // Force next check to be fresh
+/// health.invalidate().await;
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct HealthCache {
+    /// Shared cache entry wrapped in Arc for cheap cloning and shared state.
     cache: Arc<HealthCacheEntry>,
 }
 
 impl HealthCache {
-    /// Create a new health service with default cache duration.
+    /// Creates a new health monitoring service with the default cache duration of 30 seconds.
+    ///
+    /// This provides a good balance between responsiveness to failures and avoiding
+    /// excessive health check overhead for most applications.
     pub fn new() -> Self {
         Self::with_cache_duration(DEFAULT_CACHE_DURATION)
     }
 
-    /// Create a new health service with custom cache duration.
+    /// Creates a new health monitoring service with a custom cache duration.
+    ///
+    /// # Arguments
+    ///
+    /// * `cache_duration` - How long health check results remain valid
+    ///
+    /// # Choosing a Cache Duration
+    ///
+    /// - **Shorter durations** (5-15s): More responsive to failures, higher overhead
+    /// - **Medium durations** (30-60s): Balanced approach, suitable for most cases
+    /// - **Longer durations** (2-5m): Lower overhead, slower failure detection
+    ///
+    /// Consider your SLA requirements and health check endpoint call frequency.
     pub fn with_cache_duration(cache_duration: Duration) -> Self {
         tracing::info!(
-            target: TRACING_TARGET,
+            target: TRACING_TARGET_HEALTH,
             cache_duration_secs = cache_duration.as_secs(),
             "health service initialized"
         );
@@ -100,7 +184,29 @@ impl HealthCache {
         }
     }
 
-    /// Check overall system health with caching.
+    /// Checks the overall system health status with intelligent caching.
+    ///
+    /// This method performs comprehensive health checks across all system components:
+    /// - **PostgreSQL**: Verifies database connectivity
+    /// - **NATS**: Checks connection state and performs ping
+    /// - **OpenRouter**: Validates API connectivity
+    ///
+    /// All checks are performed concurrently for optimal performance. Results are
+    /// cached according to the configured TTL. The system is considered healthy
+    /// only if ALL components pass their health checks.
+    ///
+    /// # Arguments
+    ///
+    /// * `service_state` - Application state containing service clients
+    ///
+    /// # Returns
+    ///
+    /// `true` if all services are healthy (cached or fresh), `false` otherwise
+    ///
+    /// # Performance
+    ///
+    /// - **Cache hit**: ~nanoseconds (atomic read)
+    /// - **Cache miss**: Depends on service latencies, typically 50-500ms
     pub async fn is_healthy<S>(&self, service_state: S) -> bool
     where
         PgClient: FromRef<S>,
@@ -116,23 +222,58 @@ impl HealthCache {
             .await
     }
 
-    /// Get current cached health status without updating.
+    /// Returns the currently cached health status without performing any checks.
+    ///
+    /// This is an extremely fast operation (atomic load) that returns the most
+    /// recently cached health status. The value may be stale if:
+    /// - The cache has expired but no check has been performed since
+    /// - Service states have changed since the last check
+    ///
+    /// Use this when you need a fast health indication and can tolerate slightly
+    /// stale data (e.g., for monitoring dashboards, metrics collection).
+    ///
+    /// # Returns
+    ///
+    /// The last cached health status (`true` = healthy, `false` = unhealthy or unknown)
     pub fn get_cached_health(&self) -> bool {
         self.cache.get_cached()
     }
 
-    /// Invalidate cache, forcing fresh check on next access.
+    /// Invalidates the health cache, forcing a fresh check on the next access.
+    ///
+    /// Use this method when you know service state has changed and want to ensure
+    /// the next health check reflects current reality. Common scenarios:
+    /// - After recovering from a known service outage
+    /// - Following a service restart or deployment
+    /// - When manual intervention has fixed a known issue
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use nvisy_server::service::cache::HealthCache;
+    /// # async fn example(health: HealthCache) {
+    /// // After restarting a failed service
+    /// health.invalidate().await;
+    /// // Next health check will perform fresh checks
+    /// # }
+    /// ```
     pub async fn invalidate(&self) {
         self.cache.invalidate().await;
 
         tracing::debug!(
-            target: TRACING_TARGET,
+            target: TRACING_TARGET_HEALTH,
             "Health cache invalidated"
         );
     }
 
-    /// Internal method to check all components concurrently.
-    #[tracing::instrument(skip_all, target = TRACING_TARGET)]
+    /// Performs concurrent health checks across all system components.
+    ///
+    /// This internal method coordinates health checking for PostgreSQL, NATS, and
+    /// OpenRouter services. All checks run concurrently using `tokio::join!` to
+    /// minimize total check duration.
+    ///
+    /// Detailed metrics are logged including per-service status and total duration.
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_HEALTH)]
     async fn check_all_components(
         &self,
         pg_client: &PgClient,
@@ -152,7 +293,7 @@ impl HealthCache {
         let overall_healthy = db_healthy && nats_healthy && openrouter_healthy;
 
         tracing::info!(
-            target: TRACING_TARGET,
+            target: TRACING_TARGET_HEALTH,
             duration_ms = check_duration.as_millis(),
             database_healthy = db_healthy,
             nats_healthy = nats_healthy,
@@ -164,16 +305,19 @@ impl HealthCache {
         overall_healthy
     }
 
-    /// Internal database health check.
+    /// Checks PostgreSQL database health by attempting to acquire a connection.
+    ///
+    /// A successful connection acquisition indicates the database is reachable
+    /// and the connection pool has available capacity.
     async fn check_database(&self, pg_client: &PgClient) -> bool {
         match pg_client.get_connection().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET, "postgres health check passed");
+                tracing::debug!(target: TRACING_TARGET_HEALTH, "postgres health check passed");
                 true
             }
             Err(e) => {
                 tracing::warn!(
-                    target: TRACING_TARGET,
+                    target: TRACING_TARGET_HEALTH,
                     error = %e,
                     "postgres health check failed"
                 );
@@ -182,13 +326,18 @@ impl HealthCache {
         }
     }
 
-    /// Internal NATS health check.
+    /// Checks NATS messaging system health using a two-phase approach.
+    ///
+    /// 1. First checks connection state (fast, no network call)
+    /// 2. Then performs a ping to verify actual connectivity (network round-trip)
+    ///
+    /// This ensures both the client state and actual network connectivity are verified.
     async fn check_nats(&self, nats_client: &NatsClient) -> bool {
         // First check connection state
         let stats = nats_client.stats();
         if !stats.is_connected {
             tracing::warn!(
-                target: TRACING_TARGET,
+                target: TRACING_TARGET_HEALTH,
                 "nats is not connected"
             );
 
@@ -199,7 +348,7 @@ impl HealthCache {
         match nats_client.ping().await {
             Ok(duration) => {
                 tracing::debug!(
-                    target: TRACING_TARGET,
+                    target: TRACING_TARGET_HEALTH,
                     ping_ms = duration.as_millis(),
                     "nats health check passed"
                 );
@@ -207,7 +356,7 @@ impl HealthCache {
             }
             Err(e) => {
                 tracing::warn!(
-                    target: TRACING_TARGET,
+                    target: TRACING_TARGET_HEALTH,
                     error = %e,
                     "nats health check failed"
                 );
@@ -216,16 +365,19 @@ impl HealthCache {
         }
     }
 
-    /// Internal OpenRouter health check.
+    /// Checks OpenRouter LLM service health by listing available models.
+    ///
+    /// A successful model list retrieval indicates the API is accessible and
+    /// authentication is working correctly.
     async fn check_openrouter(&self, llm_client: &LlmClient) -> bool {
         match llm_client.list_models().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET, "openrouter health check passed");
+                tracing::debug!(target: TRACING_TARGET_HEALTH, "openrouter health check passed");
                 true
             }
             Err(e) => {
                 tracing::warn!(
-                    target: TRACING_TARGET,
+                    target: TRACING_TARGET_HEALTH,
                     error = %e,
                     "openrouter health check failed"
                 );

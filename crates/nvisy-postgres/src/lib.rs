@@ -198,12 +198,12 @@ impl From<error::DeadpoolError> for PgError {
             }
             DeadpoolError::PostCreateHook(err) => {
                 // This should not happen with our current hooks, but handle gracefully:
-                tracing::warn!("Unexpected post-create hook error: {}", err);
+                tracing::warn!("unexpected post-create hook error: {}", err);
                 Self::Unexpected(err.to_string().into())
             }
             DeadpoolError::NoRuntimeSpecified => {
                 // This should not happen as we specify tokio runtime, but handle gracefully:
-                tracing::error!("No tokio runtime specified for connection pool");
+                tracing::error!("no tokio runtime specified for connection pool");
                 Self::Unexpected("No runtime specified".into())
             }
             DeadpoolError::Closed => {

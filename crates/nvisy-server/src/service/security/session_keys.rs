@@ -12,7 +12,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use crate::service::{Result, ServiceError};
 
 /// Logging target for authentication key operations.
-const AUTH_KEY_TARGET: &str = "nvisy::service::auth::keys";
+const TRACING_TARGET_AUTH_KEYS: &str = "nvisy_server::service::auth_keys";
 
 /// Default name for the decoding key file.
 const DECODING_KEY_FILE: &str = "public.pem";
@@ -93,7 +93,7 @@ impl Default for AuthKeysConfig {
 /// This struct provides thread-safe access to cryptographic keys used for
 /// encoding and decoding JWT tokens in session management.
 #[derive(Clone)]
-pub struct AuthKeys {
+pub struct SessionKeys {
     inner: Arc<AuthKeysInner>,
 }
 
@@ -104,7 +104,7 @@ struct AuthKeysInner {
     config: AuthKeysConfig,
 }
 
-impl AuthKeys {
+impl SessionKeys {
     /// Creates a new `AuthKeys` instance from the provided configuration.
     ///
     /// # Arguments
@@ -132,7 +132,7 @@ impl AuthKeys {
         config.validate()?;
 
         tracing::info!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             decoding_key_path = %config.decoding_key_path().display(),
             encoding_key_path = %config.encoding_key_path().display(),
             "loading authentication secret keys",
@@ -145,7 +145,7 @@ impl AuthKeys {
         let encoding_key = Self::load_encoding_key(&config).await?;
 
         tracing::info!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             "authentication secret keys loaded successfully",
         );
 
@@ -230,11 +230,12 @@ impl AuthKeys {
         let header = Header::new(Algorithm::EdDSA);
         let token = encode(&header, &claims, self.encoding_key()).map_err(|e| {
             tracing::error!(
-                target: AUTH_KEY_TARGET,
+                target: TRACING_TARGET_AUTH_KEYS,
                 error = %e,
                 "key validation failed during encoding",
             );
-            ServiceError::auth_with_source("key validation encoding failed", e)
+
+            ServiceError::auth("key validation encoding failed").with_source(e)
         })?;
 
         // Try to decode with the decoding key
@@ -243,15 +244,15 @@ impl AuthKeys {
 
         decode::<TestClaims>(&token, self.decoding_key(), &validation).map_err(|e| {
             tracing::error!(
-                target: AUTH_KEY_TARGET,
+                target: TRACING_TARGET_AUTH_KEYS,
                 error = %e,
                 "key validation failed during decoding",
             );
-            ServiceError::auth_with_source("key validation decoding failed", e)
+            ServiceError::auth("key validation decoding failed").with_source(e)
         })?;
 
         tracing::debug!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             "key validation successful",
         );
 
@@ -263,33 +264,33 @@ impl AuthKeys {
         let path = config.decoding_key_path();
 
         tracing::debug!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             path = %path.display(),
             "loading decoding key from file",
         );
 
         let pem_data = tokio::fs::read(path).await.map_err(|e| {
             tracing::error!(
-                target: AUTH_KEY_TARGET,
+                target: TRACING_TARGET_AUTH_KEYS,
                 path = %path.display(),
                 error = %e,
                 "failed to read decoding key file",
             );
-            ServiceError::file_system_with_source("failed to read decoding key file", e)
+            ServiceError::file_system("failed to read decoding key file").with_source(e)
         })?;
 
         let key = DecodingKey::from_ed_pem(&pem_data).map_err(|e| {
             tracing::error!(
-                target: AUTH_KEY_TARGET,
+                target: TRACING_TARGET_AUTH_KEYS,
                 path = %path.display(),
                 error = %e,
                 "failed to parse decoding key PEM data",
             );
-            ServiceError::auth_with_source("invalid decoding key PEM format", e)
+            ServiceError::auth("invalid decoding key PEM format").with_source(e)
         })?;
 
         tracing::debug!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             path = %path.display(),
             key_size_bytes = pem_data.len(),
             "decoding key loaded successfully",
@@ -303,33 +304,35 @@ impl AuthKeys {
         let path = config.encoding_key_path();
 
         tracing::debug!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             path = %path.display(),
             "loading encoding key from file",
         );
 
         let pem_data = tokio::fs::read(path).await.map_err(|e| {
             tracing::error!(
-                target: AUTH_KEY_TARGET,
+                target: TRACING_TARGET_AUTH_KEYS,
                 path = %path.display(),
                 error = %e,
                 "failed to read encoding key file",
             );
-            ServiceError::file_system_with_source("failed to read encoding key file", e)
+
+            ServiceError::file_system("failed to read encoding key file").with_source(e)
         })?;
 
         let key = EncodingKey::from_ed_pem(&pem_data).map_err(|e| {
             tracing::error!(
-                target: AUTH_KEY_TARGET,
+                target: TRACING_TARGET_AUTH_KEYS,
                 path = %path.display(),
                 error = %e,
                 "failed to parse encoding key PEM data",
             );
-            ServiceError::auth_with_source("invalid encoding key PEM format", e)
+
+            ServiceError::auth("invalid encoding key PEM format").with_source(e)
         })?;
 
         tracing::debug!(
-            target: AUTH_KEY_TARGET,
+            target: TRACING_TARGET_AUTH_KEYS,
             path = %path.display(),
             key_size_bytes = pem_data.len(),
             "encoding key loaded successfully",
@@ -339,7 +342,7 @@ impl AuthKeys {
     }
 }
 
-impl fmt::Debug for AuthKeys {
+impl fmt::Debug for SessionKeys {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AuthKeys")
             .field("config", &self.inner.config)
@@ -372,7 +375,7 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
         fs::write(&priv_path, TEST_PRIVATE_KEY).unwrap();
 
-        let keys = AuthKeys::new(&pub_path, &priv_path).await.unwrap();
+        let keys = SessionKeys::new(&pub_path, &priv_path).await.unwrap();
         assert!(keys.validate_keys().is_ok());
     }
 
@@ -385,7 +388,7 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         fs::write(&invalid_path, "invalid pem").unwrap();
         fs::write(&priv_path, TEST_PRIVATE_KEY).unwrap();
 
-        assert!(AuthKeys::new(&invalid_path, &priv_path).await.is_err());
+        assert!(SessionKeys::new(&invalid_path, &priv_path).await.is_err());
     }
 
     #[tokio::test]
@@ -403,7 +406,7 @@ MC4CAQAwBQYDK2VwBCIEIFhQrCxTwEJ4aYZp4QWc5jDjQw3gGkwLG6D8FP+CvKgA
         )
         .unwrap();
 
-        let keys = AuthKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
+        let keys = SessionKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
         assert!(keys.validate_keys().is_err());
     }
 }

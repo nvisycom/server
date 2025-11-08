@@ -1,4 +1,4 @@
-# api.nvisy.com/paddlex
+# api.nvisy.com/paddle
 
 PaddleX HTTP API client for comprehensive document processing and OCR with
 low-code AI development capabilities and multi-hardware support.

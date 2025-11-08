@@ -5,8 +5,7 @@ use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgClient;
 
 use crate::service::{
-    AuthHasher, AuthKeys, DataCollectionPolicy, HealthCache, PasswordStrength, Result,
-    ServiceConfig,
+    SessionKeys, HealthCache, PasswordHasher, PasswordStrength, Result, ServiceConfig,
 };
 
 /// Application state.
@@ -21,10 +20,9 @@ pub struct ServiceState {
     llm_client: LlmClient,
     nats_client: NatsClient,
 
-    auth_hasher: AuthHasher,
+    auth_hasher: PasswordHasher,
     password_strength: PasswordStrength,
-    regional_policy: DataCollectionPolicy,
-    auth_keys: AuthKeys,
+    auth_keys: SessionKeys,
     health_cache: HealthCache,
 }
 
@@ -38,9 +36,8 @@ impl ServiceState {
             llm_client: config.connect_llm().await?,
             nats_client: config.connect_nats().await?,
 
-            auth_hasher: config.create_password_hasher()?,
-            password_strength: PasswordStrength::new(),
-            regional_policy: config.regional_policy(),
+            auth_hasher: PasswordHasher::default(),
+            password_strength: PasswordStrength::default(),
             auth_keys: config.load_auth_keys().await?,
             health_cache: HealthCache::new(),
         };
@@ -63,8 +60,7 @@ impl_di!(pg_client: PgClient);
 impl_di!(llm_client: LlmClient);
 impl_di!(nats_client: NatsClient);
 
-impl_di!(auth_hasher: AuthHasher);
+impl_di!(auth_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
-impl_di!(regional_policy: DataCollectionPolicy);
-impl_di!(auth_keys: AuthKeys);
+impl_di!(auth_keys: SessionKeys);
 impl_di!(health_cache: HealthCache);

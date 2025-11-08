@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::handler::{ErrorKind, Result as HandlerResult};
 
 /// Logging target for rate limiter operations
-const RATE_LIMITER_TARGET: &str = "nvisy::service::security::rate_limiter";
+const TRACING_TARGET_RATE_LIMITER: &str = "nvisy_server::service::rate_limiter";
 
 /// Rate limiter key type
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -182,7 +182,7 @@ impl RateLimiter {
         limiter.start_cleanup_task();
 
         tracing::info!(
-            target: RATE_LIMITER_TARGET,
+            target: TRACING_TARGET_RATE_LIMITER,
             capacity = config.capacity,
             refill_rate = config.refill_rate,
             "Rate limiter initialized"
@@ -209,7 +209,7 @@ impl RateLimiter {
         } else {
             let retry_after = bucket.time_until_available();
             tracing::warn!(
-                target: RATE_LIMITER_TARGET,
+                target: TRACING_TARGET_RATE_LIMITER,
                 key = ?key,
                 retry_after_secs = retry_after.as_secs(),
                 "Rate limit exceeded"
@@ -226,7 +226,7 @@ impl RateLimiter {
         let mut buckets = self.buckets.write().await;
         buckets.remove(key);
         tracing::debug!(
-            target: RATE_LIMITER_TARGET,
+            target: TRACING_TARGET_RATE_LIMITER,
             key = ?key,
             "Rate limit reset"
         );
@@ -237,7 +237,7 @@ impl RateLimiter {
         let mut buckets = self.buckets.write().await;
         buckets.clear();
         tracing::info!(
-            target: RATE_LIMITER_TARGET,
+            target: TRACING_TARGET_RATE_LIMITER,
             "All rate limits cleared"
         );
     }
@@ -267,7 +267,7 @@ impl RateLimiter {
                 let removed = before_count - buckets.len();
                 if removed > 0 {
                     tracing::debug!(
-                        target: RATE_LIMITER_TARGET,
+                        target: TRACING_TARGET_RATE_LIMITER,
                         removed_count = removed,
                         remaining_count = buckets.len(),
                         "Cleaned up inactive rate limit buckets"

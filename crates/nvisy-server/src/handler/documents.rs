@@ -73,7 +73,7 @@ async fn create_document(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentRequest>,
 ) -> Result<(StatusCode, Json<CreateDocumentResponse>)> {
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
@@ -98,12 +98,12 @@ async fn create_document(
 
     let document = DocumentRepository::create_document(&mut conn, new_document).await?;
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         document_id = document.id.to_string(),
-        "new document created successfully",
+        "document created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(document.into())))
@@ -264,7 +264,7 @@ async fn update_document(
 ) -> Result<(StatusCode, Json<UpdateDocumentResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         document_id = path_params.document_id.to_string(),
@@ -293,7 +293,7 @@ async fn update_document(
         DocumentRepository::update_document(&mut conn, path_params.document_id, update_document)
             .await?;
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         document_id = path_params.document_id.to_string(),

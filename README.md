@@ -35,7 +35,7 @@ server/
 │   ├── nvisy-cli/          # HTTP server CLI
 │   ├── nvisy-nats/         # NATS client (streams, KV, queues)
 │   ├── nvisy-openrouter/   # OpenRouter AI HTTP API client (assistant chatbot)
-│   ├── nvisy-paddlex/      # PaddleX HTTP API client (OCR, image recognition)
+│   ├── nvisy-paddle/       # PaddleX HTTP API client (OCR, image recognition)
 │   ├── nvisy-postgres/     # PostgreSQL database layer
 │   └── nvisy-server/       # Core HTTP API server
 ├── migrations/             # PostgreSQL database migrations

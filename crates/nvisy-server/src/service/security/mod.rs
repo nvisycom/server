@@ -9,7 +9,7 @@ mod password_strength;
 mod rate_limiter;
 mod session_keys;
 
-pub use password_hasher::AuthHasher;
+pub use password_hasher::PasswordHasher;
 pub use password_strength::PasswordStrength;
 pub use rate_limiter::{RateLimitKey, RateLimiter};
-pub use session_keys::{AuthKeys, AuthKeysConfig};
+pub use session_keys::{SessionKeys, AuthKeysConfig};

@@ -4,20 +4,15 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
-use crate::service::DataCollectionPolicy;
-
 /// System monitoring status response with health information.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[schema(example = json!({
-    "dataCollection": "normal",
     "updatedAt": "2023-12-07T10:30:00Z",
     "isHealthy": true
 }))]
 pub struct MonitorStatusResponse {
-    /// Current data collection policy in effect.
-    pub data_collection: DataCollectionPolicy,
     /// Timestamp when this status was generated.
     pub updated_at: OffsetDateTime,
     /// Overall system health status.

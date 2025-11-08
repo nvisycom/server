@@ -6,7 +6,7 @@ members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-nats",
     "./crates/nvisy-openrouter",
-    "./crates/nvisy-paddlex",
+    "./crates/nvisy-paddle",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
 ]
@@ -32,7 +32,7 @@ documentation = "https://docs.rs/nvisy-server"
 # Internal crates
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
-nvisy-paddlex = { path = "./crates/nvisy-paddlex", version = "0.1.0" }
+nvisy-paddle = { path = "./crates/nvisy-paddle", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 

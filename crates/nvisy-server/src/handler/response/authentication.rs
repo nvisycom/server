@@ -11,8 +11,6 @@ use uuid::Uuid;
 pub struct LoginResponse {
     /// ID of the account.
     pub account_id: Uuid,
-    /// Regional policy.
-    pub data_collection: bool,
 
     /// Timestamp when the token was issued.
     pub issued_at: time::OffsetDateTime,
@@ -28,8 +26,6 @@ pub struct SignupResponse {
     /// ID of the account.
     pub account_id: Uuid,
 
-    /// Region policy of the account.
-    pub regional_policy: String,
     /// Display name of the account.
     pub display_name: String,
     /// Email address of the account.

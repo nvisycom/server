@@ -66,6 +66,11 @@ pub struct ServiceConfig {
     #[arg(default_value = "postgresql://postgres:postgres@localhost:5432/postgres")]
     pub postgres_url: String,
 
+    /// NATS server URL.
+    #[arg(long, env = "NATS_URL")]
+    #[arg(default_value = "nats://127.0.0.1:4222")]
+    pub nats_url: String,
+
     /// Controls the regional policy used for data collection.
     #[arg(short = 'r', long, env = "DATA_COLLECTION_POLICY")]
     #[arg(default_value_t = true)]
@@ -89,30 +94,18 @@ pub struct ServiceConfig {
     #[arg(long, env = "OPENROUTER_BASE_URL")]
     #[arg(default_value = "https://openrouter.ai/api/v1/")]
     pub openrouter_base_url: Option<String>,
-
-    /// NATS server URL.
-    #[arg(long, env = "NATS_URL")]
-    #[arg(default_value = "nats://127.0.0.1:4222")]
-    pub nats_url: String,
-
-    /// NATS client name for identification.
-    #[arg(long, env = "NATS_CLIENT_NAME")]
-    #[arg(default_value = "nvisy")]
-    pub nats_client_name: String,
 }
 
 impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             postgres_url: "postgresql://postgres:postgres@localhost:5432/postgres".to_owned(),
+            nats_url: "nats://127.0.0.1:4222".to_owned(),
             minimal_data_collection: true,
             auth_decoding_key: "./public.pem".into(),
             auth_encoding_key: "./private.pem".into(),
             openrouter_api_key: format!("sk-or-v1-{}", "A".repeat(64)),
             openrouter_base_url: Some("https://openrouter.ai/api/v1/".to_owned()),
-
-            nats_url: "nats://127.0.0.1:4222".to_owned(),
-            nats_client_name: "nvisy-api".to_owned(),
         }
     }
 }
@@ -121,14 +114,11 @@ impl From<ServiceConfig> for ServerServiceConfig {
     fn from(cli_config: ServiceConfig) -> Self {
         Self {
             postgres_endpoint: cli_config.postgres_url,
-            minimal_data_collection: cli_config.minimal_data_collection,
+            nats_url: cli_config.nats_url,
             auth_decoding_key: cli_config.auth_decoding_key,
             auth_encoding_key: cli_config.auth_encoding_key,
             openrouter_api_key: cli_config.openrouter_api_key,
             openrouter_base_url: cli_config.openrouter_base_url,
-
-            nats_url: cli_config.nats_url,
-            nats_client_name: cli_config.nats_client_name,
         }
     }
 }
@@ -261,7 +251,6 @@ mod tests {
             server_config.postgres_endpoint,
             "postgresql://postgres:postgres@localhost:5432/postgres"
         );
-        assert!(server_config.minimal_data_collection);
     }
 
     #[test]
@@ -326,7 +315,6 @@ mod tests {
             service.postgres_endpoint,
             "postgresql://custom:pass@db:5432/custom"
         );
-        assert!(!service.minimal_data_collection);
 
         assert_eq!(cors.allowed_origins, vec!["https://app.example.com"]);
         assert_eq!(cors.max_age_seconds, 7200);

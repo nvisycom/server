@@ -32,7 +32,16 @@ use crate::service::ServiceState;
 /// Tracing target for project member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_members";
 
-/// Path parameters for member-specific endpoints.
+/// `Path` param for `{accountId}`.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountIdPathParam {
+    /// Unique identifier of the member account.
+    pub account_id: Uuid,
+}
+
+/// Combined path parameters for member-specific endpoints.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]

@@ -9,8 +9,6 @@ use std::str::FromStr;
 
 use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum_extra::TypedHeader;
-use axum_extra::headers::ContentType;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
 use nvisy_postgres::PgClient;
@@ -23,9 +21,11 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::authorize;
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, Version,
+};
 use crate::handler::documents::DocumentPathParams;
-use crate::handler::request::document_file::UpdateFileRequest;
+use crate::handler::request::document_file::{UpdateFileRequest, UploadMode};
 use crate::handler::response::document_file::{
     UpdateFileResponse, UploadFileResponse, UploadedFile,
 };
@@ -38,7 +38,16 @@ const TRACING_TARGET: &str = "nvisy_server::handler::document_files";
 /// Maximum file size: 100MB
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
-/// `Path` param for `{fileId}` handlers.
+/// `Path` param for `{fileId}`.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct FileIdPathParam {
+    /// Unique identifier of the document file.
+    pub file_id: Uuid,
+}
+
+/// Combined path params for document file operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
@@ -49,14 +58,32 @@ pub struct DocFileIdPathParams {
     pub file_id: Uuid,
 }
 
+/// Query parameters for file upload
+#[derive(Debug, Default, Serialize, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadFileQuery {
+    /// Upload mode: "single" for all files in one document, "individual" for one document per file
+    pub upload_mode: UploadMode,
+}
+
 /// Uploads input files to a document for processing.
+///
+/// The `mode` query parameter controls how files are organized:
+/// - `single`: All uploaded files belong to a single document (existing document)
+/// - `individual`: Each uploaded file creates a new document (default)
+///
+/// Query parameters:
+/// - `mode` (optional): Upload mode - "single" or "individual" (default: individual)
+///
+/// Form data:
+/// - `file`: One or more files to upload
 #[tracing::instrument(skip(pg_client, multipart))]
 #[utoipa::path(
     post, path = "/documents/{documentId}/files/", tag = "documents",
     params(DocumentPathParams),
     request_body(
         content = inline(String),
-        description = "Multipart form data with files",
+        description = "Multipart form data with 'mode' field and files",
         content_type = "multipart/form-data",
     ),
     responses(
@@ -86,7 +113,7 @@ async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocumentPathParams>,
-    TypedHeader(content_type): TypedHeader<ContentType>,
+    Query(query): Query<UploadFileQuery>,
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<UploadFileResponse>)> {
@@ -100,15 +127,13 @@ async fn upload_file(
         Permission::UploadFiles,
     );
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        document_id = %path_params.document_id,
-        account_id = %auth_claims.account_id,
-        "Starting file upload"
-    );
+    let upload_mode = query.upload_mode;
+    let mut uploaded_files = Vec::new();
+
+    tracing::debug!(target: TRACING_TARGET, mode = ?upload_mode, "starting file upload");
 
     while let Some(field) = multipart.next_field().await.map_err(|err| {
-        tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
+        tracing::error!(target: TRACING_TARGET, error = %err, "failed to read multipart field");
         ErrorKind::BadRequest
             .with_message("Invalid multipart data")
             .with_context(format!("Failed to parse multipart form: {}", err))
@@ -116,7 +141,7 @@ async fn upload_file(
         let filename = if let Some(filename) = field.file_name() {
             filename.to_string()
         } else {
-            tracing::debug!(target: TRACING_TARGET, "Skipping field without filename");
+            tracing::debug!(target: TRACING_TARGET, "skipping field without filename");
             continue;
         };
 
@@ -135,26 +160,30 @@ async fn upload_file(
             target: TRACING_TARGET,
             filename = %filename,
             content_type = %content_type,
-            "Processing file upload"
+            "processing file upload"
         );
 
-        // Read file data
-        let data = field.bytes().await.map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, filename = %filename, "Failed to read file data");
+        // Read file data with size limit to prevent DoS
+        let mut data = Vec::new();
+        let mut stream = field;
+
+        while let Some(chunk) = stream.chunk().await.map_err(|err| {
+            tracing::error!(target: TRACING_TARGET, error = %err, filename = %filename, "failed to read file chunk");
             ErrorKind::BadRequest
                 .with_message("Failed to read file data")
-                .with_context(format!("Could not read file '{}': {}", filename, err))
-        })?;
-
-        // Check file size
-        if data.len() > MAX_FILE_SIZE {
-            return Err(ErrorKind::BadRequest
-                .with_message("File too large")
-                .with_context(format!(
-                    "File '{}' exceeds maximum size of {} MB",
-                    filename,
-                    MAX_FILE_SIZE / (1024 * 1024)
-                )));
+                .with_context(format!("could not read file '{}': {}", filename, err))
+        })? {
+            // Check size before adding chunk to prevent memory exhaustion
+            if data.len() + chunk.len() > MAX_FILE_SIZE {
+                return Err(ErrorKind::BadRequest
+                    .with_message("File too large")
+                    .with_context(format!(
+                        "file '{}' exceeds maximum size of {} MB",
+                        filename,
+                        MAX_FILE_SIZE / (1024 * 1024)
+                    )));
+            }
+            data.extend_from_slice(&chunk);
         }
 
         // Extract file extension
@@ -174,12 +203,15 @@ async fn upload_file(
             file_id = %file_id,
             path = %storage_path,
             size = data.len(),
-            "Uploading file to NATS document store"
+            "uploading file to NATS document store"
         );
+
+        // Store file size before moving data
+        let file_size_bytes = data.len() as i64;
 
         // Create content data with metadata
         let content_data =
-            DocumentFileStore::<InputFiles>::create_content_data_with_metadata(data.clone().into());
+            DocumentFileStore::<InputFiles>::create_content_data_with_metadata(data.into());
 
         // Create object key for the file
         let object_key = input_fs.create_key(
@@ -197,19 +229,19 @@ async fn upload_file(
                     target: TRACING_TARGET,
                     error = %err,
                     file_id = %file_id,
-                    "Failed to upload file to NATS document store"
+                    "failed to upload file to NATS document store"
                 );
                 ErrorKind::InternalServerError
                     .with_message("Failed to upload file")
                     .with_context(format!("NATS upload failed: {}", err))
             })?;
 
-        tracing::info!(
+        tracing::debug!(
             target: TRACING_TARGET,
             file_id = %file_id,
             nuid = %put_result.nuid,
             size = put_result.size,
-            "File uploaded successfully to NATS document store"
+            "file uploaded successfully to NATS document store"
         );
 
         // Extract SHA-256 hash from content data
@@ -223,7 +255,7 @@ async fn upload_file(
             original_filename: Some(filename.clone()),
             file_extension: Some(file_extension.clone()),
             // require_mode: RequireMode::Text,
-            file_size_bytes: Some(data.len() as i64),
+            file_size_bytes: Some(file_size_bytes),
             storage_path: object_key.as_str().to_string(),
             storage_bucket: Some(InputFiles::bucket_name().to_string()),
             file_hash_sha256: sha256_bytes,
@@ -240,19 +272,19 @@ async fn upload_file(
                     target: TRACING_TARGET,
                     error = %err,
                     file_id = %file_id,
-                    "Failed to create file record in database"
+                    "failed to create file record in database"
                 );
                 ErrorKind::InternalServerError
                     .with_message("Failed to save file metadata")
                     .with_context(format!("Database error: {}", err))
             })?;
 
-        tracing::info!(
+        tracing::debug!(
             target: TRACING_TARGET,
             file_id = %file_id,
             filename = %filename,
-            size = data.len(),
-            "File upload completed successfully"
+            size = file_size_bytes,
+            "file upload completed successfully"
         );
 
         let uploaded_file = UploadedFile {
@@ -262,17 +294,84 @@ async fn upload_file(
             status: created_file.processing_status,
         };
 
-        return Ok((
-            StatusCode::CREATED,
-            Json(UploadFileResponse {
-                files: vec![uploaded_file],
-                count: 1,
-            }),
-        ));
+        // Publish file processing job to queue
+        let job = nvisy_nats::stream::DocumentJob::new_file_processing(
+            created_file.id,
+            path_params.document_id,
+            auth_claims.account_id,
+            object_key.as_str().to_string(),
+            file_extension.clone(),
+            file_size_bytes,
+        );
+
+        // Publish to document job queue
+        let jetstream = nats_client.jetstream();
+        let publisher = nvisy_nats::stream::DocumentJobPublisher::new(&jetstream)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    file_id = %file_id,
+                    "failed to create document job publisher"
+                );
+                ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
+            })?;
+
+        publisher.publish("pending", &job).await.map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                file_id = %file_id,
+                "failed to publish document job"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
+        })?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            job_id = %job.id,
+            "document job published for file processing"
+        );
+
+        uploaded_files.push(uploaded_file);
+
+        // In single mode, we process all files for the single document
+        // In individual mode, stop after first file (for now)
+        match upload_mode {
+            UploadMode::Single => {
+                // Continue processing all files for the single document
+            }
+            UploadMode::Multiple => {
+                // In individual mode, stop after first file (for now)
+                // TODO: Create new documents for each additional file
+                break;
+            }
+        }
     }
 
-    // No files were uploaded
-    Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"))
+    // Check if any files were uploaded
+    if uploaded_files.is_empty() {
+        return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
+    }
+
+    let count = uploaded_files.len();
+    tracing::debug!(
+        target: TRACING_TARGET,
+        document_id = %path_params.document_id,
+        file_count = count,
+        mode = ?upload_mode,
+        "file upload completed"
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(UploadFileResponse {
+            files: uploaded_files,
+            count,
+        }),
+    ))
 }
 
 /// Updates file metadata.
@@ -352,14 +451,14 @@ async fn update_file(
         DocumentFileRepository::update_document_file(&mut conn, path_params.file_id, updates)
             .await
             .map_err(|err| {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
+                tracing::error!(target: TRACING_TARGET, error = %err, "failed to update file");
                 ErrorKind::InternalServerError.with_message("Failed to update file")
             })?;
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         file_id = %updated_file.id,
-        "File updated successfully"
+        "file updated successfully"
     );
 
     let response = UpdateFileResponse {
@@ -417,7 +516,7 @@ async fn download_file(
                 target: TRACING_TARGET,
                 error = %err,
                 file_id = %path_params.file_id,
-                "Failed to find file in database"
+                "failed to find file in database"
             );
             ErrorKind::InternalServerError
                 .with_message("Failed to find file")
@@ -427,7 +526,7 @@ async fn download_file(
             tracing::warn!(
                 target: TRACING_TARGET,
                 file_id = %path_params.file_id,
-                "File not found"
+                "file not found"
             );
             ErrorKind::NotFound.with_message("File not found")
         })?;
@@ -438,7 +537,7 @@ async fn download_file(
             target: TRACING_TARGET,
             error = %err,
             storage_path = %file.storage_path,
-            "Invalid storage path format"
+            "invalid storage path format"
         );
         ErrorKind::InternalServerError
             .with_message("Invalid file storage path")
@@ -454,7 +553,7 @@ async fn download_file(
                 target: TRACING_TARGET,
                 error = %err,
                 file_id = %path_params.file_id,
-                "Failed to retrieve file from NATS document store"
+                "failed to retrieve file from NATS document store"
             );
             ErrorKind::InternalServerError
                 .with_message("Failed to retrieve file")
@@ -464,7 +563,7 @@ async fn download_file(
             tracing::warn!(
                 target: TRACING_TARGET,
                 file_id = %path_params.file_id,
-                "File content not found in storage"
+                "file content not found in storage"
             );
             ErrorKind::NotFound.with_message("File content not found")
         })?;
@@ -483,12 +582,12 @@ async fn download_file(
         content_data.size().to_string().parse().unwrap(),
     );
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         file_id = %path_params.file_id,
         filename = %file.display_name,
         size = content_data.size(),
-        "File downloaded successfully"
+        "file downloaded successfully"
     );
 
     Ok((StatusCode::OK, headers, content_data.into_bytes().to_vec()))
@@ -558,7 +657,7 @@ async fn delete_file(
                 target: TRACING_TARGET,
                 error = %err,
                 file_id = %path_params.file_id,
-                "Failed to find file in database"
+                "failed to find file in database"
             );
             ErrorKind::InternalServerError
                 .with_message("Failed to find file")
@@ -568,7 +667,7 @@ async fn delete_file(
             tracing::warn!(
                 target: TRACING_TARGET,
                 file_id = %path_params.file_id,
-                "File not found"
+                "file not found"
             );
             ErrorKind::NotFound.with_message("File not found")
         })?;
@@ -579,7 +678,7 @@ async fn delete_file(
             target: TRACING_TARGET,
             error = %err,
             storage_path = %file.storage_path,
-            "Invalid storage path format"
+            "invalid storage path format"
         );
         ErrorKind::InternalServerError
             .with_message("Invalid file storage path")
@@ -592,7 +691,7 @@ async fn delete_file(
             target: TRACING_TARGET,
             error = %err,
             file_id = %path_params.file_id,
-            "Failed to delete file from NATS document store"
+            "failed to delete file from NATS document store"
         );
         ErrorKind::InternalServerError
             .with_message("Failed to delete file from storage")
@@ -605,10 +704,10 @@ async fn delete_file(
     // For now, we'll just delete from storage. Database soft delete can be implemented
     // when the update method and deleted_at field are properly available
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         file_id = %path_params.file_id,
-        "File deleted successfully"
+        "file deleted successfully"
     );
 
     Ok(StatusCode::NO_CONTENT)
@@ -681,7 +780,7 @@ fn validate_mime_type(mime_type: &str) -> Result<()> {
         tracing::warn!(
             target: TRACING_TARGET,
             mime_type = %mime_type,
-            "Potentially unsafe MIME type uploaded"
+            "potentially unsafe MIME type uploaded"
         );
     }
 

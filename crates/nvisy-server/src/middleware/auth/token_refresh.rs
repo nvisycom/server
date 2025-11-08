@@ -7,20 +7,19 @@ use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use crate::extract::{AuthClaims, AuthHeader, AuthState};
 use crate::handler::{ErrorKind, Result};
 use crate::middleware::TRACING_TARGET_AUTH;
-use crate::service::{AuthKeys, DataCollectionPolicy};
+use crate::service::SessionKeys;
 
 /// Refreshes the session token if it's close to expiration.
 ///
 /// This middleware will:
-/// 
+///
 /// - Check if the token is expired and return an error if so
 /// - Refresh the token if it's within the refresh window (5 minutes before expiration)
 /// - Return the response with a new token in the Authorization header if refreshed
 pub async fn refresh_token_middleware(
     AuthState(auth_claims): AuthState,
     State(pg_database): State<PgClient>,
-    State(auth_secret_keys): State<AuthKeys>,
-    State(regional_policy): State<DataCollectionPolicy>,
+    State(auth_secret_keys): State<SessionKeys>,
     request: Request,
     next: Next,
 ) -> Result<Response> {
@@ -41,7 +40,7 @@ pub async fn refresh_token_middleware(
 
     // If token should be refreshed, refresh it and add to response
     if auth_claims.expires_soon() {
-        match refresh_token(&auth_claims, pg_database, auth_secret_keys, regional_policy).await {
+        match refresh_token(&auth_claims, pg_database, auth_secret_keys).await {
             Ok(new_auth_header) => {
                 tracing::info!(
                     target: TRACING_TARGET_AUTH,
@@ -85,8 +84,7 @@ pub async fn refresh_token_middleware(
 async fn refresh_token(
     auth_claims: &AuthClaims,
     pg_database: PgClient,
-    auth_secret_keys: AuthKeys,
-    regional_policy: DataCollectionPolicy,
+    auth_secret_keys: SessionKeys,
 ) -> Result<AuthHeader> {
     let mut conn = pg_database.get_connection().await?;
 
@@ -116,7 +114,7 @@ async fn refresh_token(
         })?;
 
     // Create new auth claims with updated expiration
-    let new_auth_claims = AuthClaims::new(account, updated_token, regional_policy);
+    let new_auth_claims = AuthClaims::new(account, updated_token);
     let new_auth_header = AuthHeader::new(new_auth_claims, auth_secret_keys);
 
     Ok(new_auth_header)

@@ -22,6 +22,7 @@ pub struct Error<'a> {
     resource: Option<Cow<'a, str>>,
     context: Option<Cow<'a, str>>,
     message: Option<Cow<'a, str>>,
+    suggestion: Option<Cow<'a, str>>,
 }
 
 impl Error<'static> {
@@ -33,6 +34,7 @@ impl Error<'static> {
             resource: None,
             context: None,
             message: None,
+            suggestion: None,
         }
     }
 }
@@ -68,6 +70,15 @@ impl<'a> Error<'a> {
         }
     }
 
+    /// Sets a suggestion for how to resolve the error.
+    #[inline]
+    pub fn with_suggestion(self, suggestion: impl Into<Cow<'a, str>>) -> Self {
+        Self {
+            suggestion: Some(suggestion.into()),
+            ..self
+        }
+    }
+
     /// Returns the error kind.
     #[inline]
     pub fn kind(&self) -> ErrorKind {
@@ -92,13 +103,20 @@ impl<'a> Error<'a> {
         self.resource.as_deref()
     }
 
+    /// Returns the suggestion if present.
+    #[inline]
+    pub fn suggestion(&self) -> Option<&str> {
+        self.suggestion.as_deref()
+    }
+
     /// Converts this error into a static version by cloning all borrowed data.
-    pub fn into_static(self) -> Error<'static> {
+    pub fn into_owned(self) -> Error<'static> {
         Error {
             kind: self.kind,
             context: self.context.map(|c| Cow::Owned(c.into_owned())),
             message: self.message.map(|m| Cow::Owned(m.into_owned())),
             resource: self.resource.map(|r| Cow::Owned(r.into_owned())),
+            suggestion: self.suggestion.map(|s| Cow::Owned(s.into_owned())),
         }
     }
 }
@@ -111,6 +129,7 @@ impl Default for Error<'static> {
             context: None,
             message: None,
             resource: None,
+            suggestion: None,
         }
     }
 }
@@ -139,6 +158,10 @@ impl fmt::Debug for Error<'_> {
             debug_struct.field("custom_resource", resource);
         }
 
+        if let Some(ref suggestion) = self.suggestion {
+            debug_struct.field("suggestion", suggestion);
+        }
+
         debug_struct.finish()
     }
 }
@@ -156,6 +179,10 @@ impl fmt::Display for Error<'_> {
 
         if let Some(ref resource) = self.resource {
             write!(f, " [resource: {}]", resource)?;
+        }
+
+        if let Some(ref suggestion) = self.suggestion {
+            write!(f, " | suggestion: {}", suggestion)?;
         }
 
         Ok(())
@@ -181,6 +208,11 @@ impl IntoResponse for Error<'_> {
         // Set context if present
         if let Some(context) = self.context {
             response = response.with_context(context);
+        }
+
+        // Set suggestion if present
+        if let Some(suggestion) = self.suggestion {
+            response = response.with_suggestion(suggestion);
         }
 
         response.into_response()
@@ -268,6 +300,14 @@ impl ErrorKind {
         Error::new(self).with_resource(resource)
     }
 
+    /// Creates an [`Error`] with the specified suggestion.
+    ///
+    /// This is a convenience method for creating errors with helpful suggestions.
+    #[inline]
+    pub fn with_suggestion<'a>(self, suggestion: impl Into<Cow<'a, str>>) -> Error<'a> {
+        Error::new(self).with_suggestion(suggestion)
+    }
+
     /// Returns the HTTP status code for this error kind.
     #[inline]
     pub fn status_code(self) -> StatusCode {
@@ -350,12 +390,17 @@ mod tests {
         let error = ErrorKind::NotFound
             .with_message("Document not found")
             .with_resource("document")
-            .with_context("ID: 123");
+            .with_context("ID: 123")
+            .with_suggestion("Check if the document ID is correct");
 
         assert_eq!(error.kind(), ErrorKind::NotFound);
         assert_eq!(error.message(), Some("Document not found"));
         assert_eq!(error.resource(), Some("document"));
         assert_eq!(error.context(), Some("ID: 123"));
+        assert_eq!(
+            error.suggestion(),
+            Some("Check if the document ID is correct")
+        );
     }
 
     #[test]
@@ -397,12 +442,14 @@ mod tests {
         let error = ErrorKind::NotFound
             .with_message("Test message".to_string())
             .with_resource("test_resource".to_string())
-            .with_context("Test context".to_string());
+            .with_context("Test context".to_string())
+            .with_suggestion("Test suggestion".to_string());
 
-        let static_error = error.into_static();
+        let static_error = error.into_owned();
         assert_eq!(static_error.message(), Some("Test message"));
         assert_eq!(static_error.resource(), Some("test_resource"));
         assert_eq!(static_error.context(), Some("Test context"));
+        assert_eq!(static_error.suggestion(), Some("Test suggestion"));
     }
 
     #[test]

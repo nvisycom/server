@@ -4,113 +4,30 @@
 //! algorithm with recommended security parameters. The password hashing and verification
 //! methods are designed for use in HTTP handlers and return appropriate HTTP error
 //! responses for client consumption.
-//!
-//! # HTTP Error Support
-//!
-//! The `hash_password` and `verify_password` methods return handler-compatible errors:
-//! - `hash_password` returns `ErrorKind::InternalServerError` for system failures
-//! - `verify_password` returns `ErrorKind::Unauthorized` for authentication failures
-//!   and `ErrorKind::InternalServerError` for system errors
-//!
-//! # Examples
-//!
-//! ## Service Creation
-//! ```rust
-//! use nvisy_server::service::auth::AuthHasher;
-//!
-//! // Create a service with recommended secure configuration
-//! let service = AuthHasher::new()?; // Returns ServiceError for configuration issues
-//! ```
-//!
-//! ## Handler Usage
-//! ```rust
-//! use nvisy_server::service::auth::AuthHasher;
-//! use nvisy_server::handler::Result;
-//!
-//! async fn login_handler(auth_hasher: AuthHasher) -> Result<()> {
-//!     let password = "user_password";
-//!     let stored_hash = get_stored_hash().await;
-//!
-//!     // Returns HTTP errors suitable for handler responses
-//!     auth_hasher.verify_password(password, &stored_hash)?;
-//!     Ok(())
-//! }
-//! ```
 
 use argon2::password_hash::{Error as ArgonError, SaltString};
-use argon2::{
-    Algorithm, Argon2, Params, PasswordHash, PasswordHasher as _, PasswordVerifier, Version,
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher as _, PasswordVerifier};
 use rand::rngs::OsRng;
 
 use crate::handler::{ErrorKind, Result};
-use crate::service::{Result as ServiceResult, ServiceError};
 
 /// Target identifier for password hashing service logging and error reporting.
-const PASSWORD_HASHING_TARGET: &str = "nvisy::service::auth::hasher";
+const TRACING_TARGER_AUTH_HASHER: &str = "nvisy_server::service::auth_hasher";
 
 /// Secure password hashing and verification service using Argon2id.
 ///
 /// This service provides cryptographically secure password hashing using the Argon2id
 /// algorithm with OWASP recommended parameters.
-///
-/// # Security Features
-///
-/// - Uses Argon2id variant (hybrid of Argon2i and Argon2d)
-/// - OWASP recommended parameters (19 MB memory, 2 iterations, 1 thread)
-/// - Cryptographically secure random salt generation
-/// - Timing-safe password verification
-/// - Comprehensive error handling with security considerations
-///
-/// # Example
-///
-/// ```rust
-/// use nvisy_server::service::auth::AuthHasher;
-///
-/// // Create service with recommended secure configuration
-/// let service = AuthHasher::new()?;
-///
-/// // Hash a password
-/// let password_hash = service.hash_password("secure_password123")?;
-///
-/// // Verify the password
-/// service.verify_password("secure_password123", &password_hash)?;
-/// ```
 #[derive(Debug, Clone)]
-pub struct AuthHasher {
+pub struct PasswordHasher {
     argon2: Argon2<'static>,
 }
 
-impl AuthHasher {
-    /// Creates a new password hashing service with OWASP recommended configuration.
-    ///
-    /// Uses the following parameters:
-    /// - Memory cost: 19456 KiB (≈19 MB)
-    /// - Time cost: 2 iterations
-    /// - Parallelism: 1 thread
-    ///
-    /// # Errors
-    ///
-    /// Returns a service error if Argon2 initialization fails.
-    pub fn new() -> ServiceResult<Self> {
-        let params = Params::new(
-            19456, // 19 MB - OWASP recommended
-            2,     // 2 iterations - OWASP recommended
-            1,     // 1 thread - OWASP recommended
-            None,  // Use default output length (32 bytes)
-        )
-        .map_err(|e| {
-            tracing::error!(
-                target: PASSWORD_HASHING_TARGET,
-                error = %e,
-                "Failed to create Argon2 parameters"
-            );
-
-            ServiceError::config("Invalid password hashing configuration")
-        })?;
-
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-        Ok(Self { argon2 })
+impl PasswordHasher {
+    /// Creates a new instance of the [`PasswordHasher`] service.
+    pub fn new() -> Self {
+        let argon2 = Argon2::default();
+        Self { argon2 }
     }
 
     /// Hashes a password using Argon2id with a cryptographically secure random salt.
@@ -143,16 +60,18 @@ impl AuthHasher {
     /// - The function has consistent timing regardless of password content
     /// - All sensitive data is cleared from memory as soon as possible
     pub fn hash_password(&self, password: &str) -> Result<String> {
-        // Generate cryptographically secure salt
+        // Generate cryptographically secure salt.
         let salt = SaltString::try_from_rng(&mut OsRng).map_err(|e| {
             tracing::error!(
-                target: PASSWORD_HASHING_TARGET,
+                target: TRACING_TARGER_AUTH_HASHER,
                 error = %e,
-                "Failed to generate cryptographically secure salt"
+                "failed to generate cryptographically secure salt"
             );
+
             ErrorKind::InternalServerError
                 .with_message("Password processing failed")
                 .with_context("Salt generation error")
+                .with_resource("authentication")
         })?;
 
         // Hash the password
@@ -161,14 +80,15 @@ impl AuthHasher {
             .hash_password(password.as_bytes(), &salt)
             .map_err(|e| {
                 tracing::error!(
-                    target: PASSWORD_HASHING_TARGET,
+                    target: TRACING_TARGER_AUTH_HASHER,
                     error = %e,
-                    "Password hashing operation failed"
+                    "password hashing operation failed"
                 );
 
                 ErrorKind::InternalServerError
                     .with_message("Password processing failed")
                     .with_context("Hash generation error")
+                    .with_resource("authentication")
             })?;
 
         Ok(password_hash.to_string())
@@ -204,7 +124,7 @@ impl AuthHasher {
         // Parse the stored hash
         let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
             tracing::warn!(
-                target: PASSWORD_HASHING_TARGET,
+                target: TRACING_TARGER_AUTH_HASHER,
                 error = %e,
                 "Invalid password hash format provided"
             );
@@ -212,6 +132,7 @@ impl AuthHasher {
             ErrorKind::InternalServerError
                 .with_message("Authentication system temporarily unavailable")
                 .with_context("Hash format error")
+                .with_resource("authentication")
         })?;
 
         match self
@@ -220,32 +141,35 @@ impl AuthHasher {
         {
             Ok(()) => {
                 tracing::debug!(
-                    target: PASSWORD_HASHING_TARGET,
+                    target: TRACING_TARGER_AUTH_HASHER,
                     "Password verification successful"
                 );
 
                 Ok(())
             }
             Err(ArgonError::Password) => {
+                // TODO: Log account id.
                 tracing::debug!(
-                    target: PASSWORD_HASHING_TARGET,
-                    "Password verification failed - incorrect password provided"
+                    target: TRACING_TARGER_AUTH_HASHER,
+                    "Password verification failed: incorrect password provided"
                 );
 
                 Err(ErrorKind::Unauthorized
                     .with_message("Authentication failed")
-                    .with_context("Invalid credentials"))
+                    .with_context("Invalid credentials")
+                    .with_resource("authentication"))
             }
             Err(e) => {
                 tracing::error!(
-                    target: PASSWORD_HASHING_TARGET,
+                    target: TRACING_TARGER_AUTH_HASHER,
                     error = %e,
                     "Password verification system error"
                 );
 
                 Err(ErrorKind::InternalServerError
-                    .with_message("Authentication system temporarily unavailable")
-                    .with_context("Verification error"))
+                    .with_message("Authentication temporarily unavailable")
+                    .with_context("Verification error")
+                    .with_resource("authentication"))
             }
         }
     }
@@ -274,7 +198,7 @@ impl AuthHasher {
             .map(|_| rand::rng().sample(rand::distr::Alphanumeric) as char)
             .collect();
 
-        // Hash the dummy password and verify - this will always fail
+        // Hash the dummy password and verify, this will always fail
         // but takes the same time as a real verification
         if let Ok(dummy_hash) = self.hash_password(&dummy_password) {
             let _ = self.verify_password(password, &dummy_hash);
@@ -284,9 +208,9 @@ impl AuthHasher {
     }
 }
 
-impl Default for AuthHasher {
+impl Default for PasswordHasher {
     fn default() -> Self {
-        Self::new().expect("Failed to create default AuthHasher service")
+        Self::new()
     }
 }
 
@@ -296,7 +220,7 @@ mod tests {
 
     #[test]
     fn hash_and_verify_password() -> anyhow::Result<()> {
-        let hasher = AuthHasher::new()?;
+        let hasher = PasswordHasher::new();
         let password = "secure_password_123";
         let hash = hasher.hash_password(password)?;
 
@@ -309,7 +233,7 @@ mod tests {
 
     #[test]
     fn hash_produces_unique_salts() -> anyhow::Result<()> {
-        let hasher = AuthHasher::new()?;
+        let hasher = PasswordHasher::new();
         let password = "test_password";
 
         let hash1 = hasher.hash_password(password)?;
@@ -324,7 +248,7 @@ mod tests {
 
     #[test]
     fn verify_password_returns_unauthorized_for_wrong_password() -> anyhow::Result<()> {
-        let hasher = AuthHasher::new()?;
+        let hasher = PasswordHasher::new();
         let correct_password = "correct_password";
         let wrong_password = "wrong_password";
         let hash = hasher
@@ -339,19 +263,21 @@ mod tests {
     }
 
     #[test]
-    fn verify_password_returns_error_for_invalid_hash() {
-        let hasher = AuthHasher::new().unwrap();
+    fn verify_password_returns_error_for_invalid_hash() -> anyhow::Result<()> {
+        let hasher = PasswordHasher::new();
         let password = "test_password";
         let invalid_hash = "invalid_hash_format";
 
         // Should fail with invalid hash format
         let result = hasher.verify_password(password, invalid_hash);
         assert!(result.is_err());
+
+        Ok(())
     }
 
     #[test]
     fn password_hasher_http_error_integration() -> anyhow::Result<()> {
-        let hasher = AuthHasher::new()?;
+        let hasher = PasswordHasher::new();
         let password = "secure_test_password_123";
 
         // Test successful hashing - should return a valid hash string

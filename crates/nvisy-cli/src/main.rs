@@ -79,12 +79,12 @@ impl Cli {
 #[tokio::main]
 async fn main() {
     let Err(error) = run_application().await else {
-        tracing::info!(target: TRACING_TARGET_SERVER_SHUTDOWN, "Application terminated successfully");
+        tracing::info!(target: TRACING_TARGET_SERVER_SHUTDOWN, "application terminated successfully");
         process::exit(0);
     };
 
     if tracing::enabled!(tracing::Level::ERROR) {
-        tracing::error!(target: TRACING_TARGET_SERVER_SHUTDOWN, error = %error, "Application terminated with error");
+        tracing::error!(target: TRACING_TARGET_SERVER_SHUTDOWN, error = %error, "application terminated with error");
     } else {
         eprintln!("Application terminated with error: {error:#}");
     }
@@ -123,14 +123,11 @@ async fn run_application() -> anyhow::Result<()> {
     // Log service configuration details
     tracing::info!(
         target: TRACING_TARGET_CONFIG,
-        postgres_url = %service_config.postgres_endpoint,
-        nats_url = %service_config.nats_url,
-        minimal_data_collection = service_config.minimal_data_collection,
         cors_origins = ?cors_config.allowed_origins,
         cors_credentials = cors_config.allow_credentials,
         openapi_json_path = %openapi_config.open_api_json,
         swagger_path = %openapi_config.swagger_ui,
-        "Service configuration loaded successfully"
+        "service configuration loaded successfully"
     );
 
     // Start the server with enhanced error handling and logging
@@ -156,7 +153,7 @@ fn create_telemetry_context(telemetry_config: &TelemetryConfig) -> Option<Teleme
     if !telemetry_config.enabled {
         tracing::debug!(
             target: TRACING_TARGET_SERVER_STARTUP,
-            "Telemetry disabled by configuration"
+            "telemetry disabled by configuration"
         );
 
         return None;
@@ -171,7 +168,7 @@ fn create_telemetry_context(telemetry_config: &TelemetryConfig) -> Option<Teleme
                 endpoint = %context.endpoint(),
                 collect_usage = context.should_collect_usage(),
                 collect_crashes = context.should_collect_crashes(),
-                "Telemetry context initialized"
+                "telemetry context initialized"
             );
 
             Some(context)
@@ -180,7 +177,7 @@ fn create_telemetry_context(telemetry_config: &TelemetryConfig) -> Option<Teleme
             tracing::warn!(
                 target: TRACING_TARGET_SERVER_STARTUP,
                 error = %error,
-                "Failed to create telemetry context"
+                "failed to create telemetry context"
             );
 
             None
@@ -194,7 +191,7 @@ fn log_startup_info() {
         target: TRACING_TARGET_SERVER_STARTUP,
         version = env!("CARGO_PKG_VERSION"),
         rust_version = env!("CARGO_PKG_RUST_VERSION"),
-        "Starting Nvisy CLI"
+        "starting Nvisy CLI"
     );
 
     tracing::debug!(
@@ -203,7 +200,7 @@ fn log_startup_info() {
         arch = std::env::consts::ARCH,
         os = std::env::consts::OS,
         features = ?get_enabled_features(),
-        "System and build information"
+        "system and build information"
     );
 }
 

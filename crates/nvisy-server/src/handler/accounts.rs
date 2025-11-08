@@ -16,7 +16,7 @@ use super::request::account::UpdateAccountRequest;
 use super::response::account::{DeleteAccountResponse, GetAccountResponse, UpdateAccountResponse};
 use crate::extract::{AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
-use crate::service::{AuthHasher, PasswordStrength, ServiceState};
+use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
 /// Tracing target for account operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
@@ -103,7 +103,7 @@ async fn get_own_account(
 )]
 async fn update_own_account(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<AuthHasher>,
+    State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateAccountRequest>,

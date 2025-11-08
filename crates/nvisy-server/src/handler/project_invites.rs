@@ -32,7 +32,16 @@ use crate::service::ServiceState;
 /// Tracing target for project invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_invites";
 
-/// Path parameters for invite-specific endpoints.
+/// `Path` param for `{inviteId}`.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteIdPathParam {
+    /// Unique identifier of the invite.
+    pub invite_id: Uuid,
+}
+
+/// Combined path parameters for invite-specific endpoints.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]

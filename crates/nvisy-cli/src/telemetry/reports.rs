@@ -161,7 +161,7 @@ impl TelemetryClient {
     /// Returns an error if the request fails or telemetry is disabled.
     pub async fn send_usage_report(&self, mut report: UsageReport) -> Result<()> {
         if !self.config.enabled || !self.config.collect_usage {
-            tracing::debug!("Usage telemetry disabled, skipping report");
+            tracing::debug!("usage telemetry disabled, skipping report");
             return Ok(());
         }
 
@@ -173,7 +173,7 @@ impl TelemetryClient {
         tracing::debug!(
             event_type = ?report.event_type,
             session_id = %report.platform.session_id,
-            "Sending usage report"
+            "sending usage report"
         );
 
         let response = self
@@ -185,11 +185,11 @@ impl TelemetryClient {
             .context("Failed to send usage report")?;
 
         if response.status().is_success() {
-            tracing::trace!("Usage report sent successfully");
+            tracing::trace!("usage report sent successfully");
         } else {
             tracing::warn!(
                 status = %response.status(),
-                "Usage report failed with non-success status"
+                "usage report failed with non-success status"
             );
         }
 
@@ -203,7 +203,7 @@ impl TelemetryClient {
     /// Returns an error if the request fails or telemetry is disabled.
     pub async fn send_crash_report(&self, mut report: CrashReport) -> Result<()> {
         if !self.config.enabled || !self.config.collect_crashes {
-            tracing::debug!("Crash telemetry disabled, skipping report");
+            tracing::debug!("crash telemetry disabled, skipping report");
             return Ok(());
         }
 
@@ -221,7 +221,7 @@ impl TelemetryClient {
             session_id = %report.platform.session_id,
             error_code = ?report.error_code,
             recoverable = report.recoverable,
-            "Sending crash report"
+            "sending crash report"
         );
 
         let response = self
@@ -233,11 +233,11 @@ impl TelemetryClient {
             .context("Failed to send crash report")?;
 
         if response.status().is_success() {
-            tracing::trace!("Crash report sent successfully");
+            tracing::trace!("crash report sent successfully");
         } else {
             tracing::warn!(
                 status = %response.status(),
-                "Crash report failed with non-success status"
+                "crash report failed with non-success status"
             );
         }
 
@@ -253,7 +253,7 @@ impl TelemetryClient {
         let client = self.clone();
         tokio::spawn(async move {
             if let Err(e) = client.send_usage_report(report).await {
-                tracing::warn!(error = %e, "Failed to send usage report in background");
+                tracing::warn!(error = %e, "failed to send usage report in background");
             }
         });
     }
@@ -267,7 +267,7 @@ impl TelemetryClient {
         let client = self.clone();
         tokio::spawn(async move {
             if let Err(e) = client.send_crash_report(report).await {
-                tracing::warn!(error = %e, "Failed to send crash report in background");
+                tracing::warn!(error = %e, "failed to send crash report in background");
             }
         });
     }

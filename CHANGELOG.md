@@ -27,7 +27,7 @@ and this project adheres to
 - **nvisy-server** - Core HTTP API server with Axum framework
 - **nvisy-postgres** - Type-safe database layer with async connection pooling
 - **nvisy-openrouter** - OpenRouter AI integration client
-- **nvisy-paddlex** - PaddleX HTTP API client for document processing and OCR
+- **nvisy-paddle** - PaddleX HTTP API client for document processing and OCR
 - **nvisy-nats** - NATS messaging client
 - **nvisy-cli** - Server CLI with enhanced lifecycle management
 

@@ -45,7 +45,7 @@ use uuid::Uuid;
 
 use crate::TRACING_TARGET_AUTHENTICATION;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{AuthKeys, DataCollectionPolicy};
+use crate::service::{SessionKeys};
 
 /// JWT authentication header extractor and response generator.
 ///
@@ -91,7 +91,7 @@ use crate::service::{AuthKeys, DataCollectionPolicy};
 #[derive(Debug, Clone)]
 pub struct AuthHeader {
     auth_claims: AuthClaims,
-    auth_secret_keys: AuthKeys,
+    auth_secret_keys: SessionKeys,
 }
 
 impl AuthHeader {
@@ -102,7 +102,7 @@ impl AuthHeader {
     /// * `claims` - The JWT claims to include in the token
     /// * `keys` - The cryptographic keys for signing the token
     #[inline]
-    pub const fn new(claims: AuthClaims, keys: AuthKeys) -> Self {
+    pub const fn new(claims: AuthClaims, keys: SessionKeys) -> Self {
         Self {
             auth_claims: claims,
             auth_secret_keys: keys,
@@ -130,7 +130,7 @@ impl AuthHeader {
     /// Returns an error if the token is invalid, expired, or malformed.
     fn from_header(
         authorization_header: TypedHeader<Authorization<Bearer>>,
-        auth_secret_keys: AuthKeys,
+        auth_secret_keys: SessionKeys,
     ) -> Result<Self> {
         let decoding_key = auth_secret_keys.decoding_key();
         let auth_claims = AuthClaims::from_header(authorization_header, decoding_key)?;
@@ -153,7 +153,7 @@ impl AuthHeader {
 impl<S> FromRequestParts<S> for AuthHeader
 where
     S: Sync + Send,
-    AuthKeys: FromRef<S>,
+    SessionKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -165,7 +165,7 @@ where
 
         // Extract Bearer token from Authorization header
         type AuthBearerHeader = TypedHeader<Authorization<Bearer>>;
-        let auth_keys = AuthKeys::from_ref(state);
+        let auth_keys = SessionKeys::from_ref(state);
 
         match AuthBearerHeader::from_request_parts(parts, state).await {
             Ok(bearer_header) => {
@@ -268,9 +268,6 @@ pub struct AuthClaims {
     pub expires_at: OffsetDateTime,
 
     // Private (or custom) claims
-    /// Regional data collection policy.
-    #[serde(rename = "pol")]
-    pub data_collection: DataCollectionPolicy,
     /// Is administrator flag.
     #[serde(rename = "cre")]
     pub is_administrator: bool,
@@ -301,7 +298,6 @@ impl AuthClaims {
     pub fn new(
         account_model: Account,
         account_api_token: AccountApiToken,
-        data_collection_policy: DataCollectionPolicy,
     ) -> Self {
         Self {
             issued_by: Self::JWT_ISSUER.to_owned(),
@@ -310,7 +306,6 @@ impl AuthClaims {
             account_id: account_model.id,
             issued_at: account_api_token.issued_at,
             expires_at: account_api_token.expired_at,
-            data_collection: data_collection_policy,
             is_administrator: account_model.is_admin,
         }
     }

@@ -24,6 +24,9 @@ pub struct ErrorResponse<'a> {
     /// Internal context for debugging (optional, not exposed to client)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<Cow<'a, str>>,
+    /// Helpful suggestion for resolving the error (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<Cow<'a, str>>,
     /// HTTP status code (not serialized in JSON)
     #[serde(skip)]
     pub status: StatusCode,
@@ -96,6 +99,7 @@ impl<'a> ErrorResponse<'a> {
             message: Cow::Borrowed(message),
             resource: None,
             context: None,
+            suggestion: None,
             status,
         }
     }
@@ -126,6 +130,17 @@ impl<'a> ErrorResponse<'a> {
         self.context = Some(match self.context {
             Some(existing) => Cow::Owned(format!("{}; {}", existing, new_context)),
             None => new_context,
+        });
+        self
+    }
+
+    /// Attaches a suggestion to the error response.
+    /// If a suggestion already exists, it merges them with a separator.
+    pub fn with_suggestion(mut self, suggestion: impl Into<Cow<'a, str>>) -> Self {
+        let new_suggestion = suggestion.into();
+        self.suggestion = Some(match self.suggestion {
+            Some(existing) => Cow::Owned(format!("{}; {}", existing, new_suggestion)),
+            None => new_suggestion,
         });
         self
     }
@@ -187,7 +202,8 @@ mod tests {
         let response = ErrorResponse::BAD_REQUEST
             .with_resource("test_resource")
             .with_message("Test message")
-            .with_context("Test context");
+            .with_context("Test context")
+            .with_suggestion("Try fixing the data");
 
         let json = serde_json::to_string(&response).unwrap();
 
@@ -196,8 +212,21 @@ mod tests {
         assert!(json.contains("message"));
         assert!(json.contains("resource"));
         assert!(json.contains("context"));
+        assert!(json.contains("suggestion"));
 
         // Should not contain status code (marked as skip)
         assert!(!json.contains("status"));
+    }
+
+    #[test]
+    fn error_response_merging_suggestion() {
+        let response = ErrorResponse::BAD_REQUEST
+            .with_suggestion("Check your input")
+            .with_suggestion("Verify the format");
+
+        assert_eq!(
+            response.suggestion.as_deref(),
+            Some("Check your input; Verify the format")
+        );
     }
 }

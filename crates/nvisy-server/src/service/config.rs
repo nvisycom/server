@@ -6,9 +6,7 @@ use nvisy_openrouter::{LlmClient, LlmConfig};
 use nvisy_postgres::{PgClient, PgClientExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::{
-    AuthHasher, AuthKeys, AuthKeysConfig, DataCollectionPolicy, Result, ServiceError,
-};
+use crate::service::{SessionKeys, AuthKeysConfig, Result, ServiceError};
 
 /// Default values for configuration options.
 mod defaults {
@@ -17,8 +15,8 @@ mod defaults {
     /// Default Postgres connection string for development.
     pub const POSTGRES_ENDPOINT: &str = "postgresql://postgres:postgres@localhost:5432/postgres";
 
-    /// Default data collection policy (minimal for development).
-    pub const MINIMAL_DATA_COLLECTION: bool = true;
+    /// Default NATS URL.
+    pub const NATS_URL: &str = "nats://127.0.0.1:4222";
 
     /// Default path to JWT decoding key.
     pub fn auth_decoding_key() -> PathBuf {
@@ -34,12 +32,6 @@ mod defaults {
     pub fn openrouter_api_key() -> String {
         format!("sk-or-v1-{}", "A".repeat(64))
     }
-
-    /// Default NATS URL.
-    pub const NATS_URL: &str = "nats://127.0.0.1:4222";
-
-    /// Default NATS client name.
-    pub const NATS_CLIENT_NAME: &str = "nvisy-api";
 }
 
 /// Wrapper for builder validation that returns String errors.
@@ -94,9 +86,9 @@ pub struct ServiceConfig {
     #[builder(default = "defaults::POSTGRES_ENDPOINT.to_string()")]
     pub postgres_endpoint: String,
 
-    /// Controls the regional policy used for data collection.
-    #[builder(default = "defaults::MINIMAL_DATA_COLLECTION")]
-    pub minimal_data_collection: bool,
+    /// NATS server URL.
+    #[builder(default = "defaults::NATS_URL.to_string()")]
+    pub nats_url: String,
 
     /// File path to the JWT decoding (public) key used for sessions.
     #[builder(default = "defaults::auth_decoding_key()")]
@@ -113,14 +105,6 @@ pub struct ServiceConfig {
     /// OpenRouter base URL.
     #[builder(default)]
     pub openrouter_base_url: Option<String>,
-
-    /// NATS server URL.
-    #[builder(default = "defaults::NATS_URL.to_string()")]
-    pub nats_url: String,
-
-    /// NATS client name.
-    #[builder(default = "defaults::NATS_CLIENT_NAME.to_string()")]
-    pub nats_client_name: String,
 }
 
 impl ServiceConfig {
@@ -134,11 +118,11 @@ impl ServiceConfig {
         let pool_config = nvisy_postgres::PgPoolConfig::default();
         let config = PgConfig::new(self.postgres_endpoint.clone(), pool_config);
         let pg_client = PgClient::new(config).map_err(|e| {
-            ServiceError::database_with_source("Failed to create database client", e)
+            ServiceError::internal("postgres", "Failed to create database client").with_source(e)
         })?;
 
         pg_client.run_pending_migrations().await.map_err(|e| {
-            ServiceError::database_with_source("Failed to apply database migrations", e)
+            ServiceError::internal("postgres", "Failed to apply database migrations").with_source(e)
         })?;
 
         Ok(pg_client)
@@ -154,50 +138,27 @@ impl ServiceConfig {
             builder.build()
         }
         .map_err(|e| {
-            ServiceError::external_service_with_source(
-                "OpenRouter",
-                "Failed to build LLM config",
-                e,
-            )
+            ServiceError::external("OpenRouter", "Failed to build LLM config").with_source(e)
         })?;
 
         LlmClient::from_api_key_with_config(&self.openrouter_api_key, config).map_err(|e| {
-            ServiceError::external_service_with_source(
-                "OpenRouter",
-                "Failed to create LLM client",
-                e,
-            )
+            ServiceError::external("OpenRouter", "Failed to create LLM client").with_source(e)
         })
     }
 
     /// Connects to NATS server.
     #[inline]
     pub async fn connect_nats(&self) -> Result<NatsClient> {
-        let config = NatsConfig::new(&self.nats_url).with_name(&self.nats_client_name);
-        NatsClient::connect(config).await.map_err(|e| {
-            ServiceError::external_service_with_source("NATS", "Failed to connect to NATS", e)
-        })
-    }
-
-    /// Returns the configured regional data collection policy.
-    #[inline]
-    pub const fn regional_policy(&self) -> DataCollectionPolicy {
-        if self.minimal_data_collection {
-            DataCollectionPolicy::minimal()
-        } else {
-            DataCollectionPolicy::normal()
-        }
+        let config = NatsConfig::new(&self.nats_url);
+        NatsClient::connect(config)
+            .await
+            .map_err(|e| ServiceError::external("NATS", "Failed to connect to NATS").with_source(e))
     }
 
     /// Loads authentication keys from configured paths.
-    pub async fn load_auth_keys(&self) -> Result<AuthKeys> {
+    pub async fn load_auth_keys(&self) -> Result<SessionKeys> {
         let config = AuthKeysConfig::new(&self.auth_decoding_key, &self.auth_encoding_key);
-        AuthKeys::from_config(config).await
-    }
-
-    /// Creates a password hasher with secure defaults.
-    pub fn create_password_hasher(&self) -> Result<AuthHasher> {
-        AuthHasher::new()
+        SessionKeys::from_config(config).await
     }
 }
 
@@ -206,13 +167,11 @@ impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             postgres_endpoint: defaults::POSTGRES_ENDPOINT.to_string(),
-            minimal_data_collection: defaults::MINIMAL_DATA_COLLECTION,
             auth_decoding_key: defaults::auth_decoding_key(),
             auth_encoding_key: defaults::auth_encoding_key(),
             openrouter_api_key: defaults::openrouter_api_key(),
             openrouter_base_url: None,
             nats_url: defaults::NATS_URL.to_string(),
-            nats_client_name: defaults::NATS_CLIENT_NAME.to_string(),
         }
     }
 }

@@ -24,7 +24,16 @@ use crate::service::ServiceState;
 /// Tracing target for document version operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::document_versions";
 
-/// `Path` param for `{versionId}` handlers.
+/// `Path` param for `{versionId}`.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionIdPathParam {
+    /// Unique identifier of the document version.
+    pub version_id: Uuid,
+}
+
+/// Combined path params for document version operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +101,7 @@ async fn get_version_files(
         document_id = %path_params.document_id,
         page = ?pagination.offset,
         per_page = ?pagination.limit,
-        "Fetching document versions"
+        "fetching document versions"
     );
 
     // Get versions with pagination
@@ -107,16 +116,16 @@ async fn get_version_files(
             target: TRACING_TARGET,
             error = %err,
             document_id = %path_params.document_id,
-            "Failed to fetch versions"
+            "failed to fetch versions"
         );
         ErrorKind::InternalServerError.with_message("Failed to fetch versions")
     })?;
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         document_id = %path_params.document_id,
         count = versions.len(),
-        "Versions fetched successfully"
+        "versions fetched successfully"
     );
 
     let version_infos: Vec<VersionInfo> = versions.into_iter().map(VersionInfo::from).collect();
@@ -194,18 +203,18 @@ async fn get_version_info(
         return Err(ErrorKind::NotFound.with_message("Version not found in document"));
     }
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         version_id = %version.id,
         version_number = version.version_number,
-        "Version info retrieved"
+        "version info retrieved"
     );
 
     Ok((StatusCode::OK, Json(VersionInfo::from(version))))
 }
 
 /// Downloads a document version output file.
-#[tracing::instrument(skip(_pg_client))]
+#[tracing::instrument(skip(pg_client, nats_client))]
 #[utoipa::path(
     get, path = "/documents/{documentId}/versions/{versionId}/download", tag = "documents",
     params(DocVersionIdPathParams),
@@ -233,19 +242,118 @@ async fn get_version_info(
     ),
 )]
 async fn download_version_file(
-    State(_pg_client): State<PgClient>,
-    State(_nats_client): State<NatsClient>,
-    Path(_path_params): Path<DocVersionIdPathParams>,
-    AuthState(_auth_claims): AuthState,
+    State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
+    Path(path_params): Path<DocVersionIdPathParams>,
+    AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
-    // TODO: Replace with NATS object store implementation
-    Err(ErrorKind::NotImplemented
-        .with_message("Version file download not implemented - use NATS object store"))
+    use std::str::FromStr;
+
+    use nvisy_nats::object::{ObjectKey, OutputFiles};
+
+    let mut conn = pg_client.get_connection().await?;
+
+    // Verify document access
+    authorize!(
+        document: path_params.document_id,
+        auth_claims, &mut conn,
+        Permission::ViewFiles,
+    );
+
+    // Get version
+    let Some(version) =
+        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
+            .await?
+    else {
+        return Err(ErrorKind::NotFound.with_message("Version not found"));
+    };
+
+    // Verify version belongs to document
+    if version.document_id != path_params.document_id {
+        return Err(ErrorKind::NotFound.with_message("Version not found in document"));
+    }
+
+    // Check if version has output file
+    let storage_path = &version.storage_path;
+    if storage_path.is_empty() {
+        return Err(ErrorKind::NotFound.with_message("Version has no output file"));
+    }
+
+    // Get output file store
+    let output_fs = nats_client
+        .document_store::<OutputFiles>()
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                version_id = %path_params.version_id,
+                "failed to get output file store"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to access file storage")
+        })?;
+
+    // Parse storage path to object key
+    let object_key = ObjectKey::<OutputFiles>::from_str(storage_path).map_err(|err| {
+        tracing::error!(
+            target: TRACING_TARGET,
+            error = %err,
+            storage_path = %storage_path,
+            "invalid storage path format"
+        );
+        ErrorKind::InternalServerError.with_message("Invalid file storage path")
+    })?;
+
+    // Get content from NATS object store
+    let content_data = output_fs
+        .get(&object_key)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                version_id = %path_params.version_id,
+                "failed to retrieve version file from NATS object store"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to retrieve file")
+        })?
+        .ok_or_else(|| {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                version_id = %path_params.version_id,
+                "version output file not found in storage"
+            );
+            ErrorKind::NotFound.with_message("Version output file not found")
+        })?;
+
+    // Set up response headers
+    let mut headers = HeaderMap::new();
+    let filename = format!("document_v{}.pdf", version.version_number);
+    headers.insert(
+        "content-disposition",
+        format!("attachment; filename=\"{}\"", filename)
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(
+        "content-length",
+        content_data.size().to_string().parse().unwrap(),
+    );
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        version_id = %path_params.version_id,
+        version_number = version.version_number,
+        size = content_data.size(),
+        "version file downloaded successfully"
+    );
+
+    Ok((StatusCode::OK, headers, content_data.into_bytes().to_vec()))
 }
 
 /// Deletes a document version.
-#[tracing::instrument(skip(pg_client))]
+#[tracing::instrument(skip(pg_client, nats_client))]
 #[utoipa::path(
     delete, path = "/documents/{documentId}/versions/{versionId}", tag = "documents",
     params(DocVersionIdPathParams),
@@ -278,11 +386,15 @@ async fn download_version_file(
 )]
 async fn delete_version(
     State(pg_client): State<PgClient>,
-    State(_nats_client): State<NatsClient>,
+    State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
+    use std::str::FromStr;
+
+    use nvisy_nats::object::{ObjectKey, OutputFiles};
+
     let mut conn = pg_client.get_connection().await?;
 
     // Verify permissions (need editor role to delete)
@@ -317,9 +429,72 @@ async fn delete_version(
             .with_context("Delete older versions or create a new version first"));
     }
 
-    // TODO: Replace with NATS object store implementation
-    Err(ErrorKind::NotImplemented
-        .with_message("Version deletion not implemented - use NATS object store"))
+    // Delete output file from NATS object store if it exists
+    let storage_path = &version.storage_path;
+    if !storage_path.is_empty() {
+        let output_fs = nats_client
+            .document_store::<OutputFiles>()
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    version_id = %path_params.version_id,
+                    "failed to get output file store"
+                );
+                ErrorKind::InternalServerError.with_message("Failed to access file storage")
+            })?;
+
+        // Parse storage path to object key
+        let object_key = ObjectKey::<OutputFiles>::from_str(storage_path).map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                storage_path = %storage_path,
+                "invalid storage path format"
+            );
+            ErrorKind::InternalServerError.with_message("Invalid file storage path")
+        })?;
+
+        // Delete from NATS object store
+        output_fs.delete(&object_key).await.map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                version_id = %path_params.version_id,
+                "failed to delete version file from NATS object store"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to delete file from storage")
+        })?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            version_id = %path_params.version_id,
+            "version output file deleted from storage"
+        );
+    }
+
+    // Soft delete version in database
+    DocumentVersionRepository::delete_document_version(&mut conn, path_params.version_id)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                version_id = %path_params.version_id,
+                "failed to delete version from database"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to delete version")
+        })?;
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        version_id = %path_params.version_id,
+        version_number = version.version_number,
+        "version deleted successfully"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Returns a [`Router`] with all related routes.

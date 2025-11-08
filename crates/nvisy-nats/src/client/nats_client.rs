@@ -47,16 +47,22 @@ use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 /// Multiple clones share the same underlying TCP connection via multiplexing.
 #[derive(Debug, Clone)]
 pub struct NatsClient {
+    inner: Arc<NatsClientInner>,
+}
+
+/// Inner data for NATS client
+#[derive(Debug)]
+struct NatsClientInner {
     client: Client,
-    jetstream: Arc<jetstream::Context>,
-    config: Arc<NatsConfig>,
+    jetstream: jetstream::Context,
+    config: NatsConfig,
 }
 
 impl NatsClient {
     /// Create a new NATS client and connect
     #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
-        tracing::info!("Connecting to NATS servers: {:?}", config.servers);
+        tracing::info!("connecting to NATS servers: {:?}", config.servers);
 
         let mut connect_opts = ConnectOptions::new()
             .name(&config.name)
@@ -124,28 +130,30 @@ impl NatsClient {
         );
 
         Ok(Self {
-            client,
-            jetstream: Arc::new(jetstream),
-            config: Arc::new(config),
+            inner: Arc::new(NatsClientInner {
+                client,
+                jetstream,
+                config,
+            }),
         })
     }
 
     /// Get the underlying NATS client
     #[must_use]
     pub fn client(&self) -> &Client {
-        &self.client
+        &self.inner.client
     }
 
     /// Get the JetStream context
     #[must_use]
     pub fn jetstream(&self) -> &jetstream::Context {
-        &self.jetstream
+        &self.inner.jetstream
     }
 
     /// Get the configuration
     #[must_use]
     pub fn config(&self) -> &NatsConfig {
-        &self.config
+        &self.inner.config
     }
 
     /// Test connectivity with a ping
@@ -153,7 +161,7 @@ impl NatsClient {
     pub async fn ping(&self) -> Result<Duration> {
         let start = std::time::Instant::now();
 
-        timeout(Duration::from_secs(10), self.client.flush())
+        timeout(Duration::from_secs(10), self.inner.client.flush())
             .await
             .map_err(|_| Error::Timeout {
                 timeout: Duration::from_secs(10),
@@ -172,13 +180,13 @@ impl NatsClient {
     /// Get connection statistics
     #[must_use]
     pub fn stats(&self) -> ConnectionStats {
-        let server_info = self.client.server_info();
+        let server_info = self.inner.client.server_info();
         ConnectionStats {
             server_name: server_info.server_name.clone(),
             server_version: server_info.version.clone(),
             server_id: server_info.server_id.clone(),
             is_connected: matches!(
-                self.client.connection_state(),
+                self.inner.client.connection_state(),
                 async_nats::connection::State::Connected
             ),
             max_payload: server_info.max_payload,
@@ -188,7 +196,7 @@ impl NatsClient {
     /// Get or create an ApiTokenStore
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn api_token_store(&self, ttl: Option<Duration>) -> Result<ApiTokenStore> {
-        ApiTokenStore::new(&self.jetstream, ttl).await
+        ApiTokenStore::new(&self.inner.jetstream, ttl).await
     }
 
     /// Get or create a KvStore for a specific bucket with typed values
@@ -202,7 +210,7 @@ impl NatsClient {
     where
         T: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
     {
-        KvStore::new(&self.jetstream, bucket_name, description, ttl).await
+        KvStore::new(&self.inner.jetstream, bucket_name, description, ttl).await
     }
 
     /// Get or create a typed ObjectStore for a specific bucket with custom key and data types
@@ -213,13 +221,13 @@ impl NatsClient {
         description: Option<&str>,
         max_age: Option<Duration>,
     ) -> Result<ObjectStore<K>> {
-        ObjectStore::new(&self.jetstream, bucket_name, description, max_age).await
+        ObjectStore::new(&self.inner.jetstream, bucket_name, description, max_age).await
     }
 
     /// Get or create a typed ObjectStore for a specific document label.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn document_store<S: DocumentLabel>(&self) -> Result<DocumentFileStore<S>> {
-        DocumentFileStore::new(&self.jetstream).await
+        DocumentFileStore::new(&self.inner.jetstream).await
     }
 
     /// Get or create a CacheStore for a specific namespace
@@ -232,7 +240,7 @@ impl NatsClient {
     where
         T: serde::Serialize + for<'de> serde::Deserialize<'de> + Clone + Send + Sync + 'static,
     {
-        CacheStore::new(&self.jetstream, namespace, ttl).await
+        CacheStore::new(&self.inner.jetstream, namespace, ttl).await
     }
 }
 

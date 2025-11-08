@@ -20,7 +20,7 @@ use super::request::authentication::{LoginRequest, SignupRequest};
 use super::response::authentication::{LoginResponse, SignupResponse};
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
-use crate::service::{AuthHasher, AuthKeys, DataCollectionPolicy, PasswordStrength, ServiceState};
+use crate::service::{PasswordHasher, PasswordStrength, ServiceState, SessionKeys};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -31,12 +31,11 @@ const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cle
 /// Creates a new authentication header.
 #[tracing::instrument(skip_all)]
 fn create_auth_header(
-    data_collection: DataCollectionPolicy,
-    auth_secret_keys: AuthKeys,
+    auth_secret_keys: SessionKeys,
     account_model: Account,
     account_api_token: AccountApiToken,
 ) -> Result<AuthHeader> {
-    let auth_claims = AuthClaims::new(account_model, account_api_token, data_collection);
+    let auth_claims = AuthClaims::new(account_model, account_api_token);
     let auth_header = AuthHeader::new(auth_claims, auth_secret_keys);
     Ok(auth_header)
 }
@@ -99,9 +98,8 @@ fn create_auth_header(
 )]
 async fn login(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<AuthHasher>,
-    State(data_collection): State<DataCollectionPolicy>,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_hasher): State<PasswordHasher>,
+    State(auth_keys): State<SessionKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<LoginRequest>,
@@ -180,12 +178,11 @@ async fn login(
     };
 
     let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
-    let auth_header = create_auth_header(data_collection, auth_keys, account, account_api_token)?;
+    let auth_header = create_auth_header(auth_keys, account, account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
     let response = LoginResponse {
         account_id: auth_claims.account_id,
-        data_collection: data_collection.is_normal(),
         issued_at: auth_claims.issued_at,
         expires_at: auth_claims.expires_at,
     };
@@ -195,7 +192,6 @@ async fn login(
         token_id = auth_claims.token_id.to_string(),
         account_id = auth_claims.account_id.to_string(),
         email = %normalized_email,
-        data_collection = data_collection.to_string(),
         "login successful: API token created"
     );
 
@@ -232,10 +228,9 @@ async fn login(
 #[allow(clippy::too_many_arguments)]
 async fn signup(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<AuthHasher>,
+    State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
-    State(regional_policy): State<DataCollectionPolicy>,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_keys): State<SessionKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<SignupRequest>,
@@ -304,12 +299,11 @@ async fn signup(
     let display_name = account.display_name.clone();
     let email_address = account.email_address.clone();
 
-    let auth_header = create_auth_header(regional_policy, auth_keys, account, account_api_token)?;
+    let auth_header = create_auth_header(auth_keys, account, account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
     let response = SignupResponse {
         account_id: auth_claims.account_id,
-        regional_policy: regional_policy.to_string(),
         display_name,
         email_address,
         issued_at: auth_claims.issued_at,
@@ -320,7 +314,6 @@ async fn signup(
         target: TRACING_TARGET,
         token_id = auth_claims.token_id.to_string(),
         account_id = auth_claims.account_id.to_string(),
-        regional_policy = regional_policy.to_string(),
         "signup successful: API token created"
     );
 
@@ -350,7 +343,6 @@ async fn signup(
 )]
 async fn logout(
     State(pg_client): State<PgClient>,
-    State(regional_policy): State<DataCollectionPolicy>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::trace!(
@@ -386,7 +378,6 @@ async fn logout(
             target: TRACING_TARGET,
             token_id = auth_claims.token_id.to_string(),
             account_id = auth_claims.account_id.to_string(),
-            regional_policy = regional_policy.to_string(),
             "logout successful: API token deleted"
         );
     } else {
@@ -518,8 +509,6 @@ mod test {
         response.assert_status(StatusCode::CREATED);
 
         let body: LoginResponse = response.json();
-        assert!(body.data_collection);
-
         Ok(())
     }
 

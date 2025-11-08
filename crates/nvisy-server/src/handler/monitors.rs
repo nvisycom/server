@@ -14,7 +14,7 @@ use super::request::monitor::MonitorStatusRequest;
 use super::response::monitor::MonitorStatusResponse;
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
-use crate::service::{DataCollectionPolicy, HealthCache, ServiceState};
+use crate::service::{HealthCache, ServiceState};
 
 /// Tracing target for monitor operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
@@ -43,7 +43,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 )]
 async fn health_status(
     State(service_state): State<ServiceState>,
-    State(data_collection): State<DataCollectionPolicy>,
     State(health_service): State<HealthCache>,
     auth_state: Option<AuthState>,
     version: Version,
@@ -68,7 +67,6 @@ async fn health_status(
     };
 
     let response = MonitorStatusResponse {
-        data_collection: data_collection,
         updated_at: OffsetDateTime::now_utc(),
         is_healthy,
     };
@@ -101,14 +99,12 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 mod tests {
     use super::*;
     use crate::handler::test::create_test_server_with_router;
-    use crate::service::DataCollectionPolicy;
 
     #[tokio::test]
     async fn test_health_status_endpoint_unauthenticated() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         let request = MonitorStatusRequest {
-            data_collection: None,
             return_cached: None,
         };
 
@@ -121,12 +117,6 @@ mod tests {
         assert!(status_response.is_healthy);
         assert!(!status_response.updated_at.to_string().is_empty());
 
-        // Should have data collection policy
-        assert!(matches!(
-            status_response.data_collection,
-            DataCollectionPolicy::NormalDataCollection
-        ));
-
         Ok(())
     }
 
@@ -135,7 +125,6 @@ mod tests {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         let request = MonitorStatusRequest {
-            data_collection: Some(DataCollectionPolicy::NormalDataCollection),
             return_cached: Some(false),
         };
 

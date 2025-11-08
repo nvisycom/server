@@ -8,13 +8,20 @@ use uuid::Uuid;
 
 use super::event::{EventPriority, EventStatus};
 
+/// Default maximum number of retries for a job
+const DEFAULT_MAX_RETRIES: u32 = 3;
+
+/// Default timeout for job processing in seconds
+const DEFAULT_TIMEOUT_SECS: u64 = 300;
+
 /// Document processing stages
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessingStage {
     /// Initial document preprocessing
     Preprocessing,
-    /// Main document processing
+    /// Main document/file processing
+    #[default]
     Processing,
     /// Final document postprocessing
     Postprocessing,
@@ -52,6 +59,12 @@ pub struct DocumentJobPayload {
     pub account_id: Uuid,
     pub stage: ProcessingStage,
 
+    // File processing fields
+    pub file_id: Option<Uuid>,
+    pub storage_path: Option<String>,
+    pub file_extension: Option<String>,
+    pub file_size_bytes: Option<i64>,
+
     // Preprocessing fields
     pub source_format: Option<String>,
     pub target_format: Option<String>,
@@ -64,6 +77,28 @@ pub struct DocumentJobPayload {
     // Postprocessing fields
     pub cleanup_tasks: Option<Vec<String>>,
     pub finalization_steps: Option<Vec<String>>,
+}
+
+impl DocumentJobPayload {
+    /// Create a new document job payload with minimal fields
+    pub fn new(document_id: Uuid, account_id: Uuid, stage: ProcessingStage) -> Self {
+        Self {
+            document_id,
+            account_id,
+            stage,
+            file_id: None,
+            storage_path: None,
+            file_extension: None,
+            file_size_bytes: None,
+            source_format: None,
+            target_format: None,
+            validation_rules: None,
+            processing_type: None,
+            options: None,
+            cleanup_tasks: None,
+            finalization_steps: None,
+        }
+    }
 }
 
 /// Document processing job
@@ -81,6 +116,43 @@ pub struct DocumentJob {
 }
 
 impl DocumentJob {
+    /// Create a new file processing job
+    pub fn new_file_processing(
+        file_id: Uuid,
+        document_id: Uuid,
+        account_id: Uuid,
+        storage_path: String,
+        file_extension: String,
+        file_size_bytes: i64,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            payload: DocumentJobPayload {
+                document_id,
+                account_id,
+                stage: ProcessingStage::Processing,
+                file_id: Some(file_id),
+                storage_path: Some(storage_path),
+                file_extension: Some(file_extension),
+                file_size_bytes: Some(file_size_bytes),
+                source_format: None,
+                target_format: None,
+                validation_rules: None,
+                processing_type: None,
+                options: None,
+                cleanup_tasks: None,
+                finalization_steps: None,
+            },
+            priority: EventPriority::Normal,
+            max_retries: DEFAULT_MAX_RETRIES,
+            retry_count: 0,
+            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            created_at: Timestamp::now(),
+            scheduled_for: None,
+            status: EventStatus::Pending,
+        }
+    }
+
     /// Create a new preprocessing job
     pub fn new_preprocessing(
         document_id: Uuid,
@@ -90,11 +162,15 @@ impl DocumentJob {
         validation_rules: Vec<String>,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             payload: DocumentJobPayload {
                 document_id,
                 account_id,
                 stage: ProcessingStage::Preprocessing,
+                file_id: None,
+                storage_path: None,
+                file_extension: None,
+                file_size_bytes: None,
                 source_format: Some(source_format),
                 target_format,
                 validation_rules: Some(validation_rules),
@@ -104,40 +180,9 @@ impl DocumentJob {
                 finalization_steps: None,
             },
             priority: EventPriority::Normal,
-            max_retries: 3,
+            max_retries: DEFAULT_MAX_RETRIES,
             retry_count: 0,
-            timeout: Duration::from_secs(300),
-            created_at: Timestamp::now(),
-            scheduled_for: None,
-            status: EventStatus::Pending,
-        }
-    }
-
-    /// Create a new processing job
-    pub fn new_processing(
-        document_id: Uuid,
-        account_id: Uuid,
-        processing_type: ProcessingType,
-        options: ProcessingOptions,
-    ) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            payload: DocumentJobPayload {
-                document_id,
-                account_id,
-                stage: ProcessingStage::Processing,
-                source_format: None,
-                target_format: None,
-                validation_rules: None,
-                processing_type: Some(processing_type),
-                options: Some(options),
-                cleanup_tasks: None,
-                finalization_steps: None,
-            },
-            priority: EventPriority::Normal,
-            max_retries: 3,
-            retry_count: 0,
-            timeout: Duration::from_secs(300),
+            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             created_at: Timestamp::now(),
             scheduled_for: None,
             status: EventStatus::Pending,
@@ -152,11 +197,15 @@ impl DocumentJob {
         finalization_steps: Vec<String>,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             payload: DocumentJobPayload {
                 document_id,
                 account_id,
                 stage: ProcessingStage::Postprocessing,
+                file_id: None,
+                storage_path: None,
+                file_extension: None,
+                file_size_bytes: None,
                 source_format: None,
                 target_format: None,
                 validation_rules: None,
@@ -166,9 +215,9 @@ impl DocumentJob {
                 finalization_steps: Some(finalization_steps),
             },
             priority: EventPriority::Normal,
-            max_retries: 3,
+            max_retries: DEFAULT_MAX_RETRIES,
             retry_count: 0,
-            timeout: Duration::from_secs(300),
+            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             created_at: Timestamp::now(),
             scheduled_for: None,
             status: EventStatus::Pending,
@@ -208,6 +257,35 @@ impl DocumentJob {
     pub fn increment_retry(&mut self) {
         self.retry_count += 1;
     }
+
+    /// Get the file ID (if this is a file processing job)
+    pub fn file_id(&self) -> Option<Uuid> {
+        self.payload.file_id
+    }
+
+    /// Get the document ID
+    pub fn document_id(&self) -> Uuid {
+        self.payload.document_id
+    }
+
+    /// Get the account ID
+    pub fn account_id(&self) -> Uuid {
+        self.payload.account_id
+    }
+
+    /// Check if job is ready to execute
+    pub fn is_ready(&self) -> bool {
+        self.scheduled_for
+            .map(|scheduled| Timestamp::now() >= scheduled)
+            .unwrap_or(true)
+    }
+
+    /// Get job age
+    pub fn age(&self) -> Duration {
+        let now = Timestamp::now();
+        let signed_dur = now.duration_since(self.created_at);
+        Duration::from_secs(signed_dur.as_secs().max(0) as u64)
+    }
 }
 
 #[cfg(test)]
@@ -233,31 +311,6 @@ mod tests {
         assert_eq!(
             job.payload.validation_rules,
             Some(vec!["validate_structure".to_string()])
-        );
-    }
-
-    #[test]
-    fn test_processing_job_creation() {
-        let job = DocumentJob::new_processing(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            ProcessingType::Ocr,
-            ProcessingOptions {
-                quality: Some("high".to_string()),
-                language: Some("en".to_string()),
-                custom_params: None,
-            },
-        );
-
-        assert_eq!(job.payload.stage, ProcessingStage::Processing);
-        assert_eq!(job.payload.processing_type, Some(ProcessingType::Ocr));
-        assert_eq!(
-            job.payload.options.as_ref().unwrap().quality,
-            Some("high".to_string())
-        );
-        assert_eq!(
-            job.payload.options.as_ref().unwrap().language,
-            Some("en".to_string())
         );
     }
 

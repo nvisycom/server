@@ -62,7 +62,7 @@ use nvisy_postgres::{PgClient, PgConnection};
 use super::{AuthClaims, AuthHeader};
 use crate::TRACING_TARGET_AUTHENTICATION;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::AuthKeys;
+use crate::service::SessionKeys;
 
 /// Authenticated user state with comprehensive database verification.
 ///
@@ -456,7 +456,7 @@ impl<S> FromRequestParts<S> for AuthState
 where
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    AuthKeys: FromRef<S>,
+    SessionKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -481,7 +481,7 @@ impl<S> OptionalFromRequestParts<S> for AuthState
 where
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    AuthKeys: FromRef<S>,
+    SessionKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
