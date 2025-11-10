@@ -60,36 +60,12 @@ pub enum Permission {
 
 impl Permission {
     /// Checks if the given project role satisfies this permission requirement.
+    ///
+    /// This method leverages the role hierarchy to determine if the given role
+    /// has sufficient permissions. A role is permitted if it has equal or higher
+    /// permission level than the minimum required role for this permission.
     pub const fn is_permitted_by_role(self, role: ProjectRole) -> bool {
-        use ProjectRole::{Admin, Editor, Owner, Viewer};
-
-        match self {
-            // Project-level permissions
-            Self::ViewProject => matches!(role, Viewer | Editor | Admin | Owner),
-            Self::UpdateProject => matches!(role, Admin | Owner),
-            Self::DeleteProject => matches!(role, Owner),
-
-            // Document permissions
-            Self::ViewDocuments => matches!(role, Viewer | Editor | Admin | Owner),
-            Self::CreateDocuments => matches!(role, Editor | Admin | Owner),
-            Self::UpdateDocuments => matches!(role, Editor | Admin | Owner),
-            Self::DeleteDocuments => matches!(role, Editor | Admin | Owner),
-
-            // File permissions
-            Self::ViewFiles => matches!(role, Viewer | Editor | Admin | Owner),
-            Self::UploadFiles => matches!(role, Editor | Admin | Owner),
-            Self::DeleteFiles => matches!(role, Editor | Admin | Owner),
-
-            // Member management permissions
-            Self::ViewMembers => matches!(role, Viewer | Editor | Admin | Owner),
-            Self::InviteMembers => matches!(role, Admin | Owner),
-            Self::RemoveMembers => matches!(role, Admin | Owner),
-            Self::ManageRoles => matches!(role, Owner),
-
-            // Settings permissions
-            Self::ViewSettings => matches!(role, Editor | Admin | Owner),
-            Self::ManageSettings => matches!(role, Admin | Owner),
-        }
+        role.has_permission_level_of(self.minimum_required_role())
     }
 
     /// Returns the minimum role required for this permission.
@@ -119,53 +95,6 @@ impl Permission {
             // Owner-only permissions
             Self::DeleteProject | Self::ManageRoles => ProjectRole::Owner,
         }
-    }
-
-    /// Returns true if this is a read-only permission that doesn't modify anything.
-    #[must_use]
-    pub const fn is_read_only(self) -> bool {
-        matches!(
-            self,
-            Self::ViewProject
-                | Self::ViewDocuments
-                | Self::ViewFiles
-                | Self::ViewMembers
-                | Self::ViewSettings
-        )
-    }
-
-    /// Returns true if this permission involves writing or modifying content.
-    #[must_use]
-    pub const fn is_write_operation(self) -> bool {
-        matches!(
-            self,
-            Self::CreateDocuments
-                | Self::UpdateDocuments
-                | Self::DeleteDocuments
-                | Self::UploadFiles
-                | Self::DeleteFiles
-                | Self::UpdateProject
-        )
-    }
-
-    /// Returns true if this permission requires admin or owner privileges.
-    #[must_use]
-    pub const fn is_admin_only(self) -> bool {
-        matches!(
-            self,
-            Self::UpdateProject
-                | Self::DeleteProject
-                | Self::InviteMembers
-                | Self::RemoveMembers
-                | Self::ManageRoles
-                | Self::ManageSettings
-        )
-    }
-
-    /// Returns true if this permission is owner-exclusive.
-    #[must_use]
-    pub const fn is_owner_only(self) -> bool {
-        matches!(self, Self::DeleteProject | Self::ManageRoles)
     }
 
     /// Returns all permissions available to the given role.

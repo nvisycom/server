@@ -1,11 +1,16 @@
+//! Connection information extractor for HTTP requests.
+//!
+//! This module provides the [`AppConnectInfo`] extractor for obtaining detailed
+//! information about client connections in Axum handlers. It captures network
+//! addresses, connection timing, and provides utilities for IP classification
+//! and security analysis.
+
 use std::net::{IpAddr, SocketAddr};
 use std::time::SystemTime;
 
 use axum::extract::connect_info::Connected;
 use axum::serve::IncomingStream;
 use tokio::net::TcpListener;
-
-// TODO: Delete it?
 
 /// Enhanced connection information extractor for incoming HTTP requests.
 ///

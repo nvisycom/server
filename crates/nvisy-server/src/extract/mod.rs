@@ -22,8 +22,7 @@
 //! - [`AuthClaims`] - JWT claims with application-specific fields
 //! - [`AuthState`] - Complete authentication state with database verification
 //! - [`AuthorizationProvider`] - Trait for types that can perform authorization
-//! - [`ProjectPermission`] - Standard project permission levels
-//! - [`AuthContext`] - Authorization context with user information
+//! - [`Permission`] - Standard project permission levels
 //! - [`AuthResult`] - Result of authorization checks
 //!
 //! ## Request Data Extraction
@@ -43,10 +42,11 @@ mod connection_info;
 mod reject;
 mod version;
 
+pub use crate::authorize;
 pub use crate::extract::auth::{
     AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
+    TRACING_TARGET_AUTHENTICATION, TRACING_TARGET_AUTHORIZATION,
 };
 pub use crate::extract::connection_info::AppConnectInfo;
 pub use crate::extract::reject::{Form, Json, Path, Query, ValidateJson};
 pub use crate::extract::version::Version;
-pub use crate::{TRACING_TARGET_AUTHENTICATION, TRACING_TARGET_AUTHORIZATION, authorize};

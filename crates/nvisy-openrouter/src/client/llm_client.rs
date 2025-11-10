@@ -160,7 +160,7 @@ impl LlmClient {
     ///
     /// # Parameters
     ///
-    /// - `f`: An async function that takes a reference to the OpenRouterClient and LlmConfig, and returns a Result<T>
+    /// - `f`: An async function that takes a reference to the OpenRouterClient and LlmConfig, and returns a `Result<T>`
     ///
     /// # Returns
     ///
@@ -222,7 +222,6 @@ impl LlmClient {
     /// # Errors
     ///
     /// - [`Error::Api`]: If the API request fails
-    /// - [`Error::Network`]: If network communication fails
     pub async fn list_models(&self) -> Result<Vec<Model>> {
         self.send_request(|client, _config| {
             let client = client.clone();

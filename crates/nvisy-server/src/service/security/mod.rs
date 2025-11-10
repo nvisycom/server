@@ -12,4 +12,4 @@ mod session_keys;
 pub use password_hasher::PasswordHasher;
 pub use password_strength::PasswordStrength;
 pub use rate_limiter::{RateLimitKey, RateLimiter};
-pub use session_keys::{SessionKeys, AuthKeysConfig};
+pub use session_keys::{AuthKeysConfig, SessionKeys};

@@ -5,7 +5,7 @@ use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgClient;
 
 use crate::service::{
-    SessionKeys, HealthCache, PasswordHasher, PasswordStrength, Result, ServiceConfig,
+    HealthCache, PasswordHasher, PasswordStrength, Result, ServiceConfig, SessionKeys,
 };
 
 /// Application state.

@@ -1,3 +1,9 @@
+//! API version extraction and validation for versioned endpoints.
+//!
+//! This module provides the [`Version`] extractor for parsing and validating
+//! API version parameters from URL paths. It supports semantic versioning with
+//! stable versions (v1, v2, etc.) and an unstable development version (v0).
+
 use std::convert::Infallible;
 use std::fmt;
 use std::num::NonZeroU32;

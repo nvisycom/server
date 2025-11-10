@@ -110,7 +110,6 @@ where
     /// # Errors
     ///
     /// - [`Error::Api`]: If the API request fails or schema generation fails
-    /// - [`Error::Network`]: If network communication fails
     /// - [`Error::RateLimit`]: If rate limit is exceeded
     ///
     /// # Example

@@ -6,7 +6,7 @@ use nvisy_openrouter::{LlmClient, LlmConfig};
 use nvisy_postgres::{PgClient, PgClientExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::{SessionKeys, AuthKeysConfig, Result, ServiceError};
+use crate::service::{AuthKeysConfig, Result, ServiceError, SessionKeys};
 
 /// Default values for configuration options.
 mod defaults {

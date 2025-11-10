@@ -10,6 +10,6 @@ pub use cache::HealthCache;
 pub use config::ServiceConfig;
 pub use error::{Result, ServiceError};
 pub use security::{
-    SessionKeys, AuthKeysConfig, PasswordHasher, PasswordStrength, RateLimitKey, RateLimiter,
+    AuthKeysConfig, PasswordHasher, PasswordStrength, RateLimitKey, RateLimiter, SessionKeys,
 };
 pub use state::ServiceState;

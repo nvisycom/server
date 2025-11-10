@@ -2,13 +2,13 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::{debug, info, instrument, warn};
 
 use super::MigrationStatus;
-use crate::{PgError, PgResult, TRACING_TARGET_MIGRATIONS};
+use crate::{PgError, PgResult, TRACING_TARGET_MIGRATION};
 
 /// Gets the current migration status of the database.
-#[instrument(skip(conn), target = TRACING_TARGET_MIGRATIONS)]
+#[instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
 pub async fn get_migration_status(conn: &mut AsyncPgConnection) -> PgResult<MigrationStatus> {
     debug!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         "Checking database migration status",
     );
 
@@ -27,7 +27,7 @@ pub async fn get_migration_status(conn: &mut AsyncPgConnection) -> PgResult<Migr
     let status = MigrationStatus::new(applied_versions, pending_versions);
 
     debug!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         applied_count = status.applied_migrations(),
         pending_count = status.pending_migrations(),
         is_up_to_date = status.is_up_to_date(),
@@ -38,9 +38,9 @@ pub async fn get_migration_status(conn: &mut AsyncPgConnection) -> PgResult<Migr
 }
 
 /// Verifies the integrity of the database schema.
-#[instrument(skip(conn), target = TRACING_TARGET_MIGRATIONS)]
+#[instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
 pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<()> {
-    info!(target: TRACING_TARGET_MIGRATIONS, "Performing database schema integrity verification");
+    info!(target: TRACING_TARGET_MIGRATION, "Performing database schema integrity verification");
 
     use diesel::sql_query;
 
@@ -63,7 +63,7 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<(
     .exists;
 
     if !migration_table_exists {
-        warn!(target: TRACING_TARGET_MIGRATIONS, "Migration table does not exist, database may not be initialized");
+        warn!(target: TRACING_TARGET_MIGRATION, "Migration table does not exist, database may not be initialized");
         return Err(PgError::Migration(
             "Migration table __diesel_schema_migrations does not exist".into(),
         ));
@@ -72,17 +72,17 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<(
     // Additional integrity checks could be added here
     // For example: checking for orphaned migration files, validating schema structure, etc.
 
-    info!(target: TRACING_TARGET_MIGRATIONS, "Database schema integrity verification passed");
+    info!(target: TRACING_TARGET_MIGRATION, "Database schema integrity verification passed");
     Ok(())
 }
 
 /// Gets list of applied migration versions from the database.
-#[instrument(skip(conn), target = TRACING_TARGET_MIGRATIONS)]
+#[instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
 pub async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<String>> {
     use diesel::sql_query;
 
     debug!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         "Retrieving applied migrations",
     );
 

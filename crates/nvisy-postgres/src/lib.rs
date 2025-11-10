@@ -7,9 +7,25 @@ pub(crate) const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
     diesel_migrations::embed_migrations!();
 
 // Tracing target constants for consistent logging.
+
+/// Tracing target for client-related operations.
+///
+/// Use this target for logging client initialization, configuration, and lifecycle events.
 pub const TRACING_TARGET_CLIENT: &str = "nvisy_postgres::client";
-pub const TRACING_TARGET_QUERIES: &str = "nvisy_postgres::queries";
-pub const TRACING_TARGET_MIGRATIONS: &str = "nvisy_postgres::migrations";
+
+/// Tracing target for database query operations.
+///
+/// Use this target for logging query execution, results, and query-related errors.
+pub const TRACING_TARGET_QUERY: &str = "nvisy_postgres::queries";
+
+/// Tracing target for database migration operations.
+///
+/// Use this target for logging migration application, rollback, and migration status checks.
+pub const TRACING_TARGET_MIGRATION: &str = "nvisy_postgres::migrations";
+
+/// Tracing target for database connection operations.
+///
+/// Use this target for logging connection establishment, pool management, and connection errors.
 pub const TRACING_TARGET_CONNECTION: &str = "nvisy_postgres::connection";
 
 mod client;

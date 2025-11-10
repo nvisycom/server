@@ -48,7 +48,7 @@ impl ProjectRole {
 
     /// Returns the hierarchical level of this role (higher number = more permissions).
     #[inline]
-    pub fn hierarchy_level(self) -> u8 {
+    pub const fn hierarchy_level(self) -> u8 {
         match self {
             ProjectRole::Viewer => 1,
             ProjectRole::Editor => 2,
@@ -59,7 +59,7 @@ impl ProjectRole {
 
     /// Returns whether this role has equal or higher permissions than the other role.
     #[inline]
-    pub fn has_permission_level_of(self, other: ProjectRole) -> bool {
+    pub const fn has_permission_level_of(self, other: ProjectRole) -> bool {
         self.hierarchy_level() >= other.hierarchy_level()
     }
 }

@@ -9,7 +9,7 @@ use crate::handler::{Error, ErrorKind};
 ///
 /// This extractor provides better error messages compared to the
 /// default Axum [`Form`] extractor. It includes:
-/// 
+///
 /// - Detailed error messages for different form parsing failures
 /// - Type-safe deserialization with proper error context
 /// - Clear indication of which fields failed validation
@@ -17,7 +17,7 @@ use crate::handler::{Error, ErrorKind};
 ///
 /// All errors are automatically converted to appropriate HTTP responses
 /// with detailed error messages for better API debugging and user experience.
-/// 
+///
 /// [Form]: AxumForm
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]

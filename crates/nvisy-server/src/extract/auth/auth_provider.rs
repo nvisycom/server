@@ -9,8 +9,7 @@ use nvisy_postgres::query::{DocumentRepository, ProjectMemberRepository};
 use nvisy_postgres::{PgConnection, PgError};
 use uuid::Uuid;
 
-use super::{AuthResult, Permission};
-use crate::TRACING_TARGET_AUTHORIZATION;
+use super::{AuthResult, Permission, TRACING_TARGET_AUTHORIZATION};
 use crate::handler::Result;
 
 /// Authorization provider for authenticated users.
@@ -170,14 +169,7 @@ pub trait AuthProvider {
                 .await;
         }
 
-        // For all other cases, verify basic project access
-        let base_permission = if permission.is_read_only() {
-            Permission::ViewDocuments
-        } else {
-            permission
-        };
-
-        self.check_project_permission(conn, document.project_id, base_permission)
+        self.check_project_permission(conn, document.project_id, permission)
             .await
     }
 
@@ -259,7 +251,7 @@ pub trait AuthProvider {
     ///
     /// # Returns
     ///
-    /// Returns [`Ok(Some(ProjectMember))`] if authorized with member info,
+    /// Returns [`ProjectMember`] if authorized with member info,
     /// [`Ok(None)`] if authorized without member info (e.g., global admin),
     /// or [`Err`] if access is denied.
     ///

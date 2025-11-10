@@ -3,31 +3,8 @@
 //! This module provides JWT token handling for HTTP Authorization headers.
 //! It supports both extracting tokens from incoming requests and generating
 //! tokens for outgoing responses.
-//!
-//! # Features
-//!
-//! - **JWT Validation**: Full JWT token validation with signature verification
-//! - **Header Extraction**: Automatic extraction from Authorization Bearer headers
-//! - **Response Generation**: Automatic generation of Authorization headers
-//! - **Caching**: Request-scoped caching to avoid repeated parsing
-//! - **Security**: Comprehensive validation including expiration and issuer checks
-//!
-//! # Usage
-//!
-//! As an extractor:
-//! ```rust,ignore
-//! async fn handler(auth_header: AuthHeader) -> Result<impl IntoResponse> {
-//!     let claims = auth_header.as_auth_claims();
-//!     // Use the claims...
-//! }
-//! ```
-//!
-//! As a response:
-//! ```rust,ignore
-//! async fn login() -> AuthHeader {
-//!     AuthHeader::new(claims, keys)
-//! }
-//! ```
+
+use std::fmt::Debug;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
@@ -37,15 +14,11 @@ use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
 use axum_extra::typed_header::TypedHeaderRejectionReason;
 use jsonwebtoken::errors::{Error as JwtError, ErrorKind as JwtErrorKind};
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use nvisy_postgres::model::{Account, AccountApiToken};
 use serde::{Deserialize, Serialize};
-use time::{Duration, OffsetDateTime};
-use uuid::Uuid;
 
-use crate::TRACING_TARGET_AUTHENTICATION;
+use super::AuthClaims;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{SessionKeys};
+use crate::service::SessionKeys;
 
 /// JWT authentication header extractor and response generator.
 ///
@@ -61,40 +34,20 @@ use crate::service::{SessionKeys};
 /// - Required claims (iss, aud, jti, sub, iat, exp)
 /// - Issuer and audience matching
 ///
-/// Note: This extractor only performs JWT validation. For full authentication
+/// # Notes
+///
+/// This extractor only performs JWT validation. For full authentication
 /// including database verification, use [`AuthState`] instead.
-///
-/// # Examples
-///
-/// Extracting a token from a request:
-/// ```rust,ignore
-/// use nvisy_server::extract::AuthHeader;
-///
-/// async fn handler(auth_header: AuthHeader) -> Result<impl IntoResponse> {
-///     let claims = auth_header.as_auth_claims();
-///     println!("User: {}", claims.account_id);
-///     Ok("Success")
-/// }
-/// ```
-///
-/// Generating a token for a response:
-/// ```rust,ignore
-/// async fn login() -> Result<AuthHeader> {
-///     let claims = AuthClaims::new(account_id, token_id, is_admin);
-///     let keys = AuthKeys::from_env()?;
-///     Ok(AuthHeader::new(claims, keys))
-/// }
-/// ```
 ///
 /// [`AuthState`]: crate::extract::AuthState
 #[must_use]
 #[derive(Debug, Clone)]
-pub struct AuthHeader {
-    auth_claims: AuthClaims,
+pub struct AuthHeader<T = ()> {
+    auth_claims: AuthClaims<T>,
     auth_secret_keys: SessionKeys,
 }
 
-impl AuthHeader {
+impl<T> AuthHeader<T> {
     /// Creates a new authentication header with the given claims and keys.
     ///
     /// # Arguments
@@ -102,7 +55,7 @@ impl AuthHeader {
     /// * `claims` - The JWT claims to include in the token
     /// * `keys` - The cryptographic keys for signing the token
     #[inline]
-    pub const fn new(claims: AuthClaims, keys: SessionKeys) -> Self {
+    pub const fn new(claims: AuthClaims<T>, keys: SessionKeys) -> Self {
         Self {
             auth_claims: claims,
             auth_secret_keys: keys,
@@ -111,16 +64,21 @@ impl AuthHeader {
 
     /// Returns a reference to the JWT claims.
     #[inline]
-    pub const fn as_auth_claims(&self) -> &AuthClaims {
+    pub const fn as_auth_claims(&self) -> &AuthClaims<T> {
         &self.auth_claims
     }
 
     /// Consumes this header and returns the JWT claims.
     #[inline]
-    pub fn into_auth_claims(self) -> AuthClaims {
+    pub fn into_auth_claims(self) -> AuthClaims<T> {
         self.auth_claims
     }
+}
 
+impl<T> AuthHeader<T>
+where
+    T: Clone + for<'de> Deserialize<'de>,
+{
     /// Creates an `AuthHeader` from a parsed Authorization header.
     ///
     /// This method validates the JWT token and extracts the claims.
@@ -136,7 +94,12 @@ impl AuthHeader {
         let auth_claims = AuthClaims::from_header(authorization_header, decoding_key)?;
         Ok(Self::new(auth_claims, auth_secret_keys))
     }
+}
 
+impl<T> AuthHeader<T>
+where
+    T: Clone + Serialize,
+{
     /// Converts this header into an HTTP Authorization header.
     ///
     /// This method signs the JWT token and creates the appropriate header.
@@ -150,8 +113,9 @@ impl AuthHeader {
     }
 }
 
-impl<S> FromRequestParts<S> for AuthHeader
+impl<T, S> FromRequestParts<S> for AuthHeader<T>
 where
+    T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send,
     SessionKeys: FromRef<S>,
 {
@@ -195,7 +159,10 @@ where
     }
 }
 
-impl IntoResponseParts for AuthHeader {
+impl<T> IntoResponseParts for AuthHeader<T>
+where
+    T: Clone + Serialize,
+{
     type Error = Error<'static>;
 
     fn into_response_parts(self, res: ResponseParts) -> Result<ResponseParts, Self::Error> {
@@ -205,267 +172,19 @@ impl IntoResponseParts for AuthHeader {
     }
 }
 
-impl IntoResponse for AuthHeader {
+impl<T> IntoResponse for AuthHeader<T>
+where
+    T: Clone + Serialize,
+{
     fn into_response(self) -> Response {
         // .into_response() for a TypedHeader is infallible
         self.into_header().map(|h| h.into_response()).unwrap()
     }
 }
 
-/// JWT claims for authentication tokens.
-///
-/// This structure contains both RFC 7519 standard JWT claims and nvisy-specific claims.
-/// All timestamps use RFC 3339 format for consistency and interoperability.
-///
-/// # Standard JWT Claims
-///
-/// | Claim | Field | Description |
-/// |-------|-------|-------------|
-/// | `iss` | `issued_by` | Token issuer identifier |
-/// | `aud` | `audience` | Token audience identifier |
-/// | `jti` | `token_id` | Unique session token identifier |
-/// | `sub` | `account_id` | Account ID this token represents |
-/// | `iat` | `issued_at` | Token creation timestamp |
-/// | `exp` | `expired_at` | Token expiration timestamp |
-///
-/// # Application-Specific Claims
-///
-/// | Claim | Field | Description |
-/// |-------|-------|-------------|
-/// | `pol` | `regional_policy` | Data handling policy |
-/// | `cre` | `is_administrator` | Global admin privileges |
-///
-/// # Security Considerations
-///
-/// - All tokens use EdDSA (Ed25519) signatures
-/// - Expiration is enforced at both JWT and database levels
-/// - Admin status is verified against current database state
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthClaims {
-    // Standard (or registered) claims.
-    /// Issuer (who created the token).
-    #[serde(rename = "iss")]
-    issued_by: String,
-    /// Audience (who the token is intended for).
-    #[serde(rename = "aud")]
-    audience: String,
-
-    // JWT ID (unique identifier for token, useful for revocation).
-    #[serde(rename = "jti")]
-    pub token_id: Uuid,
-    /// Subject ID (unique identifier for associated accound).
-    #[serde(rename = "sub")]
-    pub account_id: Uuid,
-
-    /// Issued at (as UTC timestamp).
-    #[serde(rename = "iat")]
-    #[serde(with = "time::serde::rfc3339")]
-    pub issued_at: OffsetDateTime,
-    /// Expiration time (as UTC timestamp).
-    #[serde(rename = "exp")]
-    #[serde(with = "time::serde::rfc3339")]
-    pub expires_at: OffsetDateTime,
-
-    // Private (or custom) claims
-    /// Is administrator flag.
-    #[serde(rename = "cre")]
-    pub is_administrator: bool,
-}
-
-impl AuthClaims {
-    /// Default JWT audience identifier for authentication tokens.
-    const JWT_AUDIENCE: &str = "nvisy:server";
-    /// Default JWT issuer identifier for authentication tokens.
-    const JWT_ISSUER: &str = "nvisy";
-    /// Default threshold for token expiration.
-    const SOON_THRESHOLD: Duration = Duration::minutes(5);
-
-    /// Creates a new JWT claims structure from account and session data.
-    ///
-    /// This method generates claims that are consistent with the database state
-    /// at the time of token creation.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - The authenticated account
-    /// * `account_session` - The active session for this account
-    /// * `regional_policy` - Data handling policy for this user
-    ///
-    /// # Returns
-    ///
-    /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
-    pub fn new(
-        account_model: Account,
-        account_api_token: AccountApiToken,
-    ) -> Self {
-        Self {
-            issued_by: Self::JWT_ISSUER.to_owned(),
-            audience: Self::JWT_AUDIENCE.to_owned(),
-            token_id: account_api_token.access_seq,
-            account_id: account_model.id,
-            issued_at: account_api_token.issued_at,
-            expires_at: account_api_token.expired_at,
-            is_administrator: account_model.is_admin,
-        }
-    }
-
-    /// Checks if the token has expired based on current UTC time.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the token's expiration time has passed.
-    #[inline]
-    #[must_use]
-    pub fn is_expired(&self) -> bool {
-        self.expires_at <= OffsetDateTime::now_utc()
-    }
-
-    /// Checks if the token will expire soon and should be refreshed.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the token expires within the configured threshold.
-    #[inline]
-    #[must_use]
-    pub fn expires_soon(&self) -> bool {
-        self.expires_at - OffsetDateTime::now_utc() < Self::SOON_THRESHOLD
-    }
-
-    /// Returns the remaining lifetime of this token.
-    ///
-    /// # Returns
-    ///
-    /// The duration until expiration, or zero if already expired.
-    #[inline]
-    #[must_use]
-    pub fn remaining_lifetime(&self) -> Duration {
-        let remaining = self.expires_at - OffsetDateTime::now_utc();
-        if remaining.is_positive() {
-            remaining
-        } else {
-            Duration::ZERO
-        }
-    }
-
-    /// Parses and validates a JWT token from an Authorization header.
-    ///
-    /// This method performs comprehensive validation including:
-    /// - Signature verification using EdDSA
-    /// - Standard JWT claims validation (iss, aud, exp, etc.)
-    /// - Application-specific claim presence
-    /// - Expiration checking with detailed logging
-    ///
-    /// # Arguments
-    ///
-    /// * `auth_header` - The Authorization Bearer header
-    /// * `decoding_key` - The public key for signature verification
-    ///
-    /// # Returns
-    ///
-    /// Returns validated [`AuthClaims`] on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns various authentication errors for invalid tokens.
-    fn from_header(
-        auth_header: TypedHeader<Authorization<Bearer>>,
-        decoding_key: &DecodingKey,
-    ) -> Result<Self> {
-        let auth_token = auth_header.token();
-
-        // Configure comprehensive JWT validation
-        let mut validation = Validation::new(Algorithm::EdDSA);
-        validation.validate_exp = true;
-        validation.validate_nbf = false; // Not Before claim not used
-        validation.validate_aud = true;
-        validation.set_audience(&[Self::JWT_AUDIENCE]);
-        validation.set_issuer(&[Self::JWT_ISSUER]);
-        validation
-            .set_required_spec_claims(&["iss", "aud", "jti", "sub", "iat", "exp", "pol", "cre"]);
-
-        tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
-            audience = Self::JWT_AUDIENCE,
-            issuer = Self::JWT_ISSUER,
-            "Validating JWT token with strict security settings"
-        );
-
-        let token_data = decode::<Self>(auth_token, decoding_key, &validation)?;
-        let claims = token_data.claims;
-
-        // Double-check expiration for security
-        if claims.is_expired() {
-            tracing::warn!(
-                target: TRACING_TARGET_AUTHENTICATION,
-                token_id = %claims.token_id,
-                account_id = %claims.account_id,
-                expired_at = %claims.expires_at,
-                "JWT token validation failed: token expired"
-            );
-            return Err(ErrorKind::Unauthorized
-                .with_message("Authentication session has expired")
-                .with_context("Please sign in again to continue"));
-        }
-
-        tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
-            token_id = %claims.token_id,
-            account_id = %claims.account_id,
-            is_admin = claims.is_administrator,
-            expires_soon = claims.expires_soon(),
-            remaining = ?claims.remaining_lifetime(),
-            "JWT token validation completed successfully"
-        );
-
-        Ok(claims)
-    }
-
-    /// Encodes the claims into a signed JWT token and creates an Authorization header.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoding_key` - The private key for token signing
-    ///
-    /// # Returns
-    ///
-    /// Returns a typed Authorization Bearer header ready for HTTP responses.
-    ///
-    /// # Errors
-    ///
-    /// Returns errors for JWT encoding failures or invalid token format.
-    fn into_header(self, encoding_key: &EncodingKey) -> Result<TypedHeader<Authorization<Bearer>>> {
-        let header = Header::new(Algorithm::EdDSA);
-        let jwt_token = encode(&header, &self, encoding_key).map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
-                error = %e,
-                account_id = %self.account_id,
-                "Failed to encode JWT token"
-            );
-            ErrorKind::InternalServerError
-                .with_message("Authentication token generation failed")
-                .with_context("Unable to create session token")
-        })?;
-
-        let bearer_auth = Authorization::bearer(&jwt_token).map_err(|_| {
-            tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
-                account_id = %self.account_id,
-                "Generated JWT token has invalid format for Authorization header"
-            );
-            ErrorKind::InternalServerError
-                .with_message("Authentication header creation failed")
-                .with_context("Generated token format is invalid")
-        })?;
-
-        Ok(TypedHeader(bearer_auth))
-    }
-}
-
 impl From<JwtError> for Error<'static> {
     fn from(error: JwtError) -> Self {
-        match error.kind() {
+        let error = match error.kind() {
             JwtErrorKind::ExpiredSignature => ErrorKind::Unauthorized
                 .with_message("Your session has expired")
                 .with_context("Please sign in again to continue"),
@@ -502,6 +221,8 @@ impl From<JwtError> for Error<'static> {
             _ => ErrorKind::InternalServerError
                 .with_message("Authentication processing failed")
                 .with_context("An unexpected error occurred during token validation"),
-        }
+        };
+
+        error.with_resource("authentication")
     }
 }

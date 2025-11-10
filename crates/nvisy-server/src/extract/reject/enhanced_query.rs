@@ -10,14 +10,14 @@ use crate::handler::{Error, ErrorKind};
 ///
 /// This extractor provides better error messages compared to the
 /// default Axum Query extractor. It includes:
-/// 
+///
 /// - Detailed error messages for different parameter parsing failures
 /// - Type-safe deserialization with proper error context
 /// - Clear indication of which parameters failed validation
 ///
 /// All errors are automatically converted to appropriate HTTP responses
 /// with detailed error messages for better API debugging.
-/// 
+///
 /// [`Query`]: AxumQuery
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]
@@ -149,4 +149,3 @@ fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
 
     None
 }
-

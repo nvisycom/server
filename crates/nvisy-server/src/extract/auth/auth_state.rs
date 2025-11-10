@@ -4,63 +4,18 @@
 //! authentication verification by validating JWT tokens against current database state.
 //! Unlike basic JWT validation, this extractor ensures API tokens remain active and
 //! accounts are in good standing.
-//!
-//! # Security Architecture
-//!
-//! ## Multi-Layer Verification
-//! 1. **JWT Validation**: Cryptographic signature and claims verification
-//! 2. **Token Validation**: Database lookup to ensure API token exists and is active
-//! 3. **Account Verification**: Confirms account exists and email is verified
-//! 4. **Privilege Consistency**: Validates admin status matches database records
-//!
-//! ## Defense in Depth
-//! - JWT expiration is checked at both token and database levels
-//! - API token revocation is immediately effective
-//! - Account suspension blocks access regardless of valid tokens
-//! - Admin privilege changes are enforced in real-time
-//!
-//! # Performance Optimizations
-//!
-//! - **Request-Scoped Caching**: Verified auth state is cached per request
-//! - **Single Database Query**: All verifications use optimized database calls
-//! - **Early Termination**: Fast-fail on any validation failure
-//!
-//! # Usage Patterns
-//!
-//! ```rust,ignore
-//! use nvisy_server::extract::AuthState;
-//!
-//! // Basic authentication requirement
-//! async fn protected_handler(auth_state: AuthState) -> Result<impl IntoResponse> {
-//!     let user_id = auth_state.account_id();
-//!     let is_admin = auth_state.is_admin();
-//!
-//!     // Authorization methods are available via Deref to AuthClaims
-//!     auth_state.authorize_admin()?;
-//!
-//!     Ok("Success")
-//! }
-//!
-//! // Optional authentication
-//! async fn optional_auth_handler(
-//!     auth_state: Option<AuthState>
-//! ) -> Result<impl IntoResponse> {
-//!     match auth_state {
-//!         Some(auth) => format!("Hello, {}", auth.account_id()),
-//!         None => "Hello, anonymous".to_string(),
-//!     }
-//! }
-//! ```
+
+use std::hash::Hash;
 
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
-use derive_more::Deref;
+use derive_more::{Deref, DerefMut};
 use nvisy_postgres::model::{Account, AccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::{PgClient, PgConnection};
+use serde::Deserialize;
 
-use super::{AuthClaims, AuthHeader};
-use crate::TRACING_TARGET_AUTHENTICATION;
+use super::{AuthClaims, AuthHeader, TRACING_TARGET_AUTHENTICATION};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
 
@@ -90,7 +45,7 @@ use crate::service::SessionKeys;
 /// - **Memory Footprint**: Minimal - only stores essential claims
 /// - **Database Impact**: Single optimized query per request
 ///
-/// # Error Conditions
+/// # Errors
 ///
 /// Extraction fails with specific error types for:
 /// - [`ErrorKind::MalformedAuthToken`]: Invalid JWT format
@@ -102,10 +57,10 @@ use crate::service::SessionKeys;
 ///
 /// [`AuthState`] is [`Send`] + [`Sync`] and can be safely shared across threads.
 /// All contained data is immutable after creation.
-#[derive(Debug, Clone, Deref, PartialEq, Eq)]
-pub struct AuthState(pub AuthClaims);
+#[derive(Debug, Clone, Deref, DerefMut, Hash, PartialEq, Eq)]
+pub struct AuthState<T = ()>(pub AuthClaims<T>);
 
-impl AuthState {
+impl<T> AuthState<T> {
     /// Creates a new [`AuthState`] from pre-verified claims.
     ///
     /// # Safety Requirements
@@ -123,10 +78,15 @@ impl AuthState {
     /// Returns a new [`AuthState`] without additional verification.
     #[inline]
     #[must_use]
-    pub const fn from_verified_claims(auth_claims: AuthClaims) -> Self {
+    pub const fn from_verified_claims(auth_claims: AuthClaims<T>) -> Self {
         Self(auth_claims)
     }
+}
 
+impl<T> AuthState<T>
+where
+    T: Clone + for<'de> Deserialize<'de>,
+{
     /// Creates a new [`AuthState`] from an unverified JWT token with full database validation.
     ///
     /// This method is the primary entry point for secure authentication verification.
@@ -163,7 +123,7 @@ impl AuthState {
     /// This method performs optimized database queries and should be called
     /// only once per request (caching handles subsequent uses).
     pub async fn from_unverified_header(
-        auth_header: AuthHeader,
+        auth_header: AuthHeader<T>,
         pg_database: PgClient,
     ) -> Result<Self> {
         let auth_claims = auth_header.into_auth_claims();
@@ -247,7 +207,7 @@ impl AuthState {
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_token_validity(
         conn: &mut PgConnection,
-        auth_claims: &AuthClaims,
+        auth_claims: &AuthClaims<T>,
     ) -> Result<AccountApiToken> {
         let api_token =
             AccountApiTokenRepository::find_token_by_access_token(conn, auth_claims.token_id)
@@ -340,7 +300,7 @@ impl AuthState {
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_account_status(
         conn: &mut PgConnection,
-        auth_claims: &AuthClaims,
+        auth_claims: &AuthClaims<T>,
     ) -> Result<Account> {
         let account = AccountRepository::find_account_by_id(conn, auth_claims.account_id)
             .await
@@ -423,7 +383,7 @@ impl AuthState {
     /// # Errors
     ///
     /// Returns [`ErrorKind::Unauthorized`] if privilege claims don't match database.
-    fn verify_privilege_consistency(auth_claims: &AuthClaims, account: &Account) -> Result<()> {
+    fn verify_privilege_consistency(auth_claims: &AuthClaims<T>, account: &Account) -> Result<()> {
         if auth_claims.is_administrator != account.is_admin {
             tracing::error!(
                 target: TRACING_TARGET_AUTHENTICATION,
@@ -434,7 +394,7 @@ impl AuthState {
                 email = %account.email_address,
                 "critical: admin privilege mismatch detected between token and database"
             );
-            
+
             return Err(ErrorKind::Unauthorized
                 .with_message("Your account privileges have changed")
                 .with_context("Please sign in again to access your updated permissions")
@@ -452,8 +412,9 @@ impl AuthState {
     }
 }
 
-impl<S> FromRequestParts<S> for AuthState
+impl<T, S> FromRequestParts<S> for AuthState<T>
 where
+    T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
     SessionKeys: FromRef<S>,
@@ -477,8 +438,9 @@ where
     }
 }
 
-impl<S> OptionalFromRequestParts<S> for AuthState
+impl<T, S> OptionalFromRequestParts<S> for AuthState<T>
 where
+    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
     SessionKeys: FromRef<S>,
