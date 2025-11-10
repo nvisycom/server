@@ -32,11 +32,16 @@ install-tools: # Installs tools required for the repo.
 	$(call make-log,Checking Diesel CLI...)
 	@# Use a shell if-block; call $(call shell-log,...) inside so shell sees a valid command.
 	@if ! command -v diesel >/dev/null 2>&1; then \
-		$(call shell-log,Installing Diesel CLI...); \
-		cargo install diesel_cli --features postgres --locked; \
+		$(call shell-log,Installing Diesel CLI with PostgreSQL support...); \
+		cargo install diesel_cli --no-default-features --features postgres --locked; \
 		$(call shell-log,Diesel CLI installed successfully.); \
 	else \
 		$(call shell-log,Diesel CLI already available: $$(diesel --version)); \
+		$(call shell-log,Verifying PostgreSQL support...); \
+		if ! diesel --version | grep -q postgres; then \
+			$(call shell-log,Reinstalling Diesel CLI with PostgreSQL support...); \
+			cargo install diesel_cli --no-default-features --features postgres --locked --force; \
+		fi; \
 	fi
 
 .PHONY: install-all

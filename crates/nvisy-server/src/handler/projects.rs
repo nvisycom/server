@@ -17,7 +17,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::project::{CreateProjectRequest, UpdateProjectRequest};
 use crate::handler::response::project::{
@@ -75,7 +74,7 @@ async fn create_project(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         display_name = %request.display_name,
-        "creating new project",
+        "Creating new project",
     );
 
     let mut conn = pg_client.get_connection().await?;
@@ -211,11 +210,9 @@ async fn read_project(
 ) -> Result<(StatusCode, Json<GetProjectResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::ViewDocuments,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewProject)
+        .await?;
 
     let Some(project) =
         ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
@@ -276,11 +273,9 @@ async fn update_project(
         "updating project",
     );
 
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::UpdateProject,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
+        .await?;
 
     let update_data = UpdateProject {
         display_name: request.display_name,
@@ -344,11 +339,9 @@ async fn delete_project(
         "Project deletion requested",
     );
 
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::DeleteProject,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
+        .await?;
 
     ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
     let Some(deleted_project) =

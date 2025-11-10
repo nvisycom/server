@@ -62,7 +62,7 @@ impl NatsClient {
     /// Create a new NATS client and connect
     #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
-        tracing::info!("connecting to NATS servers: {:?}", config.servers);
+        tracing::info!("Connecting to NATS servers: {:?}", config.servers);
 
         let mut connect_opts = ConnectOptions::new()
             .name(&config.name)

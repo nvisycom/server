@@ -14,7 +14,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::response::document_version::{ReadAllVersionsResponse, VersionInfo};
@@ -23,15 +22,6 @@ use crate::service::ServiceState;
 
 /// Tracing target for document version operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::document_versions";
-
-/// `Path` param for `{versionId}`.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct VersionIdPathParam {
-    /// Unique identifier of the document version.
-    pub version_id: Uuid,
-}
 
 /// Combined path params for document version operations.
 #[must_use]
@@ -90,11 +80,9 @@ async fn get_version_files(
     let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::ViewFiles,
-    );
+    auth_claims
+        .authorize_document(&mut conn, path_params.document_id, Permission::ViewFiles)
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -184,11 +172,13 @@ async fn get_version_info(
     let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::ViewDocuments,
-    );
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            Permission::ViewDocuments,
+        )
+        .await?;
 
     // Get version
     let Some(version) =
@@ -255,11 +245,9 @@ async fn download_version_file(
     let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::ViewFiles,
-    );
+    auth_claims
+        .authorize_document(&mut conn, path_params.document_id, Permission::ViewFiles)
+        .await?;
 
     // Get version
     let Some(version) =
@@ -398,11 +386,9 @@ async fn delete_version(
     let mut conn = pg_client.get_connection().await?;
 
     // Verify permissions (need editor role to delete)
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::DeleteDocuments,
-    );
+    auth_claims
+        .authorize_document(&mut conn, path_params.document_id, Permission::DeleteFiles)
+        .await?;
 
     // Get version
     let Some(version) =

@@ -7,15 +7,9 @@ on:
       - "release"
     paths:
       - "crates/**"
-      - "migrations/**"
-      - "scripts/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "diesel.toml"
-      - "rustfmt.toml"
-      - "Dockerfile"
-      - "Makefile"
-      - ".github/actions/setup-postgres/**"
+      - "deny.toml"
       - ".github/workflows/security.yml"
   pull_request:
     branches:
@@ -23,419 +17,136 @@ on:
       - "release"
     paths:
       - "crates/**"
-      - "migrations/**"
-      - "scripts/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "diesel.toml"
-      - "rustfmt.toml"
-      - "Dockerfile"
-      - "Makefile"
-      - ".github/actions/setup-postgres/**"
+      - "deny.toml"
       - ".github/workflows/security.yml"
   schedule:
-    - cron: "0 1 * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:
-    inputs:
-      scan_type:
-        description: "Type of security scan"
-        required: true
-        default: "full"
-        type: choice
-        options:
-          - full
-          - dependencies
-          - code
-          - secrets
-          - containers
-          - compliance
-
-permissions:
-  contents: read
-  security-events: write
-  issues: write
-  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  dependency-security:
-    name: Dependency Security
+  audit:
+    name: Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: |
-      github.event.inputs.scan_type == 'full' ||
-      github.event.inputs.scan_type == 'dependencies' ||
-      github.event_name != 'workflow_dispatch'
     steps:
-      - name: Checkout sources
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Rust cache
+      - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          key: security-deps
-          cache-all-crates: true
 
-      - name: Cache security tools
-        id: cache-security-tools
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/cargo-audit
-            ~/.cargo/bin/cargo-deny
-            ~/.cargo/bin/cargo-outdated
-          key: security-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            security-tools-${{ runner.os }}-
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
 
-      - name: Install security tools
-        if: steps.cache-security-tools.outputs.cache-hit != 'true'
-        run: |
-          echo "Installing security audit tools (not cached)"
-          cargo install cargo-audit --locked
-          cargo install cargo-deny --locked
-          cargo install cargo-outdated --locked
+      - name: Run cargo-audit
+        run: cargo audit --deny warnings
 
-      - name: Run dependency audit
-        run: |
-          echo "Running dependency vulnerability audit"
-          cargo audit --json --output-format json > audit-results.json || true
-          if [ -s audit-results.json ]; then
-            echo "Vulnerabilities found in dependencies:"
-            cat audit-results.json
-            if jq -e '.vulnerabilities.found[] | select(.advisory.severity == "critical")' audit-results.json > /dev/null; then
-              echo "Critical vulnerabilities found"
-              exit 1
-            fi
-          else
-            echo "No vulnerabilities found"
-          fi
-
-      - name: Run dependency policy checks
-        run: |
-          echo "Running dependency policy checks"
-          cargo deny check --hide-inclusion-graph advisories licenses bans sources
-
-      - name: Check for outdated dependencies
-        run: |
-          echo "Checking for outdated dependencies"
-          cargo outdated --root-deps-only --exit-code 1 || echo "Some dependencies are outdated"
-
-      - name: Upload audit results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-security-results
-          path: audit-results.json
-          retention-days: 30
-
-  license-compliance:
-    name: License Compliance
+  deny:
+    name: Cargo Deny
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: |
-      github.event.inputs.scan_type == 'full' ||
-      github.event.inputs.scan_type == 'compliance' ||
-      github.event_name != 'workflow_dispatch'
     steps:
-      - name: Checkout sources
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Rust cache
+      - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          key: license-compliance
-          cache-all-crates: true
 
-      - name: Cache cargo-license
-        id: cache-cargo-license
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-license
-          key: cargo-license-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-license-${{ runner.os }}-
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
 
-      - name: Install cargo-license
-        if: steps.cache-cargo-license.outputs.cache-hit != 'true'
-        run: |
-          echo "Installing cargo-license (not cached)"
-          cargo install cargo-license --locked
+      - name: Run cargo-deny
+        run: cargo deny check all
 
-      - name: Generate license report
-        run: |
-          echo "Generating license report"
-          cargo license --json > licenses.json
-          cargo license --tsv > licenses.tsv
-          echo "License summary:"
-          cargo license --tsv | cut -f3 | sort | uniq -c | sort -nr
-
-      - name: Check for problematic licenses
-        run: |
-          echo "Checking for problematic licenses"
-          PROBLEMATIC_LICENSES="GPL-3.0 AGPL-3.0 LGPL-3.0"
-
-          for license in $PROBLEMATIC_LICENSES; do
-            if grep -q "$license" licenses.tsv; then
-              echo "Warning: Found potentially problematic license: $license"
-              grep "$license" licenses.tsv
-            fi
-          done
-
-          UNKNOWN_LICENSES=$(grep -i "unknown\|n/a" licenses.tsv || true)
-          if [ -n "$UNKNOWN_LICENSES" ]; then
-            echo "Warning: Found dependencies with unknown licenses:"
-            echo "$UNKNOWN_LICENSES"
-          fi
-
-      - name: Upload license report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: license-compliance-report
-          path: |
-            licenses.json
-            licenses.tsv
-          retention-days: 30
-
-  code-security-analysis:
-    name: Code Security Analysis
+  dependency-review:
+    name: Dependency Review
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    if: |
-      github.event.inputs.scan_type == 'full' ||
-      github.event.inputs.scan_type == 'code' ||
-      github.event_name != 'workflow_dispatch'
+    if: github.event_name == 'pull_request'
     steps:
-      - name: Checkout sources
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Run dependency review
+        uses: actions/dependency-review-action@v4
         with:
-          components: clippy
+          fail-on-severity: moderate
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Unicode-DFS-2016, Unlicense, BSL-1.0, CDLA-Permissive-2.0, LGPL-2.1-or-later, Apache-2.0 OR MIT, MIT OR Apache-2.0, Apache-2.0 AND ISC, MIT OR Unlicense, Apache-2.0 OR ISC OR MIT, Zlib, Unicode-3.0, CC0-1.0, Apache-2.0 WITH LLVM-exception
 
-      - name: Setup Rust cache
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/rust
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: nvisy_security
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Setup PostgreSQL
+        uses: ./.github/actions/setup-postgres
         with:
-          key: code-security
-          cache-all-crates: true
+          postgres-timeout: 120
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@localhost/nvisy_security
 
-      - name: Run security-focused Clippy
-        run: |
-          echo "Running security-focused Clippy analysis"
-          cargo clippy --all-targets --all-features --workspace -- \
-            -W clippy::cargo \
-            -W clippy::suspicious \
-            -W clippy::complexity \
-            -W clippy::perf \
-            -W clippy::correctness \
-            -D clippy::integer_overflow \
-            -D clippy::panic \
-            -D clippy::unwrap_used \
-            -D clippy::expect_used \
-            -D clippy::indexing_slicing \
-            -D clippy::panic_in_result_fn \
-            -D clippy::unreachable \
-            -D clippy::todo \
-            -D clippy::unimplemented
+      - name: Build project
+        run: cargo build --release
 
-      - name: Install and run Semgrep
-        run: |
-          echo "Installing Semgrep"
-          pip install semgrep
-
-          echo "Running Semgrep security analysis"
-          semgrep --config=auto --json --output=semgrep-results.json . || true
-
-          if [ -f semgrep-results.json ]; then
-            echo "Semgrep analysis completed"
-            HIGH_SEVERITY=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json)
-            echo "High severity issues found: $HIGH_SEVERITY"
-
-            if [ "$HIGH_SEVERITY" -gt 0 ]; then
-              echo "High severity security issues found:"
-              jq -r '.results[] | select(.extra.severity == "ERROR") | "\(.check_id): \(.extra.message)"' semgrep-results.json
-            fi
-          fi
-
-      - name: Upload code analysis results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-security-results
-          path: semgrep-results.json
-          retention-days: 30
-
-  secret-detection:
-    name: Secret Detection
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: |
-      github.event.inputs.scan_type == 'full' ||
-      github.event.inputs.scan_type == 'secrets' ||
-      github.event_name != 'workflow_dispatch'
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run TruffleHog
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: main
-          head: HEAD
-          extra_args: --only-verified --json --output trufflehog-results.json
-
-      - name: Run Gitleaks
-        run: |
-          echo "Installing and running Gitleaks"
-          wget -O gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_*_linux_x64.tar.gz
-          tar -xzf gitleaks.tar.gz
-          chmod +x gitleaks
-
-          ./gitleaks detect --source . --report-format json --report-path gitleaks-results.json --exit-code 0
-
-      - name: Analyze secret detection results
-        run: |
-          echo "Analyzing secret detection results"
-
-          TRUFFLEHOG_SECRETS=0
-          GITLEAKS_SECRETS=0
-
-          if [ -f trufflehog-results.json ] && [ -s trufflehog-results.json ]; then
-            TRUFFLEHOG_SECRETS=$(jq '. | length' trufflehog-results.json)
-            echo "TruffleHog found $TRUFFLEHOG_SECRETS verified secrets"
-          fi
-
-          if [ -f gitleaks-results.json ] && [ -s gitleaks-results.json ]; then
-            GITLEAKS_SECRETS=$(jq '. | length' gitleaks-results.json)
-            echo "Gitleaks found $GITLEAKS_SECRETS potential secrets"
-          fi
-
-          TOTAL_SECRETS=$((TRUFFLEHOG_SECRETS + GITLEAKS_SECRETS))
-
-          if [ $TOTAL_SECRETS -gt 0 ]; then
-            echo "Warning: Potential secrets detected in repository"
-            echo "TruffleHog verified secrets: $TRUFFLEHOG_SECRETS"
-            echo "Gitleaks potential secrets: $GITLEAKS_SECRETS"
-
-            if [ $TRUFFLEHOG_SECRETS -gt 0 ]; then
-              echo "Verified secrets found - this requires immediate attention"
-              exit 1
-            fi
-          else
-            echo "No secrets detected"
-          fi
-
-      - name: Upload secret detection results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: secret-detection-results
-          path: |
-            trufflehog-results.json
-            gitleaks-results.json
-          retention-days: 30
-
-  container-security:
-    name: Container Security
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: |
-      github.event.inputs.scan_type == 'full' ||
-      github.event.inputs.scan_type == 'containers' ||
-      github.event_name != 'workflow_dispatch'
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build image for scanning
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: nvisy-server:security-scan
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: nvisy-server:security-scan
-          format: "sarif"
-          output: "trivy-results.sarif"
-          severity: "CRITICAL,HIGH,MEDIUM"
-
-      - name: Run Trivy for detailed report
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: nvisy-server:security-scan
-          format: "json"
-          output: "trivy-results.json"
-          severity: "CRITICAL,HIGH,MEDIUM,LOW"
-
-      - name: Analyze container vulnerabilities
-        run: |
-          echo "Analyzing container vulnerabilities"
-
-          if [ -f trivy-results.json ]; then
-            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
-            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
-            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-results.json)
-            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-results.json)
-
-            echo "Vulnerability summary:"
-            echo "Critical: $CRITICAL"
-            echo "High: $HIGH"
-            echo "Medium: $MEDIUM"
-            echo "Low: $LOW"
-
-            if [ "$CRITICAL" -gt 0 ]; then
-              echo "Critical vulnerabilities found in container image"
-              jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL") | "\(.VulnerabilityID): \(.Title)"' trivy-results.json
-              exit 1
-            fi
-
-            if [ "$HIGH" -gt 10 ]; then
-              echo "Too many high severity vulnerabilities found: $HIGH"
-              echo "Consider updating base image or dependencies"
-            fi
-          else
-            echo "No vulnerability scan results found"
-          fi
-
-      - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
-
-      - name: Upload container scan results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-security-results
-          path: |
-            trivy-results.sarif
-            trivy-results.json
-          retention-days: 30
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3

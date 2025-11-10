@@ -312,7 +312,7 @@ impl HealthCache {
     async fn check_database(&self, pg_client: &PgClient) -> bool {
         match pg_client.get_connection().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET_HEALTH, "postgres health check passed");
+                tracing::debug!(target: TRACING_TARGET_HEALTH, "Postgres health check passed");
                 true
             }
             Err(e) => {
@@ -372,7 +372,7 @@ impl HealthCache {
     async fn check_openrouter(&self, llm_client: &LlmClient) -> bool {
         match llm_client.list_models().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET_HEALTH, "openrouter health check passed");
+                tracing::debug!(target: TRACING_TARGET_HEALTH, "Openrouter health check passed");
                 true
             }
             Err(e) => {

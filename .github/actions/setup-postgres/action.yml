@@ -1,99 +1,51 @@
-name: "Setup PostgreSQL"
-description: "Sets up PostgreSQL database, installs tools, and runs migrations"
-author: "nvisy"
+name: Setup PostgreSQL
+description: Sets up PostgreSQL database, installs tools, and runs migrations
+author: nvisy
 
 inputs:
-  postgres-host:
-    description: "PostgreSQL host"
-    required: false
-    default: "localhost"
-  postgres-port:
-    description: "PostgreSQL port"
-    required: false
-    default: "5432"
-  postgres-user:
-    description: "PostgreSQL username"
-    required: false
-    default: "postgres"
   postgres-timeout:
-    description: "Timeout in seconds to wait for PostgreSQL"
+    description: Timeout in seconds to wait for PostgreSQL
     required: false
     default: "60"
-  working-directory:
-    description: "Working directory relative to repository root"
-    required: false
-    default: "."
 
 outputs:
-  postgres-ready:
-    description: "Whether PostgreSQL is ready and accessible"
-    value: ${{ steps.wait-postgres.outputs.ready }}
+  ready:
+    description: Whether PostgreSQL is ready and accessible
+    value: ${{ steps.wait.outputs.ready }}
 
 runs:
-  using: "composite"
+  using: composite
   steps:
-    - name: Validate inputs
-      shell: bash
-      run: |
-        if ! [[ "${{ inputs.postgres-timeout }}" =~ ^[0-9]+$ ]]; then
-          echo "Error: postgres-timeout must be a number"
-          exit 1
-        fi
-        if ! [[ "${{ inputs.postgres-port }}" =~ ^[0-9]+$ ]]; then
-          echo "Error: postgres-port must be a number"
-          exit 1
-        fi
-
-    - name: Set environment variables
-      shell: bash
-      run: |
-        echo "POSTGRES_HOST=${{ inputs.postgres-host }}" >> $GITHUB_ENV
-        echo "POSTGRES_PORT=${{ inputs.postgres-port }}" >> $GITHUB_ENV
-        echo "POSTGRES_USER=${{ inputs.postgres-user }}" >> $GITHUB_ENV
-        echo "POSTGRES_TIMEOUT=${{ inputs.postgres-timeout }}" >> $GITHUB_ENV
-
     - name: Install system dependencies
       shell: bash
       run: |
-        case "$RUNNER_OS" in
-          Linux)
-            if command -v apt-get >/dev/null 2>&1; then
-              sudo apt-get update -qq
-              sudo apt-get install -y libpq-dev postgresql-client
-            elif command -v yum >/dev/null 2>&1; then
-              sudo yum install -y postgresql-devel postgresql
-            fi
-            ;;
-          macOS)
-            if command -v brew >/dev/null 2>&1; then
-              brew install postgresql libpq
-            fi
-            ;;
-        esac
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          sudo apt-get update -qq
+          sudo apt-get install -y libpq-dev postgresql-client
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          brew install postgresql libpq
+        fi
 
-    - name: Install tools
+    - name: Install Diesel CLI
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: make install-tools
 
     - name: Wait for PostgreSQL
-      id: wait-postgres
+      id: wait
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: |
         chmod +x scripts/wait-for-postgres.sh
-        if scripts/wait-for-postgres.sh; then
+        if scripts/wait-for-postgres.sh ${{ inputs.postgres-timeout }}; then
           echo "ready=true" >> $GITHUB_OUTPUT
         else
           echo "ready=false" >> $GITHUB_OUTPUT
           exit 1
         fi
 
-    - name: Setup database and generate schema
+    - name: Run migrations
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: make generate-migrations
 
 branding:
-  icon: "database"
-  color: "blue"
+  icon: database
+  color: blue

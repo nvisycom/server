@@ -20,7 +20,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, Version,
 };
@@ -37,15 +36,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::document_files";
 
 /// Maximum file size: 100MB
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
-
-/// `Path` param for `{fileId}`.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct FileIdPathParam {
-    /// Unique identifier of the document file.
-    pub file_id: Uuid,
-}
 
 /// Combined path params for document file operations.
 #[must_use]
@@ -120,17 +110,14 @@ async fn upload_file(
     let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
-    // Verify document exists and user has editor permissions
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::UploadFiles,
-    );
+    auth_claims
+        .authorize_document(&mut conn, path_params.document_id, Permission::UploadFiles)
+        .await?;
 
     let upload_mode = query.upload_mode;
     let mut uploaded_files = Vec::new();
 
-    tracing::debug!(target: TRACING_TARGET, mode = ?upload_mode, "starting file upload");
+    tracing::debug!(target: TRACING_TARGET, mode = ?upload_mode, "Starting file upload");
 
     while let Some(field) = multipart.next_field().await.map_err(|err| {
         tracing::error!(target: TRACING_TARGET, error = %err, "failed to read multipart field");
@@ -141,7 +128,7 @@ async fn upload_file(
         let filename = if let Some(filename) = field.file_name() {
             filename.to_string()
         } else {
-            tracing::debug!(target: TRACING_TARGET, "skipping field without filename");
+            tracing::debug!(target: TRACING_TARGET, "Skipping field without filename");
             continue;
         };
 
@@ -168,7 +155,7 @@ async fn upload_file(
         let mut stream = field;
 
         while let Some(chunk) = stream.chunk().await.map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, filename = %filename, "failed to read file chunk");
+            tracing::error!(target: TRACING_TARGET, error = %err, filename = %filename, "Failed to read file chunk");
             ErrorKind::BadRequest
                 .with_message("Failed to read file data")
                 .with_context(format!("could not read file '{}': {}", filename, err))
@@ -421,11 +408,13 @@ async fn update_file(
 
     // Verify permissions
     // Verify document write permissions
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::UpdateDocuments,
-    );
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            Permission::UpdateDocuments,
+        )
+        .await?;
 
     // Get existing file
     let Some(file) =
@@ -451,7 +440,7 @@ async fn update_file(
         DocumentFileRepository::update_document_file(&mut conn, path_params.file_id, updates)
             .await
             .map_err(|err| {
-                tracing::error!(target: TRACING_TARGET, error = %err, "failed to update file");
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
                 ErrorKind::InternalServerError.with_message("Failed to update file")
             })?;
 
@@ -630,11 +619,9 @@ async fn delete_file(
     let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::DeleteFiles,
-    );
+    auth_claims
+        .authorize_document(&mut conn, path_params.document_id, Permission::DeleteFiles)
+        .await?;
 
     // Get file metadata
     let Some(file) =

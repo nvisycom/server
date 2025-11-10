@@ -32,7 +32,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{AuthProvider, AuthState, Path, Permission};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::{ErrorKind, ErrorResponse, Result};
@@ -812,11 +811,9 @@ async fn project_websocket_handler(
     let mut conn = pg_client.get_connection().await?;
 
     // Check if user has minimum permission to view documents
-    authorize!(
-        project: project_id,
-        auth_claims, &mut conn,
-        Permission::ViewDocuments,
-    );
+    auth_claims
+        .authorize_project(&mut conn, project_id, Permission::ViewDocuments)
+        .await?;
 
     // Verify the project exists
     if ProjectRepository::find_project_by_id(&mut conn, project_id)

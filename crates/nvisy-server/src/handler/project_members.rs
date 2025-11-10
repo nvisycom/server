@@ -18,7 +18,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{AuthProvider, AuthState, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::project_member::UpdateMemberRoleRequest;
@@ -31,15 +30,6 @@ use crate::service::ServiceState;
 
 /// Tracing target for project member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_members";
-
-/// `Path` param for `{accountId}`.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountIdPathParam {
-    /// Unique identifier of the member account.
-    pub account_id: Uuid,
-}
 
 /// Combined path parameters for member-specific endpoints.
 #[must_use]
@@ -109,11 +99,9 @@ async fn list_members(
     );
 
     // Verify user has permission to view project members
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::ViewMembers,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
+        .await?;
 
     // Fetch project to check if it's private
     let Some(project) =
@@ -213,11 +201,9 @@ async fn get_member(
     );
 
     // Verify user has permission to view project member details
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::ViewMembers,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
+        .await?;
 
     // Check if project is private
     let Some(project) =
@@ -318,11 +304,9 @@ async fn delete_member(
     );
 
     // Verify user has permission to remove members
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::RemoveMembers,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::RemoveMembers)
+        .await?;
 
     // Prevent users from removing themselves (they should use leave endpoint instead)
     if auth_claims.account_id == path_params.account_id {
@@ -448,11 +432,9 @@ async fn update_member(
     );
 
     // Verify user has permission to manage member roles
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::ManageRoles,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::ManageRoles)
+        .await?;
 
     // Prevent users from updating their own role
     if auth_claims.account_id == path_params.account_id {

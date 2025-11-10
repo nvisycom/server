@@ -161,7 +161,7 @@ impl TelemetryClient {
     /// Returns an error if the request fails or telemetry is disabled.
     pub async fn send_usage_report(&self, mut report: UsageReport) -> Result<()> {
         if !self.config.enabled || !self.config.collect_usage {
-            tracing::debug!("usage telemetry disabled, skipping report");
+            tracing::debug!("Usage telemetry disabled, skipping report");
             return Ok(());
         }
 
@@ -203,7 +203,7 @@ impl TelemetryClient {
     /// Returns an error if the request fails or telemetry is disabled.
     pub async fn send_crash_report(&self, mut report: CrashReport) -> Result<()> {
         if !self.config.enabled || !self.config.collect_crashes {
-            tracing::debug!("crash telemetry disabled, skipping report");
+            tracing::debug!("Crash telemetry disabled, skipping report");
             return Ok(());
         }
 

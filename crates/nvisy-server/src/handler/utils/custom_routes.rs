@@ -38,6 +38,8 @@ pub struct CustomRoutes {
     pub public_before_middleware: Option<RouterMapFn>,
     /// Function to map public routes after middlewares are applied.
     pub public_after_middleware: Option<RouterMapFn>,
+    /// Flag to disable authentication routes.
+    pub disable_authentication: bool,
 }
 
 impl CustomRoutes {
@@ -78,6 +80,14 @@ impl CustomRoutes {
             Some(existing) => self.public_routes = Some(existing.merge(routes)),
             None => self.public_routes = Some(routes),
         }
+        self
+    }
+
+    /// Sets the disable authentication flag.
+    ///
+    /// When enabled, authentication routes will not be included in the public router.
+    pub fn with_disable_authentication(mut self, disable: bool) -> Self {
+        self.disable_authentication = disable;
         self
     }
 
@@ -233,7 +243,6 @@ mod tests {
     #[test]
     fn test_custom_routes_merge() {
         let routes1 = CustomRoutes::new().with_private_routes(OpenApiRouter::new());
-
         let routes2 = CustomRoutes::new().with_public_routes(OpenApiRouter::new());
 
         let merged = routes1.merge(routes2);

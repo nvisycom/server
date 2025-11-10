@@ -18,7 +18,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::project_invite::{CreateInviteRequest, ReplyInviteRequest};
@@ -31,15 +30,6 @@ use crate::service::ServiceState;
 
 /// Tracing target for project invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_invites";
-
-/// `Path` param for `{inviteId}`.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct InviteIdPathParam {
-    /// Unique identifier of the invite.
-    pub invite_id: Uuid,
-}
 
 /// Combined path parameters for invite-specific endpoints.
 #[must_use]
@@ -129,11 +119,9 @@ async fn send_invite(
     );
 
     // Verify user has permission to send invitations
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::InviteMembers,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
+        .await?;
 
     // Check if user is already a member
     if let Some(existing_member) = ProjectMemberRepository::find_project_member(
@@ -278,11 +266,9 @@ async fn list_invites(
     );
 
     // Verify user has permission to view project invitations
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::ViewMembers,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
+        .await?;
 
     // Retrieve project invitations with pagination
     let project_invites = ProjectInviteRepository::list_project_invites(
@@ -366,11 +352,9 @@ async fn cancel_invite(
     );
 
     // Verify user has permission to manage project invitations
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::InviteMembers,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
+        .await?;
 
     // Cancel the invitation
     let project_invite = ProjectInviteRepository::cancel_invite(

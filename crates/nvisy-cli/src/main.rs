@@ -79,12 +79,12 @@ impl Cli {
 #[tokio::main]
 async fn main() {
     let Err(error) = run_application().await else {
-        tracing::info!(target: TRACING_TARGET_SERVER_SHUTDOWN, "application terminated successfully");
+        tracing::info!(target: TRACING_TARGET_SERVER_SHUTDOWN, "Application terminated successfully");
         process::exit(0);
     };
 
     if tracing::enabled!(tracing::Level::ERROR) {
-        tracing::error!(target: TRACING_TARGET_SERVER_SHUTDOWN, error = %error, "application terminated with error");
+        tracing::error!(target: TRACING_TARGET_SERVER_SHUTDOWN, error = %error, "Application terminated with error");
     } else {
         eprintln!("Application terminated with error: {error:#}");
     }
@@ -110,7 +110,7 @@ async fn run_application() -> anyhow::Result<()> {
     let telemetry_context = create_telemetry_context(&cli.telemetry);
 
     // Convert CLI config to server configs
-    let (service_config, cors_config, openapi_config) = cli.service.into_server_configs();
+    let (_service_config, cors_config, openapi_config) = cli.service.into_server_configs();
 
     // Create a simple router for now (nvisy-server integration removed for clean build)
     let router = axum::Router::new()

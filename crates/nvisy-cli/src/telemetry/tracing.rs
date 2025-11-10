@@ -114,7 +114,7 @@ pub(super) fn init_tracing_with_otel() -> anyhow::Result<()> {
         .with(fmt_layer)
         .init();
 
-    tracing::info!("openTelemetry support enabled");
+    tracing::info!("OpenTelemetry support enabled");
     tracing::trace!(
         target: TRACING_TARGET_OTEL,
         "initialized tracing subscriber with otel support",

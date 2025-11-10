@@ -1,80 +1,40 @@
-name: "Setup NATS"
-description: "Sets up NATS server and waits for it to be ready"
-author: "nvisy"
+name: Setup NATS
+description: Sets up NATS server and waits for it to be ready
+author: nvisy
 
 inputs:
-  nats-host:
-    description: "NATS host"
-    required: false
-    default: "localhost"
-  nats-port:
-    description: "NATS port"
-    required: false
-    default: "4222"
   nats-timeout:
-    description: "Timeout in seconds to wait for NATS"
+    description: Timeout in seconds to wait for NATS
     required: false
     default: "30"
-  working-directory:
-    description: "Working directory relative to repository root"
-    required: false
-    default: "."
 
 outputs:
-  nats-ready:
-    description: "Whether NATS is ready and accessible"
-    value: ${{ steps.wait-nats.outputs.ready }}
+  ready:
+    description: Whether NATS is ready and accessible
+    value: ${{ steps.wait.outputs.ready }}
 
 runs:
-  using: "composite"
+  using: composite
   steps:
-    - name: Validate inputs
-      shell: bash
-      run: |
-        if ! [[ "${{ inputs.nats-timeout }}" =~ ^[0-9]+$ ]]; then
-          echo "Error: nats-timeout must be a number"
-          exit 1
-        fi
-        if ! [[ "${{ inputs.nats-port }}" =~ ^[0-9]+$ ]]; then
-          echo "Error: nats-port must be a number"
-          exit 1
-        fi
-
-    - name: Set environment variables
-      shell: bash
-      run: |
-        echo "NATS_HOST=${{ inputs.nats-host }}" >> $GITHUB_ENV
-        echo "NATS_PORT=${{ inputs.nats-port }}" >> $GITHUB_ENV
-        echo "NATS_TIMEOUT=${{ inputs.nats-timeout }}" >> $GITHUB_ENV
-
     - name: Install NATS CLI
       shell: bash
       run: |
-        case "$RUNNER_OS" in
-          Linux)
-            wget -O nats.tar.gz https://github.com/nats-io/natscli/releases/latest/download/nats-*-linux-amd64.tar.gz
-            tar -xzf nats.tar.gz
-            sudo mv nats-*-linux-amd64/nats /usr/local/bin/
-            ;;
-          macOS)
-            if command -v brew >/dev/null 2>&1; then
-              brew install nats-io/nats-tools/nats
-            fi
-            ;;
-          Windows)
-            curl -L -o nats.zip https://github.com/nats-io/natscli/releases/latest/download/nats-*-windows-amd64.zip
-            unzip nats.zip
-            echo "$(pwd)/nats-*-windows-amd64" >> $GITHUB_PATH
-            ;;
-        esac
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          curl -sf https://binaries.nats.dev/nats-io/natscli/nats@latest | sh
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          brew install nats-io/nats-tools/nats
+        elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          curl -L -o nats.zip https://github.com/nats-io/natscli/releases/latest/download/nats-0.1.5-windows-amd64.zip
+          unzip nats.zip -d nats-cli
+          echo "$(pwd)/nats-cli" >> $GITHUB_PATH
+        fi
 
     - name: Wait for NATS
-      id: wait-nats
+      id: wait
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: |
         chmod +x scripts/wait-for-nats.sh
-        if scripts/wait-for-nats.sh; then
+        if scripts/wait-for-nats.sh ${{ inputs.nats-timeout }}; then
           echo "ready=true" >> $GITHUB_OUTPUT
         else
           echo "ready=false" >> $GITHUB_OUTPUT
@@ -82,5 +42,5 @@ runs:
         fi
 
 branding:
-  icon: "message-circle"
-  color: "blue"
+  icon: message-circle
+  color: blue

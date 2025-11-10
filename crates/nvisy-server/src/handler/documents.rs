@@ -16,7 +16,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::authorize;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::document::{CreateDocumentRequest, UpdateDocumentRequest};
@@ -83,11 +82,13 @@ async fn create_document(
 
     let mut conn = pg_client.get_connection().await?;
 
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::CreateDocuments,
-    );
+    auth_claims
+        .authorize_project(
+            &mut conn,
+            path_params.project_id,
+            Permission::CreateDocuments,
+        )
+        .await?;
 
     let new_document = NewDocument {
         project_id: path_params.project_id,
@@ -145,11 +146,9 @@ async fn get_all_documents(
 ) -> Result<(StatusCode, Json<ListDocumentsResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    authorize!(
-        project: path_params.project_id,
-        auth_claims, &mut conn,
-        Permission::ViewDocuments,
-    );
+    auth_claims
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewDocuments)
+        .await?;
 
     let documents = DocumentRepository::find_documents_by_project(
         &mut conn,
@@ -206,11 +205,13 @@ async fn get_document(
 ) -> Result<(StatusCode, Json<GetDocumentResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::ViewDocuments,
-    );
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            Permission::ViewDocuments,
+        )
+        .await?;
 
     let Some(document) =
         DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
@@ -271,11 +272,13 @@ async fn update_document(
         "updating document",
     );
 
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::UpdateDocuments,
-    );
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            Permission::UpdateDocuments,
+        )
+        .await?;
 
     // Verify document exists before updating
     let Some(_existing_document) =
@@ -341,11 +344,13 @@ async fn delete_document(
 
     let mut conn = pg_client.get_connection().await?;
 
-    authorize!(
-        document: path_params.document_id,
-        auth_claims, &mut conn,
-        Permission::DeleteDocuments,
-    );
+    auth_claims
+        .authorize_document(
+            &mut conn,
+            path_params.document_id,
+            Permission::DeleteDocuments,
+        )
+        .await?;
 
     // Verify document exists before deleting
     let Some(_existing_document) =
