@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 #[schema(example = json!({
     "dataCollection": "minimal"
 }))]
-pub struct MonitorStatusRequest {
+pub struct GetMonitorStatus {
     /// Whether to return cached health status.
     pub return_cached: Option<bool>,
 }

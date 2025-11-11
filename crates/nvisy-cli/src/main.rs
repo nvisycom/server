@@ -99,7 +99,7 @@ async fn run_application() -> anyhow::Result<()> {
     cli.validate().context("CLI validation failed")?;
 
     // Initialize tracing
-    init_tracing().context("Failed to initialize tracing subsystem")?;
+    init_tracing();
 
     // Log startup information
     log_startup_info();

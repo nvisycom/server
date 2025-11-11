@@ -20,11 +20,8 @@ use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::project_member::UpdateMemberRoleRequest;
-use crate::handler::response::project_member::{
-    DeleteMemberResponse, GetMemberResponse, ListMembersResponse, ListMembersResponseItem,
-    UpdateMemberRoleResponse,
-};
+use crate::handler::request::UpdateMemberRole;
+use crate::handler::response::{Member, Members};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
@@ -79,7 +76,7 @@ pub struct MemberPathParams {
         (
             status = OK,
             description = "Project members listed successfully",
-            body = ListMembersResponse,
+            body = Members,
         ),
     ),
 )]
@@ -88,14 +85,14 @@ async fn list_members(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<PaginationRequest>,
-) -> Result<(StatusCode, Json<ListMembersResponse>)> {
+) -> Result<(StatusCode, Json<Members>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "listing project members"
+        "Listing project members"
     );
 
     // Verify user has permission to view project members
@@ -115,7 +112,7 @@ async fn list_members(
 
     // If project is private, return empty member list
     let is_private = project.visibility == ProjectVisibility::Private;
-    let members = if is_private {
+    let members: Members = if is_private {
         Vec::new()
     } else {
         // Retrieve project members with pagination
@@ -126,27 +123,18 @@ async fn list_members(
         )
         .await?;
 
-        project_members
-            .into_iter()
-            .map(ListMembersResponseItem::from)
-            .collect()
-    };
-
-    let response = ListMembersResponse {
-        project_id: path_params.project_id,
-        is_private,
-        members,
+        project_members.into_iter().map(Member::from).collect()
     };
 
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        member_count = response.members.len(),
-        "project members listed successfully"
+        member_count = members.len(),
+        "Project members listed successfully"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok((StatusCode::OK, Json(members)))
 }
 
 /// Gets detailed information about a specific project member.
@@ -181,7 +169,7 @@ async fn list_members(
         (
             status = OK,
             description = "Project member retrieved successfully",
-            body = GetMemberResponse,
+            body = Member,
         ),
     )
 )]
@@ -189,7 +177,7 @@ async fn get_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
-) -> Result<(StatusCode, Json<GetMemberResponse>)> {
+) -> Result<(StatusCode, Json<Member>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
@@ -197,7 +185,7 @@ async fn get_member(
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         member_id = path_params.account_id.to_string(),
-        "retrieving project member details"
+        "Retrieving project member details"
     );
 
     // Verify user has permission to view project member details
@@ -215,7 +203,7 @@ async fn get_member(
             .with_context(format!("Project ID: {}", path_params.project_id)));
     };
 
-    if project.visibility == ProjectVisibility::Private {
+    if project.visibility.is_private() {
         return Err(ErrorKind::Forbidden
             .with_resource("project")
             .with_message("Cannot view members of a private project")
@@ -245,7 +233,7 @@ async fn get_member(
         project_id = path_params.project_id.to_string(),
         member_id = path_params.account_id.to_string(),
         member_role = ?project_member.member_role,
-        "project member retrieved successfully"
+        "Project member retrieved successfully"
     );
 
     Ok((StatusCode::OK, Json(project_member.into())))
@@ -284,7 +272,6 @@ async fn get_member(
         (
             status = OK,
             description = "Project member removed successfully",
-            body = DeleteMemberResponse,
         ),
     )
 )]
@@ -292,7 +279,7 @@ async fn delete_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
-) -> Result<(StatusCode, Json<DeleteMemberResponse>)> {
+) -> Result<StatusCode> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::warn!(
@@ -361,20 +348,15 @@ async fn delete_member(
     )
     .await?;
 
-    let response = DeleteMemberResponse {
-        account_id: path_params.account_id,
-        project_id: path_params.project_id,
-    };
-
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         member_id = path_params.account_id.to_string(),
-        "project member removed successfully"
+        "Project member removed successfully"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(StatusCode::OK)
 }
 
 /// Updates a project member's role.
@@ -385,7 +367,7 @@ async fn delete_member(
 #[utoipa::path(
     patch, path = "/projects/{projectId}/members/{accountId}/role", tag = "projects",
     params(MemberPathParams),
-    request_body = UpdateMemberRoleRequest,
+    request_body = UpdateMemberRole,
     responses(
         (
             status = BAD_REQUEST,
@@ -410,7 +392,7 @@ async fn delete_member(
         (
             status = OK,
             description = "Member role updated successfully",
-            body = UpdateMemberRoleResponse,
+            body = Member,
         ),
     )
 )]
@@ -418,8 +400,8 @@ async fn update_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
-    ValidateJson(request): ValidateJson<UpdateMemberRoleRequest>,
-) -> Result<(StatusCode, Json<UpdateMemberRoleResponse>)> {
+    ValidateJson(request): ValidateJson<UpdateMemberRole>,
+) -> Result<(StatusCode, Json<Member>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
@@ -428,7 +410,7 @@ async fn update_member(
         project_id = path_params.project_id.to_string(),
         member_id = path_params.account_id.to_string(),
         new_role = ?request.role,
-        "updating project member role"
+        "Updating project member role"
     );
 
     // Verify user has permission to manage member roles
@@ -521,14 +503,7 @@ async fn update_member(
         "Member role updated successfully"
     );
 
-    let response = UpdateMemberRoleResponse {
-        account_id: updated_member.account_id,
-        project_id: updated_member.project_id,
-        role: updated_member.member_role,
-        updated_at: updated_member.updated_at,
-    };
-
-    Ok((StatusCode::OK, Json(response)))
+    Ok((StatusCode::OK, Json(updated_member.into())))
 }
 
 /// Returns a [`Router`] with all project member related routes.

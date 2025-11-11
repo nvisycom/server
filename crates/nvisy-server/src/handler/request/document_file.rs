@@ -23,7 +23,7 @@ pub enum UploadMode {
     "displayName": "renamed-document.pdf",
     "processingPriority": 10
 }))]
-pub struct UpdateFileRequest {
+pub struct UpdateFile {
     /// New display name for the file
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,

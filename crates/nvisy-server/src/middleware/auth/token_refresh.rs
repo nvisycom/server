@@ -114,8 +114,7 @@ async fn refresh_token(
         })?;
 
     // Create new auth claims with updated expiration
-    let new_auth_claims = AuthClaims::new(account, updated_token);
+    let new_auth_claims = AuthClaims::new(&account, &updated_token);
     let new_auth_header = AuthHeader::new(new_auth_claims, auth_secret_keys);
-
     Ok(new_auth_header)
 }

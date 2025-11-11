@@ -24,10 +24,8 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, Version,
 };
 use crate::handler::documents::DocumentPathParams;
-use crate::handler::request::document_file::{UpdateFileRequest, UploadMode};
-use crate::handler::response::document_file::{
-    UpdateFileResponse, UploadFileResponse, UploadedFile,
-};
+use crate::handler::request::{UpdateFile, UploadMode};
+use crate::handler::response::{File, Files};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
 
@@ -95,7 +93,7 @@ pub struct UploadFileQuery {
         (
             status = CREATED,
             description = "Files uploaded successfully",
-            body = UploadFileResponse,
+            body = Files,
         ),
     )
 )]
@@ -106,7 +104,7 @@ async fn upload_file(
     Query(query): Query<UploadFileQuery>,
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
-) -> Result<(StatusCode, Json<UploadFileResponse>)> {
+) -> Result<(StatusCode, Json<Files>)> {
     let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
@@ -274,11 +272,13 @@ async fn upload_file(
             "file upload completed successfully"
         );
 
-        let uploaded_file = UploadedFile {
+        let uploaded_file = File {
             file_id: created_file.id,
             display_name: created_file.display_name,
             file_size: created_file.file_size_bytes,
             status: created_file.processing_status,
+            processing_priority: Some(created_file.processing_priority),
+            updated_at: Some(created_file.updated_at),
         };
 
         // Publish file processing job to queue
@@ -293,7 +293,7 @@ async fn upload_file(
 
         // Publish to document job queue
         let jetstream = nats_client.jetstream();
-        let publisher = nvisy_nats::stream::DocumentJobPublisher::new(&jetstream)
+        let publisher = nvisy_nats::stream::DocumentJobPublisher::new(jetstream)
             .await
             .map_err(|err| {
                 tracing::error!(
@@ -352,13 +352,7 @@ async fn upload_file(
         "file upload completed"
     );
 
-    Ok((
-        StatusCode::CREATED,
-        Json(UploadFileResponse {
-            files: uploaded_files,
-            count,
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(uploaded_files)))
 }
 
 /// Updates file metadata.
@@ -366,7 +360,7 @@ async fn upload_file(
 #[utoipa::path(
     patch, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
     params(DocFileIdPathParams),
-    request_body = UpdateFileRequest,
+    request_body = UpdateFile,
     responses(
         (
             status = BAD_REQUEST,
@@ -391,7 +385,7 @@ async fn upload_file(
         (
             status = OK,
             description = "File updated successfully",
-            body = UpdateFileResponse,
+            body = File,
         ),
     )
 )]
@@ -401,8 +395,8 @@ async fn update_file(
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
-    ValidateJson(request): ValidateJson<UpdateFileRequest>,
-) -> Result<(StatusCode, Json<UpdateFileResponse>)> {
+    ValidateJson(request): ValidateJson<UpdateFile>,
+) -> Result<(StatusCode, Json<File>)> {
     let mut conn = pg_client.get_connection().await?;
     let _input_fs = nats_client.document_store::<InputFiles>().await?;
 
@@ -450,11 +444,13 @@ async fn update_file(
         "file updated successfully"
     );
 
-    let response = UpdateFileResponse {
+    let response = File {
         file_id: updated_file.id,
         display_name: updated_file.display_name,
-        processing_priority: updated_file.processing_priority,
-        updated_at: updated_file.updated_at,
+        file_size: updated_file.file_size_bytes,
+        status: updated_file.processing_status,
+        processing_priority: Some(updated_file.processing_priority),
+        updated_at: Some(updated_file.updated_at),
     };
 
     Ok((StatusCode::OK, Json(response)))

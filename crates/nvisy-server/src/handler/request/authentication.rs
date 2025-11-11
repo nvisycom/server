@@ -13,7 +13,7 @@ use validator::Validate;
     "password": "SecurePassword123!",
     "rememberMe": true
 }))]
-pub struct LoginRequest {
+pub struct Login {
     /// Email address of the account.
     #[validate(email)]
     pub email_address: String,
@@ -33,7 +33,7 @@ pub struct LoginRequest {
     "password": "SecurePassword123!",
     "rememberMe": true
 }))]
-pub struct SignupRequest {
+pub struct Signup {
     /// Display name of the account.
     #[validate(length(min = 2, max = 32))]
     pub display_name: String,

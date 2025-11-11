@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewDocument, UpdateDocument};
+use nvisy_postgres::model::NewDocument;
 use nvisy_postgres::query::DocumentRepository;
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
@@ -18,11 +18,8 @@ use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::document::{CreateDocumentRequest, UpdateDocumentRequest};
-use crate::handler::response::document::{
-    CreateDocumentResponse, DeleteDocumentResponse, GetDocumentResponse, ListDocumentsResponse,
-    ListDocumentsResponseItem, UpdateDocumentResponse,
-};
+use crate::handler::request::{CreateDocument, UpdateDocument as UpdateDocumentRequest};
+use crate::handler::response::{Document, Documents};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
@@ -44,7 +41,7 @@ pub struct DocumentPathParams {
     post, path = "/projects/{projectId}/documents/",
     params(ProjectPathParams), tag = "documents",
     request_body(
-        content = CreateDocumentRequest,
+        content = CreateDocument,
         description = "New document",
         content_type = "application/json",
     ),
@@ -62,7 +59,7 @@ pub struct DocumentPathParams {
         (
             status = CREATED,
             description = "Document created",
-            body = CreateDocumentResponse,
+            body = Document,
         ),
     ),
 )]
@@ -70,8 +67,8 @@ async fn create_document(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(request): ValidateJson<CreateDocumentRequest>,
-) -> Result<(StatusCode, Json<CreateDocumentResponse>)> {
+    ValidateJson(request): ValidateJson<CreateDocument>,
+) -> Result<(StatusCode, Json<Document>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -134,7 +131,7 @@ async fn create_document(
         (
             status = OK,
             description = "Documents listed",
-            body = ListDocumentsResponse,
+            body = Documents,
         ),
     )
 )]
@@ -143,7 +140,7 @@ async fn get_all_documents(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<PaginationRequest>,
-) -> Result<(StatusCode, Json<ListDocumentsResponse>)> {
+) -> Result<(StatusCode, Json<Documents>)> {
     let mut conn = pg_client.get_connection().await?;
 
     auth_claims
@@ -157,18 +154,13 @@ async fn get_all_documents(
     )
     .await?;
 
-    let documents = documents
-        .into_iter()
-        .map(ListDocumentsResponseItem::from)
-        .collect();
-
-    let response = ListDocumentsResponse::new(path_params.project_id, documents);
+    let response: Documents = documents.into_iter().map(Document::from).collect();
 
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        document_count = response.documents.len(),
+        document_count = response.len(),
         "listed project documents"
     );
 
@@ -194,7 +186,7 @@ async fn get_all_documents(
         (
             status = OK,
             description = "Document details",
-            body = GetDocumentResponse,
+            body = Document,
         ),
     ),
 )]
@@ -202,7 +194,7 @@ async fn get_document(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-) -> Result<(StatusCode, Json<GetDocumentResponse>)> {
+) -> Result<(StatusCode, Json<Document>)> {
     let mut conn = pg_client.get_connection().await?;
 
     auth_claims
@@ -253,7 +245,7 @@ async fn get_document(
         (
             status = OK,
             description = "Document updated",
-            body = UpdateDocumentResponse,
+            body = Document,
         ),
     ),
 )]
@@ -262,7 +254,7 @@ async fn update_document(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocumentRequest>,
-) -> Result<(StatusCode, Json<UpdateDocumentResponse>)> {
+) -> Result<(StatusCode, Json<Document>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
@@ -287,13 +279,13 @@ async fn update_document(
         return Err(ErrorKind::NotFound.with_resource("document"));
     };
 
-    let update_document = UpdateDocument {
+    let update_data = nvisy_postgres::model::UpdateDocument {
         display_name: request.display_name,
         ..Default::default()
     };
 
     let document =
-        DocumentRepository::update_document(&mut conn, path_params.document_id, update_document)
+        DocumentRepository::update_document(&mut conn, path_params.document_id, update_data)
             .await?;
 
     tracing::debug!(
@@ -325,7 +317,6 @@ async fn update_document(
         (
             status = OK,
             description = "Document deleted",
-            body = DeleteDocumentResponse,
         ),
     )
 )]
@@ -334,7 +325,7 @@ async fn delete_document(
     State(_nats_client): State<NatsClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-) -> Result<(StatusCode, Json<DeleteDocumentResponse>)> {
+) -> Result<StatusCode> {
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -361,12 +352,6 @@ async fn delete_document(
 
     DocumentRepository::delete_document(&mut conn, path_params.document_id).await?;
 
-    let Some(deleted_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
-    else {
-        return Err(ErrorKind::NotFound.with_resource("document"));
-    };
-
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -374,7 +359,7 @@ async fn delete_document(
         "document deleted successfully",
     );
 
-    Ok((StatusCode::OK, Json(deleted_document.into())))
+    Ok(StatusCode::OK)
 }
 
 /// Returns a [`Router`] with all related routes.
@@ -395,8 +380,10 @@ mod test {
     async fn test_create_document_success() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = CreateDocumentRequest {
+        let request = CreateDocument {
             display_name: "Test Document".to_string(),
+            description: "Test description".to_string(),
+            tags: Vec::new(),
         };
 
         let project_id = Uuid::new_v4();
@@ -406,7 +393,7 @@ mod test {
             .await;
         response.assert_status(StatusCode::CREATED);
 
-        let body: CreateDocumentResponse = response.json();
+        let body: Document = response.json();
         assert!(!body.document_id.is_nil());
 
         Ok(())
@@ -437,12 +424,14 @@ mod test {
         let project_id = Uuid::new_v4();
 
         // Create a document first
-        let request = CreateDocumentRequest {
-            display_name: "List Test Document".to_string(),
+        let create_request = CreateDocument {
+            display_name: "Test Document".to_string(),
+            description: "Test description".to_string(),
+            tags: Vec::new(),
         };
         server
             .post(&format!("/projects/{}/documents/", project_id))
-            .json(&request)
+            .json(&create_request)
             .await;
 
         // List documents
@@ -466,18 +455,22 @@ mod test {
         let project_id = Uuid::new_v4();
 
         // Create a document
-        let create_request = CreateDocumentRequest {
+        let create_request = CreateDocument {
             display_name: "Original Name".to_string(),
+            description: "Test description".to_string(),
+            tags: Vec::new(),
         };
         let create_response = server
             .post(&format!("/projects/{}/documents/", project_id))
             .json(&create_request)
             .await;
-        let created: CreateDocumentResponse = create_response.json();
+        let created: Document = create_response.json();
 
         // Update the document
         let update_request = UpdateDocumentRequest {
             display_name: Some("Updated Name".to_string()),
+            description: None,
+            tags: None,
         };
 
         let response = server
@@ -496,14 +489,16 @@ mod test {
         let project_id = Uuid::new_v4();
 
         // Create a document
-        let request = CreateDocumentRequest {
-            display_name: "Get Test".to_string(),
+        let create_request = CreateDocument {
+            display_name: "Test Document".to_string(),
+            description: "Test description".to_string(),
+            tags: Vec::new(),
         };
         let create_response = server
             .post(&format!("/projects/{}/documents/", project_id))
-            .json(&request)
+            .json(&create_request)
             .await;
-        let created: CreateDocumentResponse = create_response.json();
+        let created: Document = create_response.json();
 
         // Get the document
         let response = server
@@ -511,8 +506,8 @@ mod test {
             .await;
         response.assert_status_ok();
 
-        let body: GetDocumentResponse = response.json();
-        assert_eq!(body.id, created.document_id);
+        let body: Document = response.json();
+        assert_eq!(body.document_id, created.document_id);
 
         Ok(())
     }
@@ -524,14 +519,16 @@ mod test {
         let project_id = Uuid::new_v4();
 
         // Create a document
-        let request = CreateDocumentRequest {
+        let request = CreateDocument {
             display_name: "Delete Test".to_string(),
+            description: "Test description".to_string(),
+            tags: Vec::new(),
         };
         let create_response = server
             .post(&format!("/projects/{}/documents/", project_id))
             .json(&request)
             .await;
-        let created: CreateDocumentResponse = create_response.json();
+        let created: Document = create_response.json();
 
         // Delete the document
         let response = server

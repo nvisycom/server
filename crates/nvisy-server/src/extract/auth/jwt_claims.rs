@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
@@ -20,10 +22,10 @@ pub struct AuthClaims<T = ()> {
     // Standard (or registered) claims.
     /// Issuer (who created the token).
     #[serde(rename = "iss")]
-    issued_by: String,
+    issued_by: Cow<'static, str>,
     /// Audience (who the token is intended for).
     #[serde(rename = "aud")]
-    audience: String,
+    audience: Cow<'static, str>,
 
     // JWT ID (unique identifier for token, useful for revocation).
     #[serde(rename = "jti")]
@@ -63,7 +65,7 @@ impl AuthClaims<()> {
     /// # Returns
     ///
     /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
-    pub fn new(account_model: Account, account_api_token: AccountApiToken) -> Self {
+    pub fn new(account_model: &Account, account_api_token: &AccountApiToken) -> Self {
         Self::with_custom_claims(account_model, account_api_token, ())
     }
 }
@@ -91,13 +93,13 @@ impl<T> AuthClaims<T> {
     ///
     /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
     pub fn with_custom_claims(
-        account_model: Account,
-        account_api_token: AccountApiToken,
+        account_model: &Account,
+        account_api_token: &AccountApiToken,
         custom_claims: T,
     ) -> Self {
         Self {
-            issued_by: Self::JWT_ISSUER.to_owned(),
-            audience: Self::JWT_AUDIENCE.to_owned(),
+            issued_by: Cow::Borrowed(Self::JWT_ISSUER),
+            audience: Cow::Borrowed(Self::JWT_AUDIENCE),
             token_id: account_api_token.access_seq,
             account_id: account_model.id,
             issued_at: account_api_token.issued_at,

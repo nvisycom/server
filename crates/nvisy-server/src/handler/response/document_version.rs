@@ -10,7 +10,7 @@ use uuid::Uuid;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct VersionInfo {
+pub struct Version {
     /// Version unique ID
     pub version_id: Uuid,
     /// Version number (incremental)
@@ -29,7 +29,7 @@ pub struct VersionInfo {
     pub created_at: OffsetDateTime,
 }
 
-impl From<DocumentVersion> for VersionInfo {
+impl From<DocumentVersion> for Version {
     fn from(version: DocumentVersion) -> Self {
         Self {
             version_id: version.id,
@@ -44,16 +44,5 @@ impl From<DocumentVersion> for VersionInfo {
     }
 }
 
-/// Response containing document versions list.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ReadAllVersionsResponse {
-    /// List of versions
-    pub versions: Vec<VersionInfo>,
-    /// Total number of versions
-    pub total: usize,
-    /// Pagination information
-    pub page: i64,
-    pub per_page: i64,
-}
+/// Response for document versions.
+pub type Versions = Vec<Version>;

@@ -321,8 +321,7 @@ where
                 if let Some(msg) = messages.next().await {
                     match msg {
                         Ok(message) => {
-                            let payload: T = serde_json::from_slice(&message.payload)
-                                .map_err(Error::Deserialization)?;
+                            let payload: T = serde_json::from_slice(&message.payload)?;
 
                             debug!(
                                 target: TRACING_TARGET_STREAM,

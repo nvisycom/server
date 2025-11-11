@@ -474,7 +474,7 @@ impl DocumentFileRepository {
         diesel::update(
             document_files::table
                 .filter(dsl::processing_status.eq(ProcessingStatus::Failed))
-                .filter(dsl::processing_priority.lt(max_attempts as i32))
+                .filter(dsl::processing_priority.lt(max_attempts))
                 .filter(dsl::deleted_at.is_null()),
         )
         .set((

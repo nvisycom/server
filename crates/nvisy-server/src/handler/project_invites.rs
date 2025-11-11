@@ -20,11 +20,8 @@ use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::project_invite::{CreateInviteRequest, ReplyInviteRequest};
-use crate::handler::response::project_invite::{
-    CancelInviteResponse, CreateInviteResponse, ListInvitesResponse, ListInvitesResponseItem,
-    ReplyInviteResponse,
-};
+use crate::handler::request::{CreateInvite, ReplyInvite};
+use crate::handler::response::{Invite, Invites};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
@@ -64,7 +61,7 @@ pub struct InviteePathParams {
     post, path = "/projects/{projectId}/invites/", tag = "invites",
     params(ProjectPathParams),
     request_body(
-        content = CreateInviteRequest,
+        content = CreateInvite,
         description = "Invitation details",
         content_type = "application/json",
     ),
@@ -97,7 +94,7 @@ pub struct InviteePathParams {
         (
             status = CREATED,
             description = "Project invitation created successfully",
-            body = CreateInviteResponse,
+            body = Invite,
         ),
     ),
 )]
@@ -105,8 +102,8 @@ async fn send_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(request): ValidateJson<CreateInviteRequest>,
-) -> Result<(StatusCode, Json<CreateInviteResponse>)> {
+    ValidateJson(request): ValidateJson<CreateInvite>,
+) -> Result<(StatusCode, Json<Invite>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
@@ -115,7 +112,7 @@ async fn send_invite(
         project_id = path_params.project_id.to_string(),
         invitee_email = %request.invitee_email,
         invited_role = ?request.invited_role,
-        "creating project invitation"
+        "Creating project invitation"
     );
 
     // Verify user has permission to send invitations
@@ -193,14 +190,14 @@ async fn send_invite(
     let project_invite =
         ProjectInviteRepository::create_project_invite(&mut conn, new_invite).await?;
 
-    let response = CreateInviteResponse::from(project_invite);
+    let response = Invite::from(project_invite);
 
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = response.invite_id.to_string(),
-        "project invitation created successfully"
+        "Project invitation created successfully"
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -246,7 +243,7 @@ async fn send_invite(
         (
             status = OK,
             description = "Project invitations listed successfully",
-            body = ListInvitesResponse,
+            body = Invites,
         ),
     ),
 )]
@@ -255,14 +252,14 @@ async fn list_invites(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<PaginationRequest>,
-) -> Result<(StatusCode, Json<ListInvitesResponse>)> {
+) -> Result<(StatusCode, Json<Invites>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "listing project invitations"
+        "Listing project invitations"
     );
 
     // Verify user has permission to view project invitations
@@ -278,26 +275,17 @@ async fn list_invites(
     )
     .await?;
 
-    let invites = project_invites
-        .into_iter()
-        .map(ListInvitesResponseItem::from)
-        .collect::<Vec<_>>();
-
-    let response = ListInvitesResponse {
-        project_id: path_params.project_id,
-        total_count: invites.len(),
-        invites,
-    };
+    let invites: Invites = project_invites.into_iter().map(Invite::from).collect();
 
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        invite_count = response.invites.len(),
-        "project invitations listed successfully"
+        invite_count = invites.len(),
+        "Project invitations listed successfully"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok((StatusCode::OK, Json(invites)))
 }
 
 /// Cancels a project invitation.
@@ -332,7 +320,6 @@ async fn list_invites(
         (
             status = OK,
             description = "Project invitation cancelled successfully",
-            body = CancelInviteResponse,
         ),
     ),
 )]
@@ -340,7 +327,7 @@ async fn cancel_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
-) -> Result<(StatusCode, Json<CancelInviteResponse>)> {
+) -> Result<StatusCode> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
@@ -348,7 +335,7 @@ async fn cancel_invite(
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
-        "cancelling project invitation"
+        "Cancelling project invitation"
     );
 
     // Verify user has permission to manage project invitations
@@ -357,24 +344,22 @@ async fn cancel_invite(
         .await?;
 
     // Cancel the invitation
-    let project_invite = ProjectInviteRepository::cancel_invite(
+    ProjectInviteRepository::cancel_invite(
         &mut conn,
         path_params.invite_id,
         auth_claims.account_id,
     )
     .await?;
 
-    let response = CancelInviteResponse::from(project_invite);
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
-        "project invitation cancelled successfully"
+        "Project invitation cancelled successfully"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(StatusCode::OK)
 }
 
 /// Responds to a project invitation.
@@ -387,7 +372,7 @@ async fn cancel_invite(
     patch, path = "/projects/{projectId}/invites/{inviteId}/reply/", tag = "invites",
     params(InvitePathParams),
     request_body(
-        content = ReplyInviteRequest,
+        content = ReplyInvite,
         description = "Invitation response",
         content_type = "application/json",
     ),
@@ -420,7 +405,7 @@ async fn cancel_invite(
         (
             status = OK,
             description = "Invitation response processed successfully",
-            body = ReplyInviteResponse,
+            body = Invite,
         ),
     )
 )]
@@ -428,8 +413,8 @@ async fn reply_to_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
-    Json(request): Json<ReplyInviteRequest>,
-) -> Result<(StatusCode, Json<ReplyInviteResponse>)> {
+    Json(request): Json<ReplyInvite>,
+) -> Result<(StatusCode, Json<Invite>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
@@ -438,7 +423,7 @@ async fn reply_to_invite(
         project_id = path_params.project_id.to_string(),
         invite_id = path_params.invite_id.to_string(),
         accept_invite = request.accept_invite,
-        "responding to project invitation"
+        "Responding to project invitation"
     );
 
     // Find the invitation
@@ -487,7 +472,7 @@ async fn reply_to_invite(
             account_id = auth_claims.account_id.to_string(),
             project_id = path_params.project_id.to_string(),
             invite_id = path_params.invite_id.to_string(),
-            "project invitation accepted successfully"
+            "Project invitation accepted successfully"
         );
 
         accepted_invite
@@ -505,16 +490,13 @@ async fn reply_to_invite(
             account_id = auth_claims.account_id.to_string(),
             project_id = path_params.project_id.to_string(),
             invite_id = path_params.invite_id.to_string(),
-            "project invitation declined"
+            "Project invitation declined"
         );
 
         declined_invite
     };
 
-    Ok((
-        StatusCode::OK,
-        Json(ReplyInviteResponse::from(project_invite)),
-    ))
+    Ok((StatusCode::OK, Json(Invite::from(project_invite))))
 }
 
 /// Sanitizes user input by removing potentially dangerous characters.

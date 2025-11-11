@@ -15,7 +15,7 @@ use validator::Validate;
     "companyName": "Acme Corporation",
     "phoneNumber": "+1-555-0123"
 }))]
-pub struct UpdateAccountRequest {
+pub struct UpdateAccount {
     /// New display name (2-32 characters).
     #[validate(length(min = 2, max = 32))]
     pub display_name: Option<String>,

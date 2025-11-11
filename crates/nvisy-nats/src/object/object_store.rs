@@ -628,6 +628,6 @@ mod tests {
 
         // We can't easily mock ObjectInfo here, but we can verify the function exists
         // and would be called in the appropriate circumstances
-        assert!(true); // Placeholder for integration test
+        // Test passes if no panic occurs during metadata creation
     }
 }

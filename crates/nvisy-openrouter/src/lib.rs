@@ -13,6 +13,8 @@
 //! - **Error Handling**: Comprehensive error types with recovery strategies
 //! - **Data Redaction**: Specialized service for identifying sensitive data to redact
 //! - **JSON Processing**: Structured input/output format for redaction tasks
+
+#![allow(clippy::result_large_err)]
 //! - **Observability**: Structured logging and metrics integration
 
 use openrouter_rs::error::OpenRouterError;

@@ -15,7 +15,7 @@ use validator::Validate;
     "autoCleanup": true,
     "requireApproval": false
 }))]
-pub struct CreateProjectRequest {
+pub struct CreateProject {
     /// Display name of the project.
     #[validate(length(min = 3, max = 100))]
     pub display_name: String,
@@ -47,7 +47,7 @@ pub struct CreateProjectRequest {
     "displayName": "Updated Project Name",
     "description": "Updated description"
 }))]
-pub struct UpdateProjectRequest {
+pub struct UpdateProject {
     /// Display name of the project.
     #[validate(length(min = 3, max = 100))]
     pub display_name: Option<String>,

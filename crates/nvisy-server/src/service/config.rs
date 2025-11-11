@@ -51,10 +51,10 @@ fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Resul
     }
 
     // Validate OpenRouter API key
-    if let Some(api_key) = &builder.openrouter_api_key {
-        if api_key.is_empty() {
-            return Err("OpenRouter API key cannot be empty".to_string());
-        }
+    if let Some(api_key) = &builder.openrouter_api_key
+        && api_key.is_empty()
+    {
+        return Err("OpenRouter API key cannot be empty".to_string());
     }
 
     // Validate NATS URL

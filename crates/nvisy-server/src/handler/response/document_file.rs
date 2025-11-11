@@ -6,11 +6,11 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-/// Response for a single uploaded file.
+/// Represents an uploaded file.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UploadedFile {
+pub struct File {
     /// Unique file identifier
     pub file_id: Uuid,
     /// Display name
@@ -19,27 +19,13 @@ pub struct UploadedFile {
     pub file_size: i64,
     /// Processing status
     pub status: ProcessingStatus,
+    /// Processing priority (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processing_priority: Option<i32>,
+    /// Update timestamp (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<OffsetDateTime>,
 }
 
-/// Response returned after successful file upload.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadFileResponse {
-    /// List of successfully uploaded files
-    pub files: Vec<UploadedFile>,
-    /// Number of files uploaded
-    pub count: usize,
-}
-
-/// Response after updating file metadata.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateFileResponse {
-    /// Updated file information
-    pub file_id: Uuid,
-    pub display_name: String,
-    pub processing_priority: i32,
-    pub updated_at: OffsetDateTime,
-}
+/// Response for file uploads.
+pub type Files = Vec<File>;

@@ -44,11 +44,11 @@ fn build_env_filter() -> tracing_subscriber::EnvFilter {
 /// RUST_LOG=nvisy_cli=trace,axum=debug nvisy-cli
 /// ```
 ///
-/// # Errors
+/// # Note
 ///
-/// Returns an error if the tracing subscriber fails to initialize.
+/// Initializes the tracing subscriber for the application.
 #[cfg(not(feature = "otel"))]
-pub(super) fn init_tracing() -> anyhow::Result<()> {
+pub(super) fn init_tracing() {
     // Setup a temporary subscriber to log output during setup
     let env_filter = build_env_filter();
     let fmt_layer = layer().pretty();
@@ -77,19 +77,17 @@ pub(super) fn init_tracing() -> anyhow::Result<()> {
         target: TRACING_TARGET_OTEL,
         "initialized tracing subscriber",
     );
-
-    Ok(())
 }
 
 /// Initializes tracing with OpenTelemetry support.
 ///
 /// This is only available when the `otel` feature is enabled.
 ///
-/// # Errors
+/// # Note
 ///
-/// Returns an error if the tracing subscriber fails to initialize.
+/// Initializes the tracing subscriber with OpenTelemetry support.
 #[cfg(feature = "otel")]
-pub(super) fn init_tracing_with_otel() -> anyhow::Result<()> {
+pub(super) fn init_tracing_with_otel() {
     // Setup a temporary subscriber to log output during setup
     let env_filter = build_env_filter();
     let fmt_layer = layer().pretty();
@@ -119,6 +117,4 @@ pub(super) fn init_tracing_with_otel() -> anyhow::Result<()> {
         target: TRACING_TARGET_OTEL,
         "initialized tracing subscriber with otel support",
     );
-
-    Ok(())
 }

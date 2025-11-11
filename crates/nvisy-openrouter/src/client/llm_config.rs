@@ -36,60 +36,61 @@ mod defaults {
 /// for invalid configurations.
 fn validate_config(builder: &LlmConfigBuilder) -> std::result::Result<(), String> {
     // Validate temperature range [0.0, 2.0]
-    if let Some(Some(temp)) = builder.default_temperature {
-        if !(0.0..=2.0).contains(&temp) {
-            return Err(format!(
-                "Temperature must be between 0.0 and 2.0, got {}",
-                temp
-            ));
-        }
+    if let Some(Some(temp)) = builder.default_temperature
+        && !(0.0..=2.0).contains(&temp)
+    {
+        return Err(format!(
+            "Temperature must be between 0.0 and 2.0, got {}",
+            temp
+        ));
     }
 
     // Validate presence penalty range [-2.0, 2.0]
-    if let Some(Some(penalty)) = builder.default_presence_penalty {
-        if !(-2.0..=2.0).contains(&penalty) {
-            return Err(format!(
-                "Presence penalty must be between -2.0 and 2.0, got {}",
-                penalty
-            ));
-        }
+    if let Some(Some(penalty)) = builder.default_presence_penalty
+        && !(-2.0..=2.0).contains(&penalty)
+    {
+        return Err(format!(
+            "Presence penalty must be between -2.0 and 2.0, got {}",
+            penalty
+        ));
     }
 
     // Validate frequency penalty range [-2.0, 2.0]
-    if let Some(Some(penalty)) = builder.default_frequency_penalty {
-        if !(-2.0..=2.0).contains(&penalty) {
-            return Err(format!(
-                "Frequency penalty must be between -2.0 and 2.0, got {}",
-                penalty
-            ));
-        }
+    if let Some(Some(penalty)) = builder.default_frequency_penalty
+        && !(-2.0..=2.0).contains(&penalty)
+    {
+        return Err(format!(
+            "Frequency penalty must be between -2.0 and 2.0, got {}",
+            penalty
+        ));
     }
 
     // Validate top-p range (0.0, 1.0]
-    if let Some(Some(top_p)) = builder.default_top_p {
-        if !(0.001..=1.0).contains(&top_p) {
-            return Err(format!(
-                "Top-p must be between 0.001 and 1.0, got {}",
-                top_p
-            ));
-        }
+    if let Some(Some(top_p)) = builder.default_top_p
+        && !(0.001..=1.0).contains(&top_p)
+    {
+        return Err(format!(
+            "Top-p must be between 0.001 and 1.0, got {}",
+            top_p
+        ));
     }
 
     // Validate max tokens
-    if let Some(Some(max_tokens)) = builder.default_max_tokens {
-        if max_tokens == 0 {
-            return Err("Max tokens must be greater than 0".to_string());
-        }
+    if let Some(Some(max_tokens)) = builder.default_max_tokens
+        && max_tokens == 0
+    {
+        return Err("Max tokens must be greater than 0".to_string());
     }
 
     // Validate base URL format
-    if let Some(Some(base_url)) = &builder.base_url {
-        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-            return Err(format!(
-                "Base URL must start with http:// or https://, got {}",
-                base_url
-            ));
-        }
+    if let Some(Some(base_url)) = &builder.base_url
+        && !base_url.starts_with("http://")
+        && !base_url.starts_with("https://")
+    {
+        return Err(format!(
+            "Base URL must start with http:// or https://, got {}",
+            base_url
+        ));
     }
 
     Ok(())

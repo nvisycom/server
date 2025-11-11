@@ -15,7 +15,7 @@ use validator::Validate;
     "inviteMessage": "Join our project to collaborate on documents!",
     "expiresInDays": 7
 }))]
-pub struct CreateInviteRequest {
+pub struct CreateInvite {
     /// Email address of the person to invite.
     #[validate(email, length(max = 254))]
     pub invitee_email: String,
@@ -77,7 +77,7 @@ fn validate_safe_text(text: &str) -> Result<(), validator::ValidationError> {
 #[schema(example = json!({
     "acceptInvite": true
 }))]
-pub struct ReplyInviteRequest {
+pub struct ReplyInvite {
     /// Whether to accept or decline the invitation.
     pub accept_invite: bool,
 }

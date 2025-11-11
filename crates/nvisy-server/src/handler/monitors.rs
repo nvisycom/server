@@ -10,8 +10,8 @@ use time::OffsetDateTime;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use super::request::monitor::MonitorStatusRequest;
-use super::response::monitor::MonitorStatusResponse;
+use super::request::GetMonitorStatus;
+use super::response::MonitorStatus;
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
 use crate::service::{HealthCache, ServiceState};
@@ -24,7 +24,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 #[utoipa::path(
     post, path = "/health", tag = "monitors",
     request_body(
-        content = Option<MonitorStatusRequest>,
+        content = Option<GetMonitorStatus>,
         description = "Optional health status request parameters",
         content_type = "application/json"
     ),
@@ -32,12 +32,12 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
         (
             status = 200,
             description = "System is healthy",
-            body = MonitorStatusResponse,
+            body = MonitorStatus,
         ),
         (
             status = 503,
             description = "System is unhealthy",
-            body = MonitorStatusResponse,
+            body = MonitorStatus,
         ),
     ),
 )]
@@ -46,8 +46,8 @@ async fn health_status(
     State(health_service): State<HealthCache>,
     auth_state: Option<AuthState>,
     version: Version,
-    request: Option<Json<MonitorStatusRequest>>,
-) -> Result<(StatusCode, Json<MonitorStatusResponse>)> {
+    request: Option<Json<GetMonitorStatus>>,
+) -> Result<(StatusCode, Json<MonitorStatus>)> {
     let Json(request) = request.unwrap_or_default();
     let is_authenticated = auth_state.is_some();
 
@@ -66,7 +66,7 @@ async fn health_status(
         health_service.get_cached_health()
     };
 
-    let response = MonitorStatusResponse {
+    let response = MonitorStatus {
         updated_at: OffsetDateTime::now_utc(),
         is_healthy,
     };
@@ -104,14 +104,14 @@ mod tests {
     async fn test_health_status_endpoint_unauthenticated() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = MonitorStatusRequest {
+        let request = GetMonitorStatus {
             return_cached: None,
         };
 
         let response = server.post("/health").json(&request).await;
         response.assert_status_success();
 
-        let status_response = response.json::<MonitorStatusResponse>();
+        let status_response = response.json::<MonitorStatus>();
 
         // Unauthenticated requests should return healthy (basic check)
         assert!(status_response.is_healthy);
@@ -124,14 +124,14 @@ mod tests {
     async fn test_health_status_endpoint_with_prefer_policy() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = MonitorStatusRequest {
+        let request = GetMonitorStatus {
             return_cached: Some(false),
         };
 
         let response = server.post("/health").json(&request).await;
         response.assert_status_success();
 
-        let status_response = response.json::<MonitorStatusResponse>();
+        let status_response = response.json::<MonitorStatus>();
 
         // Should still work without authentication
         assert!(status_response.is_healthy);
@@ -148,7 +148,7 @@ mod tests {
         let response = server.post("/health").await;
         response.assert_status_success();
 
-        let status_response = response.json::<MonitorStatusResponse>();
+        let status_response = response.json::<MonitorStatus>();
         assert!(status_response.is_healthy);
 
         Ok(())

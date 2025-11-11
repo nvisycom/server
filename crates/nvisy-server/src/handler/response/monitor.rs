@@ -12,7 +12,7 @@ use utoipa::ToSchema;
     "updatedAt": "2023-12-07T10:30:00Z",
     "isHealthy": true
 }))]
-pub struct MonitorStatusResponse {
+pub struct MonitorStatus {
     /// Timestamp when this status was generated.
     pub updated_at: OffsetDateTime,
     /// Overall system health status.

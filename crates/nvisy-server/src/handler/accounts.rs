@@ -6,14 +6,13 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::UpdateAccount;
 use nvisy_postgres::query::AccountRepository;
+use nvisy_postgres::{PgClient, model};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use super::request::account::UpdateAccountRequest;
-use super::response::account::{DeleteAccountResponse, GetAccountResponse, UpdateAccountResponse};
+use super::request::UpdateAccount;
+use super::response::Account;
 use crate::extract::{AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
@@ -39,14 +38,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
         (
             status = OK,
             description = "Account details",
-            body = GetAccountResponse,
+            body = Account,
         ),
     ),
 )]
 async fn get_own_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<GetAccountResponse>)> {
+) -> Result<(StatusCode, Json<Account>)> {
     tracing::trace!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
@@ -70,14 +69,14 @@ async fn get_own_account(
         "account retrieved"
     );
 
-    Ok((StatusCode::OK, Json(GetAccountResponse::new(account))))
+    Ok((StatusCode::OK, Json(account.into())))
 }
 
 /// Updates the authenticated account.
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     patch, path = "/accounts/", tag = "accounts",
-    request_body = UpdateAccountRequest,
+    request_body = UpdateAccount,
     responses(
         (
             status = NOT_FOUND,
@@ -96,7 +95,7 @@ async fn get_own_account(
         ),
         (
             status = OK,
-            body = UpdateAccountResponse,
+            body = Account,
             description = "Account updated successfully",
         ),
     )
@@ -106,8 +105,8 @@ async fn update_own_account(
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<UpdateAccountRequest>,
-) -> Result<(StatusCode, Json<UpdateAccountResponse>)> {
+    ValidateJson(request): ValidateJson<UpdateAccount>,
+) -> Result<(StatusCode, Json<Account>)> {
     tracing::trace!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
@@ -179,7 +178,7 @@ async fn update_own_account(
             .with_resource("account"));
     }
 
-    let update_account = UpdateAccount {
+    let update_account = model::UpdateAccount {
         display_name: request.display_name,
         email_address: normalized_email,
         password_hash,
@@ -198,7 +197,7 @@ async fn update_own_account(
         "account updated"
     );
 
-    Ok((StatusCode::OK, Json(UpdateAccountResponse::new(account))))
+    Ok((StatusCode::OK, Json(account.into())))
 }
 
 /// Deletes the authenticated account.
@@ -219,14 +218,13 @@ async fn update_own_account(
         (
             status = OK,
             description = "Account deleted",
-            body = DeleteAccountResponse
         ),
     ),
 )]
 async fn delete_own_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<DeleteAccountResponse>)> {
+) -> Result<StatusCode> {
     tracing::trace!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
@@ -234,15 +232,15 @@ async fn delete_own_account(
     );
 
     let mut conn = pg_client.get_connection().await?;
-    let account = AccountRepository::delete_account(&mut conn, auth_claims.account_id).await?;
+    AccountRepository::delete_account(&mut conn, auth_claims.account_id).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = %account.id,
+        account_id = %auth_claims.account_id,
         "account deleted"
     );
 
-    Ok((StatusCode::OK, Json(account.into())))
+    Ok(StatusCode::OK)
 }
 
 /// Returns a [`Router`] with all related routes.

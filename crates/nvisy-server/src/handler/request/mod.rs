@@ -1,12 +1,22 @@
 //! Request types for HTTP handlers.
 
-pub mod account;
-pub mod authentication;
-pub mod document;
-pub mod document_file;
-pub mod document_version;
-pub mod monitor;
-pub mod pagination;
-pub mod project;
-pub mod project_invite;
-pub mod project_member;
+mod account;
+mod authentication;
+mod document;
+mod document_file;
+mod document_version;
+mod monitor;
+mod pagination;
+mod project;
+mod project_invite;
+mod project_member;
+
+pub use account::*;
+pub use authentication::*;
+pub use document::*;
+pub use document_file::*;
+pub use monitor::*;
+pub use pagination::*;
+pub use project::*;
+pub use project_invite::*;
+pub use project_member::*;

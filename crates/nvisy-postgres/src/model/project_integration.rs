@@ -103,8 +103,7 @@ impl ProjectIntegration {
 
     /// Returns whether the integration can be activated.
     pub fn can_activate(&self) -> bool {
-        self.sync_status
-            .map_or(true, |status| status.can_activate())
+        self.sync_status.is_none_or(|status| status.can_activate())
     }
 
     /// Returns whether the integration is operational (active and executing).

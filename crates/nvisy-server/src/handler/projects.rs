@@ -6,7 +6,7 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewProject, NewProjectMember, UpdateProject};
+use nvisy_postgres::model::{self, NewProject, NewProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
 use nvisy_postgres::{PgClient, PgError};
@@ -18,11 +18,8 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::request::project::{CreateProjectRequest, UpdateProjectRequest};
-use crate::handler::response::project::{
-    CreateProjectResponse, DeleteProjectResponse, GetProjectResponse, ListProjectsResponse,
-    ListProjectsResponseItem, UpdateProjectResponse,
-};
+use crate::handler::request::{CreateProject, UpdateProject};
+use crate::handler::response::{Project, Projects};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
@@ -43,7 +40,7 @@ pub struct ProjectPathParams {
 #[utoipa::path(
     post, path = "/projects/", tag = "projects",
     request_body(
-        content = CreateProjectRequest,
+        content = CreateProject,
         description = "New project",
         content_type = "application/json",
     ),
@@ -61,15 +58,15 @@ pub struct ProjectPathParams {
         (
             status = CREATED,
             description = "Project created",
-            body = CreateProjectResponse,
+            body = Project,
         ),
     ),
 )]
 async fn create_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<CreateProjectRequest>,
-) -> Result<(StatusCode, Json<CreateProjectResponse>)> {
+    ValidateJson(request): ValidateJson<CreateProject>,
+) -> Result<(StatusCode, Json<Project>)> {
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -104,7 +101,7 @@ async fn create_project(
                     ..Default::default()
                 };
                 ProjectMemberRepository::add_project_member(conn, new_member).await?;
-                Ok::<CreateProjectResponse, PgError>(project.into())
+                Ok::<Project, PgError>(project.into())
             }
             .scope_boxed()
         })
@@ -114,7 +111,7 @@ async fn create_project(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = response.project_id.to_string(),
-        "new project created successfully",
+        "New project created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -143,7 +140,7 @@ async fn create_project(
         (
             status = OK,
             description = "Projects listed",
-            body = ListProjectsResponse,
+            body = Projects,
         ),
     ),
 )]
@@ -151,7 +148,7 @@ async fn list_projects(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Json(pagination): Json<PaginationRequest>,
-) -> Result<(StatusCode, Json<ListProjectsResponse>)> {
+) -> Result<(StatusCode, Json<Projects>)> {
     let mut conn = pg_client.get_connection().await?;
 
     // Use the combined query to fetch both project and membership data in a single query
@@ -163,21 +160,19 @@ async fn list_projects(
     .await?;
 
     // Convert to response items
-    let projects: Vec<ListProjectsResponseItem> = project_memberships
+    let projects: Projects = project_memberships
         .into_iter()
         .map(|(project, membership)| (project, membership).into())
         .collect();
 
-    let response = ListProjectsResponse::new(projects);
-
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
-        project_count = response.projects.len(),
-        "listed user projects"
+        project_count = projects.len(),
+        "Listed user projects"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok((StatusCode::OK, Json(projects)))
 }
 
 /// Gets a project by its project ID.
@@ -199,7 +194,7 @@ async fn list_projects(
         (
             status = OK,
             description = "Project details",
-            body = GetProjectResponse,
+            body = Project,
         ),
     ),
 )]
@@ -207,7 +202,7 @@ async fn read_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-) -> Result<(StatusCode, Json<GetProjectResponse>)> {
+) -> Result<(StatusCode, Json<Project>)> {
     let mut conn = pg_client.get_connection().await?;
 
     auth_claims
@@ -217,14 +212,16 @@ async fn read_project(
     let Some(project) =
         ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
     else {
-        return Err(ErrorKind::NotFound.with_resource("project"));
+        return Err(ErrorKind::NotFound
+            .with_message(format!("Project not found: {}", path_params.project_id))
+            .with_resource("project"));
     };
 
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "retrieved project details"
+        "Retrieved project details"
     );
 
     Ok((StatusCode::OK, Json(project.into())))
@@ -236,7 +233,7 @@ async fn read_project(
     patch, path = "/projects/{projectId}/", tag = "projects",
     params(ProjectPathParams),
     request_body(
-        content = UpdateProjectRequest,
+        content = UpdateProject,
         description = "Project changes",
         content_type = "application/json",
     ),
@@ -254,7 +251,7 @@ async fn read_project(
         (
             status = OK,
             description = "Project changes",
-            body = UpdateProjectResponse,
+            body = Project,
         ),
     ),
 )]
@@ -262,22 +259,22 @@ async fn update_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(request): ValidateJson<UpdateProjectRequest>,
-) -> Result<(StatusCode, Json<UpdateProjectResponse>)> {
+    ValidateJson(request): ValidateJson<UpdateProject>,
+) -> Result<(StatusCode, Json<Project>)> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "updating project",
+        "Updating project",
     );
 
     auth_claims
         .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
         .await?;
 
-    let update_data = UpdateProject {
+    let update_data = model::UpdateProject {
         display_name: request.display_name,
         description: request.description,
         keep_for_sec: request.keep_for_sec,
@@ -296,7 +293,7 @@ async fn update_project(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "project updated successfully",
+        "Project updated successfully",
     );
 
     Ok((StatusCode::OK, Json(project.into())))
@@ -319,9 +316,18 @@ async fn update_project(
             body = ErrorResponse,
         ),
         (
+            status = NOT_FOUND,
+            description = "Project not found",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
             status = OK,
             description = "Project deleted",
-            body = DeleteProjectResponse,
         ),
     ),
 )]
@@ -329,7 +335,7 @@ async fn delete_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-) -> Result<(StatusCode, Json<DeleteProjectResponse>)> {
+) -> Result<StatusCode> {
     let mut conn = pg_client.get_connection().await?;
 
     tracing::warn!(
@@ -343,21 +349,25 @@ async fn delete_project(
         .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
         .await?;
 
-    ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
-    let Some(deleted_project) =
+    // Verify project exists before deletion
+    let Some(_project) =
         ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
     else {
-        return Err(ErrorKind::NotFound.with_resource("project"));
+        return Err(ErrorKind::NotFound
+            .with_message(format!("Project not found: {}", path_params.project_id))
+            .with_resource("project"));
     };
+
+    ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
 
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
         project_id = path_params.project_id.to_string(),
-        "project deleted successfully",
+        "Project deleted successfully",
     );
 
-    Ok((StatusCode::OK, Json(deleted_project.into())))
+    Ok(StatusCode::OK)
 }
 
 /// Returns a [`Router`] with all related routes.
@@ -378,7 +388,7 @@ mod test {
     async fn test_create_project_success() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = CreateProjectRequest {
+        let request = CreateProject {
             display_name: "Test Project".to_string(),
             description: Some("A test project".to_string()),
             keep_for_sec: Some(86400),
@@ -390,7 +400,7 @@ mod test {
         let response = server.post("/projects/").json(&request).await;
         response.assert_status(StatusCode::CREATED);
 
-        let body: CreateProjectResponse = response.json();
+        let body: Project = response.json();
         assert!(!body.project_id.is_nil());
 
         Ok(())
@@ -400,7 +410,7 @@ mod test {
     async fn test_create_project_invalid_name() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = CreateProjectRequest {
+        let request = CreateProject {
             display_name: "Ab".to_owned(),
             ..Default::default()
         };
@@ -416,7 +426,7 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Create a project first
-        let request = CreateProjectRequest {
+        let request = CreateProject {
             display_name: "List Test Project".to_string(),
             ..Default::default()
         };
@@ -427,8 +437,8 @@ mod test {
         let response = server.get("/projects/").json(&pagination).await;
         response.assert_status_ok();
 
-        let body: ListProjectsResponse = response.json();
-        assert!(!body.projects.is_empty());
+        let body: Projects = response.json();
+        assert!(!body.is_empty());
 
         Ok(())
     }
@@ -438,15 +448,15 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Create a project
-        let create_request = CreateProjectRequest {
+        let create_request = CreateProject {
             display_name: "Original Name".to_string(),
             ..Default::default()
         };
         let create_response = server.post("/projects/").json(&create_request).await;
-        let created: CreateProjectResponse = create_response.json();
+        let created: Project = create_response.json();
 
         // Update the project
-        let update_request = UpdateProjectRequest {
+        let update_request = UpdateProject {
             display_name: Some("Updated Name".to_string()),
             ..Default::default()
         };
@@ -465,13 +475,13 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Create a project
-        let request = CreateProjectRequest {
+        let request = CreateProject {
             display_name: "Read Test".to_string(),
             description: Some("Test description".to_string()),
             ..Default::default()
         };
         let create_response = server.post("/projects/").json(&request).await;
-        let created: CreateProjectResponse = create_response.json();
+        let created: Project = create_response.json();
 
         // Read the project
         let response = server
@@ -479,7 +489,7 @@ mod test {
             .await;
         response.assert_status_ok();
 
-        let body: GetProjectResponse = response.json();
+        let body: Project = response.json();
         assert_eq!(body.project_id, created.project_id);
 
         Ok(())
@@ -490,12 +500,12 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Create a project
-        let request = CreateProjectRequest {
+        let request = CreateProject {
             display_name: "Delete Test".to_string(),
             ..Default::default()
         };
         let create_response = server.post("/projects/").json(&request).await;
-        let created: CreateProjectResponse = create_response.json();
+        let created: Project = create_response.json();
 
         // Delete the project
         let response = server

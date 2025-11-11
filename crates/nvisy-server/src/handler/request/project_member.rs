@@ -12,7 +12,7 @@ use validator::Validate;
 #[schema(example = json!({
     "role": "Admin"
 }))]
-pub struct UpdateMemberRoleRequest {
+pub struct UpdateMemberRole {
     /// New role for the member
     pub role: ProjectRole,
 }

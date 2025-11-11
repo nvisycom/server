@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Version};
 use crate::handler::documents::DocumentPathParams;
-use crate::handler::response::document_version::{ReadAllVersionsResponse, VersionInfo};
+use crate::handler::response::{Version as VersionResponse, Versions};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
 
@@ -67,7 +67,7 @@ pub struct DocVersionIdPathParams {
         (
             status = OK,
             description = "Document versions",
-            body = ReadAllVersionsResponse,
+            body = Versions,
         ),
     )
 )]
@@ -76,7 +76,7 @@ async fn get_version_files(
     Path(path_params): Path<DocumentPathParams>,
     AuthState(auth_claims): AuthState,
     Json(pagination): Json<PaginationRequest>,
-) -> Result<(StatusCode, Json<ReadAllVersionsResponse>)> {
+) -> Result<(StatusCode, Json<Versions>)> {
     let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
@@ -116,17 +116,7 @@ async fn get_version_files(
         "versions fetched successfully"
     );
 
-    let version_infos: Vec<VersionInfo> = versions.into_iter().map(VersionInfo::from).collect();
-    let total =
-        DocumentVersionRepository::count_document_versions(&mut conn, path_params.document_id)
-            .await? as usize;
-
-    let response = ReadAllVersionsResponse {
-        total,
-        versions: version_infos,
-        page: ((pagination.offset() / pagination.limit()) + 1) as i64,
-        per_page: pagination.limit() as i64,
-    };
+    let response: Versions = versions.into_iter().map(VersionResponse::from).collect();
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -160,7 +150,7 @@ async fn get_version_files(
         (
             status = OK,
             description = "Version information",
-            body = VersionInfo,
+            body = VersionResponse,
         ),
     ),
 )]
@@ -168,7 +158,7 @@ async fn get_version_info(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<VersionInfo>)> {
+) -> Result<(StatusCode, Json<VersionResponse>)> {
     let mut conn = pg_client.get_connection().await?;
 
     // Verify document access
@@ -200,7 +190,7 @@ async fn get_version_info(
         "version info retrieved"
     );
 
-    Ok((StatusCode::OK, Json(VersionInfo::from(version))))
+    Ok((StatusCode::OK, Json(VersionResponse::from(version))))
 }
 
 /// Downloads a document version output file.
