@@ -27,17 +27,8 @@ use utoipa::ToSchema;
 /// // Convert to string
 /// assert_eq!(category.to_string(), "Email Addresses");
 /// ```
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[derive(Display, EnumString, EnumIter, EnumCount, IntoStaticStr, VariantNames)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[strum(serialize_all = "title_case")]
@@ -337,105 +328,6 @@ impl RedactionCategory {
     pub fn names() -> &'static [&'static str] {
         Self::VARIANTS
     }
-
-    /// Checks if this category is related to financial information.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
-    ///
-    /// assert!(RedactionCategory::CreditCards.is_financial());
-    /// assert!(!RedactionCategory::EmailAddresses.is_financial());
-    /// ```
-    pub fn is_financial(&self) -> bool {
-        matches!(
-            self,
-            Self::AccountNumbers
-                | Self::AccountNumbersExceptLast4
-                | Self::Amounts
-                | Self::BankAccountNumbers
-                | Self::BankAccountNumbersExceptLast4
-                | Self::BankRouting
-                | Self::CreditCards
-                | Self::CreditCardCvvs
-                | Self::CreditCardExpiries
-                | Self::Iban
-                | Self::SwiftCodes
-        )
-    }
-
-    /// Checks if this category is related to personal identification.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
-    ///
-    /// assert!(RedactionCategory::FullSsns.is_personal_id());
-    /// assert!(!RedactionCategory::Amounts.is_personal_id());
-    /// ```
-    pub fn is_personal_id(&self) -> bool {
-        matches!(
-            self,
-            Self::FullSsns
-                | Self::Last4Ssn
-                | Self::SsnsNoDashes
-                | Self::Ein
-                | Self::EinExceptLast4
-                | Self::Itin
-                | Self::DriversLicense
-                | Self::PassportNumbers
-                | Self::CanadaIds
-                | Self::IndiaIds
-                | Self::UkIds
-                | Self::MedicalIds
-        )
-    }
-
-    /// Checks if this category is related to contact information.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
-    ///
-    /// assert!(RedactionCategory::EmailAddresses.is_contact_info());
-    /// assert!(!RedactionCategory::CreditCards.is_contact_info());
-    /// ```
-    pub fn is_contact_info(&self) -> bool {
-        matches!(
-            self,
-            Self::EmailAddresses
-                | Self::PhoneNumbers
-                | Self::Addresses
-                | Self::IpAddresses
-                | Self::MacAddresses
-                | Self::Links
-        )
-    }
-
-    /// Checks if this category is related to visual/image content.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
-    ///
-    /// assert!(RedactionCategory::FaceDetection.is_visual());
-    /// assert!(!RedactionCategory::PhoneNumbers.is_visual());
-    /// ```
-    pub fn is_visual(&self) -> bool {
-        matches!(
-            self,
-            Self::FaceDetection
-                | Self::Handwriting
-                | Self::Images
-                | Self::Logos
-                | Self::Signatures
-                | Self::Tables
-        )
-    }
 }
 
 #[cfg(test)]
@@ -494,42 +386,6 @@ mod tests {
 
         let deserialized: RedactionCategory = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, category);
-    }
-
-    #[test]
-    fn test_is_financial() {
-        assert!(RedactionCategory::CreditCards.is_financial());
-        assert!(RedactionCategory::BankAccountNumbers.is_financial());
-        assert!(RedactionCategory::Iban.is_financial());
-        assert!(!RedactionCategory::EmailAddresses.is_financial());
-        assert!(!RedactionCategory::FullNames.is_financial());
-    }
-
-    #[test]
-    fn test_is_personal_id() {
-        assert!(RedactionCategory::FullSsns.is_personal_id());
-        assert!(RedactionCategory::DriversLicense.is_personal_id());
-        assert!(RedactionCategory::PassportNumbers.is_personal_id());
-        assert!(!RedactionCategory::EmailAddresses.is_personal_id());
-        assert!(!RedactionCategory::CreditCards.is_personal_id());
-    }
-
-    #[test]
-    fn test_is_contact_info() {
-        assert!(RedactionCategory::EmailAddresses.is_contact_info());
-        assert!(RedactionCategory::PhoneNumbers.is_contact_info());
-        assert!(RedactionCategory::Addresses.is_contact_info());
-        assert!(!RedactionCategory::CreditCards.is_contact_info());
-        assert!(!RedactionCategory::FullSsns.is_contact_info());
-    }
-
-    #[test]
-    fn test_is_visual() {
-        assert!(RedactionCategory::FaceDetection.is_visual());
-        assert!(RedactionCategory::Signatures.is_visual());
-        assert!(RedactionCategory::Logos.is_visual());
-        assert!(!RedactionCategory::EmailAddresses.is_visual());
-        assert!(!RedactionCategory::PhoneNumbers.is_visual());
     }
 
     #[test]

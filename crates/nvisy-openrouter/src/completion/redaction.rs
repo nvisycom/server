@@ -15,7 +15,7 @@ use super::redaction_prompts::{create_system_prompt, create_user_prompt};
 use super::redaction_request::RedactionRequest;
 use super::redaction_response::RedactionResponse;
 use crate::client::LlmClient;
-use crate::{Error, REDACTION_TARGET, Result};
+use crate::{Error, Result, TRACING_TARGET_COMPLETION};
 
 /// A service for performing data redaction tasks with OpenRouter LLMs.
 ///
@@ -107,7 +107,7 @@ impl RedactionService {
     /// ```
     pub async fn redact(&self, request: &RedactionRequest) -> Result<RedactionResponse> {
         tracing::debug!(
-            target: REDACTION_TARGET,
+            target: TRACING_TARGET_COMPLETION,
             data_items = request.data.len(),
             prompt_length = request.prompt.len(),
             "Starting redaction analysis"
@@ -118,7 +118,7 @@ impl RedactionService {
         let user_prompt = create_user_prompt(request);
 
         tracing::trace!(
-            target: REDACTION_TARGET,
+            target: TRACING_TARGET_COMPLETION,
             system_prompt_length = system_prompt.len(),
             user_prompt_length = user_prompt.len(),
             "Generated prompts for redaction"
@@ -142,13 +142,12 @@ impl RedactionService {
         let typed_request = TypedChatRequest::builder()
             .with_messages(messages)
             .with_request(EmptyRequest)
-            .build()
-            .map_err(|e| Error::config(format!("Failed to build typed request: {}", e)))?;
+            .build()?;
 
         let typed_response = typed_completion.chat_completion(typed_request).await?;
 
         tracing::trace!(
-            target: REDACTION_TARGET,
+            target: TRACING_TARGET_COMPLETION,
             response_length = typed_response.raw_response.as_ref().map(|s| s.len()).unwrap_or(0),
             "Received LLM response"
         );
@@ -159,7 +158,7 @@ impl RedactionService {
         self.validate_response(request, &redaction_response)?;
 
         tracing::info!(
-            target: REDACTION_TARGET,
+            target: TRACING_TARGET_COMPLETION,
             entities_found = redaction_response.entities.len(),
             data_to_redact = redaction_response.data.len(),
             "Redaction analysis completed successfully"
@@ -190,7 +189,7 @@ impl RedactionService {
         for data in &response.data {
             if !valid_ids.contains(&data.id) {
                 tracing::error!(
-                    target: REDACTION_TARGET,
+                    target: TRACING_TARGET_COMPLETION,
                     invalid_id = %data.id,
                     valid_ids = ?valid_ids,
                     "LLM returned invalid UUID not present in request"
@@ -203,7 +202,7 @@ impl RedactionService {
         }
 
         tracing::trace!(
-            target: REDACTION_TARGET,
+            target: TRACING_TARGET_COMPLETION,
             validated_count = response.data.len(),
             "All response IDs validated successfully"
         );
@@ -223,7 +222,7 @@ impl RedactionService {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # let service = RedactionService::new(LlmClient::from_api_key("key")?);
     /// let client = service.client();
-    /// let config = client.config();
+    /// let config = client.as_config();
     /// println!("Using model: {}", config.effective_model());
     /// # Ok(())
     /// # }

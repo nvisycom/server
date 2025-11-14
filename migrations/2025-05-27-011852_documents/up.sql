@@ -519,3 +519,92 @@ $$;
 
 COMMENT ON FUNCTION find_duplicate_files(UUID) IS
     'Finds duplicate files by hash and size. Optionally scoped to a specific document.';
+
+-- Create document comments table - User discussions and annotations
+CREATE TABLE document_comments (
+    -- Primary identifiers
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References (exactly one target must be set)
+    document_id         UUID             DEFAULT NULL REFERENCES documents (id) ON DELETE CASCADE,
+    document_file_id    UUID             DEFAULT NULL REFERENCES document_files (id) ON DELETE CASCADE,
+    document_version_id UUID             DEFAULT NULL REFERENCES document_versions (id) ON DELETE CASCADE,
+    account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Thread references
+    parent_comment_id   UUID             DEFAULT NULL REFERENCES document_comments (id) ON DELETE CASCADE,
+    reply_to_account_id UUID             DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
+
+    -- Comment content
+    content             TEXT             NOT NULL,
+
+    CONSTRAINT document_comments_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
+    CONSTRAINT document_comments_one_target CHECK (
+        (document_id IS NOT NULL)::INTEGER +
+        (document_file_id IS NOT NULL)::INTEGER +
+        (document_version_id IS NOT NULL)::INTEGER = 1
+    ),
+
+    -- Metadata
+    metadata            JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT document_comments_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+
+    -- Lifecycle timestamps
+    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    deleted_at          TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT document_comments_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT document_comments_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
+    CONSTRAINT document_comments_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
+);
+
+-- Set up automatic updated_at trigger
+SELECT setup_updated_at('document_comments');
+
+-- Create indexes for document comments
+CREATE INDEX document_comments_document_idx
+    ON document_comments (document_id, created_at DESC)
+    WHERE document_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE INDEX document_comments_file_idx
+    ON document_comments (document_file_id, created_at DESC)
+    WHERE document_file_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE INDEX document_comments_version_idx
+    ON document_comments (document_version_id, created_at DESC)
+    WHERE document_version_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE INDEX document_comments_account_idx
+    ON document_comments (account_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX document_comments_thread_idx
+    ON document_comments (parent_comment_id, created_at ASC)
+    WHERE parent_comment_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE INDEX document_comments_reply_to_idx
+    ON document_comments (reply_to_account_id, created_at DESC)
+    WHERE reply_to_account_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE INDEX document_comments_metadata_idx
+    ON document_comments USING gin (metadata)
+    WHERE deleted_at IS NULL;
+
+-- Add table and column comments
+COMMENT ON TABLE document_comments IS
+    'User comments and discussions about documents, files, or versions, supporting threaded conversations and @mentions.';
+
+COMMENT ON COLUMN document_comments.id IS 'Unique comment identifier';
+COMMENT ON COLUMN document_comments.document_id IS 'Parent document reference (mutually exclusive with file/version)';
+COMMENT ON COLUMN document_comments.document_file_id IS 'Parent document file reference (mutually exclusive with document/version)';
+COMMENT ON COLUMN document_comments.document_version_id IS 'Parent document version reference (mutually exclusive with document/file)';
+COMMENT ON COLUMN document_comments.account_id IS 'Comment author reference';
+COMMENT ON COLUMN document_comments.parent_comment_id IS 'Parent comment for threaded replies (NULL for top-level)';
+COMMENT ON COLUMN document_comments.reply_to_account_id IS 'Account being replied to (@mention)';
+COMMENT ON COLUMN document_comments.content IS 'Comment text content (1-10000 chars)';
+COMMENT ON COLUMN document_comments.metadata IS 'Extended metadata (JSON, 2B-4KB)';
+COMMENT ON COLUMN document_comments.created_at IS 'Comment creation timestamp';
+COMMENT ON COLUMN document_comments.updated_at IS 'Last edit timestamp';
+COMMENT ON COLUMN document_comments.deleted_at IS 'Soft deletion timestamp';

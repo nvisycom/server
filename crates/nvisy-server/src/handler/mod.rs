@@ -39,6 +39,7 @@
 
 mod accounts;
 mod authentication;
+mod document_comments;
 mod document_files;
 mod document_versions;
 mod documents;
@@ -81,6 +82,7 @@ fn private_routes(
         .merge(project_members::routes())
         .merge(project_websocket::routes())
         .merge(documents::routes())
+        .merge(document_comments::routes())
         .merge(document_files::routes())
         .merge(document_versions::routes());
 

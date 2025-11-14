@@ -22,7 +22,7 @@ use super::redaction_request::{RedactionItem, RedactionRequest};
 pub fn create_system_prompt() -> String {
     use strum::IntoEnumIterator;
 
-    use super::categories::RedactionCategory;
+    use super::redaction_categories::RedactionCategory;
 
     let categories: Vec<String> = RedactionCategory::iter()
         .map(|c| format!("  - {}", c))
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_user_prompt_with_categories() {
-        use super::super::categories::RedactionCategory;
+        use super::super::redaction_categories::RedactionCategory;
 
         let request = RedactionRequest::new(
             vec![RedactionItem::new("john@example.com")],

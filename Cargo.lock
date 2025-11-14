@@ -842,6 +842,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link 0.2.1",
 ]
@@ -2983,6 +2984,7 @@ checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -3099,6 +3101,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_toon",
  "strum",
  "thiserror 2.0.17",
  "tokio",
@@ -4403,6 +4406,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e24345aa0fe688594e73770a5f6d1b216508b4f93484c0026d521acd30134392"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "serde_toon"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ebe8e7ac690e6534815a610b61f0023b982315cefaf4f55066947df630af942"
+dependencies = [
+ "chrono",
+ "indexmap",
+ "num-bigint",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

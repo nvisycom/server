@@ -7,6 +7,7 @@
 // Account-related enumerations
 pub mod action_token_type;
 pub mod api_token_type;
+pub mod notification_type;
 
 // Project-related enumerations
 pub mod activity_type;
@@ -30,6 +31,7 @@ pub use document_status::DocumentStatus;
 pub use integration_status::IntegrationStatus;
 pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;
+pub use notification_type::NotificationType;
 pub use processing_status::ProcessingStatus;
 pub use project_role::ProjectRole;
 pub use project_status::ProjectStatus;

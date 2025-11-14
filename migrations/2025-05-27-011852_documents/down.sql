@@ -20,6 +20,7 @@ DROP VIEW IF EXISTS processing_queue;
 DROP VIEW IF EXISTS document_processing_summary;
 
 -- Drop tables (indexes and remaining triggers dropped automatically with tables)
+DROP TABLE IF EXISTS document_comments;
 DROP TABLE IF EXISTS document_versions;
 DROP TABLE IF EXISTS document_files;
 DROP TABLE IF EXISTS documents;

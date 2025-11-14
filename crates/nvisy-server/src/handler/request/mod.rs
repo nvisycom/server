@@ -3,6 +3,7 @@
 mod account;
 mod authentication;
 mod document;
+mod document_comment;
 mod document_file;
 mod document_version;
 mod monitor;
@@ -14,6 +15,7 @@ mod project_member;
 pub use account::*;
 pub use authentication::*;
 pub use document::*;
+pub use document_comment::*;
 pub use document_file::*;
 pub use monitor::*;
 pub use pagination::*;

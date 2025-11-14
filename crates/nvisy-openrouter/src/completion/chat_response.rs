@@ -215,8 +215,7 @@ mod tests {
             .with_data(TestResponse {
                 value: "test".to_string(),
             })
-            .build()
-            .map_err(|e| crate::Error::config(e.to_string()))?;
+            .build()?;
 
         assert_eq!(response.data.value, "test");
         assert!(response.raw_response.is_none());
@@ -233,9 +232,7 @@ mod tests {
             .with_prompt_tokens(10u32)
             .with_completion_tokens(20u32)
             .with_total_tokens(30u32)
-            .build()
-            .map_err(|e| crate::Error::config(e.to_string()))?;
-
+            .build()?;
         assert_eq!(response.prompt_tokens, Some(10));
         assert_eq!(response.completion_tokens, Some(20));
         assert_eq!(response.total_tokens, Some(30));

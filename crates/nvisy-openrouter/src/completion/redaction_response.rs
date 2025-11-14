@@ -7,20 +7,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::categories::RedactionCategory;
-use crate::{Error, REDACTION_TARGET};
+use super::redaction_categories::RedactionCategory;
+use crate::{Error, TRACING_TARGET_COMPLETION};
 
 /// An entity identified in the redaction analysis.
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Builder
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Builder)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[builder(pattern = "owned", setter(into, strip_option, prefix = "with"))]
 pub struct Entity {
     /// Name of the entity (e.g., "John Smith")
@@ -302,7 +294,7 @@ impl RedactionResponse {
                             Ok(category) => Some(category),
                             Err(e) => {
                                 tracing::warn!(
-                                    target: REDACTION_TARGET,
+                                    target: TRACING_TARGET_COMPLETION,
                                     category = %cat_str,
                                     error = %e,
                                     "Failed to parse entity category, skipping"
@@ -330,7 +322,7 @@ impl RedactionResponse {
                             Ok(category) => Some(category),
                             Err(e) => {
                                 tracing::warn!(
-                                    target: REDACTION_TARGET,
+                                    target: TRACING_TARGET_COMPLETION,
                                     id = %raw.id,
                                     category = %cat_str,
                                     error = %e,

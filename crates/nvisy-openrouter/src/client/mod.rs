@@ -4,7 +4,7 @@
 //! including configuration and rate limiting.
 
 pub use self::llm_client::LlmClient;
-pub use self::llm_config::LlmConfig;
+pub use self::llm_config::{LlmBuilder, LlmBuilderError, LlmConfig};
 
 pub mod llm_client;
 pub mod llm_config;

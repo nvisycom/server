@@ -4,7 +4,7 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::categories::RedactionCategory;
+use super::redaction_categories::RedactionCategory;
 
 /// A single data item that may need redaction.
 ///

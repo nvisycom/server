@@ -3,6 +3,7 @@
 [package]
 name = "nvisy-openrouter"
 version = { workspace = true }
+rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
@@ -37,6 +38,7 @@ strum = { workspace = true, features = ["derive"] }
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
+serde_toon = { workspace = true, features = [] }
 schemars = { workspace = true, features = ["derive"] }
 
 # Text processing

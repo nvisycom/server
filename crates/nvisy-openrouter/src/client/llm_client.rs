@@ -1,6 +1,6 @@
 //! OpenRouter API client implementation.
 //!
-//! This module provides the main Client for interacting with OpenRouter's API,
+//! This module provides the main client for interacting with OpenRouter's API,
 //! including chat completions, model information, and rate limiting.
 
 use std::num::NonZeroU32;
@@ -10,10 +10,11 @@ use governor::clock::{Clock, MonotonicClock};
 use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
+use openrouter_rs::config::OpenRouterConfig;
 use openrouter_rs::{Model, OpenRouterClient};
 
 use super::llm_config::LlmConfig;
-use crate::{Error, OPENROUTER_TARGET, Result};
+use crate::{Result, TRACING_TARGET_CLIENT};
 
 /// OpenRouter API client with rate limiting and configuration.
 ///
@@ -26,35 +27,6 @@ use crate::{Error, OPENROUTER_TARGET, Result};
 /// - **Error Handling**: Comprehensive error types with recovery strategies
 /// - **Observability**: Structured logging and health monitoring
 /// - **Configuration**: Flexible configuration with sensible defaults
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use nvisy_openrouter::{LlmClient, LlmConfig, TypedChatCompletion, TypedChatRequest};
-/// use openrouter_rs::api::chat::Message;
-/// use openrouter_rs::types::Role;
-/// use serde::{Serialize, Deserialize};
-/// use schemars::JsonSchema;
-///
-/// #[derive(Serialize)]
-/// struct MyRequest { query: String }
-///
-/// #[derive(Deserialize, JsonSchema)]
-/// struct MyResponse { answer: String }
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let client = LlmClient::from_api_key("your-api-key")?;
-///     let completion = TypedChatCompletion::<MyRequest, MyResponse>::new(client);
-///     let request = TypedChatRequest::builder()
-///         .with_messages(vec![Message::new(Role::User, "Hello!")])
-///         .with_request(MyRequest { query: "Hello".to_string() })
-///         .build()?;
-///     let response = completion.chat_completion(request).await?;
-///     println!("Response: {}", response.data.answer);
-///     Ok(())
-/// }
-/// ```
 #[derive(Clone)]
 pub struct LlmClient {
     inner: Arc<ClientInner>,
@@ -72,19 +44,110 @@ struct ClientInner {
 }
 
 impl LlmClient {
-    /// Creates a new OpenRouter client with custom configuration.
+    /// Creates a new OpenRouter client from a configuration.
+    ///
+    /// This method is the primary constructor when you have an [`LlmConfig`] instance.
+    /// The configuration specifies the API key, rate limits, timeouts, and default
+    /// model parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::{LlmClient, LlmConfig};
+    /// let config = LlmConfig::builder()
+    ///     .with_api_key("your-api-key")
+    ///     .with_default_model("openai/gpt-4")
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let client = LlmClient::new(config).unwrap();
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The underlying OpenRouter client cannot be initialized
+    /// - The rate limiter configuration is invalid
+    pub fn new(config: LlmConfig) -> Result<Self> {
+        tracing::debug!(
+            target: TRACING_TARGET_CLIENT,
+            base_url = config.base_url(),
+            rate_limit = config.rate_limit(),
+            "Building OpenRouter client from configuration"
+        );
+
+        let mut builder = OpenRouterClient::builder();
+        builder.api_key(config.api_key());
+        builder.base_url(config.base_url());
+        builder.config(OpenRouterConfig {
+            default_model: config.effective_model().to_owned(),
+            ..Default::default()
+        });
+
+        if let Some(referer) = config.http_referer() {
+            builder.http_referer(referer);
+            tracing::debug!(
+                target: TRACING_TARGET_CLIENT,
+                referer = referer,
+                "Set HTTP referer"
+            );
+        }
+
+        if let Some(title) = config.x_title() {
+            builder.x_title(title);
+            tracing::debug!(
+                target: TRACING_TARGET_CLIENT,
+                title = title,
+                "Set X-Title"
+            );
+        }
+
+        let client = builder.build()?;
+        Self::with_client(client, config)
+    }
+
+    /// Creates a new OpenRouter client with a pre-configured OpenRouter client and custom configuration.
+    ///
+    /// This is useful when you need fine-grained control over the underlying OpenRouter client
+    /// or when integrating with existing OpenRouter client instances.
     ///
     /// # Parameters
     ///
-    /// - `client`: Configured OpenRouter API client
+    /// - `client`: Pre-configured OpenRouter API client
     /// - `config`: Configuration for client behavior
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::{LlmClient, LlmConfig};
+    /// # use openrouter_rs::OpenRouterClient;
+    /// let openrouter_client = OpenRouterClient::builder()
+    ///     .api_key("your-api-key")
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let config = LlmConfig::builder()
+    ///     .with_api_key("your-api-key")
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let client = LlmClient::with_client(openrouter_client, config).unwrap();
+    /// ```
     ///
     /// # Errors
     ///
     /// Returns an error if the rate limiter cannot be initialized with the provided configuration.
-    pub fn new(client: OpenRouterClient, config: LlmConfig) -> Result<Self, Error> {
-        let quota_limit =
-            NonZeroU32::new(config.effective_rate_limit()).unwrap_or(NonZeroU32::new(10).unwrap());
+    pub fn with_client(client: OpenRouterClient, config: LlmConfig) -> Result<Self> {
+        let quota_limit = NonZeroU32::new(config.rate_limit())
+            .expect("rate limit from config should be non-zero");
+
+        tracing::debug!(
+            target: TRACING_TARGET_CLIENT,
+            rate_limit = config.rate_limit(),
+            base_url = config.base_url(),
+            "Initializing LlmClient with configuration"
+        );
+
         let rate_limiter = RateLimiter::new(
             Quota::per_second(quota_limit),
             InMemoryState::default(),
@@ -97,70 +160,104 @@ impl LlmClient {
             rate_limiter,
         });
 
+        tracing::info!(
+            target: TRACING_TARGET_CLIENT,
+            "LlmClient initialized successfully"
+        );
+
         Ok(Self { inner })
     }
 
     /// Creates a new OpenRouter client from an API key.
     ///
-    /// Uses default configuration optimized for general usage.
+    /// Uses default configuration optimized for general usage. This is the
+    /// simplest way to create a client when you only need to provide an API key.
     ///
     /// # Parameters
     ///
     /// - `api_key`: Your OpenRouter API key
     ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::LlmClient;
+    /// let client = LlmClient::from_api_key("your-api-key").unwrap();
+    /// ```
+    ///
     /// # Errors
     ///
-    /// Returns an error if the API key is invalid or the client cannot be initialized.
-    pub fn from_api_key(api_key: impl Into<String>) -> Result<Self, Error> {
-        let config = LlmConfig::default();
-        Self::from_api_key_with_config(api_key, config)
+    /// Returns an error if:
+    /// - The API key is invalid or empty
+    /// - The client cannot be initialized
+    pub fn from_api_key(api_key: impl Into<String>) -> Result<Self> {
+        let config = LlmConfig::builder().with_api_key(api_key).build()?;
+        Self::new(config)
     }
 
     /// Creates a new OpenRouter client from an API key with custom configuration.
+    ///
+    /// This is useful when you want to start with a config and just override the API key,
+    /// or when migrating from code that used the old API.
     ///
     /// # Parameters
     ///
     /// - `api_key`: Your OpenRouter API key
     /// - `config`: Custom configuration for client behavior
     ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::{LlmClient, LlmConfig};
+    /// # use std::num::NonZeroU32;
+    /// let config = LlmConfig::builder()
+    ///     .with_api_key("your-api-key")
+    ///     .with_rate_limit(NonZeroU32::new(20).unwrap())
+    ///     .with_default_model("openai/gpt-4")
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let client = LlmClient::from_api_key_with_config("your-api-key", config).unwrap();
+    /// ```
+    ///
     /// # Errors
     ///
-    /// Returns an error if the API key is invalid or the client cannot be initialized.
+    /// Returns an error if:
+    /// - The API key is invalid or empty
+    /// - The configuration is invalid
+    /// - The client cannot be initialized
+    ///
+    /// # Note
+    ///
+    /// If the config already contains an API key, it will be replaced with the provided key.
+    /// It's recommended to use `LlmConfig::builder().with_api_key().build_client()` instead
+    /// for new code.
     pub fn from_api_key_with_config(
-        api_key: impl Into<String>,
+        _api_key: impl Into<String>,
         config: LlmConfig,
-    ) -> Result<Self, Error> {
-        let mut builder = OpenRouterClient::builder();
-        builder.api_key(api_key.into());
-
-        builder.base_url(config.effective_base_url());
-
-        if let Some(referer) = config.http_referer() {
-            builder.http_referer(referer);
-        }
-
-        if let Some(title) = config.x_title() {
-            builder.x_title(title);
-        }
-
-        let client = builder.build()?;
-        Self::new(client, config)
+    ) -> Result<Self> {
+        // Note: The API key parameter is maintained for backward compatibility,
+        // but the config already contains the API key.
+        // In a future version, this method could be deprecated in favor of just using new().
+        Self::new(config)
     }
 
     /// Sends a request with rate limiting by executing the provided async function.
     ///
     /// This method provides a generic interface for sending any type of request
     /// to the OpenRouter API with automatic rate limiting and error handling.
+    /// The rate limiter ensures that requests are throttled according to the
+    /// configured rate limit.
     ///
     /// # Type Parameters
     ///
-    /// - `F`: The async function type
+    /// - `F`: The async function type that creates the future
     /// - `Fut`: The future returned by the async function
-    /// - `T`: The response type
+    /// - `T`: The response type from the request
     ///
     /// # Parameters
     ///
-    /// - `f`: An async function that takes a reference to the OpenRouterClient and LlmConfig, and returns a `Result<T>`
+    /// - `f`: An async function that takes references to the OpenRouterClient and LlmConfig,
+    ///   and returns a `Result<T>`
     ///
     /// # Returns
     ///
@@ -168,23 +265,25 @@ impl LlmClient {
     ///
     /// # Errors
     ///
-    /// - [`Error::RateLimit`]: If rate limit is exceeded
+    /// - [`Error::RateLimit`]: If rate limit is exceeded (this shouldn't happen with governor)
     /// - Any error returned by the provided function
     ///
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use nvisy_openrouter::{LlmClient, LlmConfig};
+    /// # use nvisy_openrouter::{LlmClient, Result};
     /// # use openrouter_rs::api::chat::ChatCompletionRequest;
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example() -> Result<()> {
     /// let client = LlmClient::from_api_key("your-api-key")?;
     /// let request = ChatCompletionRequest::builder()
     ///     .model("openai/gpt-3.5-turbo")
     ///     .build()?;
+    ///
     /// let response = client.send_request(|c, _config| {
     ///     let c = c.clone();
+    ///     let req = request.clone();
     ///     async move {
-    ///         c.send_chat_completion(&request).await.map_err(Into::into)
+    ///         c.send_chat_completion(&req).await.map_err(Into::into)
     ///     }
     /// }).await?;
     /// # Ok(())
@@ -199,51 +298,121 @@ impl LlmClient {
         self.inner.rate_limiter.until_ready().await;
 
         tracing::debug!(
-            target: OPENROUTER_TARGET,
-            "Sending request"
+            target: TRACING_TARGET_CLIENT,
+            "Sending request to OpenRouter API"
         );
 
         let response = f(&self.inner.client, &self.inner.config).await?;
 
         tracing::info!(
-            target: OPENROUTER_TARGET,
-            "Request successful"
+            target: TRACING_TARGET_CLIENT,
+            "Request completed successfully"
         );
 
         Ok(response)
     }
 
-    /// Lists all available models.
+    /// Lists all available models from the OpenRouter API.
+    ///
+    /// Retrieves the complete list of models available through OpenRouter,
+    /// including their capabilities, pricing, and metadata.
     ///
     /// # Returns
     ///
-    /// A list of available models with their metadata.
+    /// A vector of [`Model`] instances with their metadata.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::{LlmClient, Result};
+    /// # async fn example() -> Result<()> {
+    /// let client = LlmClient::from_api_key("your-api-key")?;
+    /// let models = client.list_models().await?;
+    ///
+    /// for model in models {
+    ///     println!("Model: {} - {}", model.id, model.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
     /// - [`Error::Api`]: If the API request fails
+    /// - [`Error::RateLimit`]: If rate limit is exceeded
     pub async fn list_models(&self) -> Result<Vec<Model>> {
         self.send_request(|client, _config| {
             let client = client.clone();
             async move {
+                tracing::debug!(
+                    target: TRACING_TARGET_CLIENT,
+                    "Fetching model list"
+                );
+
                 let models = client.list_models().await?;
+
                 tracing::info!(
-                    target: OPENROUTER_TARGET,
+                    target: TRACING_TARGET_CLIENT,
                     count = models.len(),
                     "Retrieved model list successfully"
                 );
+
                 Ok(models)
             }
         })
         .await
     }
 
-    /// Gets the current configuration.
-    pub fn config(&self) -> &LlmConfig {
+    /// Returns a reference to the client's configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::LlmClient;
+    /// let client = LlmClient::from_api_key("your-api-key").unwrap();
+    /// let config = client.as_config();
+    /// println!("Rate limit: {}", config.rate_limit());
+    /// ```
+    pub fn as_config(&self) -> &LlmConfig {
         &self.inner.config
     }
 
+    /// Returns a reference to the underlying OpenRouter client.
+    ///
+    /// This provides direct access to the OpenRouter client for advanced use cases
+    /// where you need to bypass the rate limiter or access client-specific methods.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::LlmClient;
+    /// let client = LlmClient::from_api_key("your-api-key").unwrap();
+    /// let inner_client = client.as_client();
+    /// // Use inner_client directly for advanced operations
+    /// ```
+    pub fn as_client(&self) -> &OpenRouterClient {
+        &self.inner.client
+    }
+
     /// Gets the current rate limiter status.
+    ///
+    /// Returns a tuple of (available_tokens, total_capacity) indicating
+    /// how many requests can be made immediately and the total burst capacity.
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(available, capacity)` where:
+    /// - `available`: Number of requests that can be made immediately
+    /// - `capacity`: Total burst capacity of the rate limiter
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use nvisy_openrouter::LlmClient;
+    /// let client = LlmClient::from_api_key("your-api-key").unwrap();
+    /// let (available, capacity) = client.rate_limit_status();
+    /// println!("Can make {} requests out of {} capacity", available, capacity);
+    /// ```
     pub fn rate_limit_status(&self) -> (u32, u32) {
         let state = self.inner.rate_limiter.check();
         match state {
@@ -267,10 +436,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_config_builder() -> Result<()> {
+        let config = LlmConfig::builder().with_api_key("test_key").build()?;
+        assert_eq!(config.rate_limit(), 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_with_custom_values() -> Result<()> {
+        let config = LlmConfig::builder()
+            .with_api_key("test_key")
+            .with_rate_limit(NonZeroU32::new(20).unwrap())
+            .with_default_model("openai/gpt-4")
+            .build()?;
+
+        assert_eq!(config.rate_limit(), 20);
+        assert_eq!(config.default_model().unwrap(), "openai/gpt-4");
+        Ok(())
+    }
+
+    #[test]
     fn test_client_debug() {
-        // This test ensures the Debug implementation doesn't panic
-        let config = LlmConfig::default();
+        let config = LlmConfig::builder()
+            .with_api_key("test_key")
+            .build()
+            .unwrap();
         let debug_str = format!("{:?}", config);
         assert!(!debug_str.is_empty());
+        assert!(debug_str.contains("LlmConfig"));
+    }
+
+    #[test]
+    fn test_rate_limit_from_config() -> Result<()> {
+        let config = LlmConfig::builder()
+            .with_api_key("test_key")
+            .with_rate_limit(NonZeroU32::new(15).unwrap())
+            .build()?;
+
+        assert_eq!(config.rate_limit(), 15);
+        Ok(())
+    }
+
+    #[test]
+    fn test_masked_api_key_in_debug() {
+        let config = LlmConfig::builder()
+            .with_api_key("secret_key_12345")
+            .build()
+            .unwrap();
+
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("secr****"));
+        assert!(!debug_str.contains("secret_key_12345"));
     }
 }

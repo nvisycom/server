@@ -1,5 +1,7 @@
 //! Typed chat completion request types.
 
+use std::borrow::Cow;
+
 use derive_builder::Builder;
 use openrouter_rs::api::chat::{ChatCompletionRequest, Message};
 use openrouter_rs::types::{ResponseFormat, Role};
@@ -16,31 +18,13 @@ use crate::client::LlmConfig;
 /// # Type Parameters
 ///
 /// * `T` - The request payload type that implements `Serialize`
-///
-/// # Example
-///
-/// ```rust
-/// use nvisy_openrouter::completion::TypedChatRequest;
-/// use serde::Serialize;
-/// use openrouter_rs::{api::chat::Message, types::Role};
-///
-/// #[derive(Serialize)]
-/// struct MyRequest {
-///     query: String,
-/// }
-///
-/// let request: TypedChatRequest<MyRequest> = TypedChatRequest::builder()
-///     .with_messages(vec![Message::new(Role::User, "Hello")])
-///     .with_request(MyRequest { query: "test".to_string() })
-///     .build()
-///     .unwrap();
-/// ```
 #[derive(Debug, Clone, Builder, Serialize)]
-#[builder(pattern = "owned", setter(into, strip_option, prefix = "with"))]
-pub struct TypedChatRequest<T>
-where
-    T: Serialize,
-{
+#[builder(
+    name = "TypedChatRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with")
+)]
+pub struct TypedChatRequest<T> {
     /// The conversation messages
     pub messages: Vec<Message>,
 
@@ -49,25 +33,22 @@ where
 
     /// Optional system prompt override
     #[builder(default)]
-    pub system_prompt: Option<String>,
+    pub system_prompt: Option<Cow<'static, str>>,
 
     /// Optional model override
     #[builder(default)]
-    pub model: Option<String>,
+    pub model: Option<Cow<'static, str>>,
 
     /// Optional temperature override
     #[builder(default)]
-    pub temperature: Option<f32>,
+    pub temperature: Option<f64>,
 
     /// Optional max tokens override
     #[builder(default)]
     pub max_tokens: Option<u32>,
 }
 
-impl<T> TypedChatRequest<T>
-where
-    T: Serialize,
-{
+impl<T> TypedChatRequest<T> {
     /// Creates a new typed chat request builder.
     pub fn builder() -> TypedChatRequestBuilder<T> {
         TypedChatRequestBuilder::default()
@@ -107,7 +88,7 @@ where
     /// struct Request { query: String }
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let config = LlmConfig::default();
+    /// let config = LlmConfig::builder().with_api_key("test-key").build()?;
     /// let request: TypedChatRequest<Request> = TypedChatRequest::builder()
     ///     .with_messages(vec![Message::new(Role::User, "Hello")])
     ///     .with_request(Request { query: "test".to_string() })
@@ -140,26 +121,24 @@ where
         // Apply config defaults first
         builder.max_tokens(config.effective_max_tokens());
 
-        builder.temperature(config.effective_temperature() as f64);
+        builder.temperature(config.effective_temperature());
 
-        builder.top_p(config.effective_top_p() as f64);
+        builder.top_p(config.effective_top_p());
 
-        builder.presence_penalty(config.effective_presence_penalty() as f64);
+        builder.presence_penalty(config.effective_presence_penalty());
 
-        builder.frequency_penalty(config.effective_frequency_penalty() as f64);
+        builder.frequency_penalty(config.effective_frequency_penalty());
 
         // Request-specific overrides take precedence over config defaults
         if let Some(temperature) = self.temperature {
-            builder.temperature(temperature as f64);
+            builder.temperature(temperature);
         }
 
         if let Some(max_tokens) = self.max_tokens {
             builder.max_tokens(max_tokens);
         }
 
-        builder
-            .build()
-            .map_err(|e| Error::config(format!("Failed to build chat completion request: {}", e)))
+        builder.build().map_err(Into::into)
     }
 
     /// Prepares the final message list for the chat completion request.
@@ -196,7 +175,7 @@ where
         let mut messages = self.messages.clone();
 
         if let Some(system_prompt) = &self.system_prompt {
-            messages.insert(0, Message::new(Role::System, system_prompt));
+            messages.insert(0, Message::new(Role::System, system_prompt.as_ref()));
         }
 
         messages
@@ -222,8 +201,7 @@ mod tests {
             .with_request(TestRequest {
                 value: "test".to_string(),
             })
-            .build()
-            .map_err(|e| crate::Error::config(e.to_string()))?;
+            .build()?;
 
         assert_eq!(request.messages.len(), 1);
         assert!(request.system_prompt.is_none());
@@ -237,12 +215,11 @@ mod tests {
             .with_request(TestRequest {
                 value: "test".to_string(),
             })
-            .with_system_prompt("Custom system prompt")
-            .with_model("custom-model")
-            .with_temperature(0.8f32)
+            .with_system_prompt(Cow::Borrowed("Custom system prompt"))
+            .with_model(Cow::Borrowed("custom-model"))
+            .with_temperature(0.8f64)
             .with_max_tokens(1000u32)
-            .build()
-            .map_err(|e| crate::Error::config(e.to_string()))?;
+            .build()?;
 
         assert_eq!(
             request.system_prompt.as_deref(),
@@ -264,8 +241,7 @@ mod tests {
             .with_request(TestRequest {
                 value: "test".to_string(),
             })
-            .build()
-            .map_err(|e| crate::Error::config(e.to_string()))?;
+            .build()?;
 
         let messages = request.prepare_messages();
 
@@ -283,9 +259,8 @@ mod tests {
             .with_request(TestRequest {
                 value: "test".to_string(),
             })
-            .with_system_prompt("You are a helpful assistant")
-            .build()
-            .map_err(|e| crate::Error::config(e.to_string()))?;
+            .with_system_prompt(Cow::Borrowed("You are a helpful assistant"))
+            .build()?;
 
         let messages = request.prepare_messages();
 

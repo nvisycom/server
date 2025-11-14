@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use super::chat_request::TypedChatRequest;
 use super::chat_response::TypedChatResponse;
 use crate::client::LlmClient;
-use crate::{Error, Result, SCHEMA_TARGET};
+use crate::{Error, Result, TRACING_TARGET_SCHEMA};
 
 /// A typed chat completion handler that enforces request and response schemas.
 ///
@@ -196,7 +196,7 @@ where
             .unwrap_or("response_schema");
 
         tracing::debug!(
-            target: SCHEMA_TARGET,
+            target: TRACING_TARGET_SCHEMA,
             schema_name = %schema_name,
             "Generating JSON schema for typed completion"
         );
@@ -204,7 +204,7 @@ where
         let schema = schema_for!(U);
         let json_value = serde_json::to_value(&schema).map_err(|e| {
             tracing::error!(
-                target: SCHEMA_TARGET,
+                target: TRACING_TARGET_SCHEMA,
                 error = %e,
                 schema_name = %schema_name,
                 "Failed to serialize JSON schema"
@@ -258,8 +258,8 @@ mod tests {
         // Verify we can get the client back
         let retrieved_client = completion.client();
         assert_eq!(
-            retrieved_client.config().effective_model(),
-            client.config().effective_model()
+            retrieved_client.as_config().effective_model(),
+            client.as_config().effective_model()
         );
     }
 
@@ -290,7 +290,7 @@ mod tests {
 
         let response_format = ResponseFormat::json_schema("test", true, serde_json::json!({}));
 
-        let _chat_request = request.build_chat_request(client.config(), response_format)?;
+        let _chat_request = request.build_chat_request(client.as_config(), response_format)?;
 
         // Verify request is built correctly (doesn't panic)
         Ok(())
@@ -299,6 +299,7 @@ mod tests {
     #[test]
     fn test_build_chat_request_with_overrides() -> Result<()> {
         let config = crate::LlmConfig::builder()
+            .with_api_key("test-key")
             .with_default_temperature(0.5)
             .with_default_max_tokens(100u32)
             .build()
@@ -319,7 +320,7 @@ mod tests {
 
         let response_format = ResponseFormat::json_schema("test", true, serde_json::json!({}));
 
-        let _chat_request = request.build_chat_request(client.config(), response_format)?;
+        let _chat_request = request.build_chat_request(client.as_config(), response_format)?;
 
         // Verify request is built correctly with overrides (doesn't panic)
         // We can't easily test the actual values since ChatCompletionRequest fields are private
@@ -335,8 +336,8 @@ mod tests {
 
         // Verify both have the same config
         assert_eq!(
-            completion.client().config().effective_model(),
-            cloned.client().config().effective_model()
+            completion.client().as_config().effective_model(),
+            cloned.client().as_config().effective_model()
         );
     }
 }
