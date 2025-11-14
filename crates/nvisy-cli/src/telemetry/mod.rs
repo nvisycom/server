@@ -9,7 +9,6 @@ pub mod helpers;
 pub mod reports;
 mod tracing;
 
-use anyhow::Context;
 #[cfg(feature = "telemetry")]
 pub use context::TelemetryContext;
 #[cfg(feature = "telemetry")]
@@ -17,17 +16,13 @@ pub use reports::{TelemetryClient, reporting};
 
 /// Initializes the tracing subscriber based on enabled features.
 ///
-/// # Errors
-///
-/// Returns an error if the tracing subscriber fails to initialize.
-pub fn init_tracing() -> anyhow::Result<()> {
-    #[cfg(feature = "otel")]
-    {
-        tracing::init_tracing_with_otel().context("Failed to initialize OpenTelemetry tracing")
-    }
+/// Initializes tracing with OpenTelemetry support.
+#[cfg(feature = "otel")]
+pub fn init_tracing() {
+    tracing::init_tracing_with_otel();
+}
 
-    #[cfg(not(feature = "otel"))]
-    {
-        tracing::init_tracing().context("Failed to initialize tracing")
-    }
+#[cfg(not(feature = "otel"))]
+pub fn init_tracing() {
+    tracing::init_tracing();
 }

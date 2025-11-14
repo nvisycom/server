@@ -1,0 +1,42 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-paddle"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+[dependencies]
+# HTTP client
+reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["fs", "time"] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Error handling
+thiserror = { workspace = true, features = [] }
+
+# Data types
+url = { workspace = true, features = [] }

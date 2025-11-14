@@ -4,6 +4,7 @@
 //! organized into logical groups for better maintainability.
 
 // Account-related constraint modules
+pub mod account_notifications;
 pub mod account_sessions;
 pub mod account_tokens;
 pub mod accounts;
@@ -15,6 +16,7 @@ pub mod project_members;
 pub mod projects;
 
 // Document-related constraint modules
+pub mod document_comments;
 pub mod document_files;
 pub mod document_versions;
 pub mod documents;
@@ -22,9 +24,11 @@ pub mod documents;
 use std::fmt;
 
 // Re-export all constraint types for convenience
+pub use account_notifications::AccountNotificationConstraints;
 pub use account_sessions::AccountSessionConstraints;
 pub use account_tokens::AccountTokenConstraints;
 pub use accounts::AccountConstraints;
+pub use document_comments::DocumentCommentConstraints;
 pub use document_files::DocumentFileConstraints;
 pub use document_versions::DocumentVersionConstraints;
 pub use documents::DocumentConstraints;
@@ -44,6 +48,7 @@ use serde::{Deserialize, Serialize};
 pub enum ConstraintViolation {
     // Account-related constraints
     Account(AccountConstraints),
+    AccountNotification(AccountNotificationConstraints),
     AccountSession(AccountSessionConstraints),
     AccountToken(AccountTokenConstraints),
 
@@ -55,6 +60,7 @@ pub enum ConstraintViolation {
 
     // Document-related constraints
     Document(DocumentConstraints),
+    DocumentComment(DocumentCommentConstraints),
     DocumentFile(DocumentFileConstraints),
     DocumentVersion(DocumentVersionConstraints),
 }
@@ -109,6 +115,10 @@ impl ConstraintViolation {
             if let Some(c) = AccountConstraints::new(constraint) {
                 return Some(ConstraintViolation::Account(c));
             }
+        } else if constraint.starts_with("account_notifications_") {
+            if let Some(c) = AccountNotificationConstraints::from_constraint_name(constraint) {
+                return Some(ConstraintViolation::AccountNotification(c));
+            }
         } else if constraint.starts_with("account_sessions_") {
             if let Some(c) = AccountSessionConstraints::new(constraint) {
                 return Some(ConstraintViolation::AccountSession(c));
@@ -137,6 +147,10 @@ impl ConstraintViolation {
             if let Some(c) = DocumentConstraints::new(constraint) {
                 return Some(ConstraintViolation::Document(c));
             }
+        } else if constraint.starts_with("document_comments_") {
+            if let Some(c) = DocumentCommentConstraints::new(constraint) {
+                return Some(ConstraintViolation::DocumentComment(c));
+            }
         } else if constraint.starts_with("document_files_") {
             if let Some(c) = DocumentFileConstraints::new(constraint) {
                 return Some(ConstraintViolation::DocumentFile(c));
@@ -157,6 +171,7 @@ impl ConstraintViolation {
         match self {
             // Account-related tables
             ConstraintViolation::Account(_) => "accounts",
+            ConstraintViolation::AccountNotification(_) => "account_notifications",
             ConstraintViolation::AccountSession(_) => "account_sessions",
             ConstraintViolation::AccountToken(_) => "account_tokens",
 
@@ -168,6 +183,7 @@ impl ConstraintViolation {
 
             // Document-related tables
             ConstraintViolation::Document(_) => "documents",
+            ConstraintViolation::DocumentComment(_) => "document_comments",
             ConstraintViolation::DocumentFile(_) => "document_files",
             ConstraintViolation::DocumentVersion(_) => "document_versions",
         }
@@ -180,6 +196,7 @@ impl ConstraintViolation {
         // TODO: Implement functional area enumeration.
         match self {
             ConstraintViolation::Account(_)
+            | ConstraintViolation::AccountNotification(_)
             | ConstraintViolation::AccountSession(_)
             | ConstraintViolation::AccountToken(_) => "accounts",
 
@@ -189,6 +206,7 @@ impl ConstraintViolation {
             | ConstraintViolation::ProjectActivityLog(_) => "projects",
 
             ConstraintViolation::Document(_)
+            | ConstraintViolation::DocumentComment(_)
             | ConstraintViolation::DocumentFile(_)
             | ConstraintViolation::DocumentVersion(_) => "documents",
         }
@@ -200,6 +218,7 @@ impl ConstraintViolation {
     pub fn constraint_category(&self) -> ConstraintCategory {
         match self {
             ConstraintViolation::Account(c) => c.categorize(),
+            ConstraintViolation::AccountNotification(c) => c.categorize(),
             ConstraintViolation::AccountSession(c) => c.categorize(),
             ConstraintViolation::AccountToken(c) => c.categorize(),
 
@@ -209,6 +228,7 @@ impl ConstraintViolation {
             ConstraintViolation::ProjectActivityLog(c) => c.categorize(),
 
             ConstraintViolation::Document(c) => c.categorize(),
+            ConstraintViolation::DocumentComment(c) => c.categorize(),
             ConstraintViolation::DocumentFile(c) => c.categorize(),
             ConstraintViolation::DocumentVersion(c) => c.categorize(),
         }
@@ -225,6 +245,7 @@ impl fmt::Display for ConstraintViolation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConstraintViolation::Account(c) => write!(f, "{}", c),
+            ConstraintViolation::AccountNotification(c) => write!(f, "{}", c),
             ConstraintViolation::AccountSession(c) => write!(f, "{}", c),
             ConstraintViolation::AccountToken(c) => write!(f, "{}", c),
 
@@ -234,6 +255,7 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::ProjectActivityLog(c) => write!(f, "{}", c),
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),
+            ConstraintViolation::DocumentComment(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentFile(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentVersion(c) => write!(f, "{}", c),
         }

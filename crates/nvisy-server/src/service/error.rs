@@ -1,253 +1,181 @@
-//! Service layer error types.
+//! Service layer error types and utilities.
 //!
-//! This module provides comprehensive error handling for the service layer,
-//! covering configuration, database, external service, and system errors.
+//! This module provides comprehensive error handling for the service layer with:
+//!
+//! - Strongly-typed error kinds for different failure categories
+//! - Builder pattern for ergonomic error construction
+//! - Type-safe error source tracking with boxed trait objects
+//! - Integration with `thiserror` for automatic `Display` and `Error` trait implementations
 
-use thiserror::Error;
+use std::borrow::Cow;
+use std::error::Error as StdError;
+use std::fmt;
 
-/// Result type for service operations.
+/// Type alias for boxed errors that are Send + Sync.
+///
+/// This is the standard error boxing type used throughout the service layer
+/// for error sources. Using a type alias ensures consistency and reduces
+/// verbosity in error type signatures.
+///
+/// # Thread Safety
+///
+/// The `Send + Sync` bounds ensure errors can be safely transferred between
+/// threads and shared across thread boundaries, which is essential for async
+/// Rust where tasks may move between threads.
+pub type BoxedError = Box<dyn StdError + Send + Sync>;
+
+/// Result type alias for service layer operations.
+///
+/// This is a convenience alias that uses [`ServiceError`] as the error type,
+/// reducing boilerplate in function signatures throughout the service layer.
+///
+/// # Examples
+///
+/// ```
+/// use nvisy_server::service::error::Result;
+///
+/// fn validate_config(config: &str) -> Result<()> {
+///     // validation logic
+///     Ok(())
+/// }
+/// ```
 pub type Result<T> = std::result::Result<T, ServiceError>;
 
-/// Service layer error types.
+/// Error kind enumeration for categorizing service layer errors.
 ///
-/// These errors represent failures in the service layer, such as configuration
-/// issues, database connectivity problems, external service failures, etc.
-#[derive(Debug, Error)]
-pub enum ServiceError {
-    /// Configuration error (invalid config values, missing files, etc.).
-    #[error("Configuration error: {message}")]
-    Config {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+/// This enum represents the different categories of errors that can occur
+/// in the service layer. It's separated from [`ServiceError`] to allow
+/// for pattern matching on error types without accessing the full error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ErrorKind {
+    /// Configuration-related errors.
+    Config,
+    /// External service communication errors.
+    External,
+    /// Authentication and authorization errors.
+    Auth,
+    /// File system operation errors.
+    FileSystem,
+    /// Internal service logic errors.
+    Internal,
+}
 
-    /// Database connection or query error.
-    #[error("Database error: {message}")]
-    Database {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+impl ErrorKind {
+    /// Returns the error kind as a string for categorization.
+    ///
+    /// Useful for metrics, logging, or error categorization.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Config => "config",
+            Self::External => "external_service",
+            Self::Auth => "auth",
+            Self::FileSystem => "file_system",
+            Self::Internal => "internal_service",
+        }
+    }
+}
 
-    /// External service error (MinIO, OpenRouter, etc.).
-    #[error("External service error ({service}): {message}")]
-    ExternalService {
-        service: String,
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
-    /// Authentication or authorization error.
-    #[error("Authentication error: {message}")]
-    Auth {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
-
-    /// File system operation error.
-    #[error("File system error: {message}")]
-    FileSystem {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
-
-    /// Network or connectivity error.
-    #[error("Network error: {message}")]
-    Network {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
-
-    /// Internal service error.
-    #[error("Internal service error: {message}")]
-    Internal {
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+/// Service layer error with structured information.
+///
+/// This structure provides comprehensive error information including:
+///
+/// - Error kind for categorization
+/// - Human-readable message
+/// - Optional source error for error chaining
+#[derive(Debug, thiserror::Error)]
+#[error("{kind} error: {message}")]
+pub struct ServiceError {
+    /// The error category/type
+    kind: ErrorKind,
+    /// Human-readable error message
+    message: Cow<'static, str>,
+    /// Optional underlying error that caused this error
+    #[source]
+    source: Option<BoxedError>,
 }
 
 impl ServiceError {
+    /// Creates a new [`ServiceError`].
+    #[inline]
+    fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Attaches a source error to this error, enabling error chain tracking.
+    ///
+    /// This method consumes the error and returns a new one with the source attached.
+    /// It follows the builder pattern for ergonomic error construction.
+    #[inline]
+    pub fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
+        self.source = Some(Box::new(source));
+        self
+    }
+
+    /// Returns the error kind.
+    #[must_use]
+    #[inline]
+    pub const fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+
+    /// Returns the error message.
+    #[must_use]
+    #[inline]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Creates a new configuration error.
-    pub fn config(message: impl Into<String>) -> Self {
-        Self::Config {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new configuration error with source.
-    pub fn config_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::Config {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-
-    /// Creates a new database error.
-    pub fn database(message: impl Into<String>) -> Self {
-        Self::Database {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new database error with source.
-    pub fn database_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::Database {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
+    #[inline]
+    pub fn config(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(ErrorKind::Config, message)
     }
 
     /// Creates a new external service error.
-    pub fn external_service(service: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::ExternalService {
-            service: service.into(),
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new external service error with source.
-    pub fn external_service_with_source(
-        service: impl Into<String>,
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+    #[inline]
+    pub fn external(
+        service: impl Into<Cow<'static, str>>,
+        message: impl Into<Cow<'static, str>>,
     ) -> Self {
-        Self::ExternalService {
-            service: service.into(),
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
+        let service_name = service.into();
+        let msg = message.into();
+        let full_message = format!("{}: {}", service_name, msg);
+        Self::new(ErrorKind::External, full_message)
     }
 
     /// Creates a new authentication error.
-    pub fn auth(message: impl Into<String>) -> Self {
-        Self::Auth {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new authentication error with source.
-    pub fn auth_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::Auth {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
+    #[inline]
+    pub fn auth(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(ErrorKind::Auth, message)
     }
 
     /// Creates a new file system error.
-    pub fn file_system(message: impl Into<String>) -> Self {
-        Self::FileSystem {
-            message: message.into(),
-            source: None,
-        }
+    #[inline]
+    pub fn file_system(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(ErrorKind::FileSystem, message)
     }
 
-    /// Creates a new file system error with source.
-    pub fn file_system_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+    /// Creates a new internal service error.
+    #[inline]
+    pub fn internal(
+        service: impl Into<Cow<'static, str>>,
+        message: impl Into<Cow<'static, str>>,
     ) -> Self {
-        Self::FileSystem {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-
-    /// Creates a new network error.
-    pub fn network(message: impl Into<String>) -> Self {
-        Self::Network {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new network error with source.
-    pub fn network_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::Network {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-
-    /// Creates a new internal error.
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::Internal {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Creates a new internal error with source.
-    pub fn internal_with_source(
-        message: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::Internal {
-            message: message.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-
-    /// Returns the error category.
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::Config { .. } => "configuration",
-            Self::Database { .. } => "database",
-            Self::ExternalService { .. } => "external_service",
-            Self::Auth { .. } => "authentication",
-            Self::FileSystem { .. } => "file_system",
-            Self::Network { .. } => "network",
-            Self::Internal { .. } => "internal",
-        }
-    }
-
-    /// Converts this service error into a handler error.
-    ///
-    /// This is used when service errors need to be returned from HTTP handlers.
-    pub fn into_handler_error(self) -> crate::handler::Error<'static> {
-        use crate::handler::ErrorKind;
-
-        match self {
-            Self::Config { message, .. } => ErrorKind::InternalServerError.with_context(message),
-            Self::Database { message, .. } => ErrorKind::InternalServerError.with_context(message),
-            Self::ExternalService { message, .. } => {
-                ErrorKind::InternalServerError.with_context(message)
-            }
-            Self::Auth { message, .. } => ErrorKind::Unauthorized.with_context(message),
-            Self::FileSystem { message, .. } => {
-                ErrorKind::InternalServerError.with_context(message)
-            }
-            Self::Network { message, .. } => ErrorKind::InternalServerError.with_context(message),
-            Self::Internal { message, .. } => ErrorKind::InternalServerError.with_context(message),
-        }
-    }
-}
-
-/// Conversion from service error to handler error.
-impl From<ServiceError> for crate::handler::Error<'static> {
-    fn from(error: ServiceError) -> Self {
-        error.into_handler_error()
+        let service_name = service.into();
+        let msg = message.into();
+        let full_message = format!("{}: {}", service_name, msg);
+        Self::new(ErrorKind::Internal, full_message)
     }
 }
 
@@ -257,33 +185,35 @@ mod tests {
 
     #[test]
     fn test_error_creation() {
-        let error = ServiceError::config("Invalid configuration");
-        assert_eq!(error.category(), "configuration");
-        assert!(error.to_string().contains("Invalid configuration"));
+        let error = ServiceError::config("invalid configuration");
+        assert_eq!(error.kind(), ErrorKind::Config);
+        assert_eq!(error.message(), "invalid configuration");
     }
 
     #[test]
     fn test_error_with_source() {
         let source = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let error = ServiceError::file_system_with_source("Cannot read config file", source);
+        let error = ServiceError::file_system("cannot read config file").with_source(source);
 
-        assert_eq!(error.category(), "file_system");
-        assert!(std::error::Error::source(&error).is_some());
-    }
-
-    #[test]
-    fn test_handler_error_conversion() {
-        let service_error = ServiceError::auth("Invalid credentials");
-        let handler_error = service_error.into_handler_error();
-
-        // Test that it converts to the expected handler error type
-        assert!(handler_error.to_string().contains("Invalid credentials"));
+        assert!(StdError::source(&error).is_some());
+        assert_eq!(error.kind(), ErrorKind::FileSystem);
     }
 
     #[test]
     fn test_external_service_error() {
-        let error = ServiceError::external_service("MinIO", "Connection failed");
-        assert!(error.to_string().contains("MinIO"));
-        assert!(error.to_string().contains("Connection failed"));
+        let error = ServiceError::external("nats", "Connection refused");
+
+        assert_eq!(error.kind(), ErrorKind::External);
+        assert!(error.to_string().contains("NATS"));
+        assert!(error.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn test_error_kind_as_str() {
+        assert_eq!(ErrorKind::Config.as_str(), "config");
+        assert_eq!(ErrorKind::External.as_str(), "external_service");
+        assert_eq!(ErrorKind::Auth.as_str(), "auth");
+        assert_eq!(ErrorKind::FileSystem.as_str(), "file_system");
+        assert_eq!(ErrorKind::Internal.as_str(), "internal");
     }
 }

@@ -6,7 +6,9 @@
 pub mod account;
 pub mod account_action_token;
 pub mod account_api_token;
+pub mod account_notification;
 pub mod document;
+pub mod document_comment;
 pub mod document_file;
 pub mod document_version;
 
@@ -24,8 +26,14 @@ pub use account_action_token::{
     AccountActionToken, NewAccountActionToken, UpdateAccountActionToken,
 };
 pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
+pub use account_notification::{
+    AccountNotification, NewAccountNotification, UpdateAccountNotification,
+};
 // Document models
 pub use document::{Document, NewDocument, UpdateDocument};
+pub use document_comment::{
+    CommentTarget, DocumentComment, NewDocumentComment, UpdateDocumentComment,
+};
 pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 pub use document_version::{DocumentVersion, NewDocumentVersion, UpdateDocumentVersion};
 // Project models

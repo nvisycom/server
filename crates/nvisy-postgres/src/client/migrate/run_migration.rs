@@ -8,13 +8,13 @@ use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, instrument};
 
 use super::{MigrationResult, custom_hooks, get_migration_status};
-use crate::{MIGRATIONS, PgClient, PgError, PgResult, TRACING_TARGET_MIGRATIONS};
+use crate::{MIGRATIONS, PgClient, PgError, PgResult, TRACING_TARGET_MIGRATION};
 
 /// Run all pending migrations on the database.
-#[instrument(skip(pg), target = TRACING_TARGET_MIGRATIONS)]
+#[instrument(skip(pg), target = TRACING_TARGET_MIGRATION)]
 pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> {
     info!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         "Starting database migration process",
     );
 
@@ -24,14 +24,14 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
 
     if initial_status.is_up_to_date() {
         info!(
-            target: TRACING_TARGET_MIGRATIONS,
+            target: TRACING_TARGET_MIGRATION,
             "Database schema is already up to date, no migrations to apply"
         );
         return Ok(MigrationResult::success(start_time.elapsed(), vec![]));
     }
 
     info!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         pending_migrations = initial_status.pending_migrations(),
         "Found pending migrations to apply"
     );
@@ -53,7 +53,7 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
     let duration = start_time.elapsed();
     let (results, mut conn) = results.map_err(|err| {
         error!(
-            target: TRACING_TARGET_MIGRATIONS,
+            target: TRACING_TARGET_MIGRATION,
             duration = ?duration,
             error = %err,
             "Migration task panicked, join error occurred"
@@ -65,7 +65,7 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
     run_post_migrate_hook(conn.deref_mut()).await?;
     let versions = results.map_err(|err| {
         error!(
-            target: TRACING_TARGET_MIGRATIONS,
+            target: TRACING_TARGET_MIGRATION,
             duration = ?duration,
             error = &err,
             "Database migration process failed"
@@ -75,7 +75,7 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
     })?;
 
     info!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         duration = ?duration,
         migrations_count = versions.len(),
         "Database migration process completed successfully"
@@ -86,9 +86,9 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
 
 /// Runs the pre-migration hooks.
 async fn run_pre_migrate_hook(conn: &mut AsyncPgConnection) -> PgResult<()> {
-    debug!(target: TRACING_TARGET_MIGRATIONS, "Executing pre-migration hooks");
+    debug!(target: TRACING_TARGET_MIGRATION, "Executing pre-migration hooks");
     if let Err(e) = custom_hooks::pre_migrate(conn).await {
-        error!(target: TRACING_TARGET_MIGRATIONS, error = %e, "Pre-migration hook failed");
+        error!(target: TRACING_TARGET_MIGRATION, error = %e, "Pre-migration hook failed");
         return Err(PgError::Migration(
             format!("Pre-migration hook failed: {}", e).into(),
         ));
@@ -99,9 +99,9 @@ async fn run_pre_migrate_hook(conn: &mut AsyncPgConnection) -> PgResult<()> {
 
 /// Runs the post-migration hooks.
 async fn run_post_migrate_hook(conn: &mut AsyncPgConnection) -> PgResult<()> {
-    debug!(target: TRACING_TARGET_MIGRATIONS, "Executing post-migration hooks");
+    debug!(target: TRACING_TARGET_MIGRATION, "Executing post-migration hooks");
     if let Err(e) = custom_hooks::post_migrate(conn).await {
-        error!(target: TRACING_TARGET_MIGRATIONS, error = %e, "Post-migration hook failed");
+        error!(target: TRACING_TARGET_MIGRATION, error = %e, "Post-migration hook failed");
         return Err(PgError::Migration(
             format!("Post-migration hook failed: {}", e).into(),
         ));

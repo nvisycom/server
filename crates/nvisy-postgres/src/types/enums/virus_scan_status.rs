@@ -1,6 +1,8 @@
 //! Virus scan status enumeration for security scanning results.
 //! Virus scan status enumeration for file security scanning.
 
+use std::cmp::Ordering;
+
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
@@ -17,6 +19,11 @@ use utoipa::ToSchema;
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::VirusScanStatus"]
 pub enum VirusScanStatus {
+    /// Scan pending - file has not been scanned yet
+    #[db_rename = "pending"]
+    #[serde(rename = "pending")]
+    Pending,
+
     /// No virus or malware detected - file is safe
     #[db_rename = "clean"]
     #[serde(rename = "clean")]
@@ -40,7 +47,7 @@ pub enum VirusScanStatus {
 }
 
 impl VirusScanStatus {
-    /// Returns whether the file is safe to use.
+    /// Returns whether the file is safe to use (virus scan passed).
     #[inline]
     pub fn is_safe(self) -> bool {
         matches!(self, VirusScanStatus::Clean)
@@ -48,65 +55,31 @@ impl VirusScanStatus {
 
     /// Returns whether the file is dangerous and should be blocked.
     #[inline]
-    pub fn is_dangerous(self) -> bool {
-        matches!(self, VirusScanStatus::Infected)
-    }
-
-    /// Returns whether the file requires additional review or caution.
-    #[inline]
-    pub fn is_suspicious(self) -> bool {
-        matches!(self, VirusScanStatus::Suspicious)
+    pub fn is_unsafe(self) -> bool {
+        matches!(
+            self,
+            VirusScanStatus::Suspicious | VirusScanStatus::Infected
+        )
     }
 
     /// Returns whether the virus scan status is unknown or inconclusive.
     #[inline]
-    pub fn is_unknown(self) -> bool {
-        matches!(self, VirusScanStatus::Unknown)
-    }
-
-    /// Returns whether the file should be allowed for processing.
-    #[inline]
-    pub fn allows_processing(self) -> bool {
-        matches!(self, VirusScanStatus::Clean)
-    }
-
-    /// Returns whether the file should be blocked from processing.
-    #[inline]
-    pub fn blocks_processing(self) -> bool {
-        matches!(self, VirusScanStatus::Infected)
-    }
-
-    /// Returns whether the file requires manual review before processing.
-    #[inline]
-    pub fn requires_review(self) -> bool {
-        matches!(self, VirusScanStatus::Suspicious | VirusScanStatus::Unknown)
-    }
-
-    /// Returns whether the file should be quarantined.
-    #[inline]
-    pub fn requires_quarantine(self) -> bool {
-        matches!(
-            self,
-            VirusScanStatus::Infected | VirusScanStatus::Suspicious
-        )
-    }
-
-    /// Returns whether the file can be downloaded by users.
-    #[inline]
-    pub fn allows_download(self) -> bool {
-        matches!(self, VirusScanStatus::Clean)
-    }
-
-    /// Returns whether the scan result is conclusive.
-    #[inline]
     pub fn is_conclusive(self) -> bool {
-        !matches!(self, VirusScanStatus::Unknown)
+        !matches!(self, VirusScanStatus::Pending | VirusScanStatus::Unknown)
     }
 
     /// Returns whether a rescan might be beneficial.
     #[inline]
     pub fn should_rescan(self) -> bool {
-        matches!(self, VirusScanStatus::Unknown | VirusScanStatus::Suspicious)
+        matches!(
+            self,
+            VirusScanStatus::Pending | VirusScanStatus::Unknown | VirusScanStatus::Suspicious
+        )
+    }
+
+    #[inline]
+    pub fn requires_review(self) -> bool {
+        matches!(self, VirusScanStatus::Suspicious | VirusScanStatus::Unknown)
     }
 
     /// Returns the security level (1 = safe, 4 = dangerous).
@@ -114,36 +87,22 @@ impl VirusScanStatus {
     pub fn security_level(self) -> u8 {
         match self {
             VirusScanStatus::Clean => 1,
+            VirusScanStatus::Pending => 2,
             VirusScanStatus::Unknown => 2,
             VirusScanStatus::Suspicious => 3,
             VirusScanStatus::Infected => 4,
         }
     }
-
-    /// Returns scan statuses that allow normal file processing.
-    pub fn safe_statuses() -> &'static [VirusScanStatus] {
-        &[VirusScanStatus::Clean]
-    }
-
-    /// Returns scan statuses that require administrative attention.
-    pub fn dangerous_statuses() -> &'static [VirusScanStatus] {
-        &[VirusScanStatus::Infected, VirusScanStatus::Suspicious]
-    }
-
-    /// Returns scan statuses that may benefit from rescanning.
-    pub fn rescan_candidates() -> &'static [VirusScanStatus] {
-        &[VirusScanStatus::Unknown, VirusScanStatus::Suspicious]
-    }
 }
 
 impl PartialOrd for VirusScanStatus {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for VirusScanStatus {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.security_level().cmp(&other.security_level())
     }
 }

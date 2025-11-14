@@ -30,10 +30,10 @@ impl ObjectHeaders {
     pub fn from_header_map(headers: HeaderMap) -> Self {
         let mut header_map = HashMap::new();
         for (key, values) in headers.iter() {
-            if let Some(first_value) = values.first() {
-                if let Ok(value_str) = std::str::from_utf8(first_value.as_ref()) {
-                    header_map.insert(key.to_string(), value_str.to_string());
-                }
+            if let Some(first_value) = values.first()
+                && let Ok(value_str) = std::str::from_utf8(first_value.as_ref())
+            {
+                header_map.insert(key.to_string(), value_str.to_string());
             }
         }
         Self {
@@ -145,9 +145,9 @@ impl From<HeaderMap> for ObjectHeaders {
     }
 }
 
-impl Into<HeaderMap> for ObjectHeaders {
-    fn into(self) -> HeaderMap {
-        self.into_header_map().unwrap_or_default()
+impl From<ObjectHeaders> for HeaderMap {
+    fn from(value: ObjectHeaders) -> Self {
+        value.into_header_map().unwrap_or_default()
     }
 }
 

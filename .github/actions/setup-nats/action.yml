@@ -1,0 +1,46 @@
+name: Setup NATS
+description: Sets up NATS server and waits for it to be ready
+author: nvisy
+
+inputs:
+  nats-timeout:
+    description: Timeout in seconds to wait for NATS
+    required: false
+    default: "30"
+
+outputs:
+  ready:
+    description: Whether NATS is ready and accessible
+    value: ${{ steps.wait.outputs.ready }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install NATS CLI
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          curl -sf https://binaries.nats.dev/nats-io/natscli/nats@latest | sh
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          brew install nats-io/nats-tools/nats
+        elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          curl -L -o nats.zip https://github.com/nats-io/natscli/releases/latest/download/nats-0.1.5-windows-amd64.zip
+          unzip nats.zip -d nats-cli
+          echo "$(pwd)/nats-cli" >> $GITHUB_PATH
+        fi
+
+    - name: Wait for NATS
+      id: wait
+      shell: bash
+      run: |
+        chmod +x scripts/wait-for-nats.sh
+        if scripts/wait-for-nats.sh ${{ inputs.nats-timeout }}; then
+          echo "ready=true" >> $GITHUB_OUTPUT
+        else
+          echo "ready=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+branding:
+  icon: message-circle
+  color: blue

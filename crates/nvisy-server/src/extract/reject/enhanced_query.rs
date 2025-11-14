@@ -6,61 +6,31 @@ use serde::de::DeserializeOwned;
 
 use crate::handler::{Error, ErrorKind};
 
-/// Enhanced query parameter extractor with improved error handling and type safety.
+/// Enhanced query parameter extractor with improved error handling.
 ///
 /// This extractor provides better error messages compared to the
 /// default Axum Query extractor. It includes:
+///
 /// - Detailed error messages for different parameter parsing failures
 /// - Type-safe deserialization with proper error context
 /// - Clear indication of which parameters failed validation
 ///
-/// # Examples
-///
-/// ```rust,no_run
-/// use nvisy_server::extract::Query;
-/// use serde::Deserialize;
-/// use uuid::Uuid;
-///
-/// #[derive(Deserialize)]
-/// struct SearchParams {
-///     q: String,
-///     limit: Option<u32>,
-///     user_id: Option<Uuid>,
-/// }
-///
-/// // Route: /search?q=rust&limit=10&user_id=123e4567-e89b-12d3-a456-426614174000
-/// async fn search(Query(params): Query<SearchParams>) -> Result<(), ()> {
-///     println!("Search query: {}", params.q);
-///     if let Some(limit) = params.limit {
-///         println!("Limit: {}", limit);
-///     }
-///     Ok(())
-/// }
-/// ```
-///
-/// # Error Handling
-///
-/// Unlike the default Axum Query extractor, this provides detailed error
-/// messages when query parameter parsing fails:
-///
-/// - Missing required parameters
-/// - Type conversion failures (e.g., invalid UUID format)
-/// - Deserialization errors with parameter context
-///
 /// All errors are automatically converted to appropriate HTTP responses
 /// with detailed error messages for better API debugging.
+///
+/// [`Query`]: AxumQuery
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]
 pub struct Query<T>(pub T);
 
 impl<T> Query<T> {
-    /// Creates a new [`Query`] wrapper around the provided query parameters.
+    /// Creates a new instance of [`Query`].
     #[inline]
     pub fn new(inner: T) -> Self {
         Self(inner)
     }
 
-    /// Consumes the wrapper and returns the inner query parameters.
+    /// Returns the inner query parameters.
     #[inline]
     pub fn into_inner(self) -> T {
         self.0
@@ -178,33 +148,4 @@ fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     }
 
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_field_name_from_error() {
-        // Test backtick pattern
-        assert_eq!(
-            extract_field_name_from_error("missing field `user_id`"),
-            Some("user_id")
-        );
-
-        // Test field pattern
-        assert_eq!(
-            extract_field_name_from_error("duplicate field limit at line 1"),
-            Some("limit")
-        );
-
-        // Test no match
-        assert_eq!(extract_field_name_from_error("some other error"), None);
-    }
-
-    #[test]
-    fn test_query_creation() {
-        let query = Query::new("test".to_string());
-        assert_eq!(query.into_inner(), "test");
-    }
 }

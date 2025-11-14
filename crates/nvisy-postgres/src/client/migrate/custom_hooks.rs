@@ -7,7 +7,7 @@ use std::time::Instant;
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::PoolableConnection;
 
-use crate::{PgResult, TRACING_TARGET_MIGRATIONS};
+use crate::{PgResult, TRACING_TARGET_MIGRATION};
 
 /// Custom hook called before a connection has been used to run migrations.
 ///
@@ -18,7 +18,7 @@ pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
     let is_broken = conn.is_broken();
 
     tracing::info!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         hook = "pre_migrate",
         is_broken = is_broken,
         timestamp = ?Instant::now(),
@@ -27,7 +27,7 @@ pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
 
     if is_broken {
         tracing::error!(
-            target: TRACING_TARGET_MIGRATIONS,
+            target: TRACING_TARGET_MIGRATION,
             hook = "pre_migrate",
             "Connection is broken before migrations - migrations may fail"
         );
@@ -45,7 +45,7 @@ pub async fn post_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
     let is_broken = conn.is_broken();
 
     tracing::info!(
-        target: TRACING_TARGET_MIGRATIONS,
+        target: TRACING_TARGET_MIGRATION,
         hook = "post_migrate",
         is_broken = is_broken,
         timestamp = ?Instant::now(),
@@ -54,7 +54,7 @@ pub async fn post_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
 
     if is_broken {
         tracing::error!(
-            target: TRACING_TARGET_MIGRATIONS,
+            target: TRACING_TARGET_MIGRATION,
             hook = "post_migrate",
             "Connection is broken after migrations - possible migration failure"
         );

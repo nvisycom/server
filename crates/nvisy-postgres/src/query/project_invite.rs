@@ -46,7 +46,6 @@ impl ProjectInviteRepository {
 
         let invite = project_invites
             .filter(invite_token.eq(token))
-            .filter(deleted_at.is_null())
             .select(ProjectInvite::as_select())
             .first(conn)
             .await
@@ -65,7 +64,6 @@ impl ProjectInviteRepository {
 
         let invite = project_invites
             .filter(id.eq(invite_id))
-            .filter(deleted_at.is_null())
             .select(ProjectInvite::as_select())
             .first(conn)
             .await
@@ -85,7 +83,6 @@ impl ProjectInviteRepository {
 
         let invite = diesel::update(project_invites)
             .filter(id.eq(invite_id))
-            .filter(deleted_at.is_null())
             .set(&changes)
             .returning(ProjectInvite::as_returning())
             .get_result(conn)
@@ -99,13 +96,11 @@ impl ProjectInviteRepository {
     pub async fn accept_invite(
         conn: &mut AsyncPgConnection,
         invite_id: Uuid,
-        acceptor_id: Uuid,
+        _acceptor_id: Uuid,
     ) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Accepted),
-            accepted_by: Some(acceptor_id),
-            accepted_at: Some(OffsetDateTime::now_utc()),
-            use_count: None, // Will be incremented separately if needed
+            responded_at: Some(OffsetDateTime::now_utc()),
             ..Default::default()
         };
 
@@ -152,7 +147,6 @@ impl ProjectInviteRepository {
 
         let invites = project_invites
             .filter(project_id.eq(proj_id))
-            .filter(deleted_at.is_null())
             .select(ProjectInvite::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)
@@ -168,19 +162,14 @@ impl ProjectInviteRepository {
     pub async fn list_user_invites(
         conn: &mut AsyncPgConnection,
         user_id: Option<Uuid>,
-        email: Option<String>,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut query = project_invites.filter(deleted_at.is_null()).into_boxed();
+        let mut query = project_invites.into_boxed();
 
         if let Some(uid) = user_id {
             query = query.filter(invitee_id.eq(uid));
-        }
-
-        if let Some(user_email) = email {
-            query = query.filter(invitee_email.eq(user_email));
         }
 
         let invites = query
@@ -204,7 +193,6 @@ impl ProjectInviteRepository {
         let updated_count = diesel::update(project_invites)
             .filter(expires_at.lt(now))
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(deleted_at.is_null())
             .set(invite_status.eq(InviteStatus::Expired))
             .execute(conn)
             .await
@@ -223,7 +211,6 @@ impl ProjectInviteRepository {
         let invites = project_invites
             .filter(project_id.eq(proj_id))
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(deleted_at.is_null())
             .filter(expires_at.gt(OffsetDateTime::now_utc()))
             .select(ProjectInvite::as_select())
             .order(created_at.desc())
@@ -244,7 +231,6 @@ impl ProjectInviteRepository {
 
         let invites = project_invites
             .filter(invite_status.eq(status))
-            .filter(deleted_at.is_null())
             .select(ProjectInvite::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)
@@ -267,7 +253,6 @@ impl ProjectInviteRepository {
 
         let invites = project_invites
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(deleted_at.is_null())
             .filter(expires_at.between(OffsetDateTime::now_utc(), expiry_threshold))
             .select(ProjectInvite::as_select())
             .order(expires_at.asc())
@@ -283,11 +268,10 @@ impl ProjectInviteRepository {
         conn: &mut AsyncPgConnection,
         invite_id: Uuid,
         updated_by_id: Uuid,
-        reason: Option<String>,
+        _reason: Option<String>,
     ) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Revoked),
-            status_reason: reason,
             updated_by: Some(updated_by_id),
             ..Default::default()
         };
@@ -295,20 +279,19 @@ impl ProjectInviteRepository {
         Self::update_project_invite(conn, invite_id, changes).await
     }
 
-    /// Increments the use count for a reusable invitation.
-    pub async fn increment_invite_usage(
+    /// Gets an invitation by ID (use_count field no longer exists).
+    pub async fn get_invite_by_id(
         conn: &mut AsyncPgConnection,
         invite_id: Uuid,
-    ) -> PgResult<ProjectInvite> {
+    ) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let invite = diesel::update(project_invites)
+        let invite = project_invites
             .filter(id.eq(invite_id))
-            .filter(deleted_at.is_null())
-            .set(use_count.eq(use_count + 1))
-            .returning(ProjectInvite::as_returning())
-            .get_result(conn)
+            .select(ProjectInvite::as_select())
+            .first(conn)
             .await
+            .optional()
             .map_err(PgError::from)?;
 
         Ok(invite)
@@ -325,7 +308,6 @@ impl ProjectInviteRepository {
         let pending_count: i64 = project_invites
             .filter(project_id.eq(proj_id))
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(deleted_at.is_null())
             .count()
             .get_result(conn)
             .await
@@ -335,17 +317,6 @@ impl ProjectInviteRepository {
         let accepted_count: i64 = project_invites
             .filter(project_id.eq(proj_id))
             .filter(invite_status.eq(InviteStatus::Accepted))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Count declined invites
-        let declined_count: i64 = project_invites
-            .filter(project_id.eq(proj_id))
-            .filter(invite_status.eq(InviteStatus::Declined))
-            .filter(deleted_at.is_null())
             .count()
             .get_result(conn)
             .await
@@ -355,7 +326,15 @@ impl ProjectInviteRepository {
         let expired_count: i64 = project_invites
             .filter(project_id.eq(proj_id))
             .filter(invite_status.eq(InviteStatus::Expired))
-            .filter(deleted_at.is_null())
+            .count()
+            .get_result(conn)
+            .await
+            .map_err(PgError::from)?;
+
+        // Count declined invites
+        let declined_count: i64 = project_invites
+            .filter(project_id.eq(proj_id))
+            .filter(invite_status.eq(InviteStatus::Declined))
             .count()
             .get_result(conn)
             .await

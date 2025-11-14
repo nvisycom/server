@@ -151,11 +151,6 @@ impl Project {
         matches!(self.status, ProjectStatus::Suspended)
     }
 
-    /// Returns whether the project is a template.
-    pub fn is_template(&self) -> bool {
-        matches!(self.status, ProjectStatus::Template)
-    }
-
     /// Returns whether the project is public.
     pub fn is_public(&self) -> bool {
         matches!(self.visibility, ProjectVisibility::Public)
@@ -174,11 +169,6 @@ impl Project {
     /// Returns whether the project allows write operations.
     pub fn allows_writes(&self) -> bool {
         self.status.allows_writes() && !self.is_deleted()
-    }
-
-    /// Returns whether the project can be archived.
-    pub fn can_be_archived(&self) -> bool {
-        self.is_active() && !self.is_template()
     }
 
     /// Returns whether the project can be restored from archive.

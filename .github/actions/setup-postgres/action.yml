@@ -1,0 +1,51 @@
+name: Setup PostgreSQL
+description: Sets up PostgreSQL database, installs tools, and runs migrations
+author: nvisy
+
+inputs:
+  postgres-timeout:
+    description: Timeout in seconds to wait for PostgreSQL
+    required: false
+    default: "60"
+
+outputs:
+  ready:
+    description: Whether PostgreSQL is ready and accessible
+    value: ${{ steps.wait.outputs.ready }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          sudo apt-get update -qq
+          sudo apt-get install -y libpq-dev postgresql-client
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          brew install postgresql libpq
+        fi
+
+    - name: Install Diesel CLI
+      shell: bash
+      run: make install-tools
+
+    - name: Wait for PostgreSQL
+      id: wait
+      shell: bash
+      run: |
+        chmod +x scripts/wait-for-postgres.sh
+        if scripts/wait-for-postgres.sh ${{ inputs.postgres-timeout }}; then
+          echo "ready=true" >> $GITHUB_OUTPUT
+        else
+          echo "ready=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Run migrations
+      shell: bash
+      run: make generate-migrations
+
+branding:
+  icon: database
+  color: blue

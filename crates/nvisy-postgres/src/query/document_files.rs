@@ -149,52 +149,20 @@ impl DocumentFileRepository {
         conn: &mut AsyncPgConnection,
         file_id: Uuid,
         status: ProcessingStatus,
-        error: Option<String>,
-        duration_ms: Option<i32>,
     ) -> PgResult<DocumentFile> {
         use schema::document_files::{self, dsl};
 
-        let mut updates = UpdateDocumentFile {
+        let updates = UpdateDocumentFile {
             processing_status: Some(status),
-            processing_error: error,
-            processing_duration_ms: duration_ms,
             ..Default::default()
         };
 
-        if status == ProcessingStatus::Completed {
-            updates.processing_error = None;
-        }
-
         diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
-            .set((
-                &updates,
-                dsl::processing_attempts.eq(dsl::processing_attempts + 1),
-            ))
+            .set(&updates)
             .returning(DocumentFile::as_returning())
             .get_result(conn)
             .await
             .map_err(PgError::from)
-    }
-
-    /// Updates file processing scores.
-    pub async fn update_processing_scores(
-        conn: &mut AsyncPgConnection,
-        file_id: Uuid,
-        processing_score: BigDecimal,
-        completeness_score: BigDecimal,
-        confidence_score: BigDecimal,
-    ) -> PgResult<DocumentFile> {
-        Self::update_document_file(
-            conn,
-            file_id,
-            UpdateDocumentFile {
-                processing_score: Some(processing_score),
-                completeness_score: Some(completeness_score),
-                confidence_score: Some(confidence_score),
-                ..Default::default()
-            },
-        )
-        .await
     }
 
     /// Updates virus scan status.
@@ -283,14 +251,14 @@ impl DocumentFileRepository {
         let mut query = document_files::table
             .filter(dsl::processing_status.eq(ProcessingStatus::Failed))
             .filter(dsl::deleted_at.is_null())
-            .order(dsl::processing_attempts.desc())
+            .order(dsl::processing_priority.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
             .into_boxed();
 
-        if let Some(attempts) = min_attempts {
-            query = query.filter(dsl::processing_attempts.ge(attempts));
+        if let Some(priority) = min_attempts {
+            query = query.filter(dsl::processing_priority.ge(priority));
         }
 
         query.load(conn).await.map_err(PgError::from)
@@ -506,12 +474,12 @@ impl DocumentFileRepository {
         diesel::update(
             document_files::table
                 .filter(dsl::processing_status.eq(ProcessingStatus::Failed))
-                .filter(dsl::processing_attempts.lt(max_attempts))
+                .filter(dsl::processing_priority.lt(max_attempts))
                 .filter(dsl::deleted_at.is_null()),
         )
         .set((
             dsl::processing_status.eq(ProcessingStatus::Pending),
-            dsl::processing_error.eq(None::<String>),
+            dsl::processing_status.eq(ProcessingStatus::Pending),
         ))
         .execute(conn)
         .await

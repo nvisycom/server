@@ -18,8 +18,13 @@ use crate::{
 /// connection pool management, configuration, and migration handling.
 #[derive(Clone)]
 pub struct PgClient {
+    inner: Arc<PgClientInner>,
+}
+
+/// Inner data for PgClient
+struct PgClientInner {
     pool: ConnectionPool,
-    config: Arc<PgConfig>,
+    config: PgConfig,
 }
 
 impl PgClient {
@@ -61,8 +66,7 @@ impl PgClient {
             })?;
 
         Ok(Self {
-            pool,
-            config: Arc::new(config),
+            inner: Arc::new(PgClientInner { pool, config }),
         })
     }
 
@@ -87,7 +91,7 @@ impl PgClient {
 
         // Test connectivity
         debug!(target: TRACING_TARGET_CONNECTION, "Testing database connectivity");
-        let mut conn: PooledConnection = this.pool.get().await.map_err(
+        let mut conn: PooledConnection = this.inner.pool.get().await.map_err(
             |e: deadpool::managed::PoolError<diesel_async::pooled_connection::PoolError>| {
                 error!(
                     target: TRACING_TARGET_CONNECTION, error = %e,
@@ -115,9 +119,9 @@ impl PgClient {
 
         info!(
             target: TRACING_TARGET_CLIENT,
-            max_size = this.config.pool.max_size,
-            connection_timeout = ?this.config.pool.connection_timeout,
-            idle_timeout = ?this.config.pool.idle_timeout,
+            max_size = this.inner.config.pool.max_size,
+            connection_timeout = ?this.inner.config.pool.connection_timeout,
+            idle_timeout = ?this.inner.config.pool.idle_timeout,
             "Database client initialized successfully"
         );
 
@@ -136,7 +140,7 @@ impl PgClient {
         debug!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
 
         let start = std::time::Instant::now();
-        let conn = self.pool.get().await.map_err(|e| {
+        let conn = self.inner.pool.get().await.map_err(|e| {
             error!(
                 target: TRACING_TARGET_CONNECTION,
                 error = %e,
@@ -165,7 +169,7 @@ impl PgClient {
     /// and debugging purposes.
     #[inline]
     pub fn pool_status(&self) -> PgPoolStatus {
-        let status = self.pool.status();
+        let status = self.inner.pool.status();
         PgPoolStatus {
             max_size: status.max_size,
             size: status.size,
@@ -177,7 +181,7 @@ impl PgClient {
     /// Gets the database configuration used by this client.
     #[inline]
     pub fn config(&self) -> &PgConfig {
-        &self.config
+        &self.inner.config
     }
 }
 
@@ -185,13 +189,16 @@ impl std::fmt::Debug for PgClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")
-            .field("database_url", &self.config.database_url_masked())
-            .field("pool_max_size", &self.config.pool.max_size)
+            .field("database_url", &self.inner.config.database_url_masked())
+            .field("pool_max_size", &self.inner.config.pool.max_size)
             .field("pool_current_size", &pool_status.size)
             .field("pool_available", &pool_status.available)
             .field("pool_waiting", &pool_status.waiting)
-            .field("connection_timeout", &self.config.pool.connection_timeout)
-            .field("idle_timeout", &self.config.pool.idle_timeout)
+            .field(
+                "connection_timeout",
+                &self.inner.config.pool.connection_timeout,
+            )
+            .field("idle_timeout", &self.inner.config.pool.idle_timeout)
             .finish()
     }
 }

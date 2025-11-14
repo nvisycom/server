@@ -11,17 +11,16 @@ mod https_server;
 mod lifecycle;
 mod shutdown;
 
-#[cfg(feature = "telemetry")]
 use axum::Router;
 pub use error::{ServerError, ServerResult};
-pub use http_server::serve_http;
+use http_server::serve_http;
 #[cfg(feature = "telemetry")]
-pub use http_server::serve_http_with_telemetry;
+use http_server::serve_http_with_telemetry;
 #[cfg(feature = "tls")]
-pub use https_server::serve_https;
+use https_server::serve_https;
 #[cfg(all(feature = "tls", feature = "telemetry"))]
-pub use https_server::serve_https_with_telemetry;
-pub use lifecycle::serve_with_shutdown;
+use https_server::serve_https_with_telemetry;
+use lifecycle::serve_with_shutdown;
 #[cfg(feature = "telemetry")]
 pub use lifecycle::serve_with_shutdown_and_telemetry;
 use shutdown::shutdown_signal;

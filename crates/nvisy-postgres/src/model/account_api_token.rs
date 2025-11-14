@@ -48,14 +48,14 @@ pub struct AccountApiToken {
 }
 
 /// Data for creating a new account API token.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountApiToken {
     /// Reference to the account this token belongs to
     pub account_id: Uuid,
     /// Two-character region/state code where token originated
-    pub region_code: String,
+    pub region_code: Option<String>,
     /// ISO 3166-1 alpha-2 country code where token originated
     pub country_code: Option<String>,
     /// City name where token originated
@@ -67,15 +67,15 @@ pub struct NewAccountApiToken {
     /// Optional persistent device identifier
     pub device_id: Option<String>,
     /// Type of token (web, mobile, api, etc.)
-    pub session_type: ApiTokenType,
+    pub session_type: Option<ApiTokenType>,
     /// Flag indicating if this is a "remember me" extended token
-    pub is_remembered: bool,
+    pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid
-    pub expired_at: OffsetDateTime,
+    pub expired_at: Option<OffsetDateTime>,
 }
 
 /// Data for updating an account API token.
-#[derive(Debug, Clone, Default, AsChangeset)]
+#[derive(Debug, Default, Clone, AsChangeset)]
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountApiToken {
@@ -89,23 +89,6 @@ pub struct UpdateAccountApiToken {
     pub expired_at: Option<OffsetDateTime>,
     /// Timestamp when the token was soft-deleted
     pub deleted_at: Option<OffsetDateTime>,
-}
-
-impl Default for NewAccountApiToken {
-    fn default() -> Self {
-        Self {
-            account_id: Uuid::new_v4(),
-            region_code: "AA".to_owned(),
-            country_code: None,
-            city_name: None,
-            ip_address: "127.0.0.1/32".parse().unwrap(),
-            user_agent: String::new(),
-            device_id: None,
-            session_type: ApiTokenType::default(),
-            is_remembered: false,
-            expired_at: OffsetDateTime::now_utc() + time::Duration::hours(24),
-        }
-    }
 }
 
 impl AccountApiToken {

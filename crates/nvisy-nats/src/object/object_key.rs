@@ -91,7 +91,8 @@ impl DocumentLabel for OutputFiles {
 
 /// A validated string wrapper representing an object key in NATS object storage.
 ///
-/// The key follows the format: `{project_uuid}/{document_uuid}/{file_uuid}`
+/// The key follows the format: `{project_uuid}/{document_uuid}/{file_uuid}` or
+/// with version: `{project_uuid}/{document_uuid}/{file_uuid}/v{version}`
 ///
 /// # Type Parameters
 /// * `S` - The stage type that implements `DocumentLabel` (used for bucket selection)
@@ -113,12 +114,21 @@ impl<S: DocumentLabel> ObjectKey<S> {
 
     /// Constructs an ObjectKey from ObjectKeyData
     pub fn from_data(data: ObjectKeyData) -> Result<Self> {
-        let key = format!(
-            "{}/{}/{}",
-            data.project_uuid(),
-            data.document_uuid(),
-            data.file_uuid()
-        );
+        let key = match data.version() {
+            Some(version) => format!(
+                "{}/{}/{}/v{}",
+                data.project_uuid(),
+                data.document_uuid(),
+                data.file_uuid(),
+                version
+            ),
+            None => format!(
+                "{}/{}/{}",
+                data.project_uuid(),
+                data.document_uuid(),
+                data.file_uuid()
+            ),
+        };
         Ok(Self {
             key,
             _phantom: PhantomData,
@@ -138,21 +148,53 @@ impl<S: DocumentLabel> ObjectKey<S> {
     /// Parses the key string into ObjectKeyData components
     pub fn parse(&self) -> Result<ObjectKeyData> {
         let parts: Vec<&str> = self.key.split('/').collect();
-        if parts.len() != 3 {
-            return Err(Error::operation(
-                "parse_key",
-                format!(
-                    "Invalid key format '{}': expected 3 parts separated by '/' (project/document/file_uuid)",
-                    self.key
-                ),
-            ));
-        }
 
-        let project_uuid = parse_uuid(parts[0], "project")?;
-        let document_uuid = parse_uuid(parts[1], "document")?;
-        let file_uuid = parse_uuid(parts[2], "file")?;
+        // Handle both 3-part keys (without version) and 4-part keys (with version)
+        let (project_uuid, document_uuid, file_uuid, version) = match parts.len() {
+            3 => {
+                let project_uuid = parse_uuid(parts[0], "project")?;
+                let document_uuid = parse_uuid(parts[1], "document")?;
+                let file_uuid = parse_uuid(parts[2], "file")?;
+                (project_uuid, document_uuid, file_uuid, None)
+            }
+            4 => {
+                let project_uuid = parse_uuid(parts[0], "project")?;
+                let document_uuid = parse_uuid(parts[1], "document")?;
+                let file_uuid = parse_uuid(parts[2], "file")?;
 
-        Ok(ObjectKeyData::new(project_uuid, document_uuid, file_uuid))
+                // Parse version (expecting format "v123")
+                let version_str = parts[3];
+                if !version_str.starts_with('v') {
+                    return Err(Error::operation(
+                        "parse_key",
+                        format!(
+                            "Invalid version format '{}': expected 'v' followed by a number",
+                            version_str
+                        ),
+                    ));
+                }
+
+                let version = version_str[1..].parse::<u64>().map_err(|e| {
+                    Error::operation(
+                        "parse_key",
+                        format!("Invalid version number '{}': {}", version_str, e),
+                    )
+                })?;
+
+                (project_uuid, document_uuid, file_uuid, Some(version))
+            }
+            _ => {
+                return Err(Error::operation(
+                    "parse_key",
+                    format!(
+                        "Invalid key format '{}': expected 3 or 4 parts separated by '/' (project/document/file[/vN])",
+                        self.key
+                    ),
+                ));
+            }
+        };
+
+        Ok(ObjectKeyData::new(project_uuid, document_uuid, file_uuid).with_version(version))
     }
 
     /// Extracts the project UUID from the key
@@ -168,6 +210,11 @@ impl<S: DocumentLabel> ObjectKey<S> {
     /// Extracts the file UUID from the key
     pub fn file_uuid(&self) -> Result<Uuid> {
         self.parse().map(|data| data.file_uuid())
+    }
+
+    /// Extracts the version from the key (if present)
+    pub fn version(&self) -> Result<Option<u64>> {
+        self.parse().map(|data| data.version())
     }
 }
 
@@ -303,5 +350,93 @@ mod tests {
 
         let invalid_uuid_str = "invalid-uuid";
         assert!(parse_uuid(invalid_uuid_str, "test").is_err());
+    }
+
+    #[test]
+    fn test_object_key_with_version() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        // Create key with version
+        let data =
+            ObjectKeyData::new(project_uuid, document_uuid, file_uuid).with_version(Some(42));
+
+        let key = ObjectKey::<InputFiles>::from_data(data).unwrap();
+        let expected = format!("{}/{}/{}/v42", project_uuid, document_uuid, file_uuid);
+
+        assert_eq!(key.as_str(), expected);
+        assert_eq!(key.version().unwrap(), Some(42));
+        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+        assert_eq!(key.document_uuid().unwrap(), document_uuid);
+        assert_eq!(key.file_uuid().unwrap(), file_uuid);
+    }
+
+    #[test]
+    fn test_object_key_without_version() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        // Create key without version
+        let data = ObjectKeyData::new(project_uuid, document_uuid, file_uuid);
+
+        let key = ObjectKey::<InputFiles>::from_data(data).unwrap();
+        let expected = format!("{}/{}/{}", project_uuid, document_uuid, file_uuid);
+
+        assert_eq!(key.as_str(), expected);
+        assert_eq!(key.version().unwrap(), None);
+        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+        assert_eq!(key.document_uuid().unwrap(), document_uuid);
+        assert_eq!(key.file_uuid().unwrap(), file_uuid);
+    }
+
+    #[test]
+    fn test_parse_key_with_version() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        let key_str = format!("{}/{}/{}/v123", project_uuid, document_uuid, file_uuid);
+        let key: ObjectKey<OutputFiles> = ObjectKey::from_str(&key_str).unwrap();
+
+        assert_eq!(key.as_str(), key_str);
+        assert_eq!(key.version().unwrap(), Some(123));
+        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+    }
+
+    #[test]
+    fn test_parse_key_invalid_version_format() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        // Missing 'v' prefix
+        let key_str = format!("{}/{}/{}/123", project_uuid, document_uuid, file_uuid);
+        let result = ObjectKey::<InputFiles>::from_str(&key_str);
+        assert!(result.is_err());
+
+        // Invalid version number
+        let key_str = format!("{}/{}/{}/vabc", project_uuid, document_uuid, file_uuid);
+        let result = ObjectKey::<InputFiles>::from_str(&key_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_version_none_does_not_change_key() {
+        let project_uuid = Uuid::new_v4();
+        let document_uuid = Uuid::new_v4();
+        let file_uuid = Uuid::new_v4();
+
+        // Create key with None version (should be same as no version)
+        let data1 = ObjectKeyData::new(project_uuid, document_uuid, file_uuid);
+        let data2 = ObjectKeyData::new(project_uuid, document_uuid, file_uuid).with_version(None);
+
+        let key1 = ObjectKey::<InputFiles>::from_data(data1).unwrap();
+        let key2 = ObjectKey::<InputFiles>::from_data(data2).unwrap();
+
+        assert_eq!(key1.as_str(), key2.as_str());
+        assert_eq!(key1.version().unwrap(), None);
+        assert_eq!(key2.version().unwrap(), None);
     }
 }

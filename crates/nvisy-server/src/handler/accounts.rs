@@ -6,78 +6,19 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{Account, UpdateAccount};
 use nvisy_postgres::query::AccountRepository;
-use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use nvisy_postgres::{PgClient, model};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
-use uuid::Uuid;
-use validator::Validate;
 
+use super::request::UpdateAccount;
+use super::response::Account;
 use crate::extract::{AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
-use crate::service::{AuthHasher, PasswordStrength, ServiceState};
+use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
 /// Tracing target for account operations.
-const TRACING_TARGET: &str = "nvisy::handler::accounts";
-
-/// Response returned when retrieving an account.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct GetAccountResponse {
-    /// Unique identifier of the account.
-    pub account_id: Uuid,
-    /// Whether the account email has been verified.
-    pub is_activated: bool,
-    /// Whether the account has administrator privileges.
-    pub is_admin: bool,
-    /// Whether the account is currently suspended.
-    pub is_suspended: bool,
-
-    /// Display name of the account holder.
-    pub display_name: String,
-    /// Email address associated with the account.
-    pub email_address: String,
-    /// Company name (optional).
-    pub company_name: Option<String>,
-    /// Phone number (optional).
-    pub phone_number: Option<String>,
-
-    /// Timestamp when the account was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the account was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl GetAccountResponse {
-    /// Creates a new instance of [`GetAccountResponse`].
-    pub fn new(account: Account) -> Self {
-        Self {
-            account_id: account.id,
-            is_activated: account.is_verified,
-            is_admin: account.is_admin,
-            is_suspended: account.is_suspended,
-
-            display_name: account.display_name,
-            email_address: account.email_address,
-            company_name: account.company_name,
-            phone_number: account.phone_number,
-
-            created_at: account.created_at,
-            updated_at: account.updated_at,
-        }
-    }
-}
-
-impl From<Account> for GetAccountResponse {
-    fn from(account: Account) -> Self {
-        Self::new(account)
-    }
-}
+const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
 
 /// Retrieves the authenticated account.
 #[tracing::instrument(skip_all)]
@@ -97,14 +38,14 @@ impl From<Account> for GetAccountResponse {
         (
             status = OK,
             description = "Account details",
-            body = GetAccountResponse,
+            body = Account,
         ),
     ),
 )]
 async fn get_own_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<GetAccountResponse>)> {
+) -> Result<(StatusCode, Json<Account>)> {
     tracing::trace!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
@@ -128,77 +69,14 @@ async fn get_own_account(
         "account retrieved"
     );
 
-    Ok((StatusCode::OK, Json(GetAccountResponse::new(account))))
-}
-
-/// Request payload to update an account.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "Jane Smith",
-    "emailAddress": "jane.smith@example.com",
-    "password": "NewSecurePassword456!",
-    "companyName": "Acme Corporation",
-    "phoneNumber": "+1-555-0123"
-}))]
-struct UpdateAccountRequest {
-    /// New display name (2-32 characters).
-    #[validate(length(min = 2, max = 32))]
-    pub display_name: Option<String>,
-
-    /// New email address (must be valid email format).
-    #[validate(email)]
-    pub email_address: Option<String>,
-
-    /// New password (will be hashed before storage).
-    pub password: Option<String>,
-
-    /// Company or organization name.
-    #[validate(length(max = 100))]
-    pub company_name: Option<String>,
-
-    /// Phone number in international format.
-    #[validate(length(max = 20))]
-    pub phone_number: Option<String>,
-}
-
-/// Response returned after updating an account.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct UpdateAccountResponse {
-    /// Unique identifier of the updated account.
-    pub account_id: Uuid,
-
-    /// Timestamp when the account was created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the account was last updated.
-    pub updated_at: OffsetDateTime,
-}
-
-impl UpdateAccountResponse {
-    /// Creates a new instance of [`UpdateAccountResponse`].
-    pub fn new(account: Account) -> Self {
-        Self {
-            account_id: account.id,
-            created_at: account.created_at,
-            updated_at: account.updated_at,
-        }
-    }
-}
-
-impl From<Account> for UpdateAccountResponse {
-    fn from(account: Account) -> Self {
-        Self::new(account)
-    }
+    Ok((StatusCode::OK, Json(account.into())))
 }
 
 /// Updates the authenticated account.
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     patch, path = "/accounts/", tag = "accounts",
-    request_body = UpdateAccountRequest,
+    request_body = UpdateAccount,
     responses(
         (
             status = NOT_FOUND,
@@ -217,18 +95,18 @@ impl From<Account> for UpdateAccountResponse {
         ),
         (
             status = OK,
-            body = UpdateAccountResponse,
+            body = Account,
             description = "Account updated successfully",
         ),
     )
 )]
 async fn update_own_account(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<AuthHasher>,
+    State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<UpdateAccountRequest>,
-) -> Result<(StatusCode, Json<UpdateAccountResponse>)> {
+    ValidateJson(request): ValidateJson<UpdateAccount>,
+) -> Result<(StatusCode, Json<Account>)> {
     tracing::trace!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
@@ -300,7 +178,7 @@ async fn update_own_account(
             .with_resource("account"));
     }
 
-    let update_account = UpdateAccount {
+    let update_account = model::UpdateAccount {
         display_name: request.display_name,
         email_address: normalized_email,
         password_hash,
@@ -319,21 +197,7 @@ async fn update_own_account(
         "account updated"
     );
 
-    Ok((StatusCode::OK, Json(UpdateAccountResponse::new(account))))
-}
-
-/// Response returned after deleting an account.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct DeleteAccountResponse {
-    /// Unique identifier of the deleted account.
-    pub account_id: Uuid,
-
-    /// Timestamp when the account was originally created.
-    pub created_at: OffsetDateTime,
-    /// Timestamp when the account was deleted.
-    pub deleted_at: OffsetDateTime,
+    Ok((StatusCode::OK, Json(account.into())))
 }
 
 /// Deletes the authenticated account.
@@ -354,14 +218,13 @@ struct DeleteAccountResponse {
         (
             status = OK,
             description = "Account deleted",
-            body = DeleteAccountResponse
         ),
     ),
 )]
 async fn delete_own_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<DeleteAccountResponse>)> {
+) -> Result<StatusCode> {
     tracing::trace!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
@@ -371,19 +234,13 @@ async fn delete_own_account(
     let mut conn = pg_client.get_connection().await?;
     AccountRepository::delete_account(&mut conn, auth_claims.account_id).await?;
 
-    let response = DeleteAccountResponse {
-        account_id: auth_claims.account_id,
-        created_at: OffsetDateTime::now_utc(),
-        deleted_at: OffsetDateTime::now_utc(),
-    };
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
         "account deleted"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(StatusCode::OK)
 }
 
 /// Returns a [`Router`] with all related routes.

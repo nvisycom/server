@@ -1,7 +1,8 @@
 //! Document-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
+    DocumentCommentConstraints, DocumentConstraints, DocumentFileConstraints,
+    DocumentVersionConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -193,5 +194,27 @@ impl From<DocumentVersionConstraints> for Error<'static> {
         };
 
         error.with_resource("document_version")
+    }
+}
+
+impl From<DocumentCommentConstraints> for Error<'static> {
+    fn from(c: DocumentCommentConstraints) -> Self {
+        let error = match c {
+            DocumentCommentConstraints::ContentLength => ErrorKind::BadRequest
+                .with_message("Comment content must be between 1 and 10,000 characters"),
+            DocumentCommentConstraints::OneTarget => ErrorKind::BadRequest.with_message(
+                "Comment must be attached to exactly one target (document, file, or version)",
+            ),
+            DocumentCommentConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Comment metadata is too large")
+            }
+            DocumentCommentConstraints::UpdatedAfterCreated
+            | DocumentCommentConstraints::DeletedAfterCreated
+            | DocumentCommentConstraints::DeletedAfterUpdated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("document_comment")
     }
 }

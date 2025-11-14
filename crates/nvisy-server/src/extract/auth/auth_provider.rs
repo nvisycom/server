@@ -3,23 +3,13 @@
 //! This module defines the [`AuthProvider`] trait that provides authorization
 //! methods for checking permissions at different levels: project, document, admin, and self-access.
 //! The trait is designed to be implemented by types that represent authenticated users.
-//!
-//! # Design Principles
-//!
-//! - **Granular Permissions**: Fine-grained control over what users can access
-//! - **Database Consistency**: All authorization checks verify current database state
-//! - **Fail-Safe**: Default to deny access when in doubt
-//! - **Audit Trail**: Comprehensive logging of all authorization decisions
-
-use std::borrow::Cow;
 
 use nvisy_postgres::model::ProjectMember;
 use nvisy_postgres::query::{DocumentRepository, ProjectMemberRepository};
 use nvisy_postgres::{PgConnection, PgError};
 use uuid::Uuid;
 
-use super::{AuthContext, AuthResult, ProjectPermission};
-use crate::TRACING_TARGET_AUTHORIZATION;
+use super::{AuthResult, Permission, TRACING_TARGET_AUTHORIZATION};
 use crate::handler::Result;
 
 /// Authorization provider for authenticated users.
@@ -46,14 +36,6 @@ pub trait AuthProvider {
     /// Returns whether the user has global administrator privileges.
     fn is_admin(&self) -> bool;
 
-    /// Returns the authorization context for this user.
-    fn auth_context(&self) -> AuthContext {
-        AuthContext {
-            account_id: self.account_id(),
-            is_admin: self.is_admin(),
-        }
-    }
-
     /// Checks if a user has permission to access a project.
     ///
     /// # Arguments
@@ -74,7 +56,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         project_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Global administrators bypass project-level permissions
         if self.is_admin() {
@@ -83,8 +65,9 @@ pub trait AuthProvider {
                 account_id = %self.account_id(),
                 project_id = %project_id,
                 permission = ?permission,
-                "Access granted: global administrator"
+                "access granted: global administrator"
             );
+
             return Ok(AuthResult::granted());
         }
 
@@ -99,9 +82,10 @@ pub trait AuthProvider {
                 account_id = %self.account_id(),
                 project_id = %project_id,
                 permission = ?permission,
-                "Access denied: not a project member"
+                "access denied: not a project member"
             );
-            return Ok(AuthResult::denied(Cow::Borrowed("Not a project member")));
+
+            return Ok(AuthResult::denied("Not a project member"));
         };
 
         // Check role permission
@@ -114,6 +98,7 @@ pub trait AuthProvider {
                 role = ?member.member_role,
                 "Access granted: sufficient role"
             );
+
             Ok(AuthResult::granted_with_member(member))
         } else {
             tracing::warn!(
@@ -124,10 +109,11 @@ pub trait AuthProvider {
                 role = ?member.member_role,
                 "Access denied: insufficient role"
             );
-            Ok(AuthResult::denied(Cow::Owned(format!(
+
+            Ok(AuthResult::denied(format!(
                 "Role {member_role:?} insufficient for {permission:?} permission",
                 member_role = member.member_role
-            ))))
+            )))
         }
     }
 
@@ -154,7 +140,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         document_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Get the document to find its project
         let document = DocumentRepository::find_document_by_id(conn, document_id).await?;
@@ -164,16 +150,16 @@ pub trait AuthProvider {
                 target: TRACING_TARGET_AUTHORIZATION,
                 account_id = %self.account_id(),
                 document_id = %document_id,
-                "Access denied: document not found"
+                "access denied: document not found"
             );
-            return Ok(AuthResult::denied(Cow::Borrowed("Document not found")));
+            return Ok(AuthResult::denied("Document not found"));
         };
 
         // Document owners have special privileges for destructive operations
         let is_document_owner = document.account_id == self.account_id();
         let requires_ownership = matches!(
             permission,
-            ProjectPermission::UpdateDocuments | ProjectPermission::DeleteDocuments
+            Permission::UpdateDocuments | Permission::DeleteDocuments
         );
 
         if requires_ownership && !is_document_owner && !self.is_admin() {
@@ -183,14 +169,7 @@ pub trait AuthProvider {
                 .await;
         }
 
-        // For all other cases, verify basic project access
-        let base_permission = if permission.is_read_only() {
-            ProjectPermission::ViewDocuments
-        } else {
-            permission
-        };
-
-        self.check_project_permission(conn, document.project_id, base_permission)
+        self.check_project_permission(conn, document.project_id, permission)
             .await
     }
 
@@ -214,19 +193,19 @@ pub trait AuthProvider {
                 target_account_id = %target_account_id,
                 is_admin = is_admin,
                 access_type = if is_self_access { "self" } else { "admin" },
-                "Self-permission granted"
+                "self-permission granted"
             );
+
             Ok(AuthResult::granted())
         } else {
             tracing::warn!(
                 target: TRACING_TARGET_AUTHORIZATION,
                 account_id = %self.account_id(),
                 target_account_id = %target_account_id,
-                "Self-permission denied: insufficient privileges"
+                "self-permission denied: insufficient privileges"
             );
-            Ok(AuthResult::denied(Cow::Borrowed(
-                "Can only access your own account data",
-            )))
+
+            Ok(AuthResult::denied("Can only access your own account data"))
         }
     }
 
@@ -243,18 +222,19 @@ pub trait AuthProvider {
             tracing::debug!(
                 target: TRACING_TARGET_AUTHORIZATION,
                 account_id = %self.account_id(),
-                "Global admin permission granted"
+                "global admin permission granted"
             );
             Ok(AuthResult::granted())
         } else {
             tracing::warn!(
                 target: TRACING_TARGET_AUTHORIZATION,
                 account_id = %self.account_id(),
-                "Global admin permission denied"
+                "global admin permission denied"
             );
-            Ok(AuthResult::denied(Cow::Borrowed(
+
+            Ok(AuthResult::denied(
                 "Global administrator privileges required",
-            )))
+            ))
         }
     }
 
@@ -271,7 +251,7 @@ pub trait AuthProvider {
     ///
     /// # Returns
     ///
-    /// Returns [`Ok(Some(ProjectMember))`] if authorized with member info,
+    /// Returns [`ProjectMember`] if authorized with member info,
     /// [`Ok(None)`] if authorized without member info (e.g., global admin),
     /// or [`Err`] if access is denied.
     ///
@@ -283,7 +263,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         project_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
             .check_project_permission(conn, project_id, permission)
@@ -316,7 +296,7 @@ pub trait AuthProvider {
         &self,
         conn: &mut PgConnection,
         document_id: Uuid,
-        permission: ProjectPermission,
+        permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
             .check_document_permission(conn, document_id, permission)

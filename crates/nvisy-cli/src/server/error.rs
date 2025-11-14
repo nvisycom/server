@@ -29,6 +29,7 @@ pub enum ServerError {
 
     /// TLS configuration error.
     #[error("TLS certificate error: {0}")]
+    #[allow(dead_code)]
     TlsCertificate(String),
 }
 

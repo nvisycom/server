@@ -23,12 +23,8 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
 
             // Data validation and serialization errors -> Bad Request
             nvisy_nats::Error::Serialization(_) => ErrorKind::BadRequest
-                .with_message("Invalid request data format")
+                .with_message("Invalid request or response data format")
                 .with_context("Failed to serialize data for storage"),
-
-            nvisy_nats::Error::Deserialization(_) => ErrorKind::BadRequest
-                .with_message("Invalid response data format")
-                .with_context("Failed to deserialize stored data"),
 
             nvisy_nats::Error::InvalidConfig { .. } => ErrorKind::BadRequest
                 .with_message("Invalid configuration")

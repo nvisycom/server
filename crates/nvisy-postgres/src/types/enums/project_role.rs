@@ -40,98 +40,15 @@ pub enum ProjectRole {
 }
 
 impl ProjectRole {
-    /// Returns whether this role has permission to view project content.
-    #[inline]
-    pub fn can_view(self) -> bool {
-        // All roles can view content
-        true
-    }
-
-    /// Returns whether this role has permission to edit project content.
-    #[inline]
-    pub fn can_edit(self) -> bool {
-        matches!(
-            self,
-            ProjectRole::Owner | ProjectRole::Admin | ProjectRole::Editor
-        )
-    }
-
-    /// Returns whether this role has permission to comment on project content.
-    #[inline]
-    pub fn can_comment(self) -> bool {
-        // All roles except viewer can comment
-        !matches!(self, ProjectRole::Viewer)
-    }
-
-    /// Returns whether this role has permission to upload and manage files.
-    #[inline]
-    pub fn can_manage_files(self) -> bool {
-        matches!(
-            self,
-            ProjectRole::Owner | ProjectRole::Admin | ProjectRole::Editor
-        )
-    }
-
-    /// Returns whether this role has permission to manage project members.
-    #[inline]
-    pub fn can_manage_members(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
-    }
-
-    /// Returns whether this role has permission to modify project settings.
-    #[inline]
-    pub fn can_manage_settings(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
-    }
-
-    /// Returns whether this role has permission to invite new members.
-    #[inline]
-    pub fn can_invite_members(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
-    }
-
-    /// Returns whether this role has permission to remove members.
-    #[inline]
-    pub fn can_remove_members(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
-    }
-
-    /// Returns whether this role has permission to archive the project.
-    #[inline]
-    pub fn can_archive_project(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
-    }
-
-    /// Returns whether this role has permission to delete the project.
-    #[inline]
-    pub fn can_delete_project(self) -> bool {
-        matches!(self, ProjectRole::Owner)
-    }
-
     /// Returns whether this role has administrative privileges.
     #[inline]
     pub fn is_administrator(self) -> bool {
         matches!(self, ProjectRole::Owner | ProjectRole::Admin)
     }
 
-    /// Returns whether this role can modify project templates.
-    #[inline]
-    pub fn can_manage_templates(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
-    }
-
-    /// Returns whether this role can export project data.
-    #[inline]
-    pub fn can_export_data(self) -> bool {
-        matches!(
-            self,
-            ProjectRole::Owner | ProjectRole::Admin | ProjectRole::Editor
-        )
-    }
-
     /// Returns the hierarchical level of this role (higher number = more permissions).
     #[inline]
-    pub fn hierarchy_level(self) -> u8 {
+    pub const fn hierarchy_level(self) -> u8 {
         match self {
             ProjectRole::Viewer => 1,
             ProjectRole::Editor => 2,
@@ -142,7 +59,7 @@ impl ProjectRole {
 
     /// Returns whether this role has equal or higher permissions than the other role.
     #[inline]
-    pub fn has_permission_level_of(self, other: ProjectRole) -> bool {
+    pub const fn has_permission_level_of(self, other: ProjectRole) -> bool {
         self.hierarchy_level() >= other.hierarchy_level()
     }
 }

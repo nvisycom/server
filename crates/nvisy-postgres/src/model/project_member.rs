@@ -47,7 +47,7 @@ pub struct ProjectMember {
 }
 
 /// Data for creating a new project member.
-#[derive(Debug, Clone, Insertable)]
+#[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = project_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProjectMember {
@@ -106,26 +106,6 @@ pub struct UpdateProjectMember {
     pub last_accessed_at: Option<OffsetDateTime>,
     /// Updated by
     pub updated_by: Option<Uuid>,
-}
-
-impl Default for NewProjectMember {
-    fn default() -> Self {
-        Self {
-            project_id: Uuid::new_v4(),
-            account_id: Uuid::new_v4(),
-            member_role: ProjectRole::Viewer,
-            custom_permissions: serde_json::Value::Object(serde_json::Map::new()),
-            show_order: 0,
-            is_favorite: false,
-            is_hidden: false,
-            notify_updates: true,
-            notify_comments: true,
-            notify_mentions: true,
-            is_active: true,
-            created_by: Uuid::new_v4(),
-            updated_by: Uuid::new_v4(),
-        }
-    }
 }
 
 impl ProjectMember {

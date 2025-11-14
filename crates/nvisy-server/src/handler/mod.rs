@@ -39,6 +39,7 @@
 
 mod accounts;
 mod authentication;
+mod document_comments;
 mod document_files;
 mod document_versions;
 mod documents;
@@ -48,17 +49,19 @@ mod project_invites;
 mod project_members;
 mod project_websocket;
 mod projects;
-mod response;
+pub mod request;
+pub mod response;
 mod utils;
 
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use utoipa_axum::router::OpenApiRouter;
 
-pub use crate::extract::ProjectPermission;
+pub use crate::extract::Permission;
 pub use crate::handler::error::{Error, ErrorKind, Result};
+pub use crate::handler::request::PaginationRequest;
 pub(crate) use crate::handler::response::ErrorResponse;
-pub use crate::handler::utils::{CustomRoutes, Pagination, RouterMapFn};
+pub use crate::handler::utils::{CustomRoutes, RouterMapFn};
 use crate::middleware::{refresh_token_middleware, require_authentication};
 use crate::service::ServiceState;
 
@@ -79,6 +82,7 @@ fn private_routes(
         .merge(project_members::routes())
         .merge(project_websocket::routes())
         .merge(documents::routes())
+        .merge(document_comments::routes())
         .merge(document_files::routes())
         .merge(document_versions::routes());
 
@@ -93,10 +97,15 @@ fn private_routes(
 fn public_routes(
     additional_routes: Option<OpenApiRouter<ServiceState>>,
     _service_state: ServiceState,
+    disable_authentication: bool,
 ) -> OpenApiRouter<ServiceState> {
-    let mut router = OpenApiRouter::new()
-        .merge(authentication::routes())
-        .merge(monitors::routes());
+    let mut router = OpenApiRouter::new();
+
+    if !disable_authentication {
+        router = router.merge(authentication::routes());
+    }
+
+    router = router.merge(monitors::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);
@@ -120,7 +129,11 @@ pub fn openapi_routes(
         .route_layer(refresh_token_middleware);
     private_router = routes.map_private_after_middleware(private_router);
 
-    let mut public_router = public_routes(routes.public_routes.take(), state);
+    let mut public_router = public_routes(
+        routes.public_routes.take(),
+        state,
+        routes.disable_authentication,
+    );
     public_router = routes.map_public_before_middleware(public_router);
     public_router = routes.map_public_after_middleware(public_router);
 

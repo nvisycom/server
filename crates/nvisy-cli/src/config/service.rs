@@ -11,11 +11,6 @@
 //! # Basic usage with custom database
 //! nvisy-cli --postgres-url "postgresql://user:pass@localhost:5432/nvisy"
 //!
-//! # Configure MinIO storage
-//! nvisy-cli --minio-endpoint "storage.example.com:9000" \
-//!           --minio-access-key "mykey" \
-//!           --minio-secret-key "mysecret"
-//!
 //! # CORS configuration
 //! nvisy-cli --cors-origins "https://app.example.com,https://dashboard.example.com" \
 //!           --cors-max-age 7200 \
@@ -31,7 +26,6 @@
 //!
 //! ```bash
 //! export POSTGRES_URL="postgresql://user:pass@localhost:5432/nvisy"
-//! export MINIO_ENDPOINT="storage.example.com:9000"
 //! export CORS_ORIGINS="https://app.example.com,https://dashboard.example.com"
 //! export OPENROUTER_API_KEY="sk-or-v1-your-key-here"
 //! export STRIPE_API_KEY="sk_live_your-stripe-key-here"
@@ -72,6 +66,11 @@ pub struct ServiceConfig {
     #[arg(default_value = "postgresql://postgres:postgres@localhost:5432/postgres")]
     pub postgres_url: String,
 
+    /// NATS server URL.
+    #[arg(long, env = "NATS_URL")]
+    #[arg(default_value = "nats://127.0.0.1:4222")]
+    pub nats_url: String,
+
     /// Controls the regional policy used for data collection.
     #[arg(short = 'r', long, env = "DATA_COLLECTION_POLICY")]
     #[arg(default_value_t = true)]
@@ -95,47 +94,18 @@ pub struct ServiceConfig {
     #[arg(long, env = "OPENROUTER_BASE_URL")]
     #[arg(default_value = "https://openrouter.ai/api/v1/")]
     pub openrouter_base_url: Option<String>,
-
-    /// `MinIO` endpoint URL.
-    #[arg(long, env = "MINIO_ENDPOINT")]
-    #[arg(default_value = "localhost:9000")]
-    pub minio_endpoint: String,
-
-    /// `MinIO` access key.
-    #[arg(long, env = "MINIO_ACCESS_KEY")]
-    #[arg(default_value = "minioadmin")]
-    pub minio_access_key: String,
-
-    /// `MinIO` secret key.
-    #[arg(long, env = "MINIO_SECRET_KEY")]
-    #[arg(default_value = "minioadmin")]
-    pub minio_secret_key: String,
-
-    /// NATS server URL.
-    #[arg(long, env = "NATS_URL")]
-    #[arg(default_value = "nats://127.0.0.1:4222")]
-    pub nats_url: String,
-
-    /// NATS client name for identification.
-    #[arg(long, env = "NATS_CLIENT_NAME")]
-    #[arg(default_value = "nvisy")]
-    pub nats_client_name: String,
 }
 
 impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             postgres_url: "postgresql://postgres:postgres@localhost:5432/postgres".to_owned(),
+            nats_url: "nats://127.0.0.1:4222".to_owned(),
             minimal_data_collection: true,
             auth_decoding_key: "./public.pem".into(),
             auth_encoding_key: "./private.pem".into(),
             openrouter_api_key: format!("sk-or-v1-{}", "A".repeat(64)),
             openrouter_base_url: Some("https://openrouter.ai/api/v1/".to_owned()),
-            minio_endpoint: "localhost:9000".to_owned(),
-            minio_access_key: "minioadmin".to_owned(),
-            minio_secret_key: "minioadmin".to_owned(),
-            nats_url: "nats://127.0.0.1:4222".to_owned(),
-            nats_client_name: "nvisy-api".to_owned(),
         }
     }
 }
@@ -144,16 +114,11 @@ impl From<ServiceConfig> for ServerServiceConfig {
     fn from(cli_config: ServiceConfig) -> Self {
         Self {
             postgres_endpoint: cli_config.postgres_url,
-            minimal_data_collection: cli_config.minimal_data_collection,
+            nats_url: cli_config.nats_url,
             auth_decoding_key: cli_config.auth_decoding_key,
             auth_encoding_key: cli_config.auth_encoding_key,
             openrouter_api_key: cli_config.openrouter_api_key,
             openrouter_base_url: cli_config.openrouter_base_url,
-            minio_endpoint: cli_config.minio_endpoint,
-            minio_access_key: cli_config.minio_access_key,
-            minio_secret_key: cli_config.minio_secret_key,
-            nats_url: cli_config.nats_url,
-            nats_client_name: cli_config.nats_client_name,
         }
     }
 }
@@ -274,7 +239,6 @@ mod tests {
             "postgresql://postgres:postgres@localhost:5432/postgres"
         );
         assert!(config.minimal_data_collection);
-        assert_eq!(config.minio_endpoint, "localhost:9000");
     }
 
     #[test]
@@ -287,7 +251,6 @@ mod tests {
             server_config.postgres_endpoint,
             "postgresql://postgres:postgres@localhost:5432/postgres"
         );
-        assert!(server_config.minimal_data_collection);
     }
 
     #[test]
@@ -331,7 +294,7 @@ mod tests {
             service: ServiceConfig {
                 postgres_url: "postgresql://custom:pass@db:5432/custom".to_string(),
                 minimal_data_collection: false,
-                minio_endpoint: "minio.example.com:9000".to_string(),
+
                 ..ServiceConfig::default()
             },
             cors: CorsConfig {
@@ -352,8 +315,6 @@ mod tests {
             service.postgres_endpoint,
             "postgresql://custom:pass@db:5432/custom"
         );
-        assert!(!service.minimal_data_collection);
-        assert_eq!(service.minio_endpoint, "minio.example.com:9000");
 
         assert_eq!(cors.allowed_origins, vec!["https://app.example.com"]);
         assert_eq!(cors.max_age_seconds, 7200);

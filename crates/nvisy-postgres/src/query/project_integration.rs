@@ -46,7 +46,6 @@ impl ProjectIntegrationRepository {
 
         let integration = project_integrations
             .filter(id.eq(integration_id))
-            .filter(deleted_at.is_null())
             .select(ProjectIntegration::as_select())
             .first(conn)
             .await
@@ -66,7 +65,6 @@ impl ProjectIntegrationRepository {
 
         let integration = diesel::update(project_integrations)
             .filter(id.eq(integration_id))
-            .filter(deleted_at.is_null())
             .set(&changes)
             .returning(ProjectIntegration::as_returning())
             .get_result(conn)
@@ -85,8 +83,7 @@ impl ProjectIntegrationRepository {
 
         diesel::update(project_integrations)
             .filter(id.eq(integration_id))
-            .filter(deleted_at.is_null())
-            .set(deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(is_active.eq(false))
             .execute(conn)
             .await
             .map_err(PgError::from)?;
@@ -103,7 +100,6 @@ impl ProjectIntegrationRepository {
 
         let integrations = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(deleted_at.is_null())
             .select(ProjectIntegration::as_select())
             .order(created_at.desc())
             .load(conn)
@@ -121,8 +117,7 @@ impl ProjectIntegrationRepository {
         use schema::project_integrations::dsl::*;
 
         let integrations = project_integrations
-            .filter(status.eq(integration_status))
-            .filter(deleted_at.is_null())
+            .filter(sync_status.eq(Some(integration_status)))
             .select(ProjectIntegration::as_select())
             .order(created_at.desc())
             .load(conn)
@@ -143,7 +138,6 @@ impl ProjectIntegrationRepository {
         let integration = project_integrations
             .filter(project_id.eq(proj_id))
             .filter(integration_name.eq(name))
-            .filter(deleted_at.is_null())
             .select(ProjectIntegration::as_select())
             .first(conn)
             .await
@@ -157,11 +151,10 @@ impl ProjectIntegrationRepository {
     pub async fn enable_integration(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
-        updated_by: Uuid,
+        _updated_by: Uuid,
     ) -> PgResult<ProjectIntegration> {
         let changes = UpdateProjectIntegration {
-            is_enabled: Some(true),
-            updated_by: Some(updated_by),
+            is_active: Some(true),
             ..Default::default()
         };
 
@@ -172,11 +165,10 @@ impl ProjectIntegrationRepository {
     pub async fn disable_integration(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
-        updated_by: Uuid,
+        _updated_by: Uuid,
     ) -> PgResult<ProjectIntegration> {
         let changes = UpdateProjectIntegration {
-            is_enabled: Some(false),
-            updated_by: Some(updated_by),
+            is_active: Some(false),
             ..Default::default()
         };
 
@@ -192,8 +184,7 @@ impl ProjectIntegrationRepository {
 
         let integrations = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(is_enabled.eq(true))
-            .filter(deleted_at.is_null())
+            .filter(is_active.eq(true))
             .select(ProjectIntegration::as_select())
             .order(created_at.desc())
             .load(conn)
@@ -208,11 +199,10 @@ impl ProjectIntegrationRepository {
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
         new_status: IntegrationStatus,
-        updated_by: Uuid,
+        _updated_by: Uuid,
     ) -> PgResult<ProjectIntegration> {
         let changes = UpdateProjectIntegration {
-            status: Some(new_status),
-            updated_by: Some(updated_by),
+            sync_status: Some(new_status),
             ..Default::default()
         };
 
@@ -226,9 +216,7 @@ impl ProjectIntegrationRepository {
     ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
 
-        let mut query = project_integrations
-            .filter(deleted_at.is_null())
-            .into_boxed();
+        let mut query = project_integrations.into_boxed();
 
         if let Some(pid) = proj_id {
             query = query.filter(project_id.eq(pid));
@@ -236,9 +224,9 @@ impl ProjectIntegrationRepository {
 
         let integrations = query
             .filter(
-                status
-                    .eq(IntegrationStatus::Failure)
-                    .or(is_enabled.eq(false)),
+                sync_status
+                    .eq(Some(IntegrationStatus::Failure))
+                    .or(is_active.eq(false)),
             )
             .select(ProjectIntegration::as_select())
             .order(updated_at.desc())
@@ -259,7 +247,6 @@ impl ProjectIntegrationRepository {
         // Count total integrations
         let total_count: i64 = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(deleted_at.is_null())
             .count()
             .get_result(conn)
             .await
@@ -268,9 +255,8 @@ impl ProjectIntegrationRepository {
         // Count active integrations
         let active_count: i64 = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(is_enabled.eq(true))
-            .filter(status.eq(IntegrationStatus::Executing))
-            .filter(deleted_at.is_null())
+            .filter(is_active.eq(true))
+            .filter(sync_status.eq(Some(IntegrationStatus::Executing)))
             .count()
             .get_result(conn)
             .await
@@ -279,8 +265,7 @@ impl ProjectIntegrationRepository {
         // Count failed integrations
         let failed_count: i64 = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(status.eq(IntegrationStatus::Failure))
-            .filter(deleted_at.is_null())
+            .filter(sync_status.eq(Some(IntegrationStatus::Failure)))
             .count()
             .get_result(conn)
             .await
@@ -289,8 +274,7 @@ impl ProjectIntegrationRepository {
         // Count pending integrations
         let pending_count: i64 = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(status.eq(IntegrationStatus::Pending))
-            .filter(deleted_at.is_null())
+            .filter(sync_status.eq(Some(IntegrationStatus::Pending)))
             .count()
             .get_result(conn)
             .await
@@ -304,11 +288,10 @@ impl ProjectIntegrationRepository {
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
         auth_data: serde_json::Value,
-        updated_by: Uuid,
+        _updated_by: Uuid,
     ) -> PgResult<ProjectIntegration> {
         let changes = UpdateProjectIntegration {
-            auth_data: Some(auth_data),
-            updated_by: Some(updated_by),
+            credentials: Some(auth_data),
             ..Default::default()
         };
 
@@ -320,11 +303,10 @@ impl ProjectIntegrationRepository {
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
         metadata: serde_json::Value,
-        updated_by: Uuid,
+        _updated_by: Uuid,
     ) -> PgResult<ProjectIntegration> {
         let changes = UpdateProjectIntegration {
             metadata: Some(metadata),
-            updated_by: Some(updated_by),
             ..Default::default()
         };
 
@@ -341,7 +323,6 @@ impl ProjectIntegrationRepository {
 
         let integrations = project_integrations
             .filter(created_by.eq(creator_id))
-            .filter(deleted_at.is_null())
             .select(ProjectIntegration::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)
@@ -365,7 +346,6 @@ impl ProjectIntegrationRepository {
 
         let integrations = project_integrations
             .filter(integration_name.ilike(&search_pattern))
-            .filter(deleted_at.is_null())
             .select(ProjectIntegration::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)
@@ -389,7 +369,6 @@ impl ProjectIntegrationRepository {
 
         let mut query = project_integrations
             .filter(updated_at.gt(cutoff_time))
-            .filter(deleted_at.is_null())
             .into_boxed();
 
         if let Some(pid) = proj_id {
@@ -419,7 +398,6 @@ impl ProjectIntegrationRepository {
         let mut query = project_integrations
             .filter(project_id.eq(proj_id))
             .filter(integration_name.eq(name))
-            .filter(deleted_at.is_null())
             .into_boxed();
 
         if let Some(exclude) = exclude_id {

@@ -1,3 +1,10 @@
+//! Connection information extractor for HTTP requests.
+//!
+//! This module provides the [`AppConnectInfo`] extractor for obtaining detailed
+//! information about client connections in Axum handlers. It captures network
+//! addresses, connection timing, and provides utilities for IP classification
+//! and security analysis.
+
 use std::net::{IpAddr, SocketAddr};
 use std::time::SystemTime;
 
@@ -18,19 +25,6 @@ use tokio::net::TcpListener;
 /// - IP address classification (IPv4/IPv6, private/public)
 /// - Real IP detection (handles proxy headers)
 /// - Connection metadata for security analysis
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use axum::extract::ConnectInfo;
-/// use nvisy_server::extract::AppConnectInfo;
-///
-/// async fn handler(ConnectInfo(conn): ConnectInfo<AppConnectInfo>) {
-///     println!("Client IP: {}", conn.client_ip());
-///     println!("Is private IP: {}", conn.is_private_ip());
-///     println!("Connection time: {:?}", conn.connected_at);
-/// }
-/// ```
 ///
 /// # Security Considerations
 ///

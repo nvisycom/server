@@ -9,7 +9,7 @@ use utoipa::ToSchema;
 /// Defines the operational status of a project in its lifecycle.
 ///
 /// This enumeration corresponds to the `PROJECT_STATUS` PostgreSQL enum and is used
-/// to manage project states from active development through archival and template usage.
+/// to manage project states from active development through archival usage.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
@@ -30,11 +30,6 @@ pub enum ProjectStatus {
     #[db_rename = "suspended"]
     #[serde(rename = "suspended")]
     Suspended,
-
-    /// Project serves as a template for creating new projects
-    #[db_rename = "template"]
-    #[serde(rename = "template")]
-    Template,
 }
 
 impl ProjectStatus {
@@ -53,10 +48,7 @@ impl ProjectStatus {
     /// Returns whether the project allows read operations.
     #[inline]
     pub fn allows_reads(self) -> bool {
-        matches!(
-            self,
-            ProjectStatus::Active | ProjectStatus::Archived | ProjectStatus::Template
-        )
+        matches!(self, ProjectStatus::Active | ProjectStatus::Archived)
     }
 
     /// Returns whether the project is in an active development state.
@@ -75,12 +67,6 @@ impl ProjectStatus {
     #[inline]
     pub fn is_suspended(self) -> bool {
         matches!(self, ProjectStatus::Suspended)
-    }
-
-    /// Returns whether the project serves as a template.
-    #[inline]
-    pub fn is_template(self) -> bool {
-        matches!(self, ProjectStatus::Template)
     }
 
     /// Returns whether the project status can be changed by users.
@@ -102,23 +88,8 @@ impl ProjectStatus {
         matches!(self, ProjectStatus::Active)
     }
 
-    /// Returns a description of what the project status means.
-    #[inline]
-    pub fn description(self) -> &'static str {
-        match self {
-            ProjectStatus::Active => "Project is active and accessible for all operations",
-            ProjectStatus::Archived => "Project is archived and accessible in read-only mode",
-            ProjectStatus::Suspended => "Project is temporarily suspended with restricted access",
-            ProjectStatus::Template => "Project serves as a template for creating new projects",
-        }
-    }
-
     /// Returns project statuses that are accessible to regular users.
     pub fn user_accessible_statuses() -> &'static [ProjectStatus] {
-        &[
-            ProjectStatus::Active,
-            ProjectStatus::Archived,
-            ProjectStatus::Template,
-        ]
+        &[ProjectStatus::Active, ProjectStatus::Archived]
     }
 }

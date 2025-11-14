@@ -17,7 +17,10 @@ pub async fn require_admin(
     next: Next,
 ) -> Response {
     if !auth_claims.is_administrator {
-        return ErrorKind::Unauthorized.into_response();
+        return ErrorKind::Unauthorized
+            .with_context("Route requires administrator privilages")
+            .with_resource("authorization")
+            .into_response();
     }
 
     next.run(request).await

@@ -68,7 +68,7 @@ LABEL org.opencontainers.image.title="Nvisy API Server" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.source="https://github.com/nvisy/api" \
     org.opencontainers.image.documentation="https://github.com/nvisy/api/blob/main/README.md" \
-    org.opencontainers.image.version="1.0.0"
+    org.opencontainers.image.version="0.1.0"
 
 # Expose ports
 EXPOSE 8080

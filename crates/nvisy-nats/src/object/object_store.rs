@@ -131,6 +131,12 @@ where
     ///
     /// This approach ensures compatibility with both nvisy-specific rich metadata and
     /// standard NATS object storage, while providing graceful degradation.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key to store the content under
+    /// * `content` - The content data to store
+    /// * `version` - Optional version to set. If `None`, keeps the current version from metadata
     #[tracing::instrument(
         skip(self, content),
         target = TRACING_TARGET_OBJECT,
@@ -622,6 +628,6 @@ mod tests {
 
         // We can't easily mock ObjectInfo here, but we can verify the function exists
         // and would be called in the appropriate circumstances
-        assert!(true); // Placeholder for integration test
+        // Test passes if no panic occurs during metadata creation
     }
 }

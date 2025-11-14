@@ -13,8 +13,6 @@ support and unified streaming infrastructure.
 - **Unified Streaming** - Jobs and real-time updates use the same stream
   infrastructure
 - **Object Storage** - File and binary data storage using NATS JetStream
-- **Session Management** - Built-in user session handling with device tracking
-- **Smart Caching** - Cache-aside pattern with automatic computation
 - **Job Processing** - Distributed background job queue with retry logic
 - **Connection Management** - Automatic reconnection with exponential backoff
 - **Error Handling** - Comprehensive error types with retry classification
@@ -24,7 +22,6 @@ support and unified streaming infrastructure.
 - `async-nats` - High-performance async NATS client with JetStream support
 - `tokio` - Async runtime for connection management and streaming
 - `serde` - Type-safe serialization for message payloads
-- `thiserror` - Structured error handling with context
 
 ## Architecture
 

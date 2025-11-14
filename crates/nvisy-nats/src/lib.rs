@@ -72,13 +72,9 @@ pub enum Error {
     #[error("NATS connection error: {0}")]
     Connection(#[from] async_nats::Error),
 
-    /// Serialization errors when sending messages
+    /// Serialization errors when sending or receiving messages
     #[error("Serialization error: {0}")]
-    Serialization(serde_json::Error),
-
-    /// Deserialization errors when receiving messages
-    #[error("Deserialization error: {0}")]
-    Deserialization(serde_json::Error),
+    Serialization(#[from] serde_json::Error),
 
     /// JetStream publish error
     #[error("JetStream publish error: {0}")]
@@ -154,90 +150,6 @@ pub enum Error {
 }
 
 impl Error {
-    /// Check if this error indicates a temporary failure that might succeed on retry
-    pub fn is_retryable(&self) -> bool {
-        match self {
-            // Always retryable
-            Error::Connection(_) | Error::Timeout { .. } => true,
-            // Sometimes retryable - depends on the specific reason
-            Error::DeliveryFailed { reason, .. } => {
-                // Retry if it's a network/connection issue, but not if it's a validation issue
-                reason.contains("connection")
-                    || reason.contains("timeout")
-                    || reason.contains("network")
-            }
-            Error::JetstreamPublish(err) => {
-                // Retry on temporary JetStream issues
-                matches!(
-                    err.kind(),
-                    async_nats::jetstream::context::PublishErrorKind::Other
-                )
-            }
-            Error::StreamError { error, .. } => {
-                // Retry on temporary stream issues
-                error.contains("timeout")
-                    || error.contains("connection")
-                    || error.contains("temporary")
-            }
-            Error::ConsumerError { reason, .. } => {
-                // Retry on temporary consumer issues
-                reason.contains("timeout") || reason.contains("connection")
-            }
-            // Never retryable
-            Error::Serialization(_)
-            | Error::Deserialization(_)
-            | Error::KvRevisionMismatch { .. }
-            | Error::KvBucketNotFound { .. }
-            | Error::KvKeyNotFound { .. }
-            | Error::ObjectBucketNotFound { .. }
-            | Error::ObjectNotFound { .. }
-            | Error::InvalidConfig { .. } => false,
-            // Context-dependent
-            _ => false,
-        }
-    }
-
-    /// Get the error category for metrics/logging
-    pub fn category(&self) -> &'static str {
-        match self {
-            // Connection and network errors
-            Error::Connection(_) => "connection",
-            Error::Timeout { .. } => "timeout",
-            Error::DeliveryFailed { .. } => "delivery",
-
-            // JetStream specific errors
-            Error::JetstreamPublish(_) => "jetstream.publish",
-            Error::JetstreamMessage(_) => "jetstream.message",
-            Error::StreamError { .. } => "jetstream.stream",
-            Error::Consumer(_) => "jetstream.consumer",
-            Error::ConsumerError { .. } => "jetstream.consumer_error",
-            Error::Stream(_) => "jetstream.stream_legacy",
-            Error::Ack(_) => "jetstream.ack",
-
-            // Job processing errors
-            Error::JobQueueError { .. } => "jobs.queue",
-
-            // Key-Value store errors
-            Error::KvBucketNotFound { .. } => "kv.bucket_not_found",
-            Error::KvKeyNotFound { .. } => "kv.key_not_found",
-            Error::KvRevisionMismatch { .. } => "kv.revision_mismatch",
-
-            // Object store errors
-            Error::ObjectBucketNotFound { .. } => "object.bucket_not_found",
-            Error::ObjectNotFound { .. } => "object.not_found",
-
-            // Data handling errors
-            Error::Serialization(_) => "serialization",
-            Error::Deserialization(_) => "deserialization",
-
-            // Configuration errors
-            Error::InvalidConfig { .. } => "config",
-
-            // Generic errors
-            Error::Operation { .. } => "operation",
-        }
-    }
-
     /// Create a delivery failed error
     pub fn delivery_failed(subject: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::DeliveryFailed {
@@ -329,36 +241,6 @@ impl Error {
         Self::Timeout { timeout: duration }
     }
 
-    /// Check if this is a client-side error (programming/configuration issue)
-    pub fn is_client_error(&self) -> bool {
-        matches!(
-            self,
-            Error::Serialization(_)
-                | Error::Deserialization(_)
-                | Error::InvalidConfig { .. }
-                | Error::KvRevisionMismatch { .. }
-        )
-    }
-
-    /// Check if this is a "not found" type error
-    pub fn is_not_found(&self) -> bool {
-        matches!(
-            self,
-            Error::KvKeyNotFound { .. }
-                | Error::KvBucketNotFound { .. }
-                | Error::ObjectNotFound { .. }
-                | Error::ObjectBucketNotFound { .. }
-        )
-    }
-
-    /// Check if this is a network-related error
-    pub fn is_network_error(&self) -> bool {
-        matches!(
-            self,
-            Error::Connection(_) | Error::Timeout { .. } | Error::DeliveryFailed { .. }
-        )
-    }
-
     /// Get a user-friendly error message suitable for display
     pub fn user_message(&self) -> String {
         match self {
@@ -370,64 +252,9 @@ impl Error {
             }
             Error::KvKeyNotFound { key, .. } => format!("Key '{}' not found.", key),
             Error::ObjectNotFound { name, .. } => format!("Object '{}' not found.", name),
-            Error::Serialization(_) | Error::Deserialization(_) => {
-                "Data format error. Please check your input.".to_string()
-            }
+            Error::Serialization(_) => "Data format error. Please check your input.".to_string(),
             Error::InvalidConfig { reason } => format!("Configuration error: {}", reason),
             _ => "An unexpected error occurred. Please try again.".to_string(),
         }
-    }
-}
-
-// Manual From implementation for serde_json::Error to default to Serialization
-impl From<serde_json::Error> for Error {
-    fn from(error: serde_json::Error) -> Self {
-        Error::Serialization(error)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_categories() {
-        // Test with timeout error (doesn't require async_nats::Error construction)
-        let timeout_err = Error::Timeout {
-            timeout: Duration::from_secs(5),
-        };
-        assert_eq!(timeout_err.category(), "timeout");
-        assert!(timeout_err.is_retryable());
-
-        let stream_err = Error::stream_error("TEST_STREAM", "Stream not found");
-        assert_eq!(stream_err.category(), "jetstream.stream");
-        assert!(!stream_err.is_retryable());
-
-        let delivery_err = Error::delivery_failed("test.subject", "connection failed");
-        assert_eq!(delivery_err.category(), "delivery");
-        assert!(delivery_err.is_retryable());
-
-        let non_retryable_delivery = Error::delivery_failed("test.subject", "invalid payload");
-        assert_eq!(non_retryable_delivery.category(), "delivery");
-        assert!(!non_retryable_delivery.is_retryable());
-    }
-
-    #[test]
-    fn test_error_classification() {
-        // Create a real serde_json::Error by trying to parse invalid JSON
-        let json_err = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
-        let serialization_err = Error::Serialization(json_err);
-        assert!(serialization_err.is_client_error());
-        assert!(!serialization_err.is_not_found());
-        assert!(!serialization_err.is_retryable());
-
-        let kv_not_found = Error::kv_key_not_found("test_bucket", "test_key");
-        assert!(kv_not_found.is_not_found());
-        assert!(!kv_not_found.is_client_error());
-        assert!(!kv_not_found.is_retryable());
-
-        let config_err = Error::invalid_config("missing required field");
-        assert!(config_err.is_client_error());
-        assert!(!config_err.is_retryable());
     }
 }

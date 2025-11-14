@@ -6,13 +6,15 @@
 //!
 //! # Pagination
 //!
-//! All queries that may return large result sets now use the [`Pagination`] struct
+//! All queries that may return large result sets use the [`Pagination`] struct
 //! to provide consistent, bounded pagination across the system.
 
 pub mod account;
 pub mod account_action_tokens;
 pub mod account_api_tokens;
+pub mod account_notifications;
 pub mod document;
+pub mod document_comments;
 pub mod document_files;
 pub mod document_versions;
 
@@ -25,7 +27,9 @@ pub mod project_member;
 pub use account::{AccountRepository, AccountStatistics};
 pub use account_action_tokens::{AccountActionTokenRepository, AccountActionTokenStats};
 pub use account_api_tokens::{AccountApiTokenRepository, AccountApiTokenStats};
+pub use account_notifications::{AccountNotificationRepository, NotificationStats};
 pub use document::{DocumentProjectStats, DocumentRepository, DocumentUserStats};
+pub use document_comments::{CommentStats, DocumentCommentRepository};
 pub use document_files::{DocumentFileRepository, DocumentFileStats, ProcessingSummary};
 pub use document_versions::{DocumentVersionRepository, DocumentVersionStats, UserVersionStats};
 pub use project::ProjectRepository;
@@ -38,9 +42,9 @@ use serde::{Deserialize, Serialize};
 /// Pagination parameters for database queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pagination {
-    /// Maximum number of records to return
+    /// Maximum number of records to return.
     pub limit: i64,
-    /// Number of records to skip
+    /// Number of records to skip.
     pub offset: i64,
 }
 

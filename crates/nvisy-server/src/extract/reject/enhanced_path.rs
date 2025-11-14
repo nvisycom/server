@@ -6,40 +6,16 @@ use serde::de::DeserializeOwned;
 
 use crate::handler::{Error, ErrorKind};
 
-/// Enhanced path parameter extractor with improved error handling and type safety.
+/// Enhanced path parameter extractor with improved error handling.
 ///
 /// This extractor provides better error messages compared to the
-/// default Axum Path extractor. It includes:
+/// default Axum [`Path`] extractor. It includes:
+///
 /// - Detailed error messages for different parameter types
 /// - Type-safe deserialization with proper error context
 ///
-/// # Examples
-///
-/// ```rust,no_run
-/// use nvisy_server::extract::Path;
-/// use serde::Deserialize;
-/// use uuid::Uuid;
-///
-/// #[derive(Deserialize)]
-/// struct UserPath {
-///     user_id: Uuid,
-///     action: String,
-/// }
-///
-/// // Route: /users/{user_id}/{action}
-/// async fn handle_user_action(Path(params): Path<UserPath>) -> Result<(), ()> {
-///     println!("User {} performing {}", params.user_id, params.action);
-///     Ok(())
-/// }
-/// ```
-///
-/// # Common Parameter Types
-///
-/// The extractor handles various common parameter types with appropriate error messages:
-/// - `Uuid`: Validates UUID format (e.g., "550e8400-e29b-41d4-a716-446655440000")
-/// - `i32`, `u32`, `i64`, `u64`: Validates integer format
-/// - `String`: Accepts any valid UTF-8 string
-/// - Custom types: Uses serde deserialization rules
+/// All errors are automatically converted to appropriate HTTP responses
+/// with detailed error messages for better API debugging and user experience.
 ///
 /// [`Path`]: AxumPath
 #[must_use]
@@ -47,7 +23,7 @@ use crate::handler::{Error, ErrorKind};
 pub struct Path<T>(pub T);
 
 impl<T> Path<T> {
-    /// Creates a new [`Path`] wrapper around the provided value.
+    /// Creates a new instance of [`Path`].
     ///
     /// # Arguments
     ///
@@ -57,7 +33,7 @@ impl<T> Path<T> {
         Self(inner)
     }
 
-    /// Consumes the wrapper and returns the inner path parameters.
+    /// Returns the inner path parameters.
     #[inline]
     pub fn into_inner(self) -> T {
         self.0

@@ -8,19 +8,20 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{NewProjectActivity, ProjectActivity};
+use crate::types::ActivityType;
 use crate::{PgError, PgResult, schema};
 
 /// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
 pub struct LogEntityActivityParams {
-    /// The entity ID (integration, member, or document)
-    pub entity_id: Uuid,
-    /// The actor performing the activity
-    pub actor_id: Option<Uuid>,
+    /// The account performing the activity
+    pub account_id: Option<Uuid>,
     /// The type of activity
-    pub activity_type: String,
-    /// Additional activity data
-    pub activity_data: serde_json::Value,
+    pub activity_type: ActivityType,
+    /// Description of the activity
+    pub description: String,
+    /// Additional metadata
+    pub metadata: serde_json::Value,
     /// IP address of the actor
     pub ip_address: Option<IpNet>,
     /// User agent of the actor
@@ -84,7 +85,7 @@ impl ProjectActivityRepository {
         use schema::project_activity_log::dsl::*;
 
         let activities = project_activity_log
-            .filter(actor_id.eq(user_id))
+            .filter(account_id.eq(user_id))
             .select(ProjectActivity::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)
@@ -100,7 +101,7 @@ impl ProjectActivityRepository {
     pub async fn get_activity_by_type(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
-        activity_type_filter: &str,
+        activity_type_filter: ActivityType,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activity_log::dsl::*;
@@ -130,7 +131,7 @@ impl ProjectActivityRepository {
         let cutoff_time = OffsetDateTime::now_utc() - time::Duration::hours(hours);
 
         let activities = project_activity_log
-            .filter(actor_id.eq(user_id))
+            .filter(account_id.eq(user_id))
             .filter(created_at.gt(cutoff_time))
             .select(ProjectActivity::as_select())
             .order(created_at.desc())
@@ -142,20 +143,16 @@ impl ProjectActivityRepository {
         Ok(activities)
     }
 
-    /// Gets activity for a specific entity within a project.
-    pub async fn get_entity_activity(
+    /// Gets activities for a project.
+    pub async fn get_activities_by_project(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
-        entity_type_filter: &str,
-        entity_id_filter: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activity_log::dsl::*;
 
         let activities = project_activity_log
             .filter(project_id.eq(proj_id))
-            .filter(entity_type.eq(entity_type_filter))
-            .filter(entity_id.eq(entity_id_filter))
             .select(ProjectActivity::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)
@@ -175,11 +172,10 @@ impl ProjectActivityRepository {
     ) -> PgResult<ProjectActivity> {
         let activity = NewProjectActivity {
             project_id,
-            actor_id: params.actor_id,
+            account_id: params.account_id,
             activity_type: params.activity_type,
-            activity_data: params.activity_data,
-            entity_type: Some("integration".to_string()),
-            entity_id: Some(params.entity_id),
+            description: Some(params.description),
+            metadata: Some(params.metadata),
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -195,11 +191,10 @@ impl ProjectActivityRepository {
     ) -> PgResult<ProjectActivity> {
         let activity = NewProjectActivity {
             project_id,
-            actor_id: params.actor_id,
+            account_id: params.account_id,
             activity_type: params.activity_type,
-            activity_data: params.activity_data,
-            entity_type: Some("member".to_string()),
-            entity_id: Some(params.entity_id),
+            description: Some(params.description),
+            metadata: Some(params.metadata),
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -215,11 +210,10 @@ impl ProjectActivityRepository {
     ) -> PgResult<ProjectActivity> {
         let activity = NewProjectActivity {
             project_id,
-            actor_id: params.actor_id,
+            account_id: params.account_id,
             activity_type: params.activity_type,
-            activity_data: params.activity_data,
-            entity_type: Some("document".to_string()),
-            entity_id: Some(params.entity_id),
+            description: Some(params.description),
+            metadata: Some(params.metadata),
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -266,10 +260,10 @@ impl ProjectActivityRepository {
             let cutoff_time = OffsetDateTime::now_utc() - time::Duration::hours(time_window);
             project_activity_log
                 .filter(project_id.eq(proj_id))
-                .filter(actor_id.is_not_null())
+                .filter(account_id.is_not_null())
                 .filter(created_at.gt(cutoff_time))
-                .group_by(actor_id)
-                .select((actor_id, diesel::dsl::count(id)))
+                .group_by(account_id)
+                .select((account_id, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
                 .limit(limit)
                 .load::<(Option<Uuid>, i64)>(conn)
@@ -278,9 +272,9 @@ impl ProjectActivityRepository {
         } else {
             project_activity_log
                 .filter(project_id.eq(proj_id))
-                .filter(actor_id.is_not_null())
-                .group_by(actor_id)
-                .select((actor_id, diesel::dsl::count(id)))
+                .filter(account_id.is_not_null())
+                .group_by(account_id)
+                .select((account_id, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
                 .limit(limit)
                 .load::<(Option<Uuid>, i64)>(conn)
@@ -296,7 +290,7 @@ impl ProjectActivityRepository {
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
         hours: Option<i64>,
-    ) -> PgResult<Vec<(String, i64)>> {
+    ) -> PgResult<Vec<(ActivityType, i64)>> {
         use schema::project_activity_log::dsl::*;
 
         let results = if let Some(time_window) = hours {
@@ -307,7 +301,7 @@ impl ProjectActivityRepository {
                 .group_by(activity_type)
                 .select((activity_type, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
-                .load::<(String, i64)>(conn)
+                .load::<(ActivityType, i64)>(conn)
                 .await
                 .map_err(PgError::from)?
         } else {
@@ -316,7 +310,7 @@ impl ProjectActivityRepository {
                 .group_by(activity_type)
                 .select((activity_type, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
-                .load::<(String, i64)>(conn)
+                .load::<(ActivityType, i64)>(conn)
                 .await
                 .map_err(PgError::from)?
         };
@@ -324,7 +318,7 @@ impl ProjectActivityRepository {
         Ok(results)
     }
 
-    /// Gets system-generated activities (no actor).
+    /// Gets system-generated activities (no account).
     pub async fn get_system_activities(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
@@ -334,7 +328,7 @@ impl ProjectActivityRepository {
 
         let activities = project_activity_log
             .filter(project_id.eq(proj_id))
-            .filter(actor_id.is_null())
+            .filter(account_id.is_null())
             .select(ProjectActivity::as_select())
             .order(created_at.desc())
             .limit(pagination.limit)

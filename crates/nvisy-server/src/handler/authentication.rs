@@ -12,16 +12,15 @@ use axum_extra::headers::UserAgent;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use nvisy_postgres::types::ApiTokenType;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
-use uuid::Uuid;
-use validator::Validate;
 
+use super::request::{Login, Signup};
+use super::response::AuthToken;
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
-use crate::service::{AuthHasher, AuthKeys, DataCollectionPolicy, PasswordStrength, ServiceState};
+use crate::service::{PasswordHasher, PasswordStrength, ServiceState, SessionKeys};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -32,49 +31,13 @@ const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cle
 /// Creates a new authentication header.
 #[tracing::instrument(skip_all)]
 fn create_auth_header(
-    data_collection: DataCollectionPolicy,
-    auth_secret_keys: AuthKeys,
-    account_model: Account,
-    account_api_token: AccountApiToken,
+    auth_secret_keys: SessionKeys,
+    account_model: &Account,
+    account_api_token: &AccountApiToken,
 ) -> Result<AuthHeader> {
-    let auth_claims = AuthClaims::new(account_model, account_api_token, data_collection);
+    let auth_claims = AuthClaims::new(account_model, account_api_token);
     let auth_header = AuthHeader::new(auth_claims, auth_secret_keys);
     Ok(auth_header)
-}
-
-/// Request payload for login.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "emailAddress": "user@example.com",
-    "password": "SecurePassword123!",
-    "rememberMe": true
-}))]
-struct LoginRequest {
-    /// Email address of the account.
-    #[validate(email)]
-    pub email_address: String,
-    /// Password of the account.
-    pub password: String,
-    /// Whether to remember this device.
-    pub remember_me: bool,
-}
-
-/// Response returned after successful login.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct LoginResponse {
-    /// ID of the account.
-    pub account_id: Uuid,
-    /// Regional policy.
-    pub data_collection: bool,
-
-    /// Timestamp when the token was issued.
-    pub issued_at: time::OffsetDateTime,
-    /// Timestamp when the token expires.
-    pub expires_at: time::OffsetDateTime,
 }
 
 /// Creates a new account API token.
@@ -82,7 +45,7 @@ struct LoginResponse {
 #[utoipa::path(
     post, path = "/auth/login/", tag = "accounts",
     request_body(
-        content = LoginRequest,
+        content = Login,
         description = "Login credentials",
         content_type = "application/json",
         example = json!({
@@ -123,7 +86,7 @@ struct LoginResponse {
         (
             status = CREATED,
             description = "API token created successfully - use the Set-Cookie header for authentication",
-            body = LoginResponse,
+            body = AuthToken,
             example = json!({
                 "accountId": "550e8400-e29b-41d4-a716-446655440000",
                 "dataCollection": true,
@@ -135,13 +98,12 @@ struct LoginResponse {
 )]
 async fn login(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<AuthHasher>,
-    State(data_collection): State<DataCollectionPolicy>,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_hasher): State<PasswordHasher>,
+    State(auth_keys): State<SessionKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
-    ValidateJson(request): ValidateJson<LoginRequest>,
-) -> Result<(StatusCode, AuthHeader, Json<LoginResponse>)> {
+    ValidateJson(request): ValidateJson<Login>,
+) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
     tracing::trace!(
         target: TRACING_TARGET,
         email = %request.email_address,
@@ -210,17 +172,19 @@ async fn login(
         account_id: account.id,
         ip_address: ip_address.into(),
         user_agent: user_agent.to_string(),
-        is_remembered: request.remember_me,
+        is_remembered: Some(request.remember_me),
+        session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
 
     let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
-    let auth_header = create_auth_header(data_collection, auth_keys, account, account_api_token)?;
+    let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
-    let response = LoginResponse {
+    let response = AuthToken {
         account_id: auth_claims.account_id,
-        data_collection: data_collection.is_normal(),
+        display_name: account.display_name.clone(),
+        email_address: account.email_address.clone(),
         issued_at: auth_claims.issued_at,
         expires_at: auth_claims.expires_at,
     };
@@ -230,55 +194,10 @@ async fn login(
         token_id = auth_claims.token_id.to_string(),
         account_id = auth_claims.account_id.to_string(),
         email = %normalized_email,
-        data_collection = data_collection.to_string(),
         "login successful: API token created"
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
-}
-
-/// Request payload for signup.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "John Doe",
-    "emailAddress": "john.doe@example.com",
-    "password": "SecurePassword123!",
-    "rememberMe": true
-}))]
-struct SignupRequest {
-    /// Display name of the account.
-    #[validate(length(min = 2, max = 32))]
-    pub display_name: String,
-    /// Email address of the account.
-    #[validate(email)]
-    pub email_address: String,
-    /// Password of the account.
-    pub password: String,
-    /// Whether to remember the device.
-    pub remember_me: bool,
-}
-
-/// Response returned after successful signup.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct SignupResponse {
-    /// ID of the account.
-    pub account_id: Uuid,
-
-    /// Region policy of the account.
-    pub regional_policy: String,
-    /// Display name of the account.
-    pub display_name: String,
-    /// Email address of the account.
-    pub email_address: String,
-
-    /// Timestamp when the token was issued.
-    pub issued_at: time::OffsetDateTime,
-    /// Timestamp when the token expires.
-    pub expired_at: time::OffsetDateTime,
 }
 
 /// Creates a new account and API token.
@@ -286,7 +205,7 @@ struct SignupResponse {
 #[utoipa::path(
     post, path = "/auth/signup/", tag = "accounts",
     request_body(
-        content = SignupRequest,
+        content = Signup,
         description = "Signup credentials",
         content_type = "application/json",
     ),
@@ -304,21 +223,20 @@ struct SignupResponse {
         (
             status = CREATED,
             description = "Account created",
-            body = SignupResponse,
+            body = AuthToken,
         ),
     ),
 )]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<AuthHasher>,
+    State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
-    State(regional_policy): State<DataCollectionPolicy>,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_keys): State<SessionKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
-    ValidateJson(request): ValidateJson<SignupRequest>,
-) -> Result<(StatusCode, AuthHeader, Json<SignupResponse>)> {
+    ValidateJson(request): ValidateJson<Signup>,
+) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
     tracing::trace!(
         target: TRACING_TARGET,
         email = %request.email_address,
@@ -373,7 +291,8 @@ async fn signup(
         account_id: account.id,
         ip_address: ip_address.into(),
         user_agent: user_agent.to_string(),
-        is_remembered: request.remember_me,
+        is_remembered: Some(request.remember_me),
+        session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
     let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
@@ -382,24 +301,21 @@ async fn signup(
     let display_name = account.display_name.clone();
     let email_address = account.email_address.clone();
 
-    let auth_header = create_auth_header(regional_policy, auth_keys, account, account_api_token)?;
+    let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
-    let response = SignupResponse {
+    let response = AuthToken {
         account_id: auth_claims.account_id,
-
-        regional_policy: regional_policy.to_string(),
         display_name,
         email_address,
         issued_at: auth_claims.issued_at,
-        expired_at: auth_claims.expires_at,
+        expires_at: auth_claims.expires_at,
     };
 
     tracing::info!(
         target: TRACING_TARGET,
         token_id = auth_claims.token_id.to_string(),
         account_id = auth_claims.account_id.to_string(),
-        regional_policy = regional_policy.to_string(),
         "signup successful: API token created"
     );
 
@@ -429,7 +345,6 @@ async fn signup(
 )]
 async fn logout(
     State(pg_client): State<PgClient>,
-    State(regional_policy): State<DataCollectionPolicy>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::trace!(
@@ -465,7 +380,6 @@ async fn logout(
             target: TRACING_TARGET,
             token_id = auth_claims.token_id.to_string(),
             account_id = auth_claims.account_id.to_string(),
-            regional_policy = regional_policy.to_string(),
             "logout successful: API token deleted"
         );
     } else {
@@ -506,14 +420,18 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use axum::http::StatusCode;
+
+    use super::super::request::{Login, Signup};
+    use super::super::response::AuthToken;
+    use super::routes;
     use crate::handler::test::create_test_server_with_router;
 
     #[tokio::test]
     async fn test_signup_success() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let signup_request = SignupRequest {
+        let signup_request = Signup {
             display_name: "Test User".to_string(),
             email_address: "test@example.com".to_string(),
             password: "SecurePassword123!".to_string(),
@@ -523,7 +441,7 @@ mod test {
         let response = server.post("/auth/signup/").json(&signup_request).await;
         response.assert_status(StatusCode::CREATED);
 
-        let body: SignupResponse = response.json();
+        let body: AuthToken = response.json();
         assert_eq!(body.email_address, "test@example.com");
         assert_eq!(body.display_name, "Test User");
 
@@ -551,7 +469,7 @@ mod test {
     async fn test_signup_duplicate_email() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let signup_request = SignupRequest {
+        let signup_request = Signup {
             display_name: "First User".to_string(),
             email_address: "duplicate@example.com".to_string(),
             password: "SecurePassword123!".to_string(),
@@ -574,7 +492,7 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // First create an account
-        let signup_request = SignupRequest {
+        let signup_request = Signup {
             display_name: "Login Test".to_string(),
             email_address: "login@example.com".to_string(),
             password: "SecurePassword123!".to_string(),
@@ -583,7 +501,7 @@ mod test {
         server.post("/auth/signup/").json(&signup_request).await;
 
         // Then login
-        let login_request = LoginRequest {
+        let login_request = Login {
             email_address: "login@example.com".to_string(),
             password: "SecurePassword123!".to_string(),
             remember_me: true,
@@ -592,9 +510,7 @@ mod test {
         let response = server.post("/auth/login/").json(&login_request).await;
         response.assert_status(StatusCode::CREATED);
 
-        let body: LoginResponse = response.json();
-        assert!(body.data_collection);
-
+        let _body: AuthToken = response.json();
         Ok(())
     }
 
@@ -603,7 +519,7 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Create account
-        let signup_request = SignupRequest {
+        let signup_request = Signup {
             display_name: "Wrong Pass Test".to_string(),
             email_address: "wrongpass@example.com".to_string(),
             password: "CorrectPassword123!".to_string(),
@@ -612,7 +528,7 @@ mod test {
         server.post("/auth/signup/").json(&signup_request).await;
 
         // Try to login with wrong password
-        let login_request = LoginRequest {
+        let login_request = Login {
             email_address: "wrongpass@example.com".to_string(),
             password: "WrongPassword456!".to_string(),
             remember_me: false,
@@ -628,7 +544,7 @@ mod test {
     async fn test_login_nonexistent_user() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let login_request = LoginRequest {
+        let login_request = Login {
             email_address: "nonexistent@example.com".to_string(),
             password: "SomePassword123!".to_string(),
             remember_me: false,
@@ -645,7 +561,7 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Create and login
-        let signup_request = SignupRequest {
+        let signup_request = Signup {
             display_name: "Logout Test".to_string(),
             email_address: "logout@example.com".to_string(),
             password: "SecurePassword123!".to_string(),
@@ -670,7 +586,7 @@ mod test {
         let server = create_test_server_with_router(|_| routes()).await?;
 
         // Signup with mixed case email
-        let signup_request = SignupRequest {
+        let signup_request = Signup {
             display_name: "Case Test".to_string(),
             email_address: "Test@Example.COM".to_string(),
             password: "SecurePassword123!".to_string(),
@@ -679,7 +595,7 @@ mod test {
         server.post("/auth/signup/").json(&signup_request).await;
 
         // Login with lowercase email should work
-        let login_request = LoginRequest {
+        let login_request = Login {
             email_address: "test@example.com".to_string(),
             password: "SecurePassword123!".to_string(),
             remember_me: false,
