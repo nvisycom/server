@@ -80,7 +80,7 @@ diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
 
 # Messaging (NATS)
-async-nats = { version = "0.44", features = [] }
+async-nats = { version = "0.45", features = [] }
 
 # AI/OpenAI services (OpenRouter)
 openrouter-rs = { version = "0.4.5", features = [] }
