@@ -52,7 +52,7 @@ axum = { version = "0.8", features = [] }
 axum-client-ip = { version = "1.1", features = ["serde"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 axum-extra = { version = "0.10", features = [] }
-axum-test = { version = "17.1", features = [] }
+axum-test = { version = "18.2", features = [] }
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["full"] }
 http-body-util = { version = "0.1", features = [] }
