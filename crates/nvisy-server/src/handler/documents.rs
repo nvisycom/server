@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::{CreateDocument, UpdateDocument as UpdateDocumentRequest};
+use crate::handler::request::{CreateDocument, UpdateDocument};
 use crate::handler::response::{Document, Documents};
 use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
 use crate::service::ServiceState;
@@ -227,7 +227,7 @@ async fn get_document(
     patch, path = "/documents/{documentId}/", tag = "documents",
     params(DocumentPathParams),
     request_body(
-        content = UpdateDocumentRequest,
+        content = UpdateDocument,
         description = "Document changes",
         content_type = "application/json",
     ),
@@ -253,7 +253,7 @@ async fn update_document(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-    ValidateJson(request): ValidateJson<UpdateDocumentRequest>,
+    ValidateJson(request): ValidateJson<UpdateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -467,7 +467,7 @@ mod test {
         let created: Document = create_response.json();
 
         // Update the document
-        let update_request = UpdateDocumentRequest {
+        let update_request = UpdateDocument {
             display_name: Some("Updated Name".to_string()),
             description: None,
             tags: None,

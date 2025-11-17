@@ -80,14 +80,14 @@ impl<T> TypedChatRequest<T> {
     ///
     /// ```rust
     /// use nvisy_openrouter::completion::TypedChatRequest;
-    /// use nvisy_openrouter::LlmConfig;
+    /// use nvisy_openrouter::{LlmConfig, Result};
     /// use openrouter_rs::{api::chat::Message, types::{Role, ResponseFormat}};
     /// use serde::Serialize;
     ///
     /// #[derive(Serialize)]
     /// struct Request { query: String }
     ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn example() -> Result<()> {
     /// let config = LlmConfig::builder().with_api_key("test-key").build()?;
     /// let request: TypedChatRequest<Request> = TypedChatRequest::builder()
     ///     .with_messages(vec![Message::new(Role::User, "Hello")])

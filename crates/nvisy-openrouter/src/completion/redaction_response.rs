@@ -272,12 +272,12 @@ impl RedactionResponse {
                     if let Some(end) = cleaned.rfind('}') {
                         let json_part = &cleaned[start..=end];
                         serde_json::from_str::<RedactionResponseRaw>(json_part)
-                            .map_err(|_| Error::Serialization(original_error))
+                            .map_err(|_| Error::JsonSerialization(original_error))
                     } else {
-                        Err(Error::Serialization(original_error))
+                        Err(Error::JsonSerialization(original_error))
                     }
                 } else {
-                    Err(Error::Serialization(original_error))
+                    Err(Error::JsonSerialization(original_error))
                 }
             }
         }

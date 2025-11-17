@@ -131,7 +131,7 @@ impl ServiceConfig {
     /// Connects to OpenRouter LLM service.
     pub async fn connect_llm(&self) -> Result<LlmClient> {
         let config = {
-            let mut builder = LlmConfig::builder();
+            let mut builder = LlmConfig::builder().with_api_key(&self.openrouter_api_key);
             if let Some(base_url) = &self.openrouter_base_url {
                 builder = builder.with_base_url(base_url.clone());
             }
@@ -141,13 +141,12 @@ impl ServiceConfig {
             ServiceError::external("OpenRouter", "Failed to build LLM config").with_source(e)
         })?;
 
-        LlmClient::from_api_key_with_config(&self.openrouter_api_key, config).map_err(|e| {
+        LlmClient::new(config).map_err(|e| {
             ServiceError::external("OpenRouter", "Failed to create LLM client").with_source(e)
         })
     }
 
     /// Connects to NATS server.
-    #[inline]
     pub async fn connect_nats(&self) -> Result<NatsClient> {
         let config = NatsConfig::new(&self.nats_url);
         NatsClient::connect(config)

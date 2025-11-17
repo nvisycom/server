@@ -6,7 +6,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::Error;
+use crate::Result;
+use crate::typed::{extract_response_content, parse_json_response};
 
 /// A typed chat completion response.
 ///
@@ -86,115 +87,22 @@ where
     ///
     /// - Returns an error if no response choices are available
     /// - Returns an error if the response cannot be parsed as JSON
-    pub fn from_llm_response(response: &CompletionsResponse) -> Result<Self, Error> {
-        // Extract content from the first choice
-        let content = Self::extract_response_content(response)?;
+    pub fn from_llm_response(response: &CompletionsResponse) -> Result<Self> {
+        // Extract content from the first choice with content
+        let content = extract_response_content(response)?;
 
         // Parse the content into typed data
-        let data = Self::parse_response_content(&content)?;
+        let data = parse_json_response::<T>(&content)?;
+        let mut this = Self::builder().with_data(data).with_raw_response(content);
 
-        // Build response with token usage
-        let mut typed_response = Self {
-            data,
-            raw_response: Some(content),
-            prompt_tokens: None,
-            completion_tokens: None,
-            total_tokens: None,
-        };
-
-        // Add token usage information
-        Self::add_token_usage(&mut typed_response, response);
-
-        Ok(typed_response)
-    }
-
-    /// Extracts the content string from the completion response.
-    ///
-    /// # Arguments
-    ///
-    /// * `response` - The completion response from the LLM
-    ///
-    /// # Returns
-    ///
-    /// The content string from the first choice
-    ///
-    /// # Errors
-    ///
-    /// - Returns an error if no choices are available
-    /// - Returns an error if the first choice has no content
-    fn extract_response_content(response: &CompletionsResponse) -> Result<String, Error> {
-        let choice = response
-            .choices
-            .first()
-            .ok_or_else(|| Error::invalid_response("No response choices returned from LLM"))?;
-
-        choice
-            .content()
-            .map(|s| s.to_string())
-            .ok_or_else(|| Error::invalid_response("No content in LLM response"))
-    }
-
-    /// Parses a JSON response string into the typed data.
-    ///
-    /// This method handles various response formats:
-    /// - Pure JSON object
-    /// - JSON wrapped in markdown code blocks
-    /// - JSON with extra whitespace or text
-    ///
-    /// # Arguments
-    ///
-    /// * `response` - The raw response string from the LLM
-    ///
-    /// # Returns
-    ///
-    /// The parsed typed data
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the response cannot be parsed as valid JSON
-    fn parse_response_content(response: &str) -> Result<T, Error> {
-        // Clean the response - remove markdown code blocks and extra whitespace
-        let mut response_str = response.trim().strip_prefix("```json").unwrap_or(response);
-        response_str = response_str.strip_prefix("```").unwrap_or(response_str);
-        let cleaned = response_str
-            .strip_suffix("```")
-            .unwrap_or(response_str)
-            .trim();
-
-        // Try to parse as JSON object
-        match serde_json::from_str::<T>(cleaned) {
-            Ok(data) => Ok(data),
-            Err(_) => {
-                // Fallback: try to extract JSON object from text
-                if let Some(start) = cleaned.find('{') {
-                    if let Some(end) = cleaned.rfind('}') {
-                        let json_part = &cleaned[start..=end];
-                        serde_json::from_str::<T>(json_part).map_err(Error::Serialization)
-                    } else {
-                        Err(Error::invalid_response("No JSON object found in response"))
-                    }
-                } else {
-                    Err(Error::invalid_response("No JSON object found in response"))
-                }
-            }
-        }
-    }
-
-    /// Adds token usage information from the completion response.
-    ///
-    /// Updates the typed response with prompt tokens, completion tokens,
-    /// and total tokens if available in the response.
-    ///
-    /// # Arguments
-    ///
-    /// * `typed_response` - The typed response to update
-    /// * `response` - The completion response containing usage information
-    fn add_token_usage(typed_response: &mut TypedChatResponse<T>, response: &CompletionsResponse) {
         if let Some(ref usage) = response.usage {
-            typed_response.prompt_tokens = Some(usage.prompt_tokens);
-            typed_response.completion_tokens = Some(usage.completion_tokens);
-            typed_response.total_tokens = Some(usage.total_tokens);
+            this = this
+                .with_prompt_tokens(usage.prompt_tokens)
+                .with_completion_tokens(usage.completion_tokens)
+                .with_total_tokens(usage.total_tokens);
         }
+
+        Ok(this.build()?)
     }
 }
 
@@ -242,7 +150,7 @@ mod tests {
     #[test]
     fn test_parse_response_content() -> crate::Result<()> {
         let json = r#"{"value": "test"}"#;
-        let data = TypedChatResponse::<TestResponse>::parse_response_content(json)?;
+        let data = parse_json_response::<TestResponse>(json)?;
         assert_eq!(data.value, "test");
         Ok(())
     }
@@ -250,7 +158,7 @@ mod tests {
     #[test]
     fn test_parse_response_content_with_markdown() -> crate::Result<()> {
         let json = "```json\n{\"value\": \"test\"}\n```";
-        let data = TypedChatResponse::<TestResponse>::parse_response_content(json)?;
+        let data = parse_json_response::<TestResponse>(json)?;
         assert_eq!(data.value, "test");
         Ok(())
     }
@@ -258,7 +166,7 @@ mod tests {
     #[test]
     fn test_parse_response_content_with_extra_text() -> crate::Result<()> {
         let json = "Here is the response: {\"value\": \"test\"} - done";
-        let data = TypedChatResponse::<TestResponse>::parse_response_content(json)?;
+        let data = parse_json_response::<TestResponse>(json)?;
         assert_eq!(data.value, "test");
         Ok(())
     }

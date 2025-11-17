@@ -3,6 +3,8 @@
 //! This module provides the main client for interacting with OpenRouter's API,
 //! including chat completions, model information, and rate limiting.
 
+use std::fmt;
+use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -194,53 +196,6 @@ impl LlmClient {
         Self::new(config)
     }
 
-    /// Creates a new OpenRouter client from an API key with custom configuration.
-    ///
-    /// This is useful when you want to start with a config and just override the API key,
-    /// or when migrating from code that used the old API.
-    ///
-    /// # Parameters
-    ///
-    /// - `api_key`: Your OpenRouter API key
-    /// - `config`: Custom configuration for client behavior
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # use nvisy_openrouter::{LlmClient, LlmConfig};
-    /// # use std::num::NonZeroU32;
-    /// let config = LlmConfig::builder()
-    ///     .with_api_key("your-api-key")
-    ///     .with_rate_limit(NonZeroU32::new(20).unwrap())
-    ///     .with_default_model("openai/gpt-4")
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// let client = LlmClient::from_api_key_with_config("your-api-key", config).unwrap();
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The API key is invalid or empty
-    /// - The configuration is invalid
-    /// - The client cannot be initialized
-    ///
-    /// # Note
-    ///
-    /// If the config already contains an API key, it will be replaced with the provided key.
-    /// It's recommended to use `LlmConfig::builder().with_api_key().build_client()` instead
-    /// for new code.
-    pub fn from_api_key_with_config(
-        _api_key: impl Into<String>,
-        config: LlmConfig,
-    ) -> Result<Self> {
-        // Note: The API key parameter is maintained for backward compatibility,
-        // but the config already contains the API key.
-        // In a future version, this method could be deprecated in favor of just using new().
-        Self::new(config)
-    }
-
     /// Sends a request with rate limiting by executing the provided async function.
     ///
     /// This method provides a generic interface for sending any type of request
@@ -292,7 +247,7 @@ impl LlmClient {
     pub async fn send_request<F, Fut, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&OpenRouterClient, &LlmConfig) -> Fut,
-        Fut: std::future::Future<Output = Result<T>>,
+        Fut: Future<Output = Result<T>>,
     {
         // Apply rate limiting before sending request
         self.inner.rate_limiter.until_ready().await;
@@ -413,20 +368,20 @@ impl LlmClient {
     /// let (available, capacity) = client.rate_limit_status();
     /// println!("Can make {} requests out of {} capacity", available, capacity);
     /// ```
-    pub fn rate_limit_status(&self) -> (u32, u32) {
+    pub fn rate_limit(&self) -> Result<(), NonZeroU32> {
         let state = self.inner.rate_limiter.check();
         match state {
-            Ok(_) => (1, 1), // Available
-            Err(negative) => (0, negative.quota().burst_size().get()),
+            Ok(_) => Ok(()), // Available
+            Err(negative) => Err(negative.quota().burst_size()),
         }
     }
 }
 
-impl std::fmt::Debug for LlmClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for LlmClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LlmClient")
             .field("config", &self.inner.config)
-            .field("rate_limit_status", &self.rate_limit_status())
+            .field("rate_limit", &self.rate_limit())
             .finish()
     }
 }

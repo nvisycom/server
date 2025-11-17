@@ -19,6 +19,10 @@ pub struct AccountApiToken {
     pub refresh_seq: Uuid,
     /// Reference to the account this token belongs to
     pub account_id: Uuid,
+    /// Human-readable name for the API token
+    pub name: String,
+    /// Optional description for the API token
+    pub description: Option<String>,
     /// Two-character region/state code where token originated
     pub region_code: String,
     /// ISO 3166-1 alpha-2 country code where token originated
@@ -54,6 +58,10 @@ pub struct AccountApiToken {
 pub struct NewAccountApiToken {
     /// Reference to the account this token belongs to
     pub account_id: Uuid,
+    /// Human-readable name for the API token
+    pub name: String,
+    /// Optional description for the API token
+    pub description: Option<String>,
     /// Two-character region/state code where token originated
     pub region_code: Option<String>,
     /// ISO 3166-1 alpha-2 country code where token originated
@@ -81,6 +89,10 @@ pub struct NewAccountApiToken {
 pub struct UpdateAccountApiToken {
     /// Timestamp of most recent token activity
     pub last_used_at: Option<OffsetDateTime>,
+    /// Updated name for the API token
+    pub name: Option<String>,
+    /// Updated description for the API token
+    pub description: Option<String>,
     /// Flag indicating potentially suspicious token activity
     pub is_suspicious: Option<bool>,
     /// Flag indicating if this is a "remember me" extended token
