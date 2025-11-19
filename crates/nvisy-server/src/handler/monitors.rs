@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use super::request::GetMonitorStatus;
+use super::request::CheckHealth;
 use super::response::MonitorStatus;
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
@@ -24,7 +24,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 #[utoipa::path(
     post, path = "/health", tag = "monitors",
     request_body(
-        content = Option<GetMonitorStatus>,
+        content = Option<CheckHealth>,
         description = "Optional health status request parameters",
         content_type = "application/json"
     ),
@@ -46,7 +46,7 @@ async fn health_status(
     State(health_service): State<HealthCache>,
     auth_state: Option<AuthState>,
     version: Version,
-    request: Option<Json<GetMonitorStatus>>,
+    request: Option<Json<CheckHealth>>,
 ) -> Result<(StatusCode, Json<MonitorStatus>)> {
     let Json(request) = request.unwrap_or_default();
     let is_authenticated = auth_state.is_some();
@@ -59,7 +59,7 @@ async fn health_status(
     );
 
     // Get cached health status or perform new check
-    let explicitly_cached = request.return_cached.is_some_and(|c| c);
+    let explicitly_cached = request.use_cache.is_some_and(|c| c);
     let is_healthy = if is_authenticated && !explicitly_cached {
         health_service.is_healthy(service_state).await
     } else {
@@ -69,6 +69,16 @@ async fn health_status(
     let response = MonitorStatus {
         updated_at: OffsetDateTime::now_utc(),
         is_healthy,
+        overall_status: if is_healthy {
+            super::response::SystemStatus::Healthy
+        } else {
+            super::response::SystemStatus::Critical
+        },
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime: 0, // TODO: Implement actual uptime tracking
+        services: None,
+        metrics: None,
+        alerts: None,
     };
 
     let status_code = if is_healthy {
@@ -104,8 +114,9 @@ mod tests {
     async fn test_health_status_endpoint_unauthenticated() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = GetMonitorStatus {
-            return_cached: None,
+        let request = CheckHealth {
+            timeout: None,
+            use_cache: None,
         };
 
         let response = server.post("/health").json(&request).await;
@@ -124,8 +135,9 @@ mod tests {
     async fn test_health_status_endpoint_with_prefer_policy() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
 
-        let request = GetMonitorStatus {
-            return_cached: Some(false),
+        let request = CheckHealth {
+            timeout: None,
+            use_cache: Some(false),
         };
 
         let response = server.post("/health").json(&request).await;

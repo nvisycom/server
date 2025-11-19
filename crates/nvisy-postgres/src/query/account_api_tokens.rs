@@ -9,19 +9,58 @@ use super::Pagination;
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
 use crate::{PgError, PgResult, schema};
 
-/// Repository for account API token-related database operations.
+/// Repository for comprehensive account API token database operations.
+///
+/// Provides database operations for managing long-lived API tokens used for
+/// programmatic access to the system. These tokens enable applications and
+/// services to authenticate and access resources on behalf of user accounts.
+/// This repository handles the complete lifecycle of API tokens including
+/// creation, refresh, validation, and cleanup operations.
+///
+/// API tokens are security-critical components that require careful handling
+/// to prevent unauthorized access. All tokens have expiration times and
+/// usage tracking to maintain security and enable proper audit trails.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AccountApiTokenRepository;
 
 impl AccountApiTokenRepository {
     /// Creates a new account API token repository instance.
+    ///
+    /// Returns a new repository instance ready for database operations.
+    /// Since the repository is stateless, this is equivalent to using
+    /// `Default::default()` or accessing repository methods statically.
+    ///
+    /// # Returns
+    ///
+    /// A new `AccountApiTokenRepository` instance.
     pub fn new() -> Self {
         Self
     }
 
     // Token management methods
 
-    /// Creates a new account API token.
+    /// Creates a new account API token for programmatic access.
+    ///
+    /// Generates a new long-lived API token that applications can use for
+    /// authentication and API access. The token includes both access and
+    /// refresh sequences for secure token rotation and extended validity.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `new_token` - Complete token data including account ID, expiration, and metadata
+    ///
+    /// # Returns
+    ///
+    /// The created `AccountApiToken` with database-generated ID and timestamp,
+    /// or a database error if the operation fails.
+    ///
+    /// # Security Considerations
+    ///
+    /// - Token sequences should be cryptographically secure UUIDs
+    /// - Expiration times should balance usability with security
+    /// - Consider rate limiting token creation per account
+    /// - Implement proper token rotation policies
     pub async fn create_token(
         conn: &mut AsyncPgConnection,
         new_token: NewAccountApiToken,
@@ -36,7 +75,28 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Finds a token by access token.
+    /// Finds an active token by its access token sequence.
+    ///
+    /// Retrieves a token using its access sequence UUID for authentication
+    /// purposes. Only returns non-deleted tokens that can be used for API
+    /// access. This is the primary method for token-based authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `access_token` - Access sequence UUID to search for
+    ///
+    /// # Returns
+    ///
+    /// The matching `AccountApiToken` if found and not deleted, `None` if not found,
+    /// or a database error if the query fails.
+    ///
+    /// # Authentication Flow
+    ///
+    /// - Used during API request authentication
+    /// - Should be followed by expiration time validation
+    /// - Consider updating last_used_at timestamp after successful use
+    /// - Implement rate limiting to prevent token enumeration attacks
     pub async fn find_token_by_access_token(
         conn: &mut AsyncPgConnection,
         access_token: Uuid,
@@ -53,7 +113,29 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Finds a token by refresh token.
+    /// Finds an active token by its refresh token sequence.
+    ///
+    /// Retrieves a token using its refresh sequence UUID for token refresh
+    /// operations. Only returns non-deleted tokens. The refresh token is
+    /// used to generate new access/refresh token pairs without requiring
+    /// user re-authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `refresh_token` - Refresh sequence UUID to search for
+    ///
+    /// # Returns
+    ///
+    /// The matching `AccountApiToken` if found and not deleted, `None` if not found,
+    /// or a database error if the query fails.
+    ///
+    /// # Token Refresh Flow
+    ///
+    /// - Used during token refresh operations
+    /// - Should validate token expiration before refresh
+    /// - Generates new access and refresh sequences
+    /// - Critical for maintaining long-term API access
     pub async fn find_token_by_refresh_token(
         conn: &mut AsyncPgConnection,
         refresh_token: Uuid,
@@ -70,7 +152,30 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Updates a token's properties.
+    /// Updates a token's properties with new values.
+    ///
+    /// Applies partial updates to an existing token using the provided update
+    /// structure. Only fields set to `Some(value)` will be modified, while
+    /// `None` fields remain unchanged. Commonly used for updating usage
+    /// timestamps, expiration times, or metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `access_token` - Access sequence UUID of the token to update
+    /// * `updates` - Partial update data containing only fields to modify
+    ///
+    /// # Returns
+    ///
+    /// The updated `AccountApiToken` with new values,
+    /// or a database error if the operation fails.
+    ///
+    /// # Common Update Scenarios
+    ///
+    /// - Updating last usage timestamps
+    /// - Extending token expiration times
+    /// - Modifying token metadata
+    /// - Administrative token adjustments
     pub async fn update_token(
         conn: &mut AsyncPgConnection,
         access_token: Uuid,
@@ -86,7 +191,28 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Updates token last used timestamp.
+    /// Updates the token's last used timestamp to track usage patterns.
+    ///
+    /// Records the current time as the last usage timestamp for the token.
+    /// This is important for security monitoring, usage analytics, and
+    /// identifying inactive tokens that can be cleaned up.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `access_token` - Access sequence UUID of the token to update
+    ///
+    /// # Returns
+    ///
+    /// The updated `AccountApiToken` with current timestamp,
+    /// or a database error if the operation fails.
+    ///
+    /// # Usage Tracking Benefits
+    ///
+    /// - Enables identification of inactive tokens
+    /// - Supports security monitoring and alerting
+    /// - Provides data for usage analytics
+    /// - Helps with token lifecycle management
     pub async fn touch_token(
         conn: &mut AsyncPgConnection,
         access_token: Uuid,
@@ -102,7 +228,22 @@ impl AccountApiTokenRepository {
         .await
     }
 
-    /// Extends a token's expiration time.
+    /// Extends a token's expiration time by the specified duration.
+    ///
+    /// Adds the given time duration to the current time to create a new
+    /// expiration timestamp, effectively extending the token's validity period.
+    /// Also updates the last used timestamp to reflect the extension activity.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `access_token` - Access sequence UUID of the token to extend
+    /// * `extension` - Time duration to add to the current time
+    ///
+    /// # Returns
+    ///
+    /// The updated `AccountApiToken` with new expiration time,
+    /// or a database error if the operation fails.
     pub async fn extend_token(
         conn: &mut AsyncPgConnection,
         access_token: Uuid,
@@ -121,7 +262,34 @@ impl AccountApiTokenRepository {
         .await
     }
 
-    /// Refreshes a token by generating new access and refresh tokens.
+    /// Refreshes a token by generating new access and refresh sequences.
+    ///
+    /// Creates new cryptographically secure UUIDs for both access and refresh
+    /// sequences, extends the expiration time, and updates the last used timestamp.
+    /// This operation maintains API access without requiring user re-authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `refresh_token` - Current refresh sequence UUID to be replaced
+    ///
+    /// # Returns
+    ///
+    /// The updated `AccountApiToken` with new sequences and expiration,
+    /// or a database error if the operation fails.
+    ///
+    /// # Security Benefits
+    ///
+    /// - Prevents token replay attacks through rotation
+    /// - Limits exposure window of compromised tokens
+    /// - Maintains audit trail of token usage
+    /// - Enables long-term API access without stored credentials
+    ///
+    /// # Default Behavior
+    ///
+    /// - Sets expiration to 7 days from current time
+    /// - Generates new random UUIDs for both sequences
+    /// - Updates last used timestamp to current time
     pub async fn refresh_token(
         conn: &mut AsyncPgConnection,
         refresh_token: Uuid,
@@ -145,7 +313,29 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Soft deletes a token (logout).
+    /// Soft deletes a token to effectively log out the associated session.
+    ///
+    /// Marks the token as deleted by setting the deletion timestamp, which
+    /// immediately prevents the token from being used for authentication.
+    /// The token record is preserved for audit purposes and potential
+    /// recovery scenarios.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `access_token` - Access sequence UUID of the token to delete
+    ///
+    /// # Returns
+    ///
+    /// `true` if a token was successfully deleted, `false` if no token was found,
+    /// or a database error if the operation fails.
+    ///
+    /// # Logout and Security Benefits
+    ///
+    /// - Immediately invalidates API access
+    /// - Prevents unauthorized use of potentially compromised tokens
+    /// - Maintains audit trail of logout events
+    /// - Supports user-initiated security actions
     pub async fn delete_token(conn: &mut AsyncPgConnection, access_token: Uuid) -> PgResult<bool> {
         use schema::account_api_tokens::{self, dsl};
 
@@ -159,7 +349,30 @@ impl AccountApiTokenRepository {
         Ok(rows_affected > 0)
     }
 
-    /// Soft deletes all tokens for an account (logout everywhere).
+    /// Soft deletes all active tokens for an account to log out all sessions.
+    ///
+    /// Marks all non-deleted tokens for the specified account as deleted,
+    /// effectively logging out all API sessions and applications. This is
+    /// commonly used for security incidents, password changes, or user-requested
+    /// global logout operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `account_id` - UUID of the account whose tokens should be deleted
+    ///
+    /// # Returns
+    ///
+    /// The number of tokens that were deleted,
+    /// or a database error if the operation fails.
+    ///
+    /// # Security Use Cases
+    ///
+    /// - Emergency security response to compromised accounts
+    /// - Password change security procedures
+    /// - User-requested global logout from all devices
+    /// - Account suspension or termination processes
+    /// - Compliance with security policies
     pub async fn delete_all_tokens_for_account(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -178,7 +391,22 @@ impl AccountApiTokenRepository {
         .map(|rows| rows as i64)
     }
 
-    /// Lists active tokens for an account.
+    /// Lists currently active (non-deleted, unexpired) tokens for an account.
+    ///
+    /// Retrieves a paginated list of tokens that are currently valid for API
+    /// access. Only includes tokens that haven't been deleted and haven't
+    /// expired, providing a view of the account's current API access capabilities.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the account to list tokens for
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of active `AccountApiToken` entries for the account,
+    /// ordered by issue date (newest first), or a database error if the query fails.
     pub async fn list_account_tokens(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -199,7 +427,30 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Lists all tokens for an account (including expired).
+    /// Lists all non-deleted tokens for an account including expired tokens.
+    ///
+    /// Retrieves a comprehensive paginated list of all tokens for an account,
+    /// including those that have expired but haven't been deleted. This provides
+    /// a complete view of the account's API token history for audit and
+    /// administrative purposes.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the account to list tokens for
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of all non-deleted `AccountApiToken` entries for the account,
+    /// ordered by issue date (newest first), or a database error if the query fails.
+    ///
+    /// # Administrative Use Cases
+    ///
+    /// - Complete audit trail review
+    /// - Token usage pattern analysis
+    /// - Security incident investigation
+    /// - Compliance reporting and documentation
     pub async fn list_all_account_tokens(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -219,7 +470,28 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Gets token statistics for an account.
+    /// Retrieves comprehensive token statistics for a specific account.
+    ///
+    /// Generates statistical information about all tokens associated with
+    /// an account, including counts of active, expired, and total tokens.
+    /// This data is essential for account monitoring, security analysis,
+    /// and administrative oversight.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the queries
+    /// * `account_id` - UUID of the account to generate statistics for
+    ///
+    /// # Returns
+    ///
+    /// An `AccountApiTokenStats` struct containing comprehensive token metrics,
+    /// or a database error if any of the queries fail.
+    ///
+    /// # Performance Considerations
+    ///
+    /// - Executes multiple database queries for different metrics
+    /// - Results can be cached for dashboard performance
+    /// - Database indexes optimize count operations
     pub async fn get_account_token_stats(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -263,7 +535,25 @@ impl AccountApiTokenRepository {
         })
     }
 
-    /// Finds tokens by account ID that are about to expire.
+    /// Finds tokens for an account that are approaching their expiration time.
+    ///
+    /// Identifies active tokens that will expire within the specified time window.
+    /// This is useful for proactive notifications, automatic refresh scheduling,
+    /// and preventing unexpected API access interruptions.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the account to check for expiring tokens
+    /// * `expires_within` - Time duration window for finding expiring tokens
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `AccountApiToken` entries expiring within the time window,
+    /// ordered by expiration time (soonest first), or a database error if the query fails.
+    ///
+    /// - API client maintenance planning
     pub async fn find_expiring_tokens(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -288,7 +578,28 @@ impl AccountApiTokenRepository {
             .map_err(PgError::from)
     }
 
-    /// Finds the most recent token for an account.
+    /// Finds the most recently used token for an account.
+    ///
+    /// Retrieves the token with the most recent last_used_at timestamp,
+    /// providing insight into the account's most active API access pattern.
+    /// If no tokens have been used, returns the most recently issued token.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the account to find the latest token for
+    ///
+    /// # Returns
+    ///
+    /// The most recently used `AccountApiToken` if found, `None` if no tokens exist,
+    /// or a database error if the query fails.
+    ///
+    /// # Analysis Use Cases
+    ///
+    /// - Determining primary API access patterns
+    /// - Identifying the most active token for renewal
+    /// - User support and troubleshooting
+    /// - Security monitoring for account activity
     pub async fn find_latest_token(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -308,7 +619,33 @@ impl AccountApiTokenRepository {
 
     // Cleanup and maintenance methods
 
-    /// Cleans up expired tokens by soft-deleting them.
+    /// Performs system-wide cleanup of expired tokens by soft-deleting them.
+    ///
+    /// Marks all expired tokens across all accounts as deleted to maintain
+    /// system performance and security hygiene. This operation should be
+    /// run regularly as part of system maintenance to prevent accumulation
+    /// of unusable tokens.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    ///
+    /// # Returns
+    ///
+    /// The number of tokens that were marked as deleted,
+    /// or a database error if the operation fails.
+    ///
+    /// # Maintenance Benefits
+    ///
+    /// - Improves query performance by reducing active token count
+    /// - Enhances security by removing expired access vectors
+    /// - Maintains system hygiene and cleanliness
+    /// - Should be automated via scheduled maintenance jobs
+    ///
+    /// # Scheduling Recommendation
+    ///
+    /// Run this operation daily or weekly depending on token volume
+    /// and expiration patterns to maintain optimal performance.
     pub async fn cleanup_expired_tokens(conn: &mut AsyncPgConnection) -> PgResult<i64> {
         use schema::account_api_tokens::{self, dsl};
 
@@ -324,7 +661,35 @@ impl AccountApiTokenRepository {
         .map(|rows| rows as i64)
     }
 
-    /// Hard deletes old soft-deleted tokens.
+    /// Permanently deletes old soft-deleted tokens beyond retention period.
+    ///
+    /// Performs aggressive cleanup by permanently removing tokens that have
+    /// been soft-deleted for longer than the specified retention period.
+    /// This is used for compliance with data retention policies and
+    /// long-term database maintenance.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `older_than_days` - Age threshold in days for permanent deletion
+    ///
+    /// # Returns
+    ///
+    /// The number of tokens that were permanently deleted,
+    /// or a database error if the operation fails.
+    ///
+    /// # Data Retention and Compliance
+    ///
+    /// - Supports regulatory compliance requirements
+    /// - Implements data retention policies
+    /// - Reduces long-term storage costs
+    /// - Must align with audit and legal requirements
+    ///
+    /// # Critical Warning
+    ///
+    /// This operation permanently and irreversibly deletes data.
+    /// Ensure compliance with legal and audit requirements before
+    /// implementing automated purging processes.
     pub async fn purge_old_tokens(
         conn: &mut AsyncPgConnection,
         older_than_days: u32,
@@ -341,6 +706,33 @@ impl AccountApiTokenRepository {
     }
 
     /// Revokes tokens older than specified duration for security purposes.
+    ///
+    /// Soft-deletes tokens that have been issued longer ago than the specified
+    /// duration, regardless of their expiration time. This is a security measure
+    /// to prevent very old tokens from remaining active and potentially
+    /// compromised over time.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `older_than` - Maximum age duration for tokens to remain active
+    ///
+    /// # Returns
+    ///
+    /// The number of tokens that were revoked (soft-deleted),
+    /// or a database error if the operation fails.
+    ///
+    /// # Security Benefits
+    ///
+    /// - Enforces maximum token lifetime policies
+    /// - Reduces exposure window for potentially compromised tokens
+    /// - Encourages regular token refresh cycles
+    /// - Supports compliance with security frameworks
+    ///
+    /// # Policy Implementation
+    ///
+    /// Can be used to implement organizational policies requiring
+    /// periodic token rotation regardless of expiration times.
     pub async fn revoke_old_tokens(
         conn: &mut AsyncPgConnection,
         older_than: time::Duration,
@@ -362,7 +754,14 @@ impl AccountApiTokenRepository {
     }
 }
 
-/// Statistics for account API tokens.
+/// Comprehensive statistical information about account API tokens.
+///
+/// Provides aggregated counts and metrics for different token states and
+/// characteristics for a specific account. This data structure is used for
+/// account monitoring, security analysis, and administrative dashboards.
+///
+/// All statistics represent the current state of tokens and can be used
+/// to calculate derived metrics through the implemented methods.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountApiTokenStats {
     /// Number of currently active tokens
@@ -374,7 +773,16 @@ pub struct AccountApiTokenStats {
 }
 
 impl AccountApiTokenStats {
-    /// Returns the ratio of active to total tokens as a percentage.
+    /// Calculates the percentage of tokens that are currently active.
+    ///
+    /// Returns the ratio of active (non-deleted, unexpired) tokens to total
+    /// tokens as a percentage. A higher activity rate indicates healthy token
+    /// management and active API usage patterns.
+    ///
+    /// # Returns
+    ///
+    /// A percentage value between 0.0 and 100.0. Returns 100.0 if there are
+    /// no tokens for the account (optimistic assumption for new accounts).
     pub fn activity_rate(&self) -> f64 {
         if self.total_tokens == 0 {
             100.0
@@ -383,12 +791,28 @@ impl AccountApiTokenStats {
         }
     }
 
-    /// Returns whether the account has any active tokens.
+    /// Checks if the account currently has any active tokens for API access.
+    ///
+    /// Returns true if there are tokens that can be used for API authentication.
+    /// This is useful for determining if an account has current API access
+    /// capabilities and for conditional application logic.
+    ///
+    /// # Returns
+    ///
+    /// `true` if there are active tokens, `false` otherwise.
     pub fn has_active_tokens(&self) -> bool {
         self.active_tokens > 0
     }
 
-    /// Returns whether the account has expired tokens that could be cleaned up.
+    /// Checks if the account has expired tokens that could be cleaned up.
+    ///
+    /// Returns true if there are tokens that have expired but haven't been
+    /// deleted yet. These tokens are candidates for cleanup operations to
+    /// maintain database performance and security hygiene.
+    ///
+    /// # Returns
+    ///
+    /// `true` if there are expired tokens, `false` otherwise.
     pub fn has_expired_tokens(&self) -> bool {
         self.expired_tokens > 0
     }

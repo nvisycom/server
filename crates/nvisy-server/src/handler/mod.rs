@@ -26,7 +26,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 pub use crate::extract::Permission;
 pub use crate::handler::error::{Error, ErrorKind, Result};
-pub use crate::handler::request::PaginationRequest;
+pub use crate::handler::request::Pagination;
 pub(crate) use crate::handler::response::ErrorResponse;
 pub use crate::handler::utils::{CustomRoutes, RouterMapFn};
 use crate::middleware::{refresh_token_middleware, require_authentication};

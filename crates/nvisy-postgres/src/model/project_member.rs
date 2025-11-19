@@ -5,44 +5,47 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::project_members;
-use crate::types::ProjectRole;
+use crate::types::constants::project;
+use crate::types::{
+    HasCreatedAt, HasLastActivityAt, HasOwnership, HasUpdatedAt, ProjectRole, is_within_duration,
+};
 
 /// Project member model representing a user's membership in a project.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = project_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProjectMember {
-    /// Reference to the project
+    /// Reference to the project.
     pub project_id: Uuid,
-    /// Reference to the member's account
+    /// Reference to the member's account.
     pub account_id: Uuid,
-    /// Member's role in the project
+    /// Member's role in the project.
     pub member_role: ProjectRole,
-    /// Custom permissions (JSON)
+    /// Custom permissions (JSON).
     pub custom_permissions: serde_json::Value,
-    /// Display order for UI sorting
+    /// Display order for UI sorting.
     pub show_order: i32,
-    /// Whether member has marked project as favorite
+    /// Whether member has marked project as favorite.
     pub is_favorite: bool,
-    /// Whether member has hidden the project
+    /// Whether member has hidden the project.
     pub is_hidden: bool,
-    /// Whether member receives update notifications
+    /// Whether member receives update notifications.
     pub notify_updates: bool,
-    /// Whether member receives comment notifications
+    /// Whether member receives comment notifications.
     pub notify_comments: bool,
-    /// Whether member receives mention notifications
+    /// Whether member receives mention notifications.
     pub notify_mentions: bool,
-    /// Whether the membership is active
+    /// Whether the membership is active.
     pub is_active: bool,
-    /// Last time member accessed the project
+    /// Last time member accessed the project.
     pub last_accessed_at: Option<OffsetDateTime>,
-    /// Account that created this membership
+    /// Account that created this membership.
     pub created_by: Uuid,
-    /// Account that last updated this membership
+    /// Account that last updated this membership.
     pub updated_by: Uuid,
-    /// Timestamp when membership was created
+    /// Timestamp when membership was created.
     pub created_at: OffsetDateTime,
-    /// Timestamp when membership was last updated
+    /// Timestamp when membership was last updated.
     pub updated_at: OffsetDateTime,
 }
 
@@ -51,31 +54,31 @@ pub struct ProjectMember {
 #[diesel(table_name = project_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProjectMember {
-    /// Project ID
+    /// Project ID.
     pub project_id: Uuid,
-    /// Account ID
+    /// Account ID.
     pub account_id: Uuid,
-    /// Member role
+    /// Member role.
     pub member_role: ProjectRole,
-    /// Custom permissions
+    /// Custom permissions.
     pub custom_permissions: serde_json::Value,
-    /// Show order
+    /// Show order.
     pub show_order: i32,
-    /// Is favorite
+    /// Is favorite.
     pub is_favorite: bool,
-    /// Is hidden
+    /// Is hidden.
     pub is_hidden: bool,
-    /// Notify updates
+    /// Notify updates.
     pub notify_updates: bool,
-    /// Notify comments
+    /// Notify comments.
     pub notify_comments: bool,
-    /// Notify mentions
+    /// Notify mentions.
     pub notify_mentions: bool,
-    /// Is active
+    /// Is active.
     pub is_active: bool,
-    /// Created by
+    /// Created by.
     pub created_by: Uuid,
-    /// Updated by
+    /// Updated by.
     pub updated_by: Uuid,
 }
 
@@ -84,27 +87,27 @@ pub struct NewProjectMember {
 #[diesel(table_name = project_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateProjectMember {
-    /// Member role
+    /// Member role.
     pub member_role: Option<ProjectRole>,
-    /// Custom permissions
+    /// Custom permissions.
     pub custom_permissions: Option<serde_json::Value>,
-    /// Show order
+    /// Show order.
     pub show_order: Option<i32>,
-    /// Is favorite
+    /// Is favorite.
     pub is_favorite: Option<bool>,
-    /// Is hidden
+    /// Is hidden.
     pub is_hidden: Option<bool>,
-    /// Notify updates
+    /// Notify updates.
     pub notify_updates: Option<bool>,
-    /// Notify comments
+    /// Notify comments.
     pub notify_comments: Option<bool>,
-    /// Notify mentions
+    /// Notify mentions.
     pub notify_mentions: Option<bool>,
-    /// Is active
+    /// Is active.
     pub is_active: Option<bool>,
-    /// Last accessed at
+    /// Last accessed at.
     pub last_accessed_at: Option<OffsetDateTime>,
-    /// Updated by
+    /// Updated by.
     pub updated_by: Option<Uuid>,
 }
 
@@ -180,11 +183,157 @@ impl ProjectMember {
     /// Returns whether the member has recently accessed the project.
     pub fn has_recent_access(&self) -> bool {
         if let Some(last_access) = self.last_accessed_at {
-            let now = time::OffsetDateTime::now_utc();
-            let duration = now - last_access;
-            duration.whole_days() < 7 // Within last week
+            is_within_duration(
+                last_access,
+                time::Duration::days(project::RECENT_ACCESS_DAYS),
+            )
         } else {
             false
         }
+    }
+
+    /// Returns whether the member has any notification preferences enabled.
+    pub fn has_notifications_enabled(&self) -> bool {
+        self.notify_updates || self.notify_comments || self.notify_mentions
+    }
+
+    /// Returns whether the member has all notifications enabled.
+    pub fn has_all_notifications_enabled(&self) -> bool {
+        self.notify_updates && self.notify_comments && self.notify_mentions
+    }
+
+    /// Returns whether the member has custom permissions.
+    pub fn has_custom_permissions(&self) -> bool {
+        !self
+            .custom_permissions
+            .as_object()
+            .map_or(true, |obj| obj.is_empty())
+    }
+
+    /// Returns whether the member has never accessed the project.
+    pub fn has_never_accessed(&self) -> bool {
+        self.last_accessed_at.is_none()
+    }
+
+    /// Returns the time since last access.
+    pub fn time_since_last_access(&self) -> Option<time::Duration> {
+        if let Some(last_access) = self.last_accessed_at {
+            Some(OffsetDateTime::now_utc() - last_access)
+        } else {
+            None
+        }
+    }
+
+    /// Returns whether the member is inactive (no recent access).
+    pub fn is_inactive(&self) -> bool {
+        if let Some(duration) = self.time_since_last_access() {
+            duration.whole_days() > 30 // No access for 30+ days
+        } else {
+            true // Never accessed
+        }
+    }
+
+    /// Returns whether the member can perform administrative actions.
+    pub fn can_administrate(&self) -> bool {
+        self.is_active && self.is_admin()
+    }
+
+    /// Returns whether the member can modify project settings.
+    pub fn can_modify_settings(&self) -> bool {
+        self.is_active && (self.is_owner() || self.is_admin())
+    }
+
+    /// Returns whether the member can delete the project.
+    pub fn can_delete_project(&self) -> bool {
+        self.is_active && self.is_owner()
+    }
+
+    /// Returns whether the member engagement level is high.
+    pub fn is_highly_engaged(&self) -> bool {
+        self.is_favorite && !self.is_hidden && self.has_recent_access()
+    }
+
+    /// Returns the member's engagement score (0-100).
+    pub fn engagement_score(&self) -> u8 {
+        let mut score = 0u8;
+
+        if self.is_active {
+            score += 20;
+        }
+        if self.is_favorite {
+            score += 15;
+        }
+        if !self.is_hidden {
+            score += 10;
+        }
+        if self.has_recent_access() {
+            score += 25;
+        }
+        if self.has_notifications_enabled() {
+            score += 10;
+        }
+        if matches!(self.member_role, ProjectRole::Owner | ProjectRole::Admin) {
+            score += 20;
+        }
+
+        score
+    }
+
+    /// Returns the role display name.
+    pub fn role_display(&self) -> &'static str {
+        match self.member_role {
+            ProjectRole::Owner => "Owner",
+            ProjectRole::Admin => "Admin",
+            ProjectRole::Editor => "Editor",
+            ProjectRole::Viewer => "Viewer",
+        }
+    }
+
+    /// Returns the age of the membership.
+    pub fn membership_age(&self) -> time::Duration {
+        OffsetDateTime::now_utc() - self.created_at
+    }
+
+    /// Returns whether the member can be promoted to the given role.
+    pub fn can_be_promoted_to(&self, role: ProjectRole) -> bool {
+        self.is_active && role > self.member_role
+    }
+
+    /// Returns whether the member can be demoted to the given role.
+    pub fn can_be_demoted_to(&self, role: ProjectRole) -> bool {
+        self.is_active && role < self.member_role && !self.is_owner()
+    }
+
+    /// Returns whether the membership can be removed.
+    pub fn can_be_removed(&self) -> bool {
+        !self.is_owner() // Owners cannot be removed
+    }
+}
+
+impl HasCreatedAt for ProjectMember {
+    fn created_at(&self) -> OffsetDateTime {
+        self.created_at
+    }
+}
+
+impl HasUpdatedAt for ProjectMember {
+    fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
+    }
+}
+
+impl HasOwnership for ProjectMember {
+    fn created_by(&self) -> Uuid {
+        self.created_by
+    }
+
+    fn updated_by(&self) -> Option<Uuid> {
+        Some(self.updated_by)
+    }
+}
+
+impl HasLastActivityAt for ProjectMember {
+    fn last_activity_at(&self) -> Option<OffsetDateTime> {
+        self.last_accessed_at
     }
 }

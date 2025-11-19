@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::response::{Version as VersionResponse, Versions};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document version operations.
@@ -75,7 +75,7 @@ async fn get_version_files(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<DocumentPathParams>,
     AuthState(auth_claims): AuthState,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Versions>)> {
     let mut conn = pg_client.get_connection().await?;
 

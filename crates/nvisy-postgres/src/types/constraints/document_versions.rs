@@ -13,38 +13,18 @@ pub enum DocumentVersionConstraints {
     // Version validation constraints
     #[strum(serialize = "document_versions_version_number_min")]
     VersionNumberMin,
-    #[strum(serialize = "document_versions_display_name_length_min")]
-    DisplayNameLengthMin,
-    #[strum(serialize = "document_versions_display_name_length_max")]
-    DisplayNameLengthMax,
+    #[strum(serialize = "document_versions_display_name_length")]
+    DisplayNameLength,
     #[strum(serialize = "document_versions_file_extension_format")]
     FileExtensionFormat,
-    #[strum(serialize = "document_versions_mime_type_not_empty")]
-    MimeTypeNotEmpty,
 
     // Version processing constraints
     #[strum(serialize = "document_versions_processing_credits_min")]
     ProcessingCreditsMin,
     #[strum(serialize = "document_versions_processing_duration_min")]
     ProcessingDurationMin,
-    #[strum(serialize = "document_versions_processing_cost_min")]
-    ProcessingCostMin,
     #[strum(serialize = "document_versions_api_calls_min")]
     ApiCallsMin,
-
-    // Version quality score constraints
-    #[strum(serialize = "document_versions_accuracy_score_min")]
-    AccuracyScoreMin,
-    #[strum(serialize = "document_versions_accuracy_score_max")]
-    AccuracyScoreMax,
-    #[strum(serialize = "document_versions_completeness_score_min")]
-    CompletenessScoreMin,
-    #[strum(serialize = "document_versions_completeness_score_max")]
-    CompletenessScoreMax,
-    #[strum(serialize = "document_versions_confidence_score_min")]
-    ConfidenceScoreMin,
-    #[strum(serialize = "document_versions_confidence_score_max")]
-    ConfidenceScoreMax,
 
     // Version storage constraints
     #[strum(serialize = "document_versions_file_size_min")]
@@ -57,20 +37,14 @@ pub enum DocumentVersionConstraints {
     FileHashSha256Length,
 
     // Version metadata constraints
-    #[strum(serialize = "document_versions_processing_results_size_min")]
-    ProcessingResultsSizeMin,
-    #[strum(serialize = "document_versions_processing_results_size_max")]
-    ProcessingResultsSizeMax,
-    #[strum(serialize = "document_versions_metadata_size_min")]
-    MetadataSizeMin,
-    #[strum(serialize = "document_versions_metadata_size_max")]
-    MetadataSizeMax,
+    #[strum(serialize = "document_versions_results_size")]
+    ResultsSize,
+    #[strum(serialize = "document_versions_metadata_size")]
+    MetadataSize,
 
     // Version retention constraints
-    #[strum(serialize = "document_versions_retention_period_min")]
-    RetentionPeriodMin,
-    #[strum(serialize = "document_versions_retention_period_max")]
-    RetentionPeriodMax,
+    #[strum(serialize = "document_versions_retention_period")]
+    RetentionPeriod,
 
     // Version chronological constraints
     #[strum(serialize = "document_versions_updated_after_created")]
@@ -81,10 +55,6 @@ pub enum DocumentVersionConstraints {
     DeletedAfterUpdated,
     #[strum(serialize = "document_versions_auto_delete_after_created")]
     AutoDeleteAfterCreated,
-
-    // Version unique constraints
-    #[strum(serialize = "document_versions_unique_version")]
-    UniqueVersion,
 }
 
 impl DocumentVersionConstraints {
@@ -97,30 +67,18 @@ impl DocumentVersionConstraints {
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
             DocumentVersionConstraints::VersionNumberMin
-            | DocumentVersionConstraints::DisplayNameLengthMin
-            | DocumentVersionConstraints::DisplayNameLengthMax
+            | DocumentVersionConstraints::DisplayNameLength
             | DocumentVersionConstraints::FileExtensionFormat
-            | DocumentVersionConstraints::MimeTypeNotEmpty
             | DocumentVersionConstraints::ProcessingCreditsMin
             | DocumentVersionConstraints::ProcessingDurationMin
-            | DocumentVersionConstraints::ProcessingCostMin
             | DocumentVersionConstraints::ApiCallsMin
-            | DocumentVersionConstraints::AccuracyScoreMin
-            | DocumentVersionConstraints::AccuracyScoreMax
-            | DocumentVersionConstraints::CompletenessScoreMin
-            | DocumentVersionConstraints::CompletenessScoreMax
-            | DocumentVersionConstraints::ConfidenceScoreMin
-            | DocumentVersionConstraints::ConfidenceScoreMax
             | DocumentVersionConstraints::FileSizeMin
             | DocumentVersionConstraints::StoragePathNotEmpty
             | DocumentVersionConstraints::StorageBucketNotEmpty
             | DocumentVersionConstraints::FileHashSha256Length
-            | DocumentVersionConstraints::ProcessingResultsSizeMin
-            | DocumentVersionConstraints::ProcessingResultsSizeMax
-            | DocumentVersionConstraints::MetadataSizeMin
-            | DocumentVersionConstraints::MetadataSizeMax
-            | DocumentVersionConstraints::RetentionPeriodMin
-            | DocumentVersionConstraints::RetentionPeriodMax => ConstraintCategory::Validation,
+            | DocumentVersionConstraints::ResultsSize
+            | DocumentVersionConstraints::MetadataSize
+            | DocumentVersionConstraints::RetentionPeriod => ConstraintCategory::Validation,
 
             DocumentVersionConstraints::UpdatedAfterCreated
             | DocumentVersionConstraints::DeletedAfterCreated
@@ -128,8 +86,6 @@ impl DocumentVersionConstraints {
             | DocumentVersionConstraints::AutoDeleteAfterCreated => {
                 ConstraintCategory::Chronological
             }
-
-            DocumentVersionConstraints::UniqueVersion => ConstraintCategory::Uniqueness,
         }
     }
 }

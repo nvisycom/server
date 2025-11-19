@@ -1,8 +1,8 @@
 //! Project-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    ProjectActivityLogConstraints, ProjectConstraints, ProjectInviteConstraints,
-    ProjectMemberConstraints,
+    ProjectActivitiesConstraints, ProjectConstraints, ProjectIntegrationConstraints,
+    ProjectInviteConstraints, ProjectMemberConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -10,39 +10,24 @@ use crate::handler::{Error, ErrorKind};
 impl From<ProjectConstraints> for Error<'static> {
     fn from(c: ProjectConstraints) -> Self {
         let error = match c {
-            ProjectConstraints::DisplayNameLengthMin => ErrorKind::BadRequest
-                .with_message("Project name must be at least 3 characters long"),
-            ProjectConstraints::DisplayNameLengthMax => {
-                ErrorKind::BadRequest.with_message("Project name cannot exceed 32 characters")
-            }
+            ProjectConstraints::DisplayNameLength => ErrorKind::BadRequest
+                .with_message("Project name must be between 3 and 32 characters long"),
             ProjectConstraints::DescriptionLengthMax => {
                 ErrorKind::BadRequest.with_message("Project description is too long")
             }
-            ProjectConstraints::ProjectCodeFormat => {
-                ErrorKind::BadRequest.with_message("Invalid project code format")
-            }
-            ProjectConstraints::CategoryLengthMax => {
-                ErrorKind::BadRequest.with_message("Project category is too long")
-            }
-            ProjectConstraints::TagsCountMax => ErrorKind::BadRequest.with_message("Too many tags"),
-            ProjectConstraints::KeepForSecMin => ErrorKind::BadRequest
-                .with_message("Retention period must be greater than 60 seconds"),
-            ProjectConstraints::KeepForSecMax => {
-                ErrorKind::BadRequest.with_message("Retention period cannot exceed 7 days")
-            }
+            ProjectConstraints::KeepForSecRange => ErrorKind::BadRequest
+                .with_message("Retention period must be between 1 hour and 1 year"),
             ProjectConstraints::MaxMembersMin => ErrorKind::InternalServerError.into_error(),
             ProjectConstraints::MaxMembersMax => {
                 ErrorKind::BadRequest.with_message("Maximum number of members exceeded")
             }
-            ProjectConstraints::MaxDocumentsMin => ErrorKind::InternalServerError.into_error(),
-            ProjectConstraints::MaxStorageMbMin => ErrorKind::InternalServerError.into_error(),
-            ProjectConstraints::MetadataSizeMin => ErrorKind::InternalServerError.into_error(),
-            ProjectConstraints::MetadataSizeMax => {
-                ErrorKind::BadRequest.with_message("Project metadata exceeds maximum allowed size")
+            ProjectConstraints::MaxStorageMin => ErrorKind::InternalServerError.into_error(),
+            ProjectConstraints::TagsCountMax => ErrorKind::BadRequest.with_message("Too many tags"),
+            ProjectConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Project metadata size is invalid")
             }
-            ProjectConstraints::SettingsSizeMin => ErrorKind::InternalServerError.into_error(),
-            ProjectConstraints::SettingsSizeMax => {
-                ErrorKind::BadRequest.with_message("Project settings exceed maximum allowed size")
+            ProjectConstraints::SettingsSize => {
+                ErrorKind::BadRequest.with_message("Project settings size is invalid")
             }
             ProjectConstraints::UpdatedAfterCreated
             | ProjectConstraints::DeletedAfterCreated
@@ -51,20 +36,11 @@ impl From<ProjectConstraints> for Error<'static> {
             | ProjectConstraints::DeletedAfterArchived => {
                 ErrorKind::InternalServerError.into_error()
             }
-            ProjectConstraints::TemplateCannotHaveTemplate => {
-                ErrorKind::BadRequest.with_message("Templates cannot be based on other templates")
-            }
             ProjectConstraints::ActiveStatusNotArchived => {
                 ErrorKind::BadRequest.with_message("Active projects cannot be archived")
             }
             ProjectConstraints::ArchiveStatusConsistency => {
                 ErrorKind::BadRequest.with_message("Project archive status is inconsistent")
-            }
-            ProjectConstraints::DisplayNameOwnerUnique => {
-                ErrorKind::Conflict.with_message("A project with this name already exists")
-            }
-            ProjectConstraints::ProjectCodeUnique => {
-                ErrorKind::Conflict.with_message("A project with this code already exists")
             }
         };
 
@@ -75,18 +51,11 @@ impl From<ProjectConstraints> for Error<'static> {
 impl From<ProjectMemberConstraints> for Error<'static> {
     fn from(c: ProjectMemberConstraints) -> Self {
         let error = match c {
-            ProjectMemberConstraints::CustomPermissionsSizeMin => {
-                ErrorKind::InternalServerError.into_error()
+            ProjectMemberConstraints::CustomPermissionsSize => {
+                ErrorKind::BadRequest.with_message("Custom permissions data size is invalid")
             }
-            ProjectMemberConstraints::CustomPermissionsSizeMax => {
-                ErrorKind::BadRequest.with_message("Custom permissions data is too large")
-            }
-            ProjectMemberConstraints::ShowOrderMin => {
-                ErrorKind::BadRequest.with_message("Invalid show order value")
-            }
-            ProjectMemberConstraints::ShowOrderMax => {
-                ErrorKind::BadRequest.with_message("Show order value is too large")
-            }
+            ProjectMemberConstraints::ShowOrderRange => ErrorKind::BadRequest
+                .with_message("Show order value must be between -1000 and 1000"),
             ProjectMemberConstraints::UpdatedAfterCreated
             | ProjectMemberConstraints::LastAccessedAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
@@ -100,45 +69,16 @@ impl From<ProjectMemberConstraints> for Error<'static> {
 impl From<ProjectInviteConstraints> for Error<'static> {
     fn from(c: ProjectInviteConstraints) -> Self {
         let error = match c {
-            ProjectInviteConstraints::EmailValid => {
-                ErrorKind::BadRequest.with_message("Invalid email address")
-            }
             ProjectInviteConstraints::InviteMessageLengthMax => {
                 ErrorKind::BadRequest.with_message("Invite message is too long")
             }
             ProjectInviteConstraints::InviteTokenNotEmpty => {
                 ErrorKind::InternalServerError.into_error()
             }
-            ProjectInviteConstraints::StatusReasonLengthMax => {
-                ErrorKind::BadRequest.with_message("Status reason is too long")
-            }
-            ProjectInviteConstraints::MaxUsesMin => {
-                ErrorKind::BadRequest.with_message("Maximum uses must be at least 1")
-            }
-            ProjectInviteConstraints::MaxUsesMax => {
-                ErrorKind::BadRequest.with_message("Maximum uses exceeded limit")
-            }
-            ProjectInviteConstraints::UseCountMin => ErrorKind::InternalServerError.into_error(),
-            ProjectInviteConstraints::UseCountMax => {
-                ErrorKind::BadRequest.with_message("Invite has been used too many times")
-            }
-            ProjectInviteConstraints::ExpiresInFuture => {
-                ErrorKind::BadRequest.with_message("Invite expiration must be in the future")
-            }
             ProjectInviteConstraints::ExpiresAfterCreated
             | ProjectInviteConstraints::UpdatedAfterCreated
-            | ProjectInviteConstraints::DeletedAfterUpdated
-            | ProjectInviteConstraints::AcceptedAfterCreated => {
+            | ProjectInviteConstraints::RespondedAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
-            }
-            ProjectInviteConstraints::AcceptStatusConsistency => {
-                ErrorKind::BadRequest.with_message("Invite acceptance status is inconsistent")
-            }
-            ProjectInviteConstraints::AcceptorConsistency => {
-                ErrorKind::BadRequest.with_message("Invite acceptor information is inconsistent")
-            }
-            ProjectInviteConstraints::TokenUnique => {
-                ErrorKind::Conflict.with_message("Invite token already exists")
             }
         };
 
@@ -146,26 +86,42 @@ impl From<ProjectInviteConstraints> for Error<'static> {
     }
 }
 
-impl From<ProjectActivityLogConstraints> for Error<'static> {
-    fn from(c: ProjectActivityLogConstraints) -> Self {
+impl From<ProjectActivitiesConstraints> for Error<'static> {
+    fn from(c: ProjectActivitiesConstraints) -> Self {
         let error = match c {
-            ProjectActivityLogConstraints::ActivityTypeNotEmpty => {
-                ErrorKind::BadRequest.with_message("Activity type cannot be empty")
+            ProjectActivitiesConstraints::DescriptionLengthMax => {
+                ErrorKind::BadRequest.with_message("Activity description is too long")
             }
-            ProjectActivityLogConstraints::ActivityTypeLengthMax => {
-                ErrorKind::BadRequest.with_message("Activity type is too long")
-            }
-            ProjectActivityLogConstraints::ActivityDataSizeMin => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            ProjectActivityLogConstraints::ActivityDataSizeMax => {
-                ErrorKind::BadRequest.with_message("Activity data is too large")
-            }
-            ProjectActivityLogConstraints::EntityTypeLengthMax => {
-                ErrorKind::BadRequest.with_message("Entity type is too long")
+            ProjectActivitiesConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Activity metadata size is invalid")
             }
         };
 
-        error.with_resource("project_activity_log")
+        error.with_resource("project_activities")
+    }
+}
+
+impl From<ProjectIntegrationConstraints> for Error<'static> {
+    fn from(c: ProjectIntegrationConstraints) -> Self {
+        let error = match c {
+            ProjectIntegrationConstraints::IntegrationNameNotEmpty => {
+                ErrorKind::BadRequest.with_message("Integration name cannot be empty")
+            }
+            ProjectIntegrationConstraints::DescriptionLengthMax => {
+                ErrorKind::BadRequest.with_message("Integration description is too long")
+            }
+            ProjectIntegrationConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Integration metadata size is invalid")
+            }
+            ProjectIntegrationConstraints::CredentialsSize => {
+                ErrorKind::BadRequest.with_message("Integration credentials size is invalid")
+            }
+            ProjectIntegrationConstraints::UpdatedAfterCreated
+            | ProjectIntegrationConstraints::LastSyncAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("project_integration")
     }
 }

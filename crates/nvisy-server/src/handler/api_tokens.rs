@@ -12,36 +12,23 @@ use axum_extra::headers::UserAgent;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewAccountApiToken, UpdateAccountApiToken};
-use nvisy_postgres::query::{AccountApiTokenRepository, Pagination};
+use nvisy_postgres::query::{AccountApiTokenRepository, Pagination as QueryPagination};
 use nvisy_postgres::types::ApiTokenType;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use super::request::{CreateApiToken, ListApiTokensQuery, RevokeApiToken, UpdateApiToken};
+use super::request::{
+    CreateApiToken, ListApiTokensQuery, Pagination, RevokeApiToken, UpdateApiToken,
+};
 use super::response::{ApiToken, ApiTokenCreated, ApiTokenList, ApiTokenOperation};
 use crate::extract::{AuthState, Json, ValidateJson};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for API token operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::api_tokens";
-
-/// Default API token expiration duration (365 days).
-const DEFAULT_TOKEN_EXPIRATION_DAYS: i64 = 365;
-
-/// Maximum allowed API token expiration duration (2 years).
-const MAX_TOKEN_EXPIRATION_DAYS: i64 = 730;
-
-/// Maximum length for API token names.
-const MAX_TOKEN_NAME_LENGTH: usize = 100;
-
-/// Maximum length for API token descriptions.
-const MAX_TOKEN_DESCRIPTION_LENGTH: usize = 500;
-
-/// Maximum length for device IDs.
-const MAX_DEVICE_ID_LENGTH: usize = 100;
 
 /// Creates a new API token for the authenticated account.
 #[tracing::instrument(skip_all)]
@@ -92,54 +79,16 @@ async fn create_api_token(
             .with_message("Token name cannot be empty or whitespace only"));
     }
 
-    if sanitized_name.len() > MAX_TOKEN_NAME_LENGTH {
-        return Err(ErrorKind::BadRequest
-            .with_resource("api_token")
-            .with_message(format!(
-                "Token name cannot exceed {} characters",
-                MAX_TOKEN_NAME_LENGTH
-            )));
-    }
-
     let sanitized_description = request
         .description
         .as_ref()
         .map(|desc| desc.trim().to_string())
         .filter(|desc| !desc.is_empty());
 
-    if let Some(ref desc) = sanitized_description {
-        if desc.len() > MAX_TOKEN_DESCRIPTION_LENGTH {
-            return Err(ErrorKind::BadRequest
-                .with_resource("api_token")
-                .with_message(format!(
-                    "Token description cannot exceed {} characters",
-                    MAX_TOKEN_DESCRIPTION_LENGTH
-                )));
-        }
-    }
-
-    let sanitized_device_id = request
-        .device_id
-        .as_ref()
-        .map(|id| id.trim().to_string())
-        .filter(|id| !id.is_empty());
-
-    if let Some(ref device_id) = sanitized_device_id {
-        if device_id.len() > MAX_DEVICE_ID_LENGTH {
-            return Err(ErrorKind::BadRequest
-                .with_resource("api_token")
-                .with_message(format!(
-                    "Device ID cannot exceed {} characters",
-                    MAX_DEVICE_ID_LENGTH
-                )));
-        }
-    }
-
     // Validate and set expiration date
     let expires_at = match request.expires_at {
         Some(expiry) => {
             let now = OffsetDateTime::now_utc();
-            let max_expiry = now + time::Duration::days(MAX_TOKEN_EXPIRATION_DAYS);
 
             if expiry <= now {
                 return Err(ErrorKind::BadRequest
@@ -147,15 +96,15 @@ async fn create_api_token(
                     .with_message("Expiration date must be in the future"));
             }
 
-            if expiry > max_expiry {
+            if expiry > now + Duration::days(365) {
                 return Err(ErrorKind::BadRequest
                     .with_resource("api_token")
-                    .with_message("Expiration date cannot exceed 2 years from now"));
+                    .with_message("Expiration date cannot exceed 1 year from now"));
             }
 
-            expiry
+            Some(expiry)
         }
-        None => OffsetDateTime::now_utc() + time::Duration::days(DEFAULT_TOKEN_EXPIRATION_DAYS),
+        None => None,
     };
 
     // Convert IP address to IpNet for storage
@@ -179,10 +128,10 @@ async fn create_api_token(
         city_name: None,    // Would need geolocation service to populate
         ip_address: ip_net,
         user_agent: user_agent.to_string(),
-        device_id: sanitized_device_id.clone(),
+        device_id: None,
         session_type: Some(ApiTokenType::Api),
         is_remembered: Some(true),
-        expired_at: Some(expires_at),
+        expired_at: expires_at,
     };
 
     let token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
@@ -192,9 +141,9 @@ async fn create_api_token(
         account_id = %auth_claims.account_id,
         token_preview = %token.access_seq_short(),
         name = %sanitized_name,
-        expires_at = %expires_at,
+        expires_at = ?expires_at,
         has_description = sanitized_description.is_some(),
-        has_device_id = sanitized_device_id.is_some(),
+        has_device_id = false,
         "API token created"
     );
 
@@ -233,7 +182,7 @@ async fn list_api_tokens(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Query(query_params): Query<ListApiTokensQuery>,
-    Query(pagination): Query<PaginationRequest>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<ApiTokenList>)> {
     tracing::trace!(
         target: TRACING_TARGET,
@@ -259,7 +208,7 @@ async fn list_api_tokens(
         }
     }
 
-    let pagination = Pagination::from(pagination);
+    let pagination = QueryPagination::from(pagination);
 
     // For now, we'll use the basic list method and filter in application
     // In a production app, you'd want to add these filters to the database query
@@ -284,10 +233,6 @@ async fn list_api_tokens(
 
     if let Some(token_type) = query_params.token_type {
         filtered_tokens.retain(|token| token.session_type == token_type);
-    }
-
-    if let Some(is_suspicious) = query_params.is_suspicious {
-        filtered_tokens.retain(|token| token.is_suspicious == is_suspicious);
     }
 
     if let Some(created_after) = query_params.created_after {
@@ -446,30 +391,10 @@ async fn update_api_token(
             .with_message("You do not have permission to modify this API token"));
     }
 
-    // Validate expiration date if provided
-    if let Some(expires_at) = request.expires_at {
-        let now = OffsetDateTime::now_utc();
-        let max_expiry = now + time::Duration::days(MAX_TOKEN_EXPIRATION_DAYS);
-
-        if expires_at <= now {
-            return Err(ErrorKind::BadRequest
-                .with_resource("api_token")
-                .with_message("Expiration date must be in the future"));
-        }
-
-        if expires_at > max_expiry {
-            return Err(ErrorKind::BadRequest
-                .with_resource("api_token")
-                .with_message("Expiration date cannot exceed 2 years from now"));
-        }
-    }
-
     let update_token = UpdateAccountApiToken {
         last_used_at: Some(OffsetDateTime::now_utc()),
         name: request.name,
         description: request.description,
-        is_suspicious: request.is_suspicious,
-        expired_at: request.expires_at,
         ..Default::default()
     };
 
@@ -479,8 +404,6 @@ async fn update_api_token(
         target: TRACING_TARGET,
         account_id = %auth_claims.account_id,
         token_preview = %existing_token.access_seq_short(),
-        updated_expiration = request.expires_at.is_some(),
-        marked_suspicious = request.is_suspicious.unwrap_or(false),
         "API token updated"
     );
 

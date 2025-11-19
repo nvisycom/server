@@ -5,52 +5,56 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::document_files;
-use crate::types::{ProcessingStatus, RequireMode, VirusScanStatus};
+use crate::types::constants::file;
+use crate::types::{
+    HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus, RequireMode, VirusScanStatus,
+    is_within_duration,
+};
 
 /// Document file model representing a file attached to a document.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DocumentFile {
-    /// Unique file identifier
+    /// Unique file identifier.
     pub id: Uuid,
-    /// Reference to the document this file belongs to
+    /// Reference to the document this file belongs to.
     pub document_id: Uuid,
-    /// Reference to the account that owns this file
+    /// Reference to the account that owns this file.
     pub account_id: Uuid,
-    /// Human-readable file name for display
+    /// Human-readable file name for display.
     pub display_name: String,
-    /// Original filename when uploaded
+    /// Original filename when uploaded.
     pub original_filename: String,
-    /// File extension (without the dot)
+    /// File extension (without the dot).
     pub file_extension: String,
-    /// Processing mode requirements
+    /// Processing mode requirements.
     pub require_mode: RequireMode,
-    /// Processing priority (higher numbers = higher priority)
+    /// Processing priority (higher numbers = higher priority).
     pub processing_priority: i32,
-    /// Current processing status
+    /// Current processing status.
     pub processing_status: ProcessingStatus,
-    /// Virus scan status
+    /// Virus scan status.
     pub virus_scan_status: VirusScanStatus,
-    /// File size in bytes
+    /// File size in bytes.
     pub file_size_bytes: i64,
-    /// SHA-256 hash of the file
+    /// SHA-256 hash of the file.
     pub file_hash_sha256: Vec<u8>,
-    /// Storage path or identifier for the file
+    /// Storage path or identifier for the file.
     pub storage_path: String,
-    /// Storage bucket name
+    /// Storage bucket name.
     pub storage_bucket: String,
-    /// File metadata (JSON)
+    /// File metadata (JSON).
     pub metadata: serde_json::Value,
-    /// Keep file for this many seconds
+    /// Keep file for this many seconds.
     pub keep_for_sec: i32,
-    /// Auto delete timestamp
+    /// Auto delete timestamp.
     pub auto_delete_at: Option<OffsetDateTime>,
-    /// Timestamp when the file was uploaded
+    /// Timestamp when the file was uploaded.
     pub created_at: OffsetDateTime,
-    /// Timestamp when the file was last updated
+    /// Timestamp when the file was last updated.
     pub updated_at: OffsetDateTime,
-    /// Timestamp when the file was soft-deleted
+    /// Timestamp when the file was soft-deleted.
     pub deleted_at: Option<OffsetDateTime>,
 }
 
@@ -59,15 +63,15 @@ pub struct DocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentFile {
-    /// Document ID
+    /// Document ID.
     pub document_id: Uuid,
-    /// Account ID
+    /// Account ID.
     pub account_id: Uuid,
-    /// Display name
+    /// Display name.
     pub display_name: Option<String>,
-    /// Original filename
+    /// Original filename.
     pub original_filename: Option<String>,
-    /// File extension
+    /// File extension.
     pub file_extension: Option<String>,
     /// Require mode
     pub require_mode: Option<RequireMode>,
@@ -113,42 +117,18 @@ pub struct UpdateDocumentFile {
 }
 
 impl DocumentFile {
-    /// Returns whether the file is currently being processed.
-    pub fn is_processing(&self) -> bool {
+    /// Returns whether the file was uploaded recently.
+    pub fn is_recently_uploaded(&self) -> bool {
+        self.was_created_within(time::Duration::hours(file::RECENTLY_UPLOADED_HOURS))
+    }
+
+    /// Returns whether the file processing is stale.
+    pub fn has_stale_processing(&self) -> bool {
         self.processing_status.is_processing()
-    }
-
-    /// Returns whether the file processing is complete.
-    pub fn is_processed(&self) -> bool {
-        matches!(
-            self.processing_status,
-            ProcessingStatus::Completed | ProcessingStatus::Skipped
-        )
-    }
-
-    /// Returns whether the file processing has failed.
-    pub fn has_processing_failed(&self) -> bool {
-        self.processing_status.is_failed()
-    }
-
-    /// Returns whether the file is pending processing.
-    pub fn is_pending_processing(&self) -> bool {
-        self.processing_status.is_pending()
-    }
-
-    /// Returns whether the file is safe (virus scan passed).
-    pub fn is_safe(&self) -> bool {
-        self.virus_scan_status.is_safe()
-    }
-
-    // Returns whether the file is dangerous and should be blocked.
-    pub fn is_unsafe(&self) -> bool {
-        self.virus_scan_status.is_unsafe()
-    }
-
-    /// Returns whether the virus scan status is unknown or inconclusive.
-    pub fn is_conclusive(&self) -> bool {
-        self.virus_scan_status.is_conclusive()
+            && !is_within_duration(
+                self.updated_at,
+                time::Duration::days(file::STALE_PROCESSING_DAYS),
+            )
     }
 
     /// Returns whether the file is deleted.
@@ -156,87 +136,153 @@ impl DocumentFile {
         self.deleted_at.is_some()
     }
 
-    /// Returns whether the file can be processed.
-    pub fn can_be_processed(&self) -> bool {
-        self.processing_status.can_be_processed() && self.is_safe()
+    /// Returns whether the file is ready for use.
+    pub fn is_ready(&self) -> bool {
+        self.processing_status.is_successful() && self.virus_scan_status.is_safe()
     }
 
-    /// Returns whether the file processing can be retried.
-    pub fn can_be_retried(&self) -> bool {
-        self.processing_status.can_be_retried()
+    /// Returns whether the file is safe (passed virus scan).
+    pub fn is_safe(&self) -> bool {
+        matches!(self.virus_scan_status, VirusScanStatus::Clean)
     }
 
-    /// Returns whether the file processing can be canceled.
-    pub fn can_be_canceled(&self) -> bool {
-        self.processing_status.can_be_canceled()
+    /// Returns whether the file has failed virus scanning.
+    pub fn has_virus(&self) -> bool {
+        matches!(self.virus_scan_status, VirusScanStatus::Infected)
     }
 
-    /// Returns whether the file has a high processing priority.
-    pub fn has_high_priority(&self) -> bool {
-        self.processing_priority > 5
+    /// Returns whether the file is currently being processed.
+    pub fn is_processing(&self) -> bool {
+        self.processing_status.is_processing()
     }
 
-    /// Returns whether the file was uploaded recently (within last 24 hours).
-    pub fn is_recently_uploaded(&self) -> bool {
-        let now = time::OffsetDateTime::now_utc();
-        let duration = now - self.created_at;
-        duration.whole_days() < 1
+    /// Returns whether the file has completed processing.
+    pub fn is_processed(&self) -> bool {
+        self.processing_status.is_successful()
     }
 
-    /// Returns whether the file was processed recently (within last hour).
-    pub fn is_recently_processed(&self) -> bool {
-        // Check if processing was completed recently based on updated_at
-        if self.processing_status == ProcessingStatus::Completed {
-            let now = time::OffsetDateTime::now_utc();
-            let duration = now - self.updated_at;
-            duration.whole_hours() < 1
+    /// Returns whether the file processing has failed.
+    pub fn has_processing_error(&self) -> bool {
+        self.processing_status.is_failed()
+    }
+
+    /// Returns whether the file is scheduled for auto-deletion.
+    pub fn is_scheduled_for_deletion(&self) -> bool {
+        self.auto_delete_at.is_some()
+    }
+
+    /// Returns whether the file should be auto-deleted now.
+    pub fn should_be_deleted(&self) -> bool {
+        if let Some(delete_at) = self.auto_delete_at {
+            OffsetDateTime::now_utc() >= delete_at
         } else {
             false
         }
     }
 
+    /// Returns the file size in a human-readable format.
+    pub fn file_size_human(&self) -> String {
+        let bytes = self.file_size_bytes as f64;
+        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+
+        if bytes < 1024.0 {
+            return format!("{} B", self.file_size_bytes);
+        }
+
+        let mut size = bytes;
+        let mut unit_index = 0;
+
+        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+            size /= 1024.0;
+            unit_index += 1;
+        }
+
+        format!("{:.1} {}", size, UNITS[unit_index])
+    }
+
     /// Returns the file extension with a dot prefix.
     pub fn file_extension_with_dot(&self) -> String {
-        if self.file_extension.is_empty() {
-            String::new()
+        if self.file_extension.starts_with('.') {
+            self.file_extension.clone()
         } else {
             format!(".{}", self.file_extension)
         }
     }
 
-    /// Returns whether the file has metadata.
+    /// Returns whether the file has custom metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
+        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
     }
 
-    /// Returns whether the file is large (over 10MB).
-    pub fn is_large_file(&self) -> bool {
-        let bytes = self.file_size_bytes.to_string().parse::<u64>().unwrap_or(0);
-        bytes > 10_000_000 // 10MB
-    }
-
-    /// Returns whether the file checksum is valid (not empty).
-    pub fn has_valid_checksum(&self) -> bool {
-        !self.file_hash_sha256.is_empty()
-    }
-
-    /// Returns a shortened version of the checksum for display.
-    pub fn checksum_short(&self) -> String {
-        // Convert binary hash to hex string and show first 8 chars
-        let hex_hash = self
-            .file_hash_sha256
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
-        if hex_hash.len() > 8 {
-            format!("{}...", &hex_hash[..8])
+    /// Returns the time remaining until auto-deletion.
+    pub fn time_until_deletion(&self) -> Option<time::Duration> {
+        if let Some(delete_at) = self.auto_delete_at {
+            let now = OffsetDateTime::now_utc();
+            if delete_at > now {
+                Some(delete_at - now)
+            } else {
+                None
+            }
         } else {
-            hex_hash
+            None
         }
     }
 
-    /// Returns the age of the file since upload.
-    pub fn age(&self) -> time::Duration {
-        time::OffsetDateTime::now_utc() - self.created_at
+    /// Returns whether the file is a specific type by extension.
+    pub fn is_file_type(&self, extension: &str) -> bool {
+        self.file_extension.eq_ignore_ascii_case(extension)
+    }
+
+    /// Returns whether the file is an image.
+    pub fn is_image(&self) -> bool {
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "jpg" | "jpeg" | "png" | "gif" | "svg" | "webp" | "bmp"
+        )
+    }
+
+    /// Returns whether the file is a document.
+    pub fn is_document(&self) -> bool {
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "pdf" | "doc" | "docx" | "txt" | "md" | "rtf"
+        )
+    }
+
+    /// Returns the SHA-256 hash as a hex string.
+    pub fn hash_hex(&self) -> String {
+        self.file_hash_sha256
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+
+    /// Returns the processing priority level description.
+    pub fn priority_description(&self) -> &'static str {
+        match self.processing_priority {
+            p if p >= 90 => "Critical",
+            p if p >= 70 => "High",
+            p if p >= 50 => "Medium",
+            p if p >= 30 => "Low",
+            _ => "Minimal",
+        }
+    }
+}
+
+impl HasCreatedAt for DocumentFile {
+    fn created_at(&self) -> OffsetDateTime {
+        self.created_at
+    }
+}
+
+impl HasUpdatedAt for DocumentFile {
+    fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
+    }
+}
+
+impl HasDeletedAt for DocumentFile {
+    fn deleted_at(&self) -> Option<OffsetDateTime> {
+        self.deleted_at
     }
 }

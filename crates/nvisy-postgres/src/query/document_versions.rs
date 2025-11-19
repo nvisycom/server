@@ -1,4 +1,4 @@
-//! Document version repository for managing document version table operations.
+//! Document versions repository for managing version control and history operations.
 
 use bigdecimal::BigDecimal;
 use diesel::prelude::*;
@@ -10,49 +10,127 @@ use super::Pagination;
 use crate::model::{DocumentVersion, NewDocumentVersion, UpdateDocumentVersion};
 use crate::{PgError, PgResult, schema};
 
-/// Repository for document version table operations.
+/// Repository for comprehensive document version database operations.
+///
+/// Provides database operations for managing document versions throughout their
+/// lifecycle, including creation, retrieval, version tracking, and analytics.
+/// This repository handles all database interactions related to version control
+/// within document workflows, serving as the primary interface for document
+/// history management and collaborative editing coordination.
+///
+/// The repository supports sequential version numbering, content size tracking,
+/// temporal queries, and comprehensive analytics capabilities to enable rich
+/// version control experiences. Versions create immutable snapshots of document
+/// content that enable rollback capabilities, change tracking, and collaborative
+/// editing workflows with full audit trails.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DocumentVersionRepository;
 
 impl DocumentVersionRepository {
     /// Creates a new document version repository instance.
+    ///
+    /// Returns a new repository instance ready for database operations.
+    /// Since the repository is stateless, this is equivalent to using
+    /// `Default::default()` or accessing repository methods statically.
+    ///
+    /// # Returns
+    ///
+    /// A new `DocumentVersionRepository` instance.
     pub fn new() -> Self {
         Self
     }
 
-    /// Creates a new document version.
+    /// Creates a new document version with complete version control setup.
+    ///
+    /// Initializes a new version record within the document version control
+    /// system with sequential numbering, content metadata, and audit trail
+    /// information. The version is immediately available for retrieval and
+    /// comparison, enabling comprehensive document history management.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `new_version` - Complete version data including content size and metadata
+    ///
+    /// # Returns
+    ///
+    /// The created `DocumentVersion` with database-generated ID and timestamps,
+    /// or a database error if the operation fails.
+    ///
+    /// # Business Impact
+    ///
+    /// - Version becomes immediately available for content comparison
+    /// - Enables rollback and restore capabilities for document content
+    /// - Creates comprehensive audit trail for compliance and accountability
+    /// - Supports collaborative editing with conflict resolution
+    /// - Enables detailed change tracking and authorship attribution
     pub async fn create_document_version(
         conn: &mut AsyncPgConnection,
         new_version: NewDocumentVersion,
     ) -> PgResult<DocumentVersion> {
         use schema::document_versions;
 
-        diesel::insert_into(document_versions::table)
+        let version = diesel::insert_into(document_versions::table)
             .values(&new_version)
             .returning(DocumentVersion::as_returning())
             .get_result(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(version)
     }
 
-    /// Finds a document version by its ID.
+    /// Finds a document version by its unique identifier.
+    ///
+    /// Retrieves a specific version record using its UUID, automatically
+    /// excluding soft-deleted versions. This is the primary method for
+    /// accessing individual versions for content retrieval, comparison
+    /// operations, and version-specific metadata queries.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `version_id` - UUID of the version to retrieve
+    ///
+    /// # Returns
+    ///
+    /// The matching `DocumentVersion` if found and not deleted, `None` if not found,
+    /// or a database error if the query fails.
     pub async fn find_document_version_by_id(
         conn: &mut AsyncPgConnection,
         version_id: Uuid,
     ) -> PgResult<Option<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let version = document_versions::table
             .filter(dsl::id.eq(version_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentVersion::as_select())
             .first(conn)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(version)
     }
 
-    /// Lists versions for a document.
+    /// Lists versions for a specific document with chronological ordering.
+    ///
+    /// Retrieves a paginated list of versions for a document, ordered by
+    /// version number in descending order (newest first). This supports
+    /// version history interfaces and enables users to browse document
+    /// evolution over time with full version metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `document_id` - UUID of the document whose versions to retrieve
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `DocumentVersion` entries for the document, ordered by
+    /// version number (newest first), or a database error if the query fails.
     pub async fn list_document_versions(
         conn: &mut AsyncPgConnection,
         document_id: Uuid,
@@ -60,7 +138,7 @@ impl DocumentVersionRepository {
     ) -> PgResult<Vec<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let versions = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::version_number.desc())
@@ -69,10 +147,28 @@ impl DocumentVersionRepository {
             .select(DocumentVersion::as_select())
             .load(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(versions)
     }
 
-    /// Lists versions for an account.
+    /// Lists versions created by a specific account across all documents.
+    ///
+    /// Retrieves a paginated list of versions authored by a user account,
+    /// ordered by creation time (most recent first). This supports user
+    /// activity tracking, contribution analysis, and personal version
+    /// management workflows.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the account whose versions to retrieve
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `DocumentVersion` entries created by the account, ordered by
+    /// creation time (most recent first), or a database error if the query fails.
     pub async fn list_account_versions(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -80,7 +176,7 @@ impl DocumentVersionRepository {
     ) -> PgResult<Vec<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let versions = document_versions::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
@@ -89,17 +185,34 @@ impl DocumentVersionRepository {
             .select(DocumentVersion::as_select())
             .load(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(versions)
     }
 
     /// Gets the latest version for a document.
+    ///
+    /// Retrieves the most recent version of a document based on version
+    /// numbering, providing access to the current state of document content.
+    /// This supports current content retrieval and latest version comparison
+    /// operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `document_id` - UUID of the document whose latest version to retrieve
+    ///
+    /// # Returns
+    ///
+    /// The latest `DocumentVersion` for the document if any versions exist,
+    /// `None` if no versions found, or a database error if the query fails.
     pub async fn get_latest_document_version(
         conn: &mut AsyncPgConnection,
         document_id: Uuid,
     ) -> PgResult<Option<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let version = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::version_number.desc())
@@ -107,27 +220,61 @@ impl DocumentVersionRepository {
             .first(conn)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(version)
     }
 
     /// Gets the next version number for a document.
+    ///
+    /// Calculates the appropriate version number for a new version by
+    /// finding the highest existing version number and incrementing it.
+    /// This ensures sequential version numbering and prevents version
+    /// number conflicts during concurrent editing scenarios.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `document_id` - UUID of the document to get next version number for
+    ///
+    /// # Returns
+    ///
+    /// The next sequential version number for the document,
+    /// or a database error if the query fails.
     pub async fn get_next_version_number(
         conn: &mut AsyncPgConnection,
         document_id: Uuid,
     ) -> PgResult<i32> {
         use schema::document_versions::{self, dsl};
 
-        let max_version = document_versions::table
+        let max_version: Option<i32> = document_versions::table
             .filter(dsl::document_id.eq(document_id))
+            .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::max(dsl::version_number))
-            .first::<Option<i32>>(conn)
+            .first(conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(max_version.unwrap_or(0) + 1)
     }
 
-    /// Finds a specific version by document ID and version number.
+    /// Finds a specific version by document and version number.
+    ///
+    /// Retrieves a version using the combination of document ID and version
+    /// number, enabling direct access to specific versions in the document
+    /// history. This supports version comparison, rollback operations, and
+    /// historical content retrieval workflows.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `document_id` - UUID of the document containing the version
+    /// * `version_number` - Specific version number to retrieve
+    ///
+    /// # Returns
+    ///
+    /// The matching `DocumentVersion` if found, `None` if not found,
+    /// or a database error if the query fails.
     pub async fn find_version_by_number(
         conn: &mut AsyncPgConnection,
         document_id: Uuid,
@@ -135,7 +282,7 @@ impl DocumentVersionRepository {
     ) -> PgResult<Option<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let version = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::version_number.eq(version_number))
             .filter(dsl::deleted_at.is_null())
@@ -143,10 +290,28 @@ impl DocumentVersionRepository {
             .first(conn)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(version)
     }
 
-    /// Updates a document version.
+    /// Updates a document version with new metadata and information.
+    ///
+    /// Applies partial updates to an existing version record using the provided
+    /// update structure. Only fields set to `Some(value)` will be modified,
+    /// while `None` fields remain unchanged. This supports version metadata
+    /// enrichment and administrative version management operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `version_id` - UUID of the version to update
+    /// * `updates` - Partial update data containing only fields to modify
+    ///
+    /// # Returns
+    ///
+    /// The updated `DocumentVersion` with new values,
+    /// or a database error if the operation fails.
     pub async fn update_document_version(
         conn: &mut AsyncPgConnection,
         version_id: Uuid,
@@ -154,15 +319,37 @@ impl DocumentVersionRepository {
     ) -> PgResult<DocumentVersion> {
         use schema::document_versions::{self, dsl};
 
-        diesel::update(document_versions::table.filter(dsl::id.eq(version_id)))
+        let version = diesel::update(document_versions::table.filter(dsl::id.eq(version_id)))
             .set(&updates)
             .returning(DocumentVersion::as_returning())
             .get_result(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(version)
     }
 
-    /// Soft deletes a document version.
+    /// Soft deletes a document version by setting the deletion timestamp.
+    ///
+    /// Marks a version as deleted without permanently removing it from the
+    /// database. This preserves version history for audit purposes and
+    /// compliance requirements while preventing the version from appearing
+    /// in normal version listings and comparison operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `version_id` - UUID of the version to soft delete
+    ///
+    /// # Returns
+    ///
+    /// `()` on successful deletion, or a database error if the operation fails.
+    ///
+    /// # Important Considerations
+    ///
+    /// Deleting versions may impact document history integrity and rollback
+    /// capabilities. Consider the implications for audit trails and compliance
+    /// requirements before performing this operation.
     pub async fn delete_document_version(
         conn: &mut AsyncPgConnection,
         version_id: Uuid,
@@ -178,9 +365,24 @@ impl DocumentVersionRepository {
         Ok(())
     }
 
-    // Query methods
-
-    /// Finds versions created within a date range.
+    /// Finds versions created within a specific date range.
+    ///
+    /// Retrieves versions based on their creation timestamp, enabling
+    /// temporal analysis of document editing activity and content evolution
+    /// patterns. This supports activity reporting and historical analysis
+    /// workflows.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `start_date` - Beginning of the date range (inclusive)
+    /// * `end_date` - End of the date range (inclusive)
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `DocumentVersion` entries created within the date range,
+    /// ordered by creation time (most recent first), or a database error if the query fails.
     pub async fn find_versions_by_date_range(
         conn: &mut AsyncPgConnection,
         start_date: OffsetDateTime,
@@ -189,7 +391,7 @@ impl DocumentVersionRepository {
     ) -> PgResult<Vec<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let versions = document_versions::table
             .filter(dsl::created_at.between(start_date, end_date))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
@@ -198,44 +400,39 @@ impl DocumentVersionRepository {
             .select(DocumentVersion::as_select())
             .load(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(versions)
     }
 
-    /// Finds versions by file size range.
+    /// Finds versions within a specific content size range.
+    ///
+    /// Retrieves versions based on their content size in bytes, enabling
+    /// content size analysis, storage optimization, and content management
+    /// workflows. This supports storage planning and content governance
+    /// operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `min_size` - Minimum content size in bytes
+    /// * `max_size` - Maximum content size in bytes
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `DocumentVersion` entries within the size range,
+    /// ordered by content size (largest first), or a database error if the query fails.
     pub async fn find_versions_by_size_range(
         conn: &mut AsyncPgConnection,
         min_size: i64,
-        max_size: Option<i64>,
+        max_size: i64,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
         use schema::document_versions::{self, dsl};
 
-        let mut query = document_versions::table
-            .filter(dsl::file_size_bytes.ge(min_size))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::file_size_bytes.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentVersion::as_select())
-            .into_boxed();
-
-        if let Some(max) = max_size {
-            query = query.filter(dsl::file_size_bytes.le(max));
-        }
-
-        query.load(conn).await.map_err(PgError::from)
-    }
-
-    /// Finds large versions above a certain size threshold.
-    pub async fn find_large_versions(
-        conn: &mut AsyncPgConnection,
-        min_size_bytes: i64,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentVersion>> {
-        use schema::document_versions::{self, dsl};
-
-        document_versions::table
-            .filter(dsl::file_size_bytes.ge(min_size_bytes))
+        let versions = document_versions::table
+            .filter(dsl::file_size_bytes.between(min_size, max_size))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::file_size_bytes.desc())
             .limit(pagination.limit)
@@ -243,10 +440,65 @@ impl DocumentVersionRepository {
             .select(DocumentVersion::as_select())
             .load(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(versions)
     }
 
-    /// Finds recently created versions.
+    /// Finds versions exceeding a specified content size threshold.
+    ///
+    /// Retrieves versions larger than the specified size limit, enabling
+    /// large content identification, storage optimization, and performance
+    /// management workflows. This supports content governance and helps
+    /// identify versions that may require special handling.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `size_threshold` - Minimum content size threshold in bytes
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of large `DocumentVersion` entries ordered by content size
+    /// (largest first), or a database error if the query fails.
+    pub async fn find_large_versions(
+        conn: &mut AsyncPgConnection,
+        size_threshold: i64,
+        pagination: Pagination,
+    ) -> PgResult<Vec<DocumentVersion>> {
+        use schema::document_versions::{self, dsl};
+
+        let versions = document_versions::table
+            .filter(dsl::file_size_bytes.gt(size_threshold))
+            .filter(dsl::deleted_at.is_null())
+            .order(dsl::file_size_bytes.desc())
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+            .select(DocumentVersion::as_select())
+            .load(conn)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(versions)
+    }
+
+    /// Finds recently created versions across all documents.
+    ///
+    /// Retrieves versions created within the last seven days across the
+    /// entire system, providing visibility into recent editing activity
+    /// and content evolution patterns. This supports activity monitoring
+    /// and content discovery workflows.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of recently created `DocumentVersion` entries ordered by
+    /// creation time (most recent first), or a database error if the query fails.
     pub async fn find_recent_versions(
         conn: &mut AsyncPgConnection,
         pagination: Pagination,
@@ -255,7 +507,7 @@ impl DocumentVersionRepository {
 
         let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
 
-        document_versions::table
+        let versions = document_versions::table
             .filter(dsl::created_at.gt(seven_days_ago))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
@@ -264,35 +516,66 @@ impl DocumentVersionRepository {
             .select(DocumentVersion::as_select())
             .load(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(versions)
     }
 
-    /// Counts total versions for a document.
+    /// Counts total active versions for a specific document.
+    ///
+    /// Calculates the total number of active versions associated with a
+    /// document, providing version count metrics for document management
+    /// and version control analytics.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `document_id` - UUID of the document to count versions for
+    ///
+    /// # Returns
+    ///
+    /// The total count of active versions for the document,
+    /// or a database error if the query fails.
     pub async fn count_document_versions(
         conn: &mut AsyncPgConnection,
         document_id: Uuid,
     ) -> PgResult<i64> {
         use schema::document_versions::{self, dsl};
 
-        document_versions::table
+        let count = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(conn)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(count)
     }
 
-    // Statistics and analytics
-
-    /// Gets version statistics for a document.
+    /// Gets comprehensive version statistics for a specific document.
+    ///
+    /// Calculates detailed metrics about version creation patterns, content
+    /// evolution, and storage utilization within a document's version history.
+    /// This provides document managers with insights into editing patterns
+    /// and version control effectiveness.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `document_id` - UUID of the document to analyze
+    ///
+    /// # Returns
+    ///
+    /// A `DocumentVersionStats` structure containing comprehensive document
+    /// version metrics, or a database error if the query fails.
     pub async fn get_document_version_stats(
         conn: &mut AsyncPgConnection,
         document_id: Uuid,
     ) -> PgResult<DocumentVersionStats> {
         use schema::document_versions::{self, dsl};
 
-        // Total versions
+        // Total version count
         let total_count: i64 = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
@@ -301,71 +584,89 @@ impl DocumentVersionRepository {
             .await
             .map_err(PgError::from)?;
 
-        if total_count == 0 {
-            return Ok(DocumentVersionStats {
-                total_count: 0,
-                total_size: 0,
-                average_size: 0,
-                latest_version_number: 0,
-            });
-        }
-
-        // Total size
-        let total_size: i64 = document_versions::table
+        // Total storage used by all versions
+        let total_size: Option<BigDecimal> = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::sum(dsl::file_size_bytes))
-            .first::<Option<BigDecimal>>(conn)
+            .first(conn)
             .await
-            .map_err(PgError::from)?
-            .map(|bd| bd.to_string().parse().unwrap_or(0))
-            .unwrap_or(0);
+            .map_err(PgError::from)?;
+
+        let total_size = total_size.unwrap_or_else(|| BigDecimal::from(0));
+
+        // Average version size
+        let average_size = if total_count > 0 {
+            total_size.clone() / BigDecimal::from(total_count)
+        } else {
+            BigDecimal::from(0)
+        };
 
         // Latest version number
-        let latest_version_number: i32 = document_versions::table
+        let latest_version_number: Option<i32> = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::max(dsl::version_number))
-            .first::<Option<i32>>(conn)
+            .first(conn)
             .await
-            .map_err(PgError::from)?
-            .unwrap_or(0);
-
-        let average_size = if total_count > 0 {
-            total_size / total_count
-        } else {
-            0
-        };
+            .map_err(PgError::from)?;
 
         Ok(DocumentVersionStats {
             total_count,
             total_size,
             average_size,
-            latest_version_number,
+            latest_version_number: latest_version_number.unwrap_or(0),
         })
     }
 
-    /// Gets storage usage for an account's versions.
+    /// Gets storage usage statistics for a specific user account.
+    ///
+    /// Calculates total storage consumption by a user's created versions,
+    /// providing insights for storage quota management and user activity
+    /// analysis across version control workflows.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the user account to analyze
+    ///
+    /// # Returns
+    ///
+    /// The total storage used by the user's versions in bytes as a `BigDecimal`,
+    /// or a database error if the query fails.
     pub async fn get_user_version_storage_usage(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
-    ) -> PgResult<i64> {
+    ) -> PgResult<BigDecimal> {
         use schema::document_versions::{self, dsl};
 
-        let total_size: i64 = document_versions::table
+        let usage: Option<BigDecimal> = document_versions::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::sum(dsl::file_size_bytes))
-            .first::<Option<BigDecimal>>(conn)
+            .first(conn)
             .await
-            .map_err(PgError::from)?
-            .map(|bd| bd.to_string().parse().unwrap_or(0))
-            .unwrap_or(0);
+            .map_err(PgError::from)?;
 
-        Ok(total_size)
+        Ok(usage.unwrap_or_else(|| BigDecimal::from(0)))
     }
 
-    /// Gets version statistics for a user.
+    /// Gets comprehensive version statistics for a specific user.
+    ///
+    /// Calculates detailed metrics about a user's version creation activity,
+    /// content contribution patterns, and storage utilization. This provides
+    /// insights into user engagement, editing productivity, and version
+    /// control usage patterns.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `account_id` - UUID of the user account to analyze
+    ///
+    /// # Returns
+    ///
+    /// A `UserVersionStats` structure containing comprehensive user version
+    /// metrics, or a database error if the query fails.
     pub async fn get_user_version_stats(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
@@ -384,7 +685,7 @@ impl DocumentVersionRepository {
             .await
             .map_err(PgError::from)?;
 
-        // Recent versions
+        // Recent versions (within 30 days)
         let recent_count: i64 = document_versions::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::created_at.gt(thirty_days_ago))
@@ -394,16 +695,16 @@ impl DocumentVersionRepository {
             .await
             .map_err(PgError::from)?;
 
-        // Total storage
-        let total_storage: i64 = document_versions::table
+        // Total storage used by user's versions
+        let total_storage: Option<BigDecimal> = document_versions::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::sum(dsl::file_size_bytes))
-            .first::<Option<BigDecimal>>(conn)
+            .first(conn)
             .await
-            .map_err(PgError::from)?
-            .map(|bd| bd.to_string().parse().unwrap_or(0))
-            .unwrap_or(0);
+            .map_err(PgError::from)?;
+
+        let total_storage = total_storage.unwrap_or_else(|| BigDecimal::from(0));
 
         Ok(UserVersionStats {
             total_count,
@@ -412,57 +713,99 @@ impl DocumentVersionRepository {
         })
     }
 
-    // Cleanup and maintenance
-
-    /// Cleans up versions marked for auto-deletion.
-    pub async fn cleanup_auto_delete_versions(conn: &mut AsyncPgConnection) -> PgResult<i64> {
+    /// Cleans up versions marked for automatic deletion.
+    ///
+    /// Soft deletes versions that have been marked for automatic cleanup based
+    /// on retention policies or system maintenance schedules. This supports
+    /// automated storage management and compliance with data retention
+    /// requirements.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    ///
+    /// # Returns
+    ///
+    /// The number of versions that were marked for deletion,
+    /// or a database error if the operation fails.
+    pub async fn cleanup_auto_delete_versions(conn: &mut AsyncPgConnection) -> PgResult<usize> {
         use schema::document_versions::{self, dsl};
 
-        diesel::update(
-            document_versions::table
-                .filter(dsl::auto_delete_at.lt(OffsetDateTime::now_utc()))
-                .filter(dsl::deleted_at.is_null()),
-        )
-        .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-        .execute(conn)
-        .await
-        .map_err(PgError::from)
-        .map(|rows| rows as i64)
-    }
-
-    /// Hard deletes old soft-deleted versions.
-    pub async fn purge_old_versions(
-        conn: &mut AsyncPgConnection,
-        older_than_days: u32,
-    ) -> PgResult<i64> {
-        use schema::document_versions::{self, dsl};
-
-        let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(older_than_days as i64);
-
-        diesel::delete(document_versions::table.filter(dsl::deleted_at.lt(cutoff_date)))
+        let affected = diesel::update(document_versions::table)
+            .filter(dsl::auto_delete_at.le(OffsetDateTime::now_utc()))
+            .filter(dsl::deleted_at.is_null())
+            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
             .execute(conn)
             .await
-            .map_err(PgError::from)
-            .map(|rows| rows as i64)
+            .map_err(PgError::from)?;
+
+        Ok(affected)
     }
 
-    /// Finds orphaned versions (versions whose parent document was deleted).
+    /// Purges old versions beyond retention period.
+    ///
+    /// Soft deletes versions that exceed the specified age threshold,
+    /// supporting automated data lifecycle management and storage
+    /// optimization policies. This enables compliant data retention
+    /// and cost-effective storage management.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `retention_days` - Number of days beyond which versions should be purged
+    ///
+    /// # Returns
+    ///
+    /// The number of versions that were marked for deletion,
+    /// or a database error if the operation fails.
+    pub async fn purge_old_versions(
+        conn: &mut AsyncPgConnection,
+        retention_days: i32,
+    ) -> PgResult<usize> {
+        use schema::document_versions::{self, dsl};
+
+        let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
+
+        let affected = diesel::update(document_versions::table)
+            .filter(dsl::created_at.lt(cutoff_date))
+            .filter(dsl::deleted_at.is_null())
+            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .execute(conn)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(affected)
+    }
+
+    /// Finds orphaned versions without associated documents.
+    ///
+    /// Retrieves versions that reference documents that no longer exist,
+    /// enabling data integrity maintenance and cleanup operations. This
+    /// supports database consistency and helps identify data relationship
+    /// issues that may require administrative attention.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of orphaned `DocumentVersion` entries,
+    /// or a database error if the query fails.
     pub async fn find_orphaned_versions(
         conn: &mut AsyncPgConnection,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        use schema::document_versions::dsl as version_dsl;
+        use schema::documents::dsl as doc_dsl;
         use schema::{document_versions, documents};
 
-        // Find versions where the document doesn't exist or is deleted
-        let orphaned_versions = document_versions::table
-            .left_join(
-                documents::table.on(documents::id
-                    .eq(document_versions::document_id)
-                    .and(documents::deleted_at.is_null())),
-            )
-            .filter(documents::id.is_null())
-            .filter(document_versions::deleted_at.is_null())
-            .order(document_versions::created_at.asc())
+        let versions = document_versions::table
+            .left_join(documents::table.on(doc_dsl::id.eq(version_dsl::document_id)))
+            .filter(doc_dsl::id.is_null())
+            .filter(version_dsl::deleted_at.is_null())
+            .order(version_dsl::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
@@ -470,127 +813,205 @@ impl DocumentVersionRepository {
             .await
             .map_err(PgError::from)?;
 
-        Ok(orphaned_versions)
+        Ok(versions)
     }
 
-    /// Cleans up orphaned versions.
-    pub async fn cleanup_orphaned_versions(conn: &mut AsyncPgConnection) -> PgResult<i64> {
+    /// Cleans up orphaned versions without associated documents.
+    ///
+    /// Soft deletes versions that reference non-existent documents,
+    /// maintaining database consistency and preventing data integrity
+    /// issues. This supports automated database maintenance and ensures
+    /// referential integrity within the version control system.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    ///
+    /// # Returns
+    ///
+    /// The number of orphaned versions that were marked for deletion,
+    /// or a database error if the operation fails.
+    pub async fn cleanup_orphaned_versions(conn: &mut AsyncPgConnection) -> PgResult<usize> {
+        use schema::document_versions::dsl as version_dsl;
+        use schema::documents::dsl as doc_dsl;
         use schema::{document_versions, documents};
 
-        // Soft delete versions where the document doesn't exist or is deleted
-        // First, find document_ids that don't exist or are deleted
-        let orphaned_doc_ids: Vec<Uuid> = document_versions::table
-            .left_join(
-                documents::table.on(documents::id
-                    .eq(document_versions::document_id)
-                    .and(documents::deleted_at.is_null())),
+        let affected = diesel::update(document_versions::table)
+            .filter(
+                version_dsl::document_id.ne_all(
+                    documents::table
+                        .filter(doc_dsl::deleted_at.is_null())
+                        .select(doc_dsl::id),
+                ),
             )
-            .filter(documents::id.is_null())
-            .filter(document_versions::deleted_at.is_null())
-            .select(document_versions::document_id)
-            .distinct()
-            .load(conn)
+            .filter(version_dsl::deleted_at.is_null())
+            .set(version_dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .execute(conn)
             .await
             .map_err(PgError::from)?;
 
-        if orphaned_doc_ids.is_empty() {
-            return Ok(0);
-        }
-
-        // Then update the versions with those document_ids
-        diesel::update(
-            document_versions::table
-                .filter(document_versions::document_id.eq_any(orphaned_doc_ids))
-                .filter(document_versions::deleted_at.is_null()),
-        )
-        .set(document_versions::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-        .execute(conn)
-        .await
-        .map_err(PgError::from)
-        .map(|rows| rows as i64)
+        Ok(affected)
     }
 }
 
-/// Statistics for document versions.
+/// Comprehensive statistics for versions within a document.
+///
+/// Provides insights into version creation patterns, content evolution,
+/// and storage utilization within document version control workflows.
+/// These metrics help document managers understand editing activity,
+/// identify storage optimization opportunities, and analyze content
+/// evolution patterns over time.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DocumentVersionStats {
     /// Total number of versions for the document
     pub total_count: i64,
-    /// Total file size of all versions in bytes
-    pub total_size: i64,
+    /// Total storage used by all versions in bytes
+    pub total_size: BigDecimal,
     /// Average version size in bytes
-    pub average_size: i64,
-    /// Latest version number
+    pub average_size: BigDecimal,
+    /// Latest version number in the sequence
     pub latest_version_number: i32,
 }
 
 impl DocumentVersionStats {
-    /// Returns whether the document has multiple versions.
+    /// Indicates whether the document has multiple versions.
+    ///
+    /// Returns true if more than one version exists, suggesting
+    /// active editing and version control usage.
     pub fn has_multiple_versions(&self) -> bool {
         self.total_count > 1
     }
 
-    /// Returns whether the document has any versions.
+    /// Indicates whether the document has any versions.
+    ///
+    /// Returns true if at least one version exists,
+    /// confirming version control initialization.
     pub fn has_versions(&self) -> bool {
         self.total_count > 0
     }
 
-    /// Returns the total storage usage in a human-readable format.
-    pub fn total_size_human(&self) -> String {
-        if self.total_size < 1024 {
-            format!("{} B", self.total_size)
-        } else if self.total_size < 1024 * 1024 {
-            format!("{:.1} KB", self.total_size as f64 / 1024.0)
-        } else if self.total_size < 1024 * 1024 * 1024 {
-            format!("{:.1} MB", self.total_size as f64 / (1024.0 * 1024.0))
+    /// Indicates whether the document shows significant editing activity.
+    ///
+    /// Returns true if the document has more than 5 versions,
+    /// suggesting active collaborative editing patterns.
+    pub fn has_active_editing(&self) -> bool {
+        self.total_count > 5
+    }
+
+    /// Calculates storage efficiency ratio.
+    ///
+    /// Returns the ratio of average version size to total size,
+    /// indicating storage overhead from version control.
+    pub fn storage_efficiency(&self) -> f64 {
+        if self.total_count <= 1 {
+            1.0
         } else {
-            format!(
-                "{:.1} GB",
-                self.total_size as f64 / (1024.0 * 1024.0 * 1024.0)
-            )
+            let avg_size_f64 = self.average_size.to_string().parse::<f64>().unwrap_or(0.0);
+            let total_size_f64 = self.total_size.to_string().parse::<f64>().unwrap_or(1.0);
+            avg_size_f64 / total_size_f64
+        }
+    }
+
+    /// Formats total storage usage in human-readable format.
+    ///
+    /// Returns a string representation of total storage with
+    /// appropriate unit scaling (B, KB, MB, GB).
+    pub fn total_size_human(&self) -> String {
+        let size_f64 = self.total_size.to_string().parse::<f64>().unwrap_or(0.0);
+
+        if size_f64 < 1024.0 {
+            format!("{:.0} B", size_f64)
+        } else if size_f64 < 1024.0 * 1024.0 {
+            format!("{:.1} KB", size_f64 / 1024.0)
+        } else if size_f64 < 1024.0 * 1024.0 * 1024.0 {
+            format!("{:.1} MB", size_f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{:.1} GB", size_f64 / (1024.0 * 1024.0 * 1024.0))
         }
     }
 }
 
-/// Statistics for versions created by a user.
+/// Comprehensive statistics for versions created by a specific user.
+///
+/// Provides insights into individual user contribution patterns, version
+/// creation productivity, and storage utilization within version control
+/// workflows. These metrics help identify active contributors and understand
+/// user engagement with version control capabilities.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UserVersionStats {
-    /// Total number of versions created by user
+    /// Total number of versions created by the user
     pub total_count: i64,
-    /// Number of versions created in last 30 days
+    /// Number of versions created by the user in the last 30 days
     pub recent_count: i64,
-    /// Total storage used by user's versions in bytes
-    pub total_storage: i64,
+    /// Total storage used by the user's versions in bytes
+    pub total_storage: BigDecimal,
 }
 
 impl UserVersionStats {
-    /// Returns whether the user is actively creating versions.
+    /// Indicates whether the user is actively creating versions.
+    ///
+    /// Returns true if the user has created any versions in the last 30 days,
+    /// suggesting current engagement with version control workflows.
     pub fn is_active_versioner(&self) -> bool {
         self.recent_count > 0
     }
 
-    /// Returns the average version size in bytes.
+    /// Indicates whether the user has contributed any versions.
+    ///
+    /// Returns true if the user has created any versions in the system,
+    /// useful for identifying contributing versus consuming users.
+    pub fn has_created_versions(&self) -> bool {
+        self.total_count > 0
+    }
+
+    /// Calculates the average version size created by the user.
+    ///
+    /// Returns the mean size of versions created by the user,
+    /// useful for understanding user content creation patterns.
     pub fn average_version_size(&self) -> f64 {
         if self.total_count == 0 {
             0.0
         } else {
-            self.total_storage as f64 / self.total_count as f64
+            let total_size_f64 = self.total_storage.to_string().parse::<f64>().unwrap_or(0.0);
+            total_size_f64 / self.total_count as f64
         }
     }
 
-    /// Returns the storage usage in a human-readable format.
-    pub fn storage_human(&self) -> String {
-        if self.total_storage < 1024 {
-            format!("{} B", self.total_storage)
-        } else if self.total_storage < 1024 * 1024 {
-            format!("{:.1} KB", self.total_storage as f64 / 1024.0)
-        } else if self.total_storage < 1024 * 1024 * 1024 {
-            format!("{:.1} MB", self.total_storage as f64 / (1024.0 * 1024.0))
+    /// Calculates the recent activity rate as a percentage.
+    ///
+    /// Returns the percentage of the user's total versions that were
+    /// created recently, indicating current productivity levels.
+    pub fn recent_activity_rate(&self) -> f64 {
+        if self.total_count == 0 {
+            0.0
         } else {
-            format!(
-                "{:.1} GB",
-                self.total_storage as f64 / (1024.0 * 1024.0 * 1024.0)
-            )
+            (self.recent_count as f64 / self.total_count as f64) * 100.0
+        }
+    }
+
+    /// Indicates whether the user is a prolific version creator.
+    ///
+    /// Returns true if the user has created more than 20 versions,
+    /// suggesting heavy usage of version control capabilities.
+    pub fn is_prolific_versioner(&self) -> bool {
+        self.total_count > 20
+    }
+
+    /// Formats storage usage in human-readable format.
+    ///
+    /// Returns a string representation of storage usage with
+    /// appropriate unit scaling (B, KB, MB, GB).
+    pub fn storage_human(&self) -> String {
+        let storage_f64 = self.total_storage.to_string().parse::<f64>().unwrap_or(0.0);
+
+        if storage_f64 < 1024.0 {
+            format!("{:.0} B", storage_f64)
+        } else if storage_f64 < 1024.0 * 1024.0 {
+            format!("{:.1} KB", storage_f64 / 1024.0)
+        } else if storage_f64 < 1024.0 * 1024.0 * 1024.0 {
+            format!("{:.1} MB", storage_f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{:.1} GB", storage_f64 / (1024.0 * 1024.0 * 1024.0))
         }
     }
 }

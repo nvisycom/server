@@ -11,14 +11,10 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum ProjectMemberConstraints {
     // Member validation constraints
-    #[strum(serialize = "project_members_custom_permissions_size_min")]
-    CustomPermissionsSizeMin,
-    #[strum(serialize = "project_members_custom_permissions_size_max")]
-    CustomPermissionsSizeMax,
-    #[strum(serialize = "project_members_show_order_min")]
-    ShowOrderMin,
-    #[strum(serialize = "project_members_show_order_max")]
-    ShowOrderMax,
+    #[strum(serialize = "project_members_custom_permissions_size")]
+    CustomPermissionsSize,
+    #[strum(serialize = "project_members_show_order_range")]
+    ShowOrderRange,
 
     // Member chronological constraints
     #[strum(serialize = "project_members_updated_after_created")]
@@ -36,10 +32,8 @@ impl ProjectMemberConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            ProjectMemberConstraints::CustomPermissionsSizeMin
-            | ProjectMemberConstraints::CustomPermissionsSizeMax
-            | ProjectMemberConstraints::ShowOrderMin
-            | ProjectMemberConstraints::ShowOrderMax => ConstraintCategory::Validation,
+            ProjectMemberConstraints::CustomPermissionsSize
+            | ProjectMemberConstraints::ShowOrderRange => ConstraintCategory::Validation,
 
             ProjectMemberConstraints::UpdatedAfterCreated
             | ProjectMemberConstraints::LastAccessedAfterCreated => {

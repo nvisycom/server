@@ -23,7 +23,7 @@ use crate::handler::request::{
     CreateDocumentComment, UpdateDocumentComment as UpdateCommentRequest,
 };
 use crate::handler::response::{DocumentComment, DocumentComments};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document comment operations.
@@ -134,7 +134,6 @@ async fn create_document_comment(
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
         content: request.content.clone(),
-        metadata: request.metadata,
         ..Default::default()
     };
 
@@ -157,7 +156,7 @@ async fn create_document_comment(
     get, path = "/documents/{documentId}/comments/", tag = "comments",
     params(DocumentPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -183,7 +182,7 @@ async fn list_document_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -223,7 +222,7 @@ async fn list_document_comments(
     get, path = "/documents/{documentId}/comments/top-level/", tag = "comments",
     params(DocumentPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -249,7 +248,7 @@ async fn list_top_level_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -358,7 +357,7 @@ async fn get_comment(
     get, path = "/documents/{documentId}/comments/{commentId}/replies/", tag = "comments",
     params(DocumentCommentPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -384,7 +383,7 @@ async fn list_comment_replies(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentCommentPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -520,7 +519,7 @@ async fn update_comment(
 
     let update_data = nvisy_postgres::model::UpdateDocumentComment {
         content: request.content,
-        metadata: request.metadata,
+        ..Default::default()
     };
 
     let comment =
@@ -696,7 +695,6 @@ async fn create_file_comment(
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
         content: request.content.clone(),
-        metadata: request.metadata,
         ..Default::default()
     };
 
@@ -710,7 +708,7 @@ async fn create_file_comment(
 #[utoipa::path(
     get, path = "/files/{fileId}/comments/", tag = "comments",
     params(FilePathParams),
-    request_body(content = PaginationRequest, description = "Pagination parameters"),
+    request_body(content = Pagination, description = "Pagination parameters"),
     responses(
         (status = OK, description = "Comments listed", body = DocumentComments),
     )
@@ -719,7 +717,7 @@ async fn list_file_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -832,7 +830,6 @@ async fn create_version_comment(
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
         content: request.content.clone(),
-        metadata: request.metadata,
         ..Default::default()
     };
 
@@ -846,7 +843,7 @@ async fn create_version_comment(
 #[utoipa::path(
     get, path = "/versions/{versionId}/comments/", tag = "comments",
     params(VersionPathParams),
-    request_body(content = PaginationRequest, description = "Pagination parameters"),
+    request_body(content = Pagination, description = "Pagination parameters"),
     responses(
         (status = OK, description = "Comments listed", body = DocumentComments),
     )
@@ -855,7 +852,7 @@ async fn list_version_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<VersionPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -936,7 +933,6 @@ mod test {
             content: "This is a test comment".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
 
         let response = server
@@ -963,7 +959,6 @@ mod test {
             content: "Test comment for listing".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
         server
             .post(&format!("/documents/{}/comments/", document_id))
@@ -971,7 +966,7 @@ mod test {
             .await;
 
         // List comments
-        let pagination = PaginationRequest::default().with_limit(10);
+        let pagination = Pagination::default().with_limit(10);
         let response = server
             .get(&format!("/documents/{}/comments/", document_id))
             .json(&pagination)
@@ -995,7 +990,6 @@ mod test {
             content: "Original comment".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
         let create_response = server
             .post(&format!("/documents/{}/comments/", document_id))
@@ -1006,7 +1000,6 @@ mod test {
         // Update the comment
         let update_request = UpdateCommentRequest {
             content: Some("Updated comment".to_string()),
-            metadata: None,
         };
 
         let response = server
@@ -1035,7 +1028,6 @@ mod test {
             content: "Comment to delete".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
         let create_response = server
             .post(&format!("/documents/{}/comments/", document_id))

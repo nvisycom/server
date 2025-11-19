@@ -38,10 +38,6 @@ pub struct ApiToken {
     #[schema(example = false)]
     pub is_expired: bool,
 
-    /// Whether the token is active (recently used).
-    #[schema(example = true)]
-    pub is_active: bool,
-
     /// Timestamp of token creation.
     #[schema(example = "2024-01-01T00:00:00Z")]
     pub issued_at: OffsetDateTime,
@@ -107,31 +103,17 @@ pub struct ApiTokenOperation {
 
 impl From<AccountApiToken> for ApiToken {
     fn from(token: AccountApiToken) -> Self {
-        let access_token_preview = token.access_seq_short();
-        let refresh_token_preview = token.refresh_seq_short();
-        let account_id = token.account_id;
-        let session_type = token.session_type;
-        let issued_at = token.issued_at;
-        let expired_at = token.expired_at;
-        let last_used_at = token.last_used_at;
-        let is_expired = token.is_expired();
-        let is_active = token.is_active();
-
-        let name = token.name;
-        let description = token.description;
-
         Self {
-            access_token_preview,
-            refresh_token_preview,
-            account_id,
-            name,
-            description,
-            session_type,
-            is_expired,
-            is_active,
-            issued_at,
-            expired_at,
-            last_used_at,
+            access_token_preview: token.access_seq_short(),
+            refresh_token_preview: token.refresh_seq_short(),
+            account_id: token.account_id,
+            session_type: token.session_type,
+            is_expired: token.is_expired(),
+            issued_at: token.issued_at,
+            expired_at: token.expired_at,
+            last_used_at: token.last_used_at,
+            name: token.name,
+            description: token.description,
         }
     }
 }

@@ -22,7 +22,7 @@ use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJs
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{CreateInvite, ReplyInvite};
 use crate::handler::response::{Invite, Invites};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project invite operations.
@@ -37,18 +37,6 @@ pub struct InvitePathParams {
     pub project_id: Uuid,
     /// Unique identifier of the invite.
     pub invite_id: Uuid,
-}
-
-/// Path parameters for invitee-specific endpoints.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct InviteePathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-    /// Unique identifier of the invitee account.
-    pub account_id: Uuid,
 }
 
 /// Creates a new project invitation.
@@ -171,7 +159,7 @@ async fn send_invite(
 
     // Generate expiration time
     let expires_at = OffsetDateTime::now_utc()
-        + time::Duration::days(request.expires_in_days.clamp(1, 30) as i64);
+        + time::Duration::days(request.expires_in_days.unwrap_or(7).clamp(1, 30) as i64);
 
     // Sanitize the invite message for additional security
     let sanitized_message = sanitize_text(&request.invite_message);
@@ -215,7 +203,7 @@ async fn send_invite(
         ("status" = Option<InviteStatus>, Query, description = "Filter by invitation status")
     ),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -251,7 +239,7 @@ async fn list_invites(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Invites>)> {
     let mut conn = pg_client.get_connection().await?;
 

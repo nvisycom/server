@@ -5,47 +5,48 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::document_versions;
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Document version model representing a specific version of a document file.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = document_versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DocumentVersion {
-    /// Unique version identifier
+    /// Unique version identifier.
     pub id: Uuid,
-    /// Reference to the document this version belongs to
+    /// Reference to the document this version belongs to.
     pub document_id: Uuid,
-    /// Reference to the account that owns this version
+    /// Reference to the account that owns this version.
     pub account_id: Uuid,
-    /// Version number (incremental)
+    /// Version number (incremental).
     pub version_number: i32,
-    /// Display name for this version
+    /// Display name for this version.
     pub display_name: String,
-    /// File extension (without the dot)
+    /// File extension (without the dot).
     pub file_extension: String,
-    /// Processing credits used
+    /// Processing credits used.
     pub processing_credits: i32,
-    /// Processing duration in milliseconds
+    /// Processing duration in milliseconds.
     pub processing_duration: i32,
-    /// Number of API calls made during processing
+    /// Number of API calls made during processing.
     pub api_calls_made: i32,
-    /// File size in bytes
+    /// File size in bytes.
     pub file_size_bytes: i64,
-    /// SHA-256 hash of the file
+    /// SHA-256 hash of the file.
     pub file_hash_sha256: Vec<u8>,
-    /// Storage path or identifier for the version file
+    /// Storage path or identifier for the version file.
     pub storage_path: String,
-    /// Storage bucket location
+    /// Storage bucket location.
     pub storage_bucket: String,
-    /// Processing results and extracted data (JSON)
+    /// Processing results and extracted data (JSON).
     pub results: serde_json::Value,
-    /// Version metadata (JSON)
+    /// Version metadata (JSON).
     pub metadata: serde_json::Value,
-    /// Timestamp when the version was created
+    /// Timestamp when the version was created.
     pub created_at: OffsetDateTime,
-    /// Timestamp when the version was last updated
+    /// Timestamp when the version was last updated.
     pub updated_at: OffsetDateTime,
-    /// Timestamp when the version was soft-deleted
+    /// Timestamp when the version was soft-deleted.
     pub deleted_at: Option<OffsetDateTime>,
     /// Retention period in seconds
     pub keep_for_sec: i32,
@@ -58,15 +59,15 @@ pub struct DocumentVersion {
 #[diesel(table_name = document_versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentVersion {
-    /// Document ID
+    /// Document ID.
     pub document_id: Uuid,
-    /// Account ID
+    /// Account ID.
     pub account_id: Uuid,
-    /// Version number
+    /// Version number.
     pub version_number: i32,
-    /// Display name
+    /// Display name.
     pub display_name: Option<String>,
-    /// File extension
+    /// File extension.
     pub file_extension: Option<String>,
     /// Processing credits
     pub processing_credits: Option<i32>,
@@ -146,127 +147,152 @@ impl DocumentVersion {
         }
     }
 
-    /// Returns whether the version is an image based on file extension.
-    pub fn is_image(&self) -> bool {
-        matches!(
-            self.file_extension.to_lowercase().as_str(),
-            "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg"
-        )
+    /// Returns the file size in a human-readable format.
+    pub fn file_size_human(&self) -> String {
+        let bytes = self.file_size_bytes as f64;
+        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+
+        if bytes < 1024.0 {
+            return format!("{} B", self.file_size_bytes);
+        }
+
+        let mut size = bytes;
+        let mut unit_index = 0;
+
+        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+            size /= 1024.0;
+            unit_index += 1;
+        }
+
+        format!("{:.1} {}", size, UNITS[unit_index])
     }
 
-    /// Returns whether the version is a document based on file extension.
-    pub fn is_document(&self) -> bool {
-        matches!(
-            self.file_extension.to_lowercase().as_str(),
-            "pdf" | "doc" | "docx" | "txt" | "html" | "md" | "rtf"
-        )
+    /// Returns the SHA-256 hash as a hex string.
+    pub fn hash_hex(&self) -> String {
+        self.file_hash_sha256
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
     }
 
-    /// Returns whether the version is a video based on file extension.
-    pub fn is_video(&self) -> bool {
-        matches!(
-            self.file_extension.to_lowercase().as_str(),
-            "mp4" | "avi" | "mov" | "wmv" | "flv" | "mkv" | "webm"
-        )
+    /// Returns a shortened version of the hash for display.
+    pub fn hash_short(&self) -> String {
+        let hex_hash = self.hash_hex();
+        if hex_hash.len() > 8 {
+            format!("{}...", &hex_hash[..8])
+        } else {
+            hex_hash
+        }
     }
 
-    /// Returns whether the version is audio based on file extension.
-    pub fn is_audio(&self) -> bool {
-        matches!(
-            self.file_extension.to_lowercase().as_str(),
-            "mp3" | "wav" | "ogg" | "m4a" | "flac" | "aac"
-        )
+    /// Returns the processing duration in seconds.
+    pub fn processing_duration_seconds(&self) -> f64 {
+        self.processing_duration as f64 / 1000.0
     }
 
-    /// Returns whether the version was created recently (within last 24 hours).
-    pub fn is_recently_created(&self) -> bool {
-        let now = time::OffsetDateTime::now_utc();
-        let duration = now - self.created_at;
-        duration.whole_days() < 1
+    /// Returns whether this version has processing results.
+    pub fn has_results(&self) -> bool {
+        !self.results.as_object().map_or(true, |obj| obj.is_empty())
     }
 
-    /// Returns whether the version was updated recently (within last hour).
-    pub fn is_recently_updated(&self) -> bool {
-        let now = time::OffsetDateTime::now_utc();
-        let duration = now - self.updated_at;
-        duration.whole_hours() < 1
+    /// Returns whether this version has metadata.
+    pub fn has_metadata(&self) -> bool {
+        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+    }
+
+    /// Returns whether this is a high-cost version (used many credits).
+    pub fn is_high_cost(&self) -> bool {
+        self.processing_credits > 100 // Arbitrary threshold
+    }
+
+    /// Returns whether this version required many API calls.
+    pub fn is_api_intensive(&self) -> bool {
+        self.api_calls_made > 50 // Arbitrary threshold
     }
 
     /// Returns the file extension with a dot prefix.
     pub fn file_extension_with_dot(&self) -> String {
-        if self.file_extension.is_empty() {
-            String::new()
+        if self.file_extension.starts_with('.') {
+            self.file_extension.clone()
         } else {
             format!(".{}", self.file_extension)
         }
     }
 
-    /// Returns whether the version has processing results.
-    pub fn has_processing_results(&self) -> bool {
-        !self.results.as_object().is_none_or(|obj| obj.is_empty())
+    /// Returns whether the file is a specific type by extension.
+    pub fn is_file_type(&self, extension: &str) -> bool {
+        self.file_extension.eq_ignore_ascii_case(extension)
     }
 
-    /// Returns whether the version has metadata.
-    pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
+    /// Returns whether the file is an image.
+    pub fn is_image(&self) -> bool {
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "jpg" | "jpeg" | "png" | "gif" | "svg" | "webp" | "bmp"
+        )
     }
 
-    /// Returns whether the version is large (over 10MB).
+    /// Returns whether the file is a document.
+    pub fn is_document(&self) -> bool {
+        matches!(
+            self.file_extension.to_lowercase().as_str(),
+            "pdf" | "doc" | "docx" | "txt" | "md" | "rtf"
+        )
+    }
+
+    /// Returns whether this is a large file (over 10MB).
     pub fn is_large_file(&self) -> bool {
-        self.file_size_bytes > 10_000_000 // 10MB
+        self.file_size_bytes > 10_000_000
     }
 
-    /// Returns whether the version has a valid file hash.
-    pub fn has_valid_hash(&self) -> bool {
-        !self.file_hash_sha256.is_empty()
-    }
-
-    /// Returns a shortened version of the file hash for display.
-    pub fn hash_short(&self) -> String {
-        if self.file_hash_sha256.len() >= 4 {
-            format!(
-                "{:02x}{:02x}{:02x}{:02x}...",
-                self.file_hash_sha256[0],
-                self.file_hash_sha256[1],
-                self.file_hash_sha256[2],
-                self.file_hash_sha256[3]
-            )
+    /// Returns the processing efficiency (bytes per credit).
+    pub fn processing_efficiency(&self) -> Option<f64> {
+        if self.processing_credits > 0 {
+            Some(self.file_size_bytes as f64 / self.processing_credits as f64)
         } else {
-            String::new()
+            None
         }
     }
 
-    /// Returns the age of the version since creation.
+    /// Returns the average processing time per API call (in milliseconds).
+    pub fn avg_processing_time_per_call(&self) -> Option<f64> {
+        if self.api_calls_made > 0 {
+            Some(self.processing_duration as f64 / self.api_calls_made as f64)
+        } else {
+            None
+        }
+    }
+
+    /// Returns whether this version can be compared with another version number.
+    pub fn is_newer_than(&self, other_version: i32) -> bool {
+        self.version_number > other_version
+    }
+
+    /// Returns whether this version is older than another version number.
+    pub fn is_older_than(&self, other_version: i32) -> bool {
+        self.version_number < other_version
+    }
+
+    /// Returns the age of this version since creation.
     pub fn age(&self) -> time::Duration {
-        time::OffsetDateTime::now_utc() - self.created_at
+        OffsetDateTime::now_utc() - self.created_at
     }
+}
 
-    /// Returns whether this version needs immediate attention (scheduled for deletion soon).
-    pub fn needs_attention(&self) -> bool {
-        if let Some(remaining) = self.time_until_deletion() {
-            remaining.whole_days() < 1 // Less than 1 day until deletion
-        } else {
-            false
-        }
+impl HasCreatedAt for DocumentVersion {
+    fn created_at(&self) -> OffsetDateTime {
+        self.created_at
     }
+}
 
-    /// Returns the formatted version number for display.
-    pub fn version_display(&self) -> String {
-        format!("v{}", self.version_number)
+impl HasUpdatedAt for DocumentVersion {
+    fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
     }
+}
 
-    /// Returns whether this version can be compared with another version.
-    pub fn can_compare_with(&self, other: &DocumentVersion) -> bool {
-        self.document_id == other.document_id && !self.is_deleted() && !other.is_deleted()
-    }
-
-    /// Returns whether this version is newer than another version.
-    pub fn is_newer_than(&self, other: &DocumentVersion) -> bool {
-        self.document_id == other.document_id && self.version_number > other.version_number
-    }
-
-    /// Returns whether this version is older than another version.
-    pub fn is_older_than(&self, other: &DocumentVersion) -> bool {
-        self.document_id == other.document_id && self.version_number < other.version_number
+impl HasDeletedAt for DocumentVersion {
+    fn deleted_at(&self) -> Option<OffsetDateTime> {
+        self.deleted_at
     }
 }

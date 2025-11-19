@@ -6,36 +6,36 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::schema::account_action_tokens;
-use crate::types::ActionTokenType;
+use crate::types::{ActionTokenType, HasCreatedAt, HasExpiresAt, HasSecurityContext};
 
-/// Account action token model representing an action token for account operations.
+/// Account action token model representing a temporary authorization token.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = account_action_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AccountActionToken {
-    /// Unique identifier for the token
+    /// Unique identifier for the token.
     pub action_token: Uuid,
-    /// Reference to the account this token belongs to
+    /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-    /// Type of action this token authorizes
+    /// Type of action this token authorizes.
     pub action_type: ActionTokenType,
-    /// Additional context data for the token action (JSON, 2B-4KB)
+    /// Additional context data for the token action (JSON, 2B-4KB).
     pub action_data: serde_json::Value,
-    /// IP address where the token was generated
+    /// IP address where the token was generated.
     pub ip_address: IpNet,
-    /// User agent of the client that generated the token
+    /// User agent of the client that generated the token.
     pub user_agent: String,
-    /// Optional device identifier for additional security tracking
+    /// Optional device identifier for additional security tracking.
     pub device_id: Option<String>,
-    /// Number of times this token has been attempted
+    /// Number of times this token has been attempted.
     pub attempt_count: i32,
-    /// Maximum allowed attempts before token becomes invalid
+    /// Maximum allowed attempts before token becomes invalid.
     pub max_attempts: i32,
-    /// Timestamp when the token was created
+    /// Timestamp when the token was created.
     pub issued_at: OffsetDateTime,
-    /// Timestamp when the token expires
+    /// Timestamp when the token expires.
     pub expired_at: OffsetDateTime,
-    /// Timestamp when the token was successfully used
+    /// Timestamp when the token was successfully used.
     pub used_at: Option<OffsetDateTime>,
 }
 
@@ -44,39 +44,39 @@ pub struct AccountActionToken {
 #[diesel(table_name = account_action_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountActionToken {
-    /// Reference to the account this token belongs to
+    /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-    /// Type of action this token authorizes
+    /// Type of action this token authorizes.
     pub action_type: ActionTokenType,
-    /// Additional context data for the token action
+    /// Additional context data for the token action.
     pub action_data: Option<serde_json::Value>,
-    /// IP address where the token was generated
+    /// IP address where the token was generated.
     pub ip_address: IpNet,
-    /// User agent of the client that generated the token
+    /// User agent of the client that generated the token.
     pub user_agent: String,
-    /// Optional device identifier for additional security tracking
+    /// Optional device identifier for additional security tracking.
     pub device_id: Option<String>,
-    /// Maximum allowed attempts before token becomes invalid
+    /// Maximum allowed attempts before token becomes invalid.
     pub max_attempts: Option<i32>,
-    /// Timestamp when the token expires
+    /// Timestamp when the token expires.
     pub expired_at: Option<OffsetDateTime>,
 }
 
 /// Data for updating an account action token.
-#[derive(Debug, Clone, Default, AsChangeset)]
+#[derive(Debug, Default, Clone, AsChangeset)]
 #[diesel(table_name = account_action_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountActionToken {
-    /// Number of times this token has been attempted
+    /// Number of times this token has been attempted.
     pub attempt_count: Option<i32>,
-    /// Timestamp when the token was successfully used
+    /// Timestamp when the token was successfully used.
     pub used_at: Option<OffsetDateTime>,
 }
 
 impl AccountActionToken {
-    /// Returns whether the token is still valid (not expired and not used).
+    /// Returns whether the token is currently valid (not expired and not used).
     pub fn is_valid(&self) -> bool {
-        !self.is_expired() && !self.is_used()
+        !self.is_expired() && !self.is_used() && !self.has_exceeded_attempts()
     }
 
     /// Returns whether the token has expired.
@@ -84,14 +84,9 @@ impl AccountActionToken {
         OffsetDateTime::now_utc() > self.expired_at
     }
 
-    /// Returns whether the token has been used.
+    /// Returns whether the token has been successfully used.
     pub fn is_used(&self) -> bool {
         self.used_at.is_some()
-    }
-
-    /// Returns whether the token can still be used.
-    pub fn can_be_used(&self) -> bool {
-        self.is_valid() && !self.has_exceeded_attempts()
     }
 
     /// Returns whether the token has exceeded maximum attempts.
@@ -99,81 +94,63 @@ impl AccountActionToken {
         self.attempt_count >= self.max_attempts
     }
 
-    /// Returns the remaining time until token expires.
-    pub fn time_until_expiry(&self) -> Option<Duration> {
-        let now = OffsetDateTime::now_utc();
-        if self.expired_at > now {
-            Some(self.expired_at - now)
-        } else {
-            None
-        }
+    /// Returns whether the token can be used for another attempt.
+    pub fn can_attempt(&self) -> bool {
+        self.is_valid() && !self.has_exceeded_attempts()
     }
 
-    /// Returns whether the token is about to expire (within specified minutes).
-    pub fn is_expiring_soon(&self, minutes: i64) -> bool {
-        if let Some(remaining) = self.time_until_expiry() {
-            remaining.whole_minutes() <= minutes
-        } else {
-            false
-        }
+    /// Returns whether the token has been attempted at least once.
+    pub fn has_been_attempted(&self) -> bool {
+        self.attempt_count > 0
     }
 
-    /// Returns whether the token was created recently (within last hour).
-    pub fn is_recently_created(&self) -> bool {
-        let now = OffsetDateTime::now_utc();
-        let duration = now - self.issued_at;
-        duration.whole_hours() < 1
-    }
-
-    /// Returns whether the token was used recently (within last hour).
-    pub fn is_recently_used(&self) -> bool {
-        if let Some(used_time) = self.used_at {
-            let now = OffsetDateTime::now_utc();
-            let duration = now - used_time;
-            duration.whole_hours() < 1
-        } else {
-            false
-        }
-    }
-
-    /// Returns whether this is an account activation token.
-    pub fn is_account_activation(&self) -> bool {
-        self.action_type == ActionTokenType::ActivateAccount
-    }
-
-    /// Returns whether this is a password reset token.
+    /// Returns whether the token is for password reset.
     pub fn is_password_reset(&self) -> bool {
-        self.action_type == ActionTokenType::ResetPassword
+        matches!(self.action_type, ActionTokenType::ResetPassword)
     }
 
-    /// Returns whether this is an email update token.
-    pub fn is_email_update(&self) -> bool {
-        self.action_type == ActionTokenType::UpdateEmail
+    /// Returns whether the token is for email verification.
+    pub fn is_email_verification(&self) -> bool {
+        matches!(self.action_type, ActionTokenType::ActivateAccount)
     }
 
-    /// Returns whether this is a two-factor authentication token.
-    pub fn is_two_factor_enable(&self) -> bool {
-        self.action_type == ActionTokenType::Enable2fa
-    }
-
-    /// Returns whether this is a login verification token.
+    /// Returns whether the token is for login verification.
     pub fn is_login_verification(&self) -> bool {
-        self.action_type == ActionTokenType::LoginVerification
+        matches!(self.action_type, ActionTokenType::LoginVerification)
     }
 
-    /// Returns the remaining attempts before the token is blocked.
+    /// Returns the number of remaining attempts.
     pub fn remaining_attempts(&self) -> i32 {
         (self.max_attempts - self.attempt_count).max(0)
     }
 
-    /// Returns a shortened version of the token for logging/display.
-    pub fn token_short(&self) -> String {
+    /// Returns a shortened version of the token for logging purposes.
+    pub fn action_token_short(&self) -> String {
         let token_str = self.action_token.to_string();
         if token_str.len() > 8 {
             format!("{}...", &token_str[..8])
         } else {
             token_str
         }
+    }
+
+    /// Returns whether the token has a device identifier.
+    pub fn has_device_id(&self) -> bool {
+        self.device_id.is_some()
+    }
+
+    /// Returns the token's usage rate (attempts/max_attempts).
+    pub fn usage_rate(&self) -> f64 {
+        if self.max_attempts > 0 {
+            self.attempt_count as f64 / self.max_attempts as f64
+        } else {
+            0.0
+        }
+    }
+
+    /// Returns whether the token is close to attempt limit.
+    pub fn is_near_attempt_limit(&self) -> bool {
+        self.usage_rate() >= 0.8 // 80% of attempts used
     }
 
     /// Returns whether the token requires immediate action.
@@ -186,7 +163,12 @@ impl AccountActionToken {
 
     /// Returns the recommended expiry time for this token type.
     pub fn recommended_expiry_duration(&self) -> Duration {
-        Duration::seconds(self.action_type.default_expiration_seconds() as i64)
+        match self.action_type {
+            ActionTokenType::ActivateAccount => Duration::hours(24),
+            ActionTokenType::ResetPassword => Duration::hours(1),
+            ActionTokenType::LoginVerification => Duration::minutes(15),
+            _ => Duration::hours(2),
+        }
     }
 
     /// Returns whether the token has context data.
@@ -194,16 +176,49 @@ impl AccountActionToken {
         !self
             .action_data
             .as_object()
-            .is_none_or(|obj| obj.is_empty())
-    }
-
-    /// Returns the duration since the token was created.
-    pub fn age(&self) -> Duration {
-        OffsetDateTime::now_utc() - self.issued_at
+            .map_or(true, |obj| obj.is_empty())
     }
 
     /// Returns whether the token is stale (created more than recommended duration ago but not expired).
     pub fn is_stale(&self) -> bool {
-        !self.is_expired() && self.age() > self.recommended_expiry_duration()
+        !self.is_expired() && self.creation_age() > self.recommended_expiry_duration()
+    }
+
+    /// Returns whether the token is from a suspicious source.
+    pub fn is_suspicious(&self) -> bool {
+        // Simple heuristics for suspicious tokens
+        self.attempt_count > (self.max_attempts / 2) && !self.is_used()
+    }
+
+    /// Returns whether the token has the specified action type.
+    pub fn has_action_type(&self, action_type: ActionTokenType) -> bool {
+        self.action_type == action_type
+    }
+
+    /// Returns whether the token can be refreshed/extended.
+    pub fn can_be_refreshed(&self) -> bool {
+        self.is_valid() && !self.is_suspicious()
+    }
+}
+
+impl HasCreatedAt for AccountActionToken {
+    fn created_at(&self) -> OffsetDateTime {
+        self.issued_at
+    }
+}
+
+impl HasExpiresAt for AccountActionToken {
+    fn expires_at(&self) -> OffsetDateTime {
+        self.expired_at
+    }
+}
+
+impl HasSecurityContext for AccountActionToken {
+    fn ip_address(&self) -> Option<IpNet> {
+        Some(self.ip_address)
+    }
+
+    fn user_agent(&self) -> Option<&str> {
+        Some(&self.user_agent)
     }
 }

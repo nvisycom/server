@@ -20,7 +20,7 @@ use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJs
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{CreateDocument, UpdateDocument};
 use crate::handler::response::{Document, Documents};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document operations.
@@ -113,7 +113,7 @@ async fn create_document(
     get, path = "/projects/{projectId}/documents/", tag = "documents",
     params(ProjectPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -139,7 +139,7 @@ async fn get_all_documents(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Documents>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -382,8 +382,8 @@ mod test {
 
         let request = CreateDocument {
             display_name: "Test Document".to_string(),
-            description: "Test description".to_string(),
-            tags: Vec::new(),
+            description: Some("Test description".to_string()),
+            ..Default::default()
         };
 
         let project_id = Uuid::new_v4();
@@ -426,8 +426,8 @@ mod test {
         // Create a document first
         let create_request = CreateDocument {
             display_name: "Test Document".to_string(),
-            description: "Test description".to_string(),
-            tags: Vec::new(),
+            description: Some("Updated description".to_string()),
+            ..Default::default()
         };
         server
             .post(&format!("/projects/{}/documents/", project_id))
@@ -435,7 +435,7 @@ mod test {
             .await;
 
         // List documents
-        let pagination = PaginationRequest {
+        let pagination = Pagination {
             offset: Some(0),
             limit: Some(10),
         };
@@ -457,8 +457,8 @@ mod test {
         // Create a document
         let create_request = CreateDocument {
             display_name: "Original Name".to_string(),
-            description: "Test description".to_string(),
-            tags: Vec::new(),
+            description: Some("Test description".to_string()),
+            ..Default::default()
         };
         let create_response = server
             .post(&format!("/projects/{}/documents/", project_id))
@@ -470,7 +470,7 @@ mod test {
         let update_request = UpdateDocument {
             display_name: Some("Updated Name".to_string()),
             description: None,
-            tags: None,
+            ..Default::default()
         };
 
         let response = server
@@ -491,8 +491,8 @@ mod test {
         // Create a document
         let create_request = CreateDocument {
             display_name: "Test Document".to_string(),
-            description: "Test description".to_string(),
-            tags: Vec::new(),
+            description: Some("Test description".to_string()),
+            ..Default::default()
         };
         let create_response = server
             .post(&format!("/projects/{}/documents/", project_id))
@@ -515,14 +515,13 @@ mod test {
     #[tokio::test]
     async fn test_delete_document() -> anyhow::Result<()> {
         let server = create_test_server_with_router(|_| routes()).await?;
-
         let project_id = Uuid::new_v4();
 
         // Create a document
         let request = CreateDocument {
             display_name: "Delete Test".to_string(),
-            description: "Test description".to_string(),
-            tags: Vec::new(),
+            description: Some("Test description".to_string()),
+            ..Default::default()
         };
         let create_response = server
             .post(&format!("/projects/{}/documents/", project_id))
