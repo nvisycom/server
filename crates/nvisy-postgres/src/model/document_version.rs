@@ -192,12 +192,12 @@ impl DocumentVersion {
 
     /// Returns whether this version has processing results.
     pub fn has_results(&self) -> bool {
-        !self.results.as_object().map_or(true, |obj| obj.is_empty())
+        !self.results.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether this version has metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether this is a high-cost version (used many credits).

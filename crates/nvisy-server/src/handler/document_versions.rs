@@ -393,18 +393,6 @@ async fn delete_version(
         return Err(ErrorKind::NotFound.with_message("Version not found in document"));
     }
 
-    // Get latest version number
-    let stats =
-        DocumentVersionRepository::get_document_version_stats(&mut conn, path_params.document_id)
-            .await?;
-
-    // Prevent deleting the latest version
-    if version.version_number == stats.latest_version_number {
-        return Err(ErrorKind::BadRequest
-            .with_message("Cannot delete the latest version")
-            .with_context("Delete older versions or create a new version first"));
-    }
-
     // Delete output file from NATS object store if it exists
     let storage_path = &version.storage_path;
     if !storage_path.is_empty() {

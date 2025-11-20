@@ -5,10 +5,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::project_members;
-use crate::types::constants::project;
-use crate::types::{
-    HasCreatedAt, HasLastActivityAt, HasOwnership, HasUpdatedAt, ProjectRole, is_within_duration,
-};
+use crate::types::{HasCreatedAt, HasLastActivityAt, HasOwnership, HasUpdatedAt, ProjectRole};
 
 /// Project member model representing a user's membership in a project.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -180,18 +177,6 @@ impl ProjectMember {
         self.is_hidden
     }
 
-    /// Returns whether the member has recently accessed the project.
-    pub fn has_recent_access(&self) -> bool {
-        if let Some(last_access) = self.last_accessed_at {
-            is_within_duration(
-                last_access,
-                time::Duration::days(project::RECENT_ACCESS_DAYS),
-            )
-        } else {
-            false
-        }
-    }
-
     /// Returns whether the member has any notification preferences enabled.
     pub fn has_notifications_enabled(&self) -> bool {
         self.notify_updates || self.notify_comments || self.notify_mentions
@@ -207,7 +192,7 @@ impl ProjectMember {
         !self
             .custom_permissions
             .as_object()
-            .map_or(true, |obj| obj.is_empty())
+            .is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the member has never accessed the project.
@@ -217,11 +202,8 @@ impl ProjectMember {
 
     /// Returns the time since last access.
     pub fn time_since_last_access(&self) -> Option<time::Duration> {
-        if let Some(last_access) = self.last_accessed_at {
-            Some(OffsetDateTime::now_utc() - last_access)
-        } else {
-            None
-        }
+        self.last_accessed_at
+            .map(|last_access| OffsetDateTime::now_utc() - last_access)
     }
 
     /// Returns whether the member is inactive (no recent access).
@@ -246,52 +228,6 @@ impl ProjectMember {
     /// Returns whether the member can delete the project.
     pub fn can_delete_project(&self) -> bool {
         self.is_active && self.is_owner()
-    }
-
-    /// Returns whether the member engagement level is high.
-    pub fn is_highly_engaged(&self) -> bool {
-        self.is_favorite && !self.is_hidden && self.has_recent_access()
-    }
-
-    /// Returns the member's engagement score (0-100).
-    pub fn engagement_score(&self) -> u8 {
-        let mut score = 0u8;
-
-        if self.is_active {
-            score += 20;
-        }
-        if self.is_favorite {
-            score += 15;
-        }
-        if !self.is_hidden {
-            score += 10;
-        }
-        if self.has_recent_access() {
-            score += 25;
-        }
-        if self.has_notifications_enabled() {
-            score += 10;
-        }
-        if matches!(self.member_role, ProjectRole::Owner | ProjectRole::Admin) {
-            score += 20;
-        }
-
-        score
-    }
-
-    /// Returns the role display name.
-    pub fn role_display(&self) -> &'static str {
-        match self.member_role {
-            ProjectRole::Owner => "Owner",
-            ProjectRole::Admin => "Admin",
-            ProjectRole::Editor => "Editor",
-            ProjectRole::Viewer => "Viewer",
-        }
-    }
-
-    /// Returns the age of the membership.
-    pub fn membership_age(&self) -> time::Duration {
-        OffsetDateTime::now_utc() - self.created_at
     }
 
     /// Returns whether the member can be promoted to the given role.

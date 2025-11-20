@@ -331,17 +331,15 @@ impl AccountRepository {
     pub async fn record_successful_login(
         conn: &mut AsyncPgConnection,
         account_id: Uuid,
-        ip_address: IpNet,
+        _ip_address: IpNet,
     ) -> PgResult<Account> {
-        let now = OffsetDateTime::now_utc();
+        let _now = OffsetDateTime::now_utc();
         Self::update_account(
             conn,
             account_id,
             UpdateAccount {
                 failed_login_attempts: Some(0),
                 locked_until: None,
-                last_login_at: Some(now),
-                last_login_ip: Some(ip_address),
                 ..Default::default()
             },
         )
@@ -731,11 +729,7 @@ impl AccountRepository {
         let ninety_days_ago = OffsetDateTime::now_utc() - time::Duration::days(90);
 
         accounts::table
-            .filter(
-                dsl::last_login_at
-                    .is_null()
-                    .or(dsl::last_login_at.lt(ninety_days_ago)),
-            )
+            .filter(dsl::updated_at.lt(ninety_days_ago))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
             .limit(pagination.limit)
@@ -816,116 +810,6 @@ impl AccountRepository {
             .map_err(PgError::from)
     }
 
-    // Statistics and maintenance
-
-    /// Retrieves comprehensive statistical information about all accounts.
-    ///
-    /// Generates a complete statistical overview of the account system,
-    /// including counts for various account states and calculated metrics.
-    /// Essential for dashboard displays, reporting, and system monitoring.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the queries
-    ///
-    /// # Returns
-    ///
-    /// An `AccountStatistics` struct containing comprehensive account metrics,
-    /// or a database error if any of the queries fail.
-    ///
-    /// # Performance Considerations
-    ///
-    /// - Executes multiple database queries for different metrics
-    /// - Results may be cached for dashboard performance
-    /// - Consider running periodically rather than real-time
-    /// - Database indexes optimize count operations
-    ///
-    /// # Statistics Included
-    ///
-    /// - Total, verified, suspended, admin, locked account counts
-    /// - Recent registration and activity metrics
-    /// - Derived rates and percentages via helper methods
-    pub async fn get_account_statistics(
-        conn: &mut AsyncPgConnection,
-    ) -> PgResult<AccountStatistics> {
-        use schema::accounts::{self, dsl};
-
-        let now = OffsetDateTime::now_utc();
-        let thirty_days_ago = now - time::Duration::days(30);
-
-        // Total count
-        let total_count: i64 = accounts::table
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Verified count
-        let verified_count: i64 = accounts::table
-            .filter(dsl::is_verified.eq(true))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Suspended count
-        let suspended_count: i64 = accounts::table
-            .filter(dsl::is_suspended.eq(true))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Admin count
-        let admin_count: i64 = accounts::table
-            .filter(dsl::is_admin.eq(true))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Locked count
-        let locked_count: i64 = accounts::table
-            .filter(dsl::locked_until.gt(now))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Recent count (created in last 30 days)
-        let recent_count: i64 = accounts::table
-            .filter(dsl::created_at.gt(thirty_days_ago))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Active count (logged in within last 30 days)
-        let active_count: i64 = accounts::table
-            .filter(dsl::last_login_at.gt(thirty_days_ago))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(AccountStatistics {
-            total_count,
-            verified_count,
-            suspended_count,
-            admin_count,
-            locked_count,
-            recent_count,
-            active_count,
-        })
-    }
-
     /// Automatically unlocks accounts whose lock period has expired.
     ///
     /// Performs maintenance by clearing expired locks and resetting failed
@@ -966,107 +850,5 @@ impl AccountRepository {
         .get_results(conn)
         .await
         .map_err(PgError::from)
-    }
-}
-
-/// Comprehensive statistical information about accounts in the system.
-///
-/// Provides aggregated counts and metrics for different account states and characteristics.
-/// This data structure is typically used for dashboard displays, administrative reports,
-/// and system monitoring. All counts represent active (non-deleted) accounts unless
-/// specifically noted otherwise.
-///
-/// The statistics include both raw counts and the ability to calculate derived metrics
-/// such as percentages and rates through the implemented methods.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AccountStatistics {
-    /// Total number of accounts
-    pub total_count: i64,
-    /// Number of verified accounts
-    pub verified_count: i64,
-    /// Number of suspended accounts
-    pub suspended_count: i64,
-    /// Number of admin accounts
-    pub admin_count: i64,
-    /// Number of currently locked accounts
-    pub locked_count: i64,
-    /// Number of accounts created in last 30 days
-    pub recent_count: i64,
-    /// Number of accounts active in last 30 days
-    pub active_count: i64,
-}
-
-impl AccountStatistics {
-    /// Calculates the percentage of accounts that have been verified.
-    ///
-    /// Returns the ratio of verified accounts to total accounts as a percentage.
-    /// A higher verification rate indicates better email validation completion
-    /// and user engagement with the verification process.
-    ///
-    /// # Returns
-    ///
-    /// A percentage value between 0.0 and 100.0. Returns 100.0 if there are
-    /// no accounts in the system (to avoid division by zero).
-    pub fn verification_rate(&self) -> f64 {
-        if self.total_count == 0 {
-            100.0
-        } else {
-            (self.verified_count as f64 / self.total_count as f64) * 100.0
-        }
-    }
-
-    /// Calculates the percentage of accounts that are currently suspended.
-    ///
-    /// Returns the ratio of suspended accounts to total accounts as a percentage.
-    /// A higher suspension rate may indicate increased moderation activity,
-    /// policy violations, or security concerns that require investigation.
-    ///
-    /// # Returns
-    ///
-    /// A percentage value between 0.0 and 100.0. Returns 0.0 if there are
-    /// no accounts in the system.
-    pub fn suspension_rate(&self) -> f64 {
-        if self.total_count == 0 {
-            0.0
-        } else {
-            (self.suspended_count as f64 / self.total_count as f64) * 100.0
-        }
-    }
-
-    /// Calculates the percentage of accounts that have been active recently.
-    ///
-    /// Returns the ratio of accounts with recent activity (login within last 30 days)
-    /// to total accounts as a percentage. This metric indicates platform engagement
-    /// and user retention effectiveness.
-    ///
-    /// # Returns
-    ///
-    /// A percentage value between 0.0 and 100.0. Returns 100.0 if there are
-    /// no accounts in the system (optimistic assumption for new systems).
-    pub fn activity_rate(&self) -> f64 {
-        if self.total_count == 0 {
-            100.0
-        } else {
-            (self.active_count as f64 / self.total_count as f64) * 100.0
-        }
-    }
-
-    /// Calculates the recent growth rate based on new account registrations.
-    ///
-    /// Returns the ratio of recently created accounts (last 30 days) to total
-    /// accounts as a percentage. This metric indicates the current growth
-    /// momentum and effectiveness of user acquisition efforts.
-    ///
-    /// # Returns
-    ///
-    /// A percentage value representing growth rate. Can exceed 100.0 for
-    /// rapidly growing systems. Returns 0.0 if there are no accounts.
-    /// - Scaling and capacity planning
-    pub fn growth_rate(&self) -> f64 {
-        if self.total_count == 0 {
-            0.0
-        } else {
-            (self.recent_count as f64 / self.total_count as f64) * 100.0
-        }
     }
 }

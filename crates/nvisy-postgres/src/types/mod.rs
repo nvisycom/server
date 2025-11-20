@@ -20,5 +20,5 @@ pub use enums::{
 };
 pub use utilities::{
     HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext, HasLastActivityAt,
-    HasOwnership, HasSecurityContext, HasUpdatedAt, Tags, is_within_duration,
+    HasOwnership, HasSecurityContext, HasUpdatedAt, Tags,
 };

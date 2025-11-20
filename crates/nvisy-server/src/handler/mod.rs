@@ -12,6 +12,7 @@ mod document_versions;
 mod documents;
 mod error;
 mod monitors;
+mod project_integration;
 mod project_invites;
 mod project_members;
 mod project_websocket;
@@ -46,6 +47,7 @@ fn private_routes(
         .merge(accounts::routes(service_state.clone()))
         .merge(api_tokens::routes())
         .merge(projects::routes())
+        .merge(project_integration::routes())
         .merge(project_invites::routes())
         .merge(project_members::routes())
         .merge(project_websocket::routes())

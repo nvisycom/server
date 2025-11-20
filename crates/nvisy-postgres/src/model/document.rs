@@ -84,7 +84,7 @@ impl Document {
     /// Returns the flattened tags (removing None values).
     pub fn tags(&self) -> Vec<String> {
         let tags = self.tags.clone();
-        tags.into_iter().filter_map(|x| x).collect()
+        tags.into_iter().flatten().collect()
     }
 
     /// Returns whether the document can be edited.
@@ -193,17 +193,17 @@ impl Document {
     pub fn has_description(&self) -> bool {
         self.description
             .as_deref()
-            .map_or(false, |desc| !desc.is_empty())
+            .is_some_and(|desc| !desc.is_empty())
     }
 
     /// Returns whether the document has custom metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the document has custom settings.
     pub fn has_settings(&self) -> bool {
-        !self.settings.as_object().map_or(true, |obj| obj.is_empty())
+        !self.settings.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the document is in a final state (cannot be modified).

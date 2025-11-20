@@ -70,8 +70,6 @@ CREATE TABLE accounts (
     failed_login_attempts INTEGER     NOT NULL DEFAULT 0,
     locked_until          TIMESTAMPTZ DEFAULT NULL,
     password_changed_at   TIMESTAMPTZ DEFAULT NULL,
-    last_login_at         TIMESTAMPTZ DEFAULT NULL,
-    last_login_ip         INET        DEFAULT NULL,
 
     CONSTRAINT accounts_failed_login_attempts_range CHECK (failed_login_attempts BETWEEN 0 AND 10),
     CONSTRAINT accounts_locked_until_future CHECK (locked_until IS NULL OR locked_until > current_timestamp),
@@ -85,7 +83,6 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
     CONSTRAINT accounts_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
     CONSTRAINT accounts_password_changed_after_created CHECK (password_changed_at IS NULL OR password_changed_at >= created_at),
-    CONSTRAINT accounts_last_login_after_created CHECK (last_login_at IS NULL OR last_login_at >= created_at),
 
     -- Business logic constraints
     CONSTRAINT accounts_suspended_not_admin CHECK (NOT (is_suspended AND is_admin))
@@ -126,8 +123,6 @@ COMMENT ON COLUMN accounts.locale IS 'User locale for language and regional form
 COMMENT ON COLUMN accounts.failed_login_attempts IS 'Counter for consecutive failed login attempts (0-10)';
 COMMENT ON COLUMN accounts.locked_until IS 'Temporary account lock expiration after too many failed logins';
 COMMENT ON COLUMN accounts.password_changed_at IS 'Timestamp of last password change for security tracking';
-COMMENT ON COLUMN accounts.last_login_at IS 'Timestamp of most recent successful login';
-COMMENT ON COLUMN accounts.last_login_ip IS 'IP address of most recent successful login for security monitoring';
 COMMENT ON COLUMN accounts.created_at IS 'Timestamp when the account was created';
 COMMENT ON COLUMN accounts.updated_at IS 'Timestamp when the account was last modified (auto-updated by trigger)';
 COMMENT ON COLUMN accounts.deleted_at IS 'Timestamp when the account was soft-deleted (NULL if active)';

@@ -79,7 +79,7 @@ impl Tags {
     /// Removes all empty/None tag entries from the collection.
     pub fn compact(&mut self) {
         self.0
-            .retain(|tag| tag.as_deref().map_or(false, |s| !s.is_empty()));
+            .retain(|tag| tag.as_deref().is_some_and(|s| !s.is_empty()));
     }
 
     /// Returns a new `Tags` collection with empty/None entries removed.

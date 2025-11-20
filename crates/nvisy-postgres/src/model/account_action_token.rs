@@ -176,7 +176,7 @@ impl AccountActionToken {
         !self
             .action_data
             .as_object()
-            .map_or(true, |obj| obj.is_empty())
+            .is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the token is stale (created more than recommended duration ago but not expired).

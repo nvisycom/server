@@ -212,24 +212,24 @@ impl Project {
     pub fn has_description(&self) -> bool {
         self.description
             .as_deref()
-            .map_or(false, |desc| !desc.is_empty())
+            .is_some_and(|desc| !desc.is_empty())
     }
 
     /// Returns whether the project has an avatar.
     pub fn has_avatar(&self) -> bool {
         self.avatar_url
             .as_deref()
-            .map_or(false, |url| !url.is_empty())
+            .is_some_and(|url| !url.is_empty())
     }
 
     /// Returns whether the project has custom metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the project has custom settings.
     pub fn has_settings(&self) -> bool {
-        !self.settings.as_object().map_or(true, |obj| obj.is_empty())
+        !self.settings.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the project has member limits.

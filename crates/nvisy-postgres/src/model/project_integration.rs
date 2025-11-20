@@ -177,7 +177,7 @@ impl ProjectIntegration {
 
     /// Returns whether the integration has configuration metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the integration has authentication credentials configured.
@@ -185,7 +185,7 @@ impl ProjectIntegration {
         !self
             .credentials
             .as_object()
-            .map_or(true, |obj| obj.is_empty())
+            .is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the integration has all required configuration.

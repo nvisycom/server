@@ -22,7 +22,7 @@ pub trait HasOwnership {
 
     /// Returns whether the specified account last updated this entity.
     fn is_updated_by(&self, account_id: Uuid) -> bool {
-        self.updated_by().map_or(false, |id| id == account_id)
+        self.updated_by() == Some(account_id)
     }
 
     /// Returns whether the specified account has any ownership relationship.

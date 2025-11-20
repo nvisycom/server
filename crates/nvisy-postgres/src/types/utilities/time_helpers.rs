@@ -5,7 +5,7 @@
 use time::{Duration, OffsetDateTime};
 
 /// Common time duration constants used throughout the application.
-pub mod constants {
+mod constants {
     use time::Duration;
 
     /// Duration for considering something "recently created" (24 hours).

@@ -8,7 +8,6 @@ use crate::schema::document_files;
 use crate::types::constants::file;
 use crate::types::{
     HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus, RequireMode, VirusScanStatus,
-    is_within_duration,
 };
 
 /// Document file model representing a file attached to a document.
@@ -122,15 +121,6 @@ impl DocumentFile {
         self.was_created_within(time::Duration::hours(file::RECENTLY_UPLOADED_HOURS))
     }
 
-    /// Returns whether the file processing is stale.
-    pub fn has_stale_processing(&self) -> bool {
-        self.processing_status.is_processing()
-            && !is_within_duration(
-                self.updated_at,
-                time::Duration::days(file::STALE_PROCESSING_DAYS),
-            )
-    }
-
     /// Returns whether the file is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
@@ -211,7 +201,7 @@ impl DocumentFile {
 
     /// Returns whether the file has custom metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns the time remaining until auto-deletion.

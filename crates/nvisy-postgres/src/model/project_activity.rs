@@ -78,7 +78,7 @@ impl ProjectActivity {
 
     /// Returns whether the activity has additional metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the activity has location information.
@@ -88,9 +88,7 @@ impl ProjectActivity {
 
     /// Returns whether the activity has user agent information.
     pub fn has_user_agent(&self) -> bool {
-        self.user_agent
-            .as_deref()
-            .map_or(false, |ua| !ua.is_empty())
+        self.user_agent.as_deref().is_some_and(|ua| !ua.is_empty())
     }
 
     /// Returns the high-level category of this activity.

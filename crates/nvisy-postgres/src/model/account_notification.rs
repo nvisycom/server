@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::schema::account_notifications;
 use crate::types::constants::notification;
-use crate::types::{HasCreatedAt, HasExpiresAt, NotificationType, is_within_duration};
+use crate::types::{HasCreatedAt, HasExpiresAt, NotificationType};
 
 /// Account notification model representing a notification sent to a user.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -98,15 +98,6 @@ impl AccountNotification {
         self.related_id.is_some()
     }
 
-    /// Returns whether the notification was read recently (within last hour).
-    pub fn is_recently_read(&self) -> bool {
-        if let Some(read_at) = self.read_at {
-            is_within_duration(read_at, time::Duration::hours(1))
-        } else {
-            false
-        }
-    }
-
     /// Returns the time remaining until expiration.
     pub fn time_until_expiry(&self) -> Option<time::Duration> {
         if let Some(expires_at) = self.expires_at {
@@ -167,7 +158,7 @@ impl AccountNotification {
 
     /// Returns whether the notification has custom metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().map_or(true, |obj| obj.is_empty())
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the notification requires action from the user.

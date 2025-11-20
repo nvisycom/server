@@ -154,11 +154,8 @@ impl ProjectInvite {
 
     /// Returns the response time if the invitation was responded to.
     pub fn response_time(&self) -> Option<time::Duration> {
-        if let Some(responded_at) = self.responded_at {
-            Some(responded_at - self.created_at)
-        } else {
-            None
-        }
+        self.responded_at
+            .map(|responded_at| responded_at - self.created_at)
     }
 
     /// Returns whether the invitation has a custom message.

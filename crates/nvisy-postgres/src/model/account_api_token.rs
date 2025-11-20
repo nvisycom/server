@@ -9,7 +9,6 @@ use crate::schema::account_api_tokens;
 use crate::types::constants::token;
 use crate::types::{
     ApiTokenType, HasCreatedAt, HasExpiresAt, HasGeographicContext, HasSecurityContext,
-    is_within_duration,
 };
 
 /// Account API token model representing an authentication token.
@@ -126,23 +125,6 @@ impl AccountApiToken {
     /// Returns whether the token is flagged as suspicious.
     pub fn is_suspicious(&self) -> bool {
         self.is_suspicious
-    }
-
-    /// Returns whether the token is active (valid and recently used).
-    pub fn is_active(&self) -> bool {
-        self.is_valid() && self.is_recently_used()
-    }
-
-    /// Returns whether the token was used recently (within last 30 minutes).
-    pub fn is_recently_used(&self) -> bool {
-        if let Some(last_used) = self.last_used_at {
-            is_within_duration(
-                last_used,
-                time::Duration::minutes(token::RECENT_USE_MINUTES),
-            )
-        } else {
-            false
-        }
     }
 
     /// Returns whether the token can be refreshed.

@@ -17,9 +17,7 @@ use uuid::Uuid;
 
 use crate::schema::accounts;
 use crate::types::constants::account;
-use crate::types::{
-    HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt, is_within_duration,
-};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt};
 
 /// Main account model representing a user account in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -56,10 +54,6 @@ pub struct Account {
     pub locked_until: Option<OffsetDateTime>,
     /// Timestamp when password was last changed.
     pub password_changed_at: Option<OffsetDateTime>,
-    /// Timestamp of the last successful login.
-    pub last_login_at: Option<OffsetDateTime>,
-    /// IP address of the last successful login.
-    pub last_login_ip: Option<IpNet>,
     /// Timestamp when the account was created.
     pub created_at: OffsetDateTime,
     /// Timestamp when the account was last updated.
@@ -124,10 +118,6 @@ pub struct UpdateAccount {
     pub locked_until: Option<OffsetDateTime>,
     /// Timestamp when password was last changed.
     pub password_changed_at: Option<OffsetDateTime>,
-    /// Timestamp of the last successful login.
-    pub last_login_at: Option<OffsetDateTime>,
-    /// IP address of the last successful login.
-    pub last_login_ip: Option<IpNet>,
 }
 
 impl Account {
@@ -214,58 +204,6 @@ impl Account {
         self.failed_login_attempts >= account::MAX_FAILED_LOGIN_ATTEMPTS
     }
 
-    /// Returns whether the password was changed recently (within last 90 days).
-    pub fn password_recently_changed(&self) -> bool {
-        if let Some(changed_at) = self.password_changed_at {
-            is_within_duration(
-                changed_at,
-                time::Duration::days(account::PASSWORD_CHANGE_REMINDER_DAYS),
-            )
-        } else {
-            false
-        }
-    }
-
-    /// Returns whether the account was active recently (logged in within last 30 days).
-    pub fn recently_active(&self) -> bool {
-        if let Some(last_login) = self.last_login_at {
-            is_within_duration(
-                last_login,
-                time::Duration::days(account::RECENT_ACTIVITY_DAYS),
-            )
-        } else {
-            false
-        }
-    }
-
-    /// Returns the best available display name for the account.
-    ///
-    /// Falls back to the email address when no display name is set.
-    pub fn display_name_or_email(&self) -> &str {
-        if self.display_name.is_empty() {
-            &self.email_address
-        } else {
-            &self.display_name
-        }
-    }
-
-    /// Returns the account's initials for avatar generation and display.
-    ///
-    /// Extracts up to two initials from the display name or email address.
-    pub fn get_initials(&self) -> String {
-        let name = if self.display_name.is_empty() {
-            &self.email_address
-        } else {
-            &self.display_name
-        };
-
-        name.split_whitespace()
-            .filter_map(|word| word.chars().next())
-            .take(2)
-            .collect::<String>()
-            .to_uppercase()
-    }
-
     /// Returns the time remaining until the account lockout expires.
     ///
     /// When an account is temporarily locked due to failed login attempts,
@@ -304,7 +242,7 @@ impl HasDeletedAt for Account {
 
 impl HasSecurityContext for Account {
     fn ip_address(&self) -> Option<IpNet> {
-        self.last_login_ip
+        None
     }
 
     fn user_agent(&self) -> Option<&str> {

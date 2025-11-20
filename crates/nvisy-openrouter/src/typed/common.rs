@@ -472,30 +472,30 @@ mod tests {
     fn test_parse_config_default() {
         let config = ParseConfig::new();
         assert_eq!(config.preferred_format, None);
-        assert_eq!(config.enable_fallback, false);
+        assert!(!config.enable_fallback);
 
         let config_default = ParseConfig::default();
         assert_eq!(config_default.preferred_format, None);
-        assert_eq!(config_default.enable_fallback, false);
+        assert!(!config_default.enable_fallback);
     }
 
     #[test]
     fn test_parse_config_presets() {
         let config = ParseConfig::json_only();
         assert_eq!(config.preferred_format, Some(SerializationFormat::Json));
-        assert_eq!(config.enable_fallback, false);
+        assert!(!config.enable_fallback);
 
         let config = ParseConfig::toon_only();
         assert_eq!(config.preferred_format, Some(SerializationFormat::Toon));
-        assert_eq!(config.enable_fallback, false);
+        assert!(!config.enable_fallback);
 
         let config = ParseConfig::json_with_toon_fallback();
         assert_eq!(config.preferred_format, Some(SerializationFormat::Json));
-        assert_eq!(config.enable_fallback, true);
+        assert!(config.enable_fallback);
 
         let config = ParseConfig::toon_with_json_fallback();
         assert_eq!(config.preferred_format, Some(SerializationFormat::Toon));
-        assert_eq!(config.enable_fallback, true);
+        assert!(config.enable_fallback);
     }
 
     #[test]
@@ -504,20 +504,20 @@ mod tests {
             .with_preferred_format(SerializationFormat::Json)
             .with_fallback(true);
         assert_eq!(config.preferred_format, Some(SerializationFormat::Json));
-        assert_eq!(config.enable_fallback, true);
+        assert!(config.enable_fallback);
 
         let config = ParseConfig::new()
             .with_preferred_format(SerializationFormat::Toon)
             .with_fallback(false);
         assert_eq!(config.preferred_format, Some(SerializationFormat::Toon));
-        assert_eq!(config.enable_fallback, false);
+        assert!(!config.enable_fallback);
 
         // Test method chaining
         let config = ParseConfig::new()
             .with_fallback(true)
             .with_preferred_format(SerializationFormat::Toon);
         assert_eq!(config.preferred_format, Some(SerializationFormat::Toon));
-        assert_eq!(config.enable_fallback, true);
+        assert!(config.enable_fallback);
     }
 
     #[test]
