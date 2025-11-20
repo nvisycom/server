@@ -11,10 +11,8 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum AccountConstraints {
     // Account validation constraints
-    #[strum(serialize = "accounts_display_name_length_min")]
-    DisplayNameLengthMin,
-    #[strum(serialize = "accounts_display_name_length_max")]
-    DisplayNameLengthMax,
+    #[strum(serialize = "accounts_display_name_length")]
+    DisplayNameLength,
     #[strum(serialize = "accounts_display_name_not_empty")]
     DisplayNameNotEmpty,
     #[strum(serialize = "accounts_email_format")]
@@ -35,10 +33,8 @@ pub enum AccountConstraints {
     LocaleFormat,
 
     // Account security constraints
-    #[strum(serialize = "accounts_failed_login_attempts_min")]
-    FailedLoginAttemptsMin,
-    #[strum(serialize = "accounts_failed_login_attempts_max")]
-    FailedLoginAttemptsMax,
+    #[strum(serialize = "accounts_failed_login_attempts_range")]
+    FailedLoginAttemptsRange,
     #[strum(serialize = "accounts_locked_until_future")]
     LockedUntilFuture,
 
@@ -72,8 +68,7 @@ impl AccountConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            AccountConstraints::DisplayNameLengthMin
-            | AccountConstraints::DisplayNameLengthMax
+            AccountConstraints::DisplayNameLength
             | AccountConstraints::DisplayNameNotEmpty
             | AccountConstraints::EmailFormat
             | AccountConstraints::EmailLengthMax
@@ -83,8 +78,7 @@ impl AccountConstraints {
             | AccountConstraints::PhoneNumberLengthMax
             | AccountConstraints::TimezoneFormat
             | AccountConstraints::LocaleFormat
-            | AccountConstraints::FailedLoginAttemptsMin
-            | AccountConstraints::FailedLoginAttemptsMax => ConstraintCategory::Validation,
+            | AccountConstraints::FailedLoginAttemptsRange => ConstraintCategory::Validation,
 
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated

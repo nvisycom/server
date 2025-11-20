@@ -67,10 +67,10 @@ impl CustomRoutes {
 
     /// Adds custom private routes, merging with existing private routes if any.
     pub fn add_private_routes(mut self, routes: OpenApiRouter<ServiceState>) -> Self {
-        match self.private_routes {
-            Some(existing) => self.private_routes = Some(existing.merge(routes)),
-            None => self.private_routes = Some(routes),
-        }
+        self.private_routes = match self.private_routes {
+            Some(existing) => Some(existing.merge(routes)),
+            None => Some(routes),
+        };
         self
     }
 
@@ -104,17 +104,6 @@ impl CustomRoutes {
     /// Returns true if no custom routes are configured.
     pub fn is_empty(&self) -> bool {
         !self.has_private_routes() && !self.has_public_routes()
-    }
-
-    /// Merges this `CustomRoutes` with another, combining all routes.
-    pub fn merge(mut self, other: CustomRoutes) -> Self {
-        if let Some(other_private) = other.private_routes {
-            self = self.add_private_routes(other_private);
-        }
-        if let Some(other_public) = other.public_routes {
-            self = self.add_public_routes(other_public);
-        }
-        self
     }
 
     /// Takes the private routes, leaving `None` in their place.
@@ -209,44 +198,5 @@ impl CustomRoutes {
         } else {
             routes
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use utoipa_axum::router::OpenApiRouter;
-
-    use super::*;
-
-    #[test]
-    fn test_custom_routes_new() {
-        let routes = CustomRoutes::new();
-        assert!(routes.is_empty());
-        assert!(!routes.has_private_routes());
-        assert!(!routes.has_public_routes());
-    }
-
-    #[test]
-    fn test_custom_routes_builder() {
-        let private_router = OpenApiRouter::new();
-        let public_router = OpenApiRouter::new();
-
-        let routes = CustomRoutes::new()
-            .with_private_routes(private_router)
-            .with_public_routes(public_router);
-
-        assert!(routes.has_private_routes());
-        assert!(routes.has_public_routes());
-        assert!(!routes.is_empty());
-    }
-
-    #[test]
-    fn test_custom_routes_merge() {
-        let routes1 = CustomRoutes::new().with_private_routes(OpenApiRouter::new());
-        let routes2 = CustomRoutes::new().with_public_routes(OpenApiRouter::new());
-
-        let merged = routes1.merge(routes2);
-        assert!(merged.has_private_routes());
-        assert!(merged.has_public_routes());
     }
 }

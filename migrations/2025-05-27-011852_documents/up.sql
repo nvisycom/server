@@ -61,7 +61,7 @@ CREATE TABLE documents (
 
     -- Core attributes
     display_name    TEXT             NOT NULL DEFAULT 'Untitled',
-    description     TEXT             NOT NULL DEFAULT '',
+    description     TEXT                      DEFAULT NULL,
     tags            TEXT[]           NOT NULL DEFAULT '{}',
     status          DOCUMENT_STATUS  NOT NULL DEFAULT 'draft',
 

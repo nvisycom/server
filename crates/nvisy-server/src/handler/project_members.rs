@@ -22,7 +22,7 @@ use crate::extract::{AuthProvider, AuthState, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::UpdateMemberRole;
 use crate::handler::response::{Member, Members};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project member operations.
@@ -48,7 +48,7 @@ pub struct MemberPathParams {
     get, path = "/projects/{projectId}/members/", tag = "members",
     params(ProjectPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -84,7 +84,7 @@ async fn list_members(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Members>)> {
     let mut conn = pg_client.get_connection().await?;
 

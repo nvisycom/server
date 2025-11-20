@@ -57,6 +57,7 @@ pub const TRACING_TARGET_COMPLETION: &str = "nvisy_openrouter::completion";
 // Core modules
 pub mod client;
 pub mod completion;
+pub mod typed;
 
 pub use client::{LlmClient, LlmConfig};
 
@@ -102,7 +103,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     /// API-related errors from the OpenRouter service.
     #[error(transparent)]
-    Api(#[from] OpenRouterError),
+    Api(#[from] Box<OpenRouterError>),
 
     /// Rate limiting errors.
     #[error("Rate limit exceeded: {message}")]
@@ -132,9 +133,13 @@ pub enum Error {
         message: String,
     },
 
-    /// Serialization/deserialization errors.
-    #[error(transparent)]
-    Serialization(#[from] serde_json::Error),
+    /// JSON serialization/deserialization errors.
+    #[error("JSON serialization error: {0}")]
+    JsonSerialization(#[from] serde_json::Error),
+
+    /// TOON serialization/deserialization errors.
+    #[error("TOON serialization error: {0}")]
+    ToonSerialization(#[from] serde_toon::Error),
 }
 
 impl Error {
@@ -184,7 +189,10 @@ impl Error {
     /// ```
     pub fn status_code(&self) -> Option<u16> {
         match self {
-            Self::Api(OpenRouterError::ApiError { code, .. }) => Some(*code as u16),
+            Self::Api(x) => match x.as_ref() {
+                OpenRouterError::ApiError { code, .. } => Some(*code as u16),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -204,5 +212,11 @@ impl Error {
             Self::RateLimit { retry_after, .. } => *retry_after,
             _ => None,
         }
+    }
+}
+
+impl From<OpenRouterError> for Error {
+    fn from(value: OpenRouterError) -> Self {
+        Self::Api(Box::new(value))
     }
 }

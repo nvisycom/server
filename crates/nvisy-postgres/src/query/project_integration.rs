@@ -1,4 +1,8 @@
 //! Project integration repository for managing project integration operations.
+//!
+//! This module provides comprehensive database operations for managing third-party
+//! integrations connected to projects. It handles the full lifecycle of integrations
+//! from creation and configuration through status monitoring, updates, and maintenance.
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -11,16 +15,47 @@ use crate::types::IntegrationStatus;
 use crate::{PgError, PgResult, schema};
 
 /// Repository for project integration table operations.
+///
+/// Provides comprehensive database operations for managing project integrations,
+/// including CRUD operations, status management, and analytical queries. This repository
+/// handles all database interactions related to third-party service integrations.
+///
+/// The repository is stateless and thread-safe, designed to be used as a singleton
+/// or instantiated as needed. All methods require an active database connection
+/// and return results wrapped in the standard `PgResult` type for error handling.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProjectIntegrationRepository;
 
 impl ProjectIntegrationRepository {
     /// Creates a new project integration repository instance.
+    ///
+    /// Returns a new repository instance ready for database operations.
+    /// Since the repository is stateless, this is equivalent to using
+    /// `Default::default()` or accessing repository methods statically.
+    ///
+    /// # Returns
+    ///
+    /// A new `ProjectIntegrationRepository` instance.
     pub fn new() -> Self {
         Self
     }
 
-    /// Creates a new project integration.
+    /// Creates a new project integration with the provided configuration.
+    ///
+    /// Sets up a new integration between a project and an external service.
+    /// The integration is created with the provided configuration and automatically
+    /// assigned a unique ID and creation timestamp. The creator is recorded for
+    /// attribution and permission management.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration` - Complete integration configuration data
+    ///
+    /// # Returns
+    ///
+    /// The created `ProjectIntegration` with database-generated ID and timestamps,
+    /// or a database error if the operation fails.
     pub async fn create_integration(
         conn: &mut AsyncPgConnection,
         integration: NewProjectIntegration,
@@ -37,7 +72,21 @@ impl ProjectIntegrationRepository {
         Ok(integration)
     }
 
-    /// Finds an integration by its ID.
+    /// Finds an integration by its unique identifier.
+    ///
+    /// Retrieves a specific integration using its UUID. This is the primary
+    /// method for accessing individual integrations when you know the exact ID,
+    /// typically for update operations or detailed views.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `integration_id` - UUID of the integration to retrieve
+    ///
+    /// # Returns
+    ///
+    /// The matching `ProjectIntegration` if found, `None` if not found,
+    /// or a database error if the query fails.
     pub async fn find_integration_by_id(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -55,7 +104,23 @@ impl ProjectIntegrationRepository {
         Ok(integration)
     }
 
-    /// Updates an integration.
+    /// Updates an existing integration with new configuration or status.
+    ///
+    /// Applies the specified changes to an integration using Diesel's changeset
+    /// mechanism. Only the fields set to `Some(value)` in the update structure
+    /// will be modified, while `None` fields remain unchanged. The updated_at
+    /// timestamp is automatically updated.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to update
+    /// * `changes` - Partial update data containing only fields to modify
+    ///
+    /// # Returns
+    ///
+    /// The updated `ProjectIntegration` with new values and timestamp,
+    /// or a database error if the operation fails.
     pub async fn update_integration(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -74,7 +139,26 @@ impl ProjectIntegrationRepository {
         Ok(integration)
     }
 
-    /// Soft deletes an integration.
+    /// Soft deletes an integration by deactivating it.
+    ///
+    /// Disables the integration rather than permanently deleting it from the database.
+    /// This preserves the integration's configuration and history while preventing
+    /// it from performing any sync operations or receiving webhooks.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to deactivate
+    ///
+    /// # Returns
+    ///
+    /// Unit type on success, or a database error if the operation fails.
+    ///
+    /// # Note
+    ///
+    /// This operation only sets `is_active` to false. The integration record
+    /// and all its configuration remain in the database for potential reactivation
+    /// or audit purposes.
     pub async fn delete_integration(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -91,7 +175,21 @@ impl ProjectIntegrationRepository {
         Ok(())
     }
 
-    /// Lists all integrations for a project.
+    /// Lists all integrations for a specific project.
+    ///
+    /// Retrieves all integrations associated with the specified project,
+    /// regardless of their status or activity state. Results are ordered by
+    /// creation date with newest integrations first.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - UUID of the project whose integrations to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A vector of all `ProjectIntegration` entries for the project, ordered by
+    /// creation date (newest first), or a database error if the query fails.
     pub async fn list_project_integrations(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
@@ -109,7 +207,21 @@ impl ProjectIntegrationRepository {
         Ok(integrations)
     }
 
-    /// Finds integrations by their status.
+    /// Finds all integrations matching a specific sync status.
+    ///
+    /// Retrieves integrations across all projects that have the specified
+    /// sync status. This is useful for system-wide monitoring, identifying
+    /// failed integrations, or finding integrations in specific operational states.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `integration_status` - Specific sync status to filter by
+    ///
+    /// # Returns
+    ///
+    /// A vector of `ProjectIntegration` entries with matching status, ordered by
+    /// creation date (newest first), or a database error if the query fails.
     pub async fn find_integrations_by_status(
         conn: &mut AsyncPgConnection,
         integration_status: IntegrationStatus,
@@ -127,7 +239,22 @@ impl ProjectIntegrationRepository {
         Ok(integrations)
     }
 
-    /// Finds an integration by project ID and integration name.
+    /// Finds an integration by project and name combination.
+    ///
+    /// Searches for an integration within a specific project using its display name.
+    /// Integration names should be unique within a project, making this a reliable
+    /// way to locate specific integrations when you know both the project and name.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - UUID of the project to search within
+    /// * `name` - Exact integration name to search for
+    ///
+    /// # Returns
+    ///
+    /// The matching `ProjectIntegration` if found, `None` if not found,
+    /// or a database error if the query fails.
     pub async fn find_integration_by_project_and_name(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
@@ -147,7 +274,22 @@ impl ProjectIntegrationRepository {
         Ok(integration)
     }
 
-    /// Enables an integration.
+    /// Enables an integration for active operation.
+    ///
+    /// Activates the specified integration, allowing it to participate in sync
+    /// operations, receive webhooks, and perform automated tasks. The integration
+    /// must be properly configured with credentials before activation.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to enable
+    /// * `_updated_by` - UUID of the user performing the operation (for audit trails)
+    ///
+    /// # Returns
+    ///
+    /// The updated `ProjectIntegration` with active status set to true,
+    /// or a database error if the operation fails.
     pub async fn enable_integration(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -161,7 +303,22 @@ impl ProjectIntegrationRepository {
         Self::update_integration(conn, integration_id, changes).await
     }
 
-    /// Disables an integration.
+    /// Disables an integration to stop all operations.
+    ///
+    /// Deactivates the specified integration, preventing it from performing sync
+    /// operations, receiving webhooks, or executing automated tasks. The integration's
+    /// configuration is preserved for potential reactivation.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to disable
+    /// * `_updated_by` - UUID of the user performing the operation (for audit trails)
+    ///
+    /// # Returns
+    ///
+    /// The updated `ProjectIntegration` with active status set to false,
+    /// or a database error if the operation fails.
     pub async fn disable_integration(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -175,7 +332,21 @@ impl ProjectIntegrationRepository {
         Self::update_integration(conn, integration_id, changes).await
     }
 
-    /// Lists only active integrations for a project.
+    /// Lists only active integrations for a specific project.
+    ///
+    /// Retrieves integrations that are currently enabled and operational within
+    /// the specified project. This filters out disabled or deactivated integrations,
+    /// showing only those that can participate in sync operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - UUID of the project whose active integrations to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A vector of active `ProjectIntegration` entries for the project, ordered by
+    /// creation date (newest first), or a database error if the query fails.
     pub async fn list_active_integrations(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
@@ -194,7 +365,23 @@ impl ProjectIntegrationRepository {
         Ok(integrations)
     }
 
-    /// Updates integration status.
+    /// Updates the sync status of an integration.
+    ///
+    /// Modifies the current sync status of an integration, typically used by
+    /// sync processes to indicate operational state changes such as starting
+    /// execution, completing successfully, or encountering failures.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to update
+    /// * `new_status` - New sync status to set
+    /// * `_updated_by` - UUID of the user or system performing the update
+    ///
+    /// # Returns
+    ///
+    /// The updated `ProjectIntegration` with new sync status,
+    /// or a database error if the operation fails.
     pub async fn update_integration_status(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -209,7 +396,22 @@ impl ProjectIntegrationRepository {
         Self::update_integration(conn, integration_id, changes).await
     }
 
-    /// Lists integrations that need attention (have errors or are disabled).
+    /// Lists integrations that require administrator attention.
+    ///
+    /// Retrieves integrations that are in problematic states - either experiencing
+    /// sync failures or are currently disabled. This is useful for monitoring
+    /// dashboards and maintenance workflows to identify integrations that need
+    /// intervention.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - Optional project ID to scope the search (None for system-wide)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `ProjectIntegration` entries that need attention, ordered by
+    /// last update time (most recent first), or a database error if the query fails.
     pub async fn list_integrations_needing_attention(
         conn: &mut AsyncPgConnection,
         proj_id: Option<Uuid>,
@@ -237,7 +439,21 @@ impl ProjectIntegrationRepository {
         Ok(integrations)
     }
 
-    /// Gets integration statistics for a project.
+    /// Gets comprehensive integration statistics for a project.
+    ///
+    /// Calculates key metrics about integrations within a project, including
+    /// total count, active count, failed count, and pending count. These statistics
+    /// provide a quick overview of integration health and status distribution.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - UUID of the project to analyze
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing (total_count, active_count, failed_count, pending_count),
+    /// or a database error if the query fails.
     pub async fn get_integration_stats(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,
@@ -283,7 +499,29 @@ impl ProjectIntegrationRepository {
         Ok((total_count, active_count, failed_count, pending_count))
     }
 
-    /// Updates integration authentication data.
+    /// Updates the authentication credentials for an integration.
+    ///
+    /// Replaces the stored authentication data with new credentials. This is
+    /// typically used when API tokens expire, passwords change, or OAuth tokens
+    /// need refreshing. The credentials should be encrypted before passing to
+    /// this method for security.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to update
+    /// * `auth_data` - New encrypted authentication credentials
+    /// * `_updated_by` - UUID of the user performing the update
+    ///
+    /// # Returns
+    ///
+    /// The updated `ProjectIntegration` with new credentials,
+    /// or a database error if the operation fails.
+    ///
+    /// # Security Note
+    ///
+    /// Credentials should be encrypted at the application layer before being
+    /// stored in the database to ensure sensitive authentication data is protected.
     pub async fn update_integration_auth(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -298,7 +536,23 @@ impl ProjectIntegrationRepository {
         Self::update_integration(conn, integration_id, changes).await
     }
 
-    /// Updates integration metadata.
+    /// Updates the configuration metadata for an integration.
+    ///
+    /// Replaces the stored metadata with new configuration data. This includes
+    /// service-specific settings, sync preferences, webhook URLs, and other
+    /// non-credential configuration that affects how the integration operates.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the operation
+    /// * `integration_id` - UUID of the integration to update
+    /// * `metadata` - New configuration metadata as JSON
+    /// * `_updated_by` - UUID of the user performing the update
+    ///
+    /// # Returns
+    ///
+    /// The updated `ProjectIntegration` with new metadata,
+    /// or a database error if the operation fails.
     pub async fn update_integration_metadata(
         conn: &mut AsyncPgConnection,
         integration_id: Uuid,
@@ -313,7 +567,22 @@ impl ProjectIntegrationRepository {
         Self::update_integration(conn, integration_id, changes).await
     }
 
-    /// Lists integrations created by a specific user.
+    /// Lists integrations created by a specific user with pagination.
+    ///
+    /// Retrieves all integrations that were originally created by the specified user,
+    /// regardless of which projects they belong to. This is useful for user-specific
+    /// views, permission management, and understanding user integration patterns.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `creator_id` - UUID of the user whose integrations to retrieve
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `ProjectIntegration` entries created by the user, ordered by
+    /// creation date (newest first), or a database error if the query fails.
     pub async fn list_integrations_by_creator(
         conn: &mut AsyncPgConnection,
         creator_id: Uuid,
@@ -334,7 +603,23 @@ impl ProjectIntegrationRepository {
         Ok(integrations)
     }
 
-    /// Finds integrations by name pattern across projects.
+    /// Finds integrations matching a name pattern across all projects.
+    ///
+    /// Searches for integrations with names that match the specified pattern using
+    /// case-insensitive substring matching. This is useful for finding similarly
+    /// named integrations across different projects or searching for integrations
+    /// by partial names.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `name_pattern` - Pattern to search for in integration names (case-insensitive)
+    /// * `pagination` - Pagination parameters (limit and offset)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `ProjectIntegration` entries with matching names, ordered by
+    /// last update time (most recent first), or a database error if the query fails.
     pub async fn find_integrations_by_name_pattern(
         conn: &mut AsyncPgConnection,
         name_pattern: &str,
@@ -357,7 +642,24 @@ impl ProjectIntegrationRepository {
         Ok(integrations)
     }
 
-    /// Gets recently updated integrations.
+    /// Gets integrations that have been recently updated within a time window.
+    ///
+    /// Retrieves integrations that have been modified within the specified number
+    /// of hours, optionally scoped to a specific project. This is useful for
+    /// monitoring recent changes, tracking integration maintenance, and identifying
+    /// active integrations.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - Optional project ID to scope the search (None for system-wide)
+    /// * `hours` - Number of hours back to search for updates
+    ///
+    /// # Returns
+    ///
+    /// A vector of up to 50 recently updated `ProjectIntegration` entries, ordered by
+    /// A vector of `ProjectIntegration` entries updated within the time window,
+    /// ordered by update time (most recent first), or a database error if the query fails.
     pub async fn get_recently_updated_integrations(
         conn: &mut AsyncPgConnection,
         proj_id: Option<Uuid>,
@@ -387,6 +689,22 @@ impl ProjectIntegrationRepository {
     }
 
     /// Checks if an integration name is unique within a project.
+    ///
+    /// Verifies that no other integration in the specified project has the same name,
+    /// optionally excluding a specific integration ID. This is used to enforce name
+    /// uniqueness constraints and prevent duplicate integration names within projects.
+    ///
+    /// # Arguments
+    ///
+    /// * `conn` - Active database connection for the query
+    /// * `proj_id` - UUID of the project to check within
+    /// * `name` - Integration name to check for uniqueness
+    /// * `exclude_id` - Optional integration ID to exclude from the check (for updates)
+    ///
+    /// # Returns
+    ///
+    /// `true` if the name is unique (available), `false` if already taken,
+    /// or a database error if the query fails.
     pub async fn is_integration_name_unique(
         conn: &mut AsyncPgConnection,
         proj_id: Uuid,

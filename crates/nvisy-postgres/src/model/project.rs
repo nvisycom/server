@@ -5,52 +5,54 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::projects;
-use crate::types::{ProjectStatus, ProjectVisibility};
+use crate::types::{
+    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, ProjectStatus, ProjectVisibility, Tags,
+};
 
 /// Main project model representing a project workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = projects)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Project {
-    /// Unique project identifier
+    /// Unique project identifier.
     pub id: Uuid,
-    /// Human-readable project name (2-100 characters)
+    /// Human-readable project name (2-100 characters).
     pub display_name: String,
-    /// Detailed description of the project purpose and goals
-    pub description: String,
-    /// URL to project avatar/logo image
+    /// Detailed description of the project purpose and goals.
+    pub description: Option<String>,
+    /// URL to project avatar/logo image.
     pub avatar_url: Option<String>,
-    /// Current status of the project (active, archived, etc.)
+    /// Current status of the project (active, archived, etc.).
     pub status: ProjectStatus,
-    /// Project visibility level (public, private, etc.)
+    /// Project visibility level (public, private, etc.).
     pub visibility: ProjectVisibility,
-    /// Data retention period in seconds
+    /// Data retention period in seconds.
     pub keep_for_sec: i32,
-    /// Whether automatic cleanup is enabled
+    /// Whether automatic cleanup is enabled.
     pub auto_cleanup: bool,
-    /// Maximum number of members allowed
+    /// Maximum number of members allowed.
     pub max_members: Option<i32>,
-    /// Maximum storage in MB
+    /// Maximum storage in MB.
     pub max_storage: Option<i32>,
-    /// Whether approval is required
+    /// Whether approval is required.
     pub require_approval: bool,
-    /// Whether comments are enabled
+    /// Whether comments are enabled.
     pub enable_comments: bool,
-    /// Project tags
+    /// Project tags.
     pub tags: Vec<Option<String>>,
-    /// Additional project metadata
+    /// Additional project metadata.
     pub metadata: serde_json::Value,
-    /// Project-specific settings
+    /// Project-specific settings.
     pub settings: serde_json::Value,
-    /// Account that created the project
+    /// Account that created the project.
     pub created_by: Uuid,
-    /// Timestamp when the project was created
+    /// Timestamp when the project was created.
     pub created_at: OffsetDateTime,
-    /// Timestamp when the project was last updated
+    /// Timestamp when the project was last updated.
     pub updated_at: OffsetDateTime,
-    /// Timestamp when the project was archived
+    /// Timestamp when the project was archived.
     pub archived_at: Option<OffsetDateTime>,
-    /// Timestamp when the project was soft-deleted
+    /// Timestamp when the project was soft-deleted.
     pub deleted_at: Option<OffsetDateTime>,
 }
 
@@ -59,35 +61,35 @@ pub struct Project {
 #[diesel(table_name = projects)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProject {
-    /// Project display name
+    /// Project display name.
     pub display_name: String,
-    /// Project description
+    /// Project description.
     pub description: Option<String>,
-    /// Optional avatar URL
+    /// Optional avatar URL.
     pub avatar_url: Option<String>,
-    /// Project status
+    /// Project status.
     pub status: Option<ProjectStatus>,
-    /// Project visibility
+    /// Project visibility.
     pub visibility: Option<ProjectVisibility>,
-    /// Data retention period
+    /// Data retention period.
     pub keep_for_sec: Option<i32>,
-    /// Auto cleanup enabled
+    /// Auto cleanup enabled.
     pub auto_cleanup: Option<bool>,
-    /// Maximum members
+    /// Maximum members.
     pub max_members: Option<i32>,
-    /// Maximum storage
+    /// Maximum storage.
     pub max_storage: Option<i32>,
-    /// Require approval
+    /// Require approval.
     pub require_approval: Option<bool>,
-    /// Enable comments
+    /// Enable comments.
     pub enable_comments: Option<bool>,
-    /// Tags
+    /// Tags.
     pub tags: Option<Vec<Option<String>>>,
-    /// Metadata
+    /// Metadata.
     pub metadata: Option<serde_json::Value>,
-    /// Settings
+    /// Settings.
     pub settings: Option<serde_json::Value>,
-    /// Created by
+    /// Created by.
     pub created_by: Uuid,
 }
 
@@ -96,36 +98,34 @@ pub struct NewProject {
 #[diesel(table_name = projects)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateProject {
-    /// Display name
+    /// Display name.
     pub display_name: Option<String>,
-    /// Description
+    /// Description.
     pub description: Option<String>,
-    /// Avatar URL
+    /// Avatar URL.
     pub avatar_url: Option<String>,
-    /// Status
+    /// Status.
     pub status: Option<ProjectStatus>,
-    /// Visibility
+    /// Visibility.
     pub visibility: Option<ProjectVisibility>,
-    /// Keep for seconds
+    /// Data retention period.
     pub keep_for_sec: Option<i32>,
-    /// Auto cleanup
+    /// Auto cleanup enabled.
     pub auto_cleanup: Option<bool>,
-    /// Max members
+    /// Maximum members.
     pub max_members: Option<i32>,
-    /// Max storage MB
+    /// Maximum storage.
     pub max_storage: Option<i32>,
-    /// Require approval
+    /// Require approval.
     pub require_approval: Option<bool>,
-    /// Enable comments
+    /// Enable comments.
     pub enable_comments: Option<bool>,
-    /// Tags
-    pub tags: Vec<Option<String>>,
-    /// Metadata
+    /// Tags.
+    pub tags: Option<Vec<Option<String>>>,
+    /// Metadata.
     pub metadata: Option<serde_json::Value>,
-    /// Settings
+    /// Settings.
     pub settings: Option<serde_json::Value>,
-    /// Archived at
-    pub archived_at: Option<OffsetDateTime>,
 }
 
 impl Project {
@@ -184,5 +184,134 @@ impl Project {
     /// Returns whether the project allows invitations.
     pub fn allows_invitations(&self) -> bool {
         self.is_active() || self.is_archived()
+    }
+
+    /// Returns the tags as a Tags helper.
+    pub fn tags_helper(&self) -> Tags {
+        Tags::from_optional_strings(self.tags.clone())
+    }
+
+    /// Returns the flattened tags (removing None values).
+    pub fn get_tags(&self) -> Vec<String> {
+        self.tags.iter().filter_map(|tag| tag.clone()).collect()
+    }
+
+    /// Returns whether the project has tags.
+    pub fn has_tags(&self) -> bool {
+        self.tags.iter().any(|tag| tag.is_some())
+    }
+
+    /// Returns whether the project contains a specific tag.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags
+            .iter()
+            .any(|t| t.as_ref() == Some(&tag.to_string()))
+    }
+
+    /// Returns whether the project has a description.
+    pub fn has_description(&self) -> bool {
+        self.description
+            .as_deref()
+            .is_some_and(|desc| !desc.is_empty())
+    }
+
+    /// Returns whether the project has an avatar.
+    pub fn has_avatar(&self) -> bool {
+        self.avatar_url
+            .as_deref()
+            .is_some_and(|url| !url.is_empty())
+    }
+
+    /// Returns whether the project has custom metadata.
+    pub fn has_metadata(&self) -> bool {
+        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
+    }
+
+    /// Returns whether the project has custom settings.
+    pub fn has_settings(&self) -> bool {
+        !self.settings.as_object().is_none_or(|obj| obj.is_empty())
+    }
+
+    /// Returns whether the project has member limits.
+    pub fn has_member_limit(&self) -> bool {
+        self.max_members.is_some()
+    }
+
+    /// Returns whether the project has storage limits.
+    pub fn has_storage_limit(&self) -> bool {
+        self.max_storage.is_some()
+    }
+
+    /// Returns whether the project is at or near member capacity.
+    pub fn is_near_member_capacity(&self, current_members: i32) -> bool {
+        if let Some(max_members) = self.max_members {
+            let usage_percentage = (current_members as f64 / max_members as f64) * 100.0;
+            usage_percentage >= 80.0 // 80% threshold
+        } else {
+            false
+        }
+    }
+
+    /// Returns whether the project is at or near storage capacity.
+    pub fn is_near_storage_capacity(&self, current_storage_mb: i32) -> bool {
+        if let Some(max_storage) = self.max_storage {
+            let usage_percentage = (current_storage_mb as f64 / max_storage as f64) * 100.0;
+            usage_percentage >= 80.0 // 80% threshold
+        } else {
+            false
+        }
+    }
+
+    /// Returns the data retention period in days.
+    pub fn retention_days(&self) -> i32 {
+        self.keep_for_sec / (24 * 60 * 60) // Convert seconds to days
+    }
+
+    /// Returns whether the project allows file uploads.
+    pub fn allows_file_uploads(&self) -> bool {
+        self.is_active() && !self.is_deleted()
+    }
+
+    /// Returns whether the project allows collaboration.
+    pub fn allows_collaboration(&self) -> bool {
+        self.is_active() && self.enable_comments
+    }
+
+    /// Returns the age of the project since creation.
+    pub fn age(&self) -> time::Duration {
+        OffsetDateTime::now_utc() - self.created_at
+    }
+
+    /// Returns the display name or a default.
+    pub fn display_name_or_default(&self) -> &str {
+        if self.display_name.is_empty() {
+            "Untitled Project"
+        } else {
+            &self.display_name
+        }
+    }
+}
+
+impl HasCreatedAt for Project {
+    fn created_at(&self) -> OffsetDateTime {
+        self.created_at
+    }
+}
+
+impl HasUpdatedAt for Project {
+    fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
+    }
+}
+
+impl HasDeletedAt for Project {
+    fn deleted_at(&self) -> Option<OffsetDateTime> {
+        self.deleted_at
+    }
+}
+
+impl HasOwnership for Project {
+    fn created_by(&self) -> Uuid {
+        self.created_by
     }
 }

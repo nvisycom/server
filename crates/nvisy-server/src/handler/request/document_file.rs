@@ -27,6 +27,8 @@ pub struct UpdateFile {
     /// New display name for the file
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
-    /// New processing priority
+
+    /// New processing priority (1-10, higher = more priority)
+    #[validate(range(min = 1, max = 10))]
     pub processing_priority: Option<i32>,
 }

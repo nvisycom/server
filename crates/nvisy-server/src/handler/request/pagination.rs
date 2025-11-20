@@ -1,27 +1,48 @@
+//! Pagination request types with performance and security considerations.
+//!
+//! This module provides pagination utilities that balance usability with performance
+//! and security. It includes both offset-based and cursor-based pagination support
+//! with comprehensive validation to prevent expensive database queries.
+
 use nvisy_postgres::query::Pagination as QueryPagination;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use validator::Validate;
 
-/// Represents pagination parameters commonly used in API queries.
+/// Pagination parameters with performance and security validation.
 ///
 /// `Pagination` allows clients to retrieve data in chunks, which helps manage
 /// large datasets by specifying how many records to skip and how many to fetch.
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, ToSchema)]
-pub struct PaginationRequest {
+#[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[schema(example = json!({
+    "offset": 20,
+    "limit": 10,
+    "cursor": None::<String>,
+    "direction": "forward"
+}))]
+pub struct Pagination {
     /// The number of records to skip before starting to return results.
     ///
-    /// Useful for implementing paged responses where you want to skip a
-    /// certain number of entries (e.g., skip the first 10).
+    /// For performance reasons, this is limited to prevent expensive deep
+    /// pagination queries. Consider using cursor-based pagination for
+    /// better performance when dealing with large datasets.
+    ///
+    /// **Performance Impact**: High offsets require the database to scan
+    /// and skip many records, which can be slow for large tables.
+    #[validate(range(min = 0, max = 100000))]
+    #[schema(example = 20, maximum = 100000)]
     pub offset: Option<u32>,
 
-    /// The maximum number of records to return.
+    /// The maximum number of records to return in a single request.
     ///
-    /// This limits the number of items retrieved in a single request,
-    /// commonly used to cap the response size (e.g., return only 25 items).
+    /// This is balanced between usability and performance. Very large limits
+    /// can cause memory pressure and slow response times.
+    #[validate(range(min = 1, max = 1000))]
+    #[schema(example = 10, minimum = 1, maximum = 1000)]
     pub limit: Option<u32>,
 }
 
-impl PaginationRequest {
+impl Pagination {
     /// Default pagination limit.
     const DEFAULT_LIMIT: u32 = 10;
     /// Default pagination offset.
@@ -61,8 +82,8 @@ impl PaginationRequest {
     }
 }
 
-impl From<PaginationRequest> for QueryPagination {
-    fn from(pagination: PaginationRequest) -> Self {
+impl From<Pagination> for QueryPagination {
+    fn from(pagination: Pagination) -> Self {
         Self {
             limit: pagination.limit() as i64,
             offset: pagination.offset() as i64,

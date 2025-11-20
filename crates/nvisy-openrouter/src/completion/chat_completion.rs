@@ -209,7 +209,7 @@ where
                 schema_name = %schema_name,
                 "Failed to serialize JSON schema"
             );
-            Error::Serialization(e)
+            Error::JsonSerialization(e)
         })?;
 
         let response_format = ResponseFormat::json_schema(schema_name, true, json_value);
@@ -239,6 +239,7 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+    use crate::LlmClient;
 
     #[derive(Serialize, Deserialize)]
     struct TestRequest {
@@ -252,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_typed_chat_completion_creation() {
-        let client = crate::LlmClient::from_api_key("test-key").unwrap();
+        let client = LlmClient::from_api_key("test-key").unwrap();
         let completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client.clone());
 
         // Verify we can get the client back
@@ -265,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_generate_response_schema() -> Result<()> {
-        let client = crate::LlmClient::from_api_key("test-key")?;
+        let client = LlmClient::from_api_key("test-key")?;
         let completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client);
 
         let _schema = completion.generate_response_schema()?;
@@ -277,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_build_chat_request_with_defaults() -> Result<()> {
-        let client = crate::LlmClient::from_api_key("test-key")?;
+        let client = LlmClient::from_api_key("test-key")?;
         let _completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client.clone());
 
         let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
@@ -304,7 +305,7 @@ mod tests {
             .with_default_max_tokens(100u32)
             .build()
             .unwrap();
-        let client = crate::LlmClient::from_api_key_with_config("test-key", config)?;
+        let client = LlmClient::new(config)?;
         let _completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client.clone());
 
         let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
@@ -329,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let client = crate::LlmClient::from_api_key("test-key").unwrap();
+        let client = LlmClient::from_api_key("test-key").unwrap();
         let completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client);
 
         let cloned = completion.clone();

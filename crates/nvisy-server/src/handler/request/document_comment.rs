@@ -24,9 +24,6 @@ pub struct CreateDocumentComment {
     /// Account being replied to (@mention).
     #[serde(default)]
     pub reply_to_account_id: Option<Uuid>,
-    /// Additional metadata.
-    #[serde(default)]
-    pub metadata: Option<serde_json::Value>,
 }
 
 /// Request payload to update a document comment.
@@ -40,6 +37,4 @@ pub struct UpdateDocumentComment {
     /// Updated comment content.
     #[validate(length(min = 1, max = 10000))]
     pub content: Option<String>,
-    /// Updated metadata.
-    pub metadata: Option<serde_json::Value>,
 }

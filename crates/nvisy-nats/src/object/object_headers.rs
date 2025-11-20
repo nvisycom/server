@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use async_nats::HeaderMap;
-use derive_more::{Deref, DerefMut, From, Into};
+use derive_more::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 
 /// HTTP-like headers for object storage operations.

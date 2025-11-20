@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Version};
 use crate::handler::documents::DocumentPathParams;
 use crate::handler::response::{Version as VersionResponse, Versions};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document version operations.
@@ -75,7 +75,7 @@ async fn get_version_files(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<DocumentPathParams>,
     AuthState(auth_claims): AuthState,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Versions>)> {
     let mut conn = pg_client.get_connection().await?;
 
@@ -391,18 +391,6 @@ async fn delete_version(
     // Verify version belongs to document
     if version.document_id != path_params.document_id {
         return Err(ErrorKind::NotFound.with_message("Version not found in document"));
-    }
-
-    // Get latest version number
-    let stats =
-        DocumentVersionRepository::get_document_version_stats(&mut conn, path_params.document_id)
-            .await?;
-
-    // Prevent deleting the latest version
-    if version.version_number == stats.latest_version_number {
-        return Err(ErrorKind::BadRequest
-            .with_message("Cannot delete the latest version")
-            .with_context("Delete older versions or create a new version first"));
     }
 
     // Delete output file from NATS object store if it exists

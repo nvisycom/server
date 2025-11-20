@@ -11,34 +11,16 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum DocumentFileConstraints {
     // File identity validation constraints
-    #[strum(serialize = "document_files_display_name_length_min")]
-    DisplayNameLengthMin,
-    #[strum(serialize = "document_files_display_name_length_max")]
-    DisplayNameLengthMax,
-    #[strum(serialize = "document_files_original_filename_length_min")]
-    OriginalFilenameLengthMin,
-    #[strum(serialize = "document_files_original_filename_length_max")]
-    OriginalFilenameLengthMax,
+    #[strum(serialize = "document_files_display_name_length")]
+    DisplayNameLength,
+    #[strum(serialize = "document_files_original_filename_length")]
+    OriginalFilenameLength,
     #[strum(serialize = "document_files_file_extension_format")]
     FileExtensionFormat,
-    #[strum(serialize = "document_files_mime_type_length_min")]
-    MimeTypeLengthMin,
-    #[strum(serialize = "document_files_mime_type_length_max")]
-    MimeTypeLengthMax,
 
     // File processing constraints
-    #[strum(serialize = "document_files_processing_priority_min")]
-    ProcessingPriorityMin,
-    #[strum(serialize = "document_files_processing_priority_max")]
-    ProcessingPriorityMax,
-    #[strum(serialize = "document_files_processing_attempts_min")]
-    ProcessingAttemptsMin,
-    #[strum(serialize = "document_files_processing_attempts_max")]
-    ProcessingAttemptsMax,
-    #[strum(serialize = "document_files_processing_error_length_max")]
-    ProcessingErrorLengthMax,
-    #[strum(serialize = "document_files_processing_duration_min")]
-    ProcessingDurationMin,
+    #[strum(serialize = "document_files_processing_priority_range")]
+    ProcessingPriorityRange,
 
     // File storage constraints
     #[strum(serialize = "document_files_file_size_min")]
@@ -51,30 +33,12 @@ pub enum DocumentFileConstraints {
     FileHashSha256Length,
 
     // File metadata constraints
-    #[strum(serialize = "document_files_metadata_size_min")]
-    MetadataSizeMin,
-    #[strum(serialize = "document_files_metadata_size_max")]
-    MetadataSizeMax,
-
-    // File quality score constraints
-    #[strum(serialize = "document_files_processing_score_min")]
-    ProcessingScoreMin,
-    #[strum(serialize = "document_files_processing_score_max")]
-    ProcessingScoreMax,
-    #[strum(serialize = "document_files_completeness_score_min")]
-    CompletenessScoreMin,
-    #[strum(serialize = "document_files_completeness_score_max")]
-    CompletenessScoreMax,
-    #[strum(serialize = "document_files_confidence_score_min")]
-    ConfidenceScoreMin,
-    #[strum(serialize = "document_files_confidence_score_max")]
-    ConfidenceScoreMax,
+    #[strum(serialize = "document_files_metadata_size")]
+    MetadataSize,
 
     // File retention constraints
-    #[strum(serialize = "document_files_retention_period_min")]
-    RetentionPeriodMin,
-    #[strum(serialize = "document_files_retention_period_max")]
-    RetentionPeriodMax,
+    #[strum(serialize = "document_files_retention_period")]
+    RetentionPeriod,
 
     // File chronological constraints
     #[strum(serialize = "document_files_updated_after_created")]
@@ -96,33 +60,16 @@ impl DocumentFileConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            DocumentFileConstraints::DisplayNameLengthMin
-            | DocumentFileConstraints::DisplayNameLengthMax
-            | DocumentFileConstraints::OriginalFilenameLengthMin
-            | DocumentFileConstraints::OriginalFilenameLengthMax
+            DocumentFileConstraints::DisplayNameLength
+            | DocumentFileConstraints::OriginalFilenameLength
             | DocumentFileConstraints::FileExtensionFormat
-            | DocumentFileConstraints::MimeTypeLengthMin
-            | DocumentFileConstraints::MimeTypeLengthMax
-            | DocumentFileConstraints::ProcessingPriorityMin
-            | DocumentFileConstraints::ProcessingPriorityMax
-            | DocumentFileConstraints::ProcessingAttemptsMin
-            | DocumentFileConstraints::ProcessingAttemptsMax
-            | DocumentFileConstraints::ProcessingErrorLengthMax
-            | DocumentFileConstraints::ProcessingDurationMin
+            | DocumentFileConstraints::ProcessingPriorityRange
             | DocumentFileConstraints::FileSizeMin
             | DocumentFileConstraints::StoragePathNotEmpty
             | DocumentFileConstraints::StorageBucketNotEmpty
             | DocumentFileConstraints::FileHashSha256Length
-            | DocumentFileConstraints::MetadataSizeMin
-            | DocumentFileConstraints::MetadataSizeMax
-            | DocumentFileConstraints::ProcessingScoreMin
-            | DocumentFileConstraints::ProcessingScoreMax
-            | DocumentFileConstraints::CompletenessScoreMin
-            | DocumentFileConstraints::CompletenessScoreMax
-            | DocumentFileConstraints::ConfidenceScoreMin
-            | DocumentFileConstraints::ConfidenceScoreMax
-            | DocumentFileConstraints::RetentionPeriodMin
-            | DocumentFileConstraints::RetentionPeriodMax => ConstraintCategory::Validation,
+            | DocumentFileConstraints::MetadataSize
+            | DocumentFileConstraints::RetentionPeriod => ConstraintCategory::Validation,
 
             DocumentFileConstraints::UpdatedAfterCreated
             | DocumentFileConstraints::DeletedAfterCreated

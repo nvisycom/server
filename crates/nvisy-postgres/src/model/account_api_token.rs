@@ -6,44 +6,51 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::account_api_tokens;
-use crate::types::ApiTokenType;
+use crate::types::constants::token;
+use crate::types::{
+    ApiTokenType, HasCreatedAt, HasExpiresAt, HasGeographicContext, HasSecurityContext,
+};
 
 /// Account API token model representing an authentication token.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AccountApiToken {
-    /// Unique token identifier used for authentication
+    /// Unique access token for API authentication.
     pub access_seq: Uuid,
-    /// Unique refresh token for extending token without re-authentication
+    /// Unique refresh token for extending token without re-authentication.
     pub refresh_seq: Uuid,
-    /// Reference to the account this token belongs to
+    /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-    /// Two-character region/state code where token originated
+    /// Human-readable name for the API token.
+    pub name: String,
+    /// Optional description for the API token.
+    pub description: Option<String>,
+    /// Two-character region/state code where token originated.
     pub region_code: String,
-    /// ISO 3166-1 alpha-2 country code where token originated
+    /// ISO 3166-1 alpha-2 country code where token originated.
     pub country_code: Option<String>,
-    /// City name where token originated
+    /// City name where token originated.
     pub city_name: Option<String>,
-    /// IP address from which the token was initiated
+    /// IP address from which the token was initiated.
     pub ip_address: IpNet,
-    /// User agent string from the client browser/application
+    /// User agent string from the client browser/application.
     pub user_agent: String,
-    /// Optional persistent device identifier
+    /// Optional persistent device identifier.
     pub device_id: Option<String>,
-    /// Type of token (web, mobile, api, etc.)
+    /// Type of token (web, mobile, api, etc.).
     pub session_type: ApiTokenType,
-    /// Flag indicating potentially suspicious token activity
+    /// Flag indicating potentially suspicious token activity.
     pub is_suspicious: bool,
-    /// Flag indicating if this is a "remember me" extended token
+    /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: bool,
-    /// Timestamp of token creation
+    /// Timestamp of token creation.
     pub issued_at: OffsetDateTime,
-    /// Timestamp when the token expires and becomes invalid
+    /// Timestamp when the token expires and becomes invalid.
     pub expired_at: OffsetDateTime,
-    /// Timestamp of most recent token activity
+    /// Timestamp of most recent token activity.
     pub last_used_at: Option<OffsetDateTime>,
-    /// Timestamp when the token was soft-deleted
+    /// Timestamp when the token was soft-deleted.
     pub deleted_at: Option<OffsetDateTime>,
 }
 
@@ -52,25 +59,29 @@ pub struct AccountApiToken {
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountApiToken {
-    /// Reference to the account this token belongs to
+    /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-    /// Two-character region/state code where token originated
+    /// Human-readable name for the API token.
+    pub name: String,
+    /// Optional description for the API token.
+    pub description: Option<String>,
+    /// Two-character region/state code where token originated.
     pub region_code: Option<String>,
-    /// ISO 3166-1 alpha-2 country code where token originated
+    /// ISO 3166-1 alpha-2 country code where token originated.
     pub country_code: Option<String>,
-    /// City name where token originated
+    /// City name where token originated.
     pub city_name: Option<String>,
-    /// IP address from which the token was initiated
+    /// IP address from which the token was initiated.
     pub ip_address: IpNet,
-    /// User agent string from the client browser/application
+    /// User agent string from the client browser/application.
     pub user_agent: String,
-    /// Optional persistent device identifier
+    /// Optional persistent device identifier.
     pub device_id: Option<String>,
-    /// Type of token (web, mobile, api, etc.)
+    /// Type of token (web, mobile, api, etc.).
     pub session_type: Option<ApiTokenType>,
-    /// Flag indicating if this is a "remember me" extended token
+    /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
-    /// Timestamp when the token expires and becomes invalid
+    /// Timestamp when the token expires and becomes invalid.
     pub expired_at: Option<OffsetDateTime>,
 }
 
@@ -79,15 +90,19 @@ pub struct NewAccountApiToken {
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountApiToken {
-    /// Timestamp of most recent token activity
+    /// Timestamp of most recent token activity.
     pub last_used_at: Option<OffsetDateTime>,
-    /// Flag indicating potentially suspicious token activity
+    /// Updated name for the API token.
+    pub name: Option<String>,
+    /// Updated description for the API token.
+    pub description: Option<String>,
+    /// Flag indicating potentially suspicious token activity.
     pub is_suspicious: Option<bool>,
-    /// Flag indicating if this is a "remember me" extended token
+    /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
-    /// Timestamp when the token expires and becomes invalid
+    /// Timestamp when the token expires and becomes invalid.
     pub expired_at: Option<OffsetDateTime>,
-    /// Timestamp when the token was soft-deleted
+    /// Timestamp when the token was soft-deleted.
     pub deleted_at: Option<OffsetDateTime>,
 }
 
@@ -110,22 +125,6 @@ impl AccountApiToken {
     /// Returns whether the token is flagged as suspicious.
     pub fn is_suspicious(&self) -> bool {
         self.is_suspicious
-    }
-
-    /// Returns whether the token is active (valid and recently used).
-    pub fn is_active(&self) -> bool {
-        self.is_valid() && self.is_recently_used()
-    }
-
-    /// Returns whether the token was used recently (within last 30 minutes).
-    pub fn is_recently_used(&self) -> bool {
-        let now = OffsetDateTime::now_utc();
-        if let Some(last_used) = self.last_used_at {
-            let duration = now - last_used;
-            duration.whole_minutes() < 30
-        } else {
-            false
-        }
     }
 
     /// Returns whether the token can be refreshed.
@@ -175,6 +174,11 @@ impl AccountApiToken {
         }
     }
 
+    /// Returns whether the token is about to expire (within warning threshold).
+    pub fn is_expiring_soon_default(&self) -> bool {
+        self.is_expiring_soon(token::EXPIRY_WARNING_MINUTES)
+    }
+
     /// Returns whether this is a web token.
     pub fn is_web_token(&self) -> bool {
         self.session_type == ApiTokenType::Web
@@ -205,16 +209,9 @@ impl AccountApiToken {
         }
     }
 
-    /// Returns whether the token was created recently (within last hour).
-    pub fn is_recently_created(&self) -> bool {
-        let now = OffsetDateTime::now_utc();
-        let duration = now - self.issued_at;
-        duration.whole_hours() < 1
-    }
-
     /// Returns whether the token is long-lived (active for more than 24 hours).
     pub fn is_long_lived(&self) -> bool {
-        self.token_duration().whole_hours() > 24
+        self.token_duration().whole_hours() > token::LONG_LIVED_THRESHOLD_HOURS
     }
 
     /// Returns a shortened version of the access token for logging/display.
@@ -235,5 +232,41 @@ impl AccountApiToken {
         } else {
             token_str
         }
+    }
+}
+
+impl HasCreatedAt for AccountApiToken {
+    fn created_at(&self) -> OffsetDateTime {
+        self.issued_at
+    }
+}
+
+impl HasExpiresAt for AccountApiToken {
+    fn expires_at(&self) -> OffsetDateTime {
+        self.expired_at
+    }
+}
+
+impl HasSecurityContext for AccountApiToken {
+    fn ip_address(&self) -> Option<IpNet> {
+        Some(self.ip_address)
+    }
+
+    fn user_agent(&self) -> Option<&str> {
+        Some(&self.user_agent)
+    }
+}
+
+impl HasGeographicContext for AccountApiToken {
+    fn country_code(&self) -> Option<&str> {
+        self.country_code.as_deref()
+    }
+
+    fn region_code(&self) -> Option<&str> {
+        Some(&self.region_code)
+    }
+
+    fn city_name(&self) -> Option<&str> {
+        self.city_name.as_deref()
     }
 }

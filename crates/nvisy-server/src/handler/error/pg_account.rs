@@ -1,8 +1,8 @@
 //! Account-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    AccountConstraints, AccountNotificationConstraints, AccountSessionConstraints,
-    AccountTokenConstraints,
+    AccountActionTokenConstraints, AccountApiTokenConstraints, AccountConstraints,
+    AccountNotificationConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -10,11 +10,8 @@ use crate::handler::{Error, ErrorKind};
 impl From<AccountConstraints> for Error<'static> {
     fn from(c: AccountConstraints) -> Self {
         let error = match c {
-            AccountConstraints::DisplayNameLengthMin => ErrorKind::BadRequest
-                .with_message("Display name must be at least 2 characters long"),
-            AccountConstraints::DisplayNameLengthMax => {
-                ErrorKind::BadRequest.with_message("Display name cannot exceed 32 characters")
-            }
+            AccountConstraints::DisplayNameLength => ErrorKind::BadRequest
+                .with_message("Display name must be between 2 and 100 characters long"),
             AccountConstraints::DisplayNameNotEmpty => {
                 ErrorKind::BadRequest.with_message("Display name cannot be empty")
             }
@@ -42,11 +39,8 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::LocaleFormat => {
                 ErrorKind::BadRequest.with_message("Invalid locale format")
             }
-            AccountConstraints::FailedLoginAttemptsMin => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            AccountConstraints::FailedLoginAttemptsMax => {
-                ErrorKind::BadRequest.with_message("Too many failed login attempts")
+            AccountConstraints::FailedLoginAttemptsRange => {
+                ErrorKind::BadRequest.with_message("Invalid number of failed login attempts")
             }
             AccountConstraints::LockedUntilFuture => ErrorKind::InternalServerError.into_error(),
             AccountConstraints::UpdatedAfterCreated
@@ -67,63 +61,70 @@ impl From<AccountConstraints> for Error<'static> {
     }
 }
 
-impl From<AccountSessionConstraints> for Error<'static> {
-    fn from(c: AccountSessionConstraints) -> Self {
+impl From<AccountApiTokenConstraints> for Error<'static> {
+    fn from(c: AccountApiTokenConstraints) -> Self {
         let error = match c {
-            AccountSessionConstraints::RegionCodeValid => {
+            AccountApiTokenConstraints::NameNotEmpty => {
+                ErrorKind::BadRequest.with_message("Token name cannot be empty")
+            }
+            AccountApiTokenConstraints::NameLength => {
+                ErrorKind::BadRequest.with_message("Token name is too long")
+            }
+            AccountApiTokenConstraints::DescriptionLength => {
+                ErrorKind::BadRequest.with_message("Token description is too long")
+            }
+            AccountApiTokenConstraints::RegionCodeValid => {
                 ErrorKind::BadRequest.with_message("Invalid region code")
             }
-            AccountSessionConstraints::CountryCodeValid => {
+            AccountApiTokenConstraints::CountryCodeValid => {
                 ErrorKind::BadRequest.with_message("Invalid country code")
             }
-            AccountSessionConstraints::UserAgentNotEmpty => {
+            AccountApiTokenConstraints::UserAgentNotEmpty => {
                 ErrorKind::BadRequest.with_message("User agent cannot be empty")
             }
-            AccountSessionConstraints::ExpiredAfterIssued
-            | AccountSessionConstraints::DeletedAfterIssued
-            | AccountSessionConstraints::LastUsedAfterIssued => {
+            AccountApiTokenConstraints::ExpiredAfterIssued
+            | AccountApiTokenConstraints::DeletedAfterIssued
+            | AccountApiTokenConstraints::LastUsedAfterIssued => {
                 ErrorKind::InternalServerError.into_error()
             }
-            AccountSessionConstraints::AccessSeqUnique => {
+            AccountApiTokenConstraints::AccessSeqUnique => {
                 ErrorKind::InternalServerError.into_error()
             }
-            AccountSessionConstraints::RefreshSeqUnique => {
+            AccountApiTokenConstraints::RefreshSeqUnique => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
 
-        error.with_resource("account_session")
+        error.with_resource("account_api_token")
     }
 }
 
-impl From<AccountTokenConstraints> for Error<'static> {
-    fn from(c: AccountTokenConstraints) -> Self {
+impl From<AccountActionTokenConstraints> for Error<'static> {
+    fn from(c: AccountActionTokenConstraints) -> Self {
         let error = match c {
-            AccountTokenConstraints::PrimaryKey => ErrorKind::InternalServerError.into_error(),
-            AccountTokenConstraints::ActionDataSizeMin => {
-                ErrorKind::BadRequest.with_message("Action data is too small")
-            }
-            AccountTokenConstraints::ActionDataSizeMax => {
-                ErrorKind::BadRequest.with_message("Action data exceeds maximum allowed size")
-            }
-            AccountTokenConstraints::UserAgentNotEmpty => {
-                ErrorKind::BadRequest.with_message("User agent cannot be empty")
-            }
-            AccountTokenConstraints::AttemptCountMin => ErrorKind::InternalServerError.into_error(),
-            AccountTokenConstraints::AttemptCountMax => {
-                ErrorKind::BadRequest.with_message("Maximum attempts exceeded")
-            }
-            AccountTokenConstraints::MaxAttemptsMin | AccountTokenConstraints::MaxAttemptsMax => {
+            AccountActionTokenConstraints::PrimaryKey => {
                 ErrorKind::InternalServerError.into_error()
             }
-            AccountTokenConstraints::ExpiredAfterIssued
-            | AccountTokenConstraints::UsedAfterIssued
-            | AccountTokenConstraints::UsedBeforeExpired => {
+            AccountActionTokenConstraints::ActionDataSize => {
+                ErrorKind::BadRequest.with_message("Action data size is invalid")
+            }
+            AccountActionTokenConstraints::UserAgentNotEmpty => {
+                ErrorKind::BadRequest.with_message("User agent cannot be empty")
+            }
+            AccountActionTokenConstraints::AttemptCountRange => {
+                ErrorKind::BadRequest.with_message("Invalid attempt count")
+            }
+            AccountActionTokenConstraints::MaxAttemptsRange => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            AccountActionTokenConstraints::ExpiredAfterIssued
+            | AccountActionTokenConstraints::UsedAfterIssued
+            | AccountActionTokenConstraints::UsedBeforeExpired => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
 
-        error.with_resource("account_token")
+        error.with_resource("account_action_token")
     }
 }
 

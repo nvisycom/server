@@ -122,7 +122,7 @@ CREATE TABLE projects (
 
     -- Project identity and branding
     display_name     TEXT             NOT NULL,
-    description      TEXT             NOT NULL DEFAULT '',
+    description      TEXT             DEFAULT NULL,
     avatar_url       TEXT             DEFAULT NULL,
 
     CONSTRAINT projects_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 32),
@@ -393,7 +393,7 @@ COMMENT ON COLUMN project_invites.created_at IS 'Timestamp when the invitation w
 COMMENT ON COLUMN project_invites.updated_at IS 'Timestamp when the invitation was last modified';
 
 -- Create project activity log table
-CREATE TABLE project_activity_log (
+CREATE TABLE project_activities (
     -- Primary identifier
     id            BIGSERIAL PRIMARY KEY,
 
@@ -406,8 +406,8 @@ CREATE TABLE project_activity_log (
     description   TEXT          NOT NULL DEFAULT '',
     metadata      JSONB         NOT NULL DEFAULT '{}',
 
-    CONSTRAINT project_activity_log_description_length_max CHECK (length(description) <= 500),
-    CONSTRAINT project_activity_log_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+    CONSTRAINT project_activities_description_length_max CHECK (length(description) <= 500),
+    CONSTRAINT project_activities_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
 
     -- Context tracking
     ip_address    INET        DEFAULT NULL,
@@ -418,29 +418,29 @@ CREATE TABLE project_activity_log (
 );
 
 -- Create indexes for activity log
-CREATE INDEX project_activity_log_project_recent_idx
-    ON project_activity_log (project_id, created_at DESC);
+CREATE INDEX project_activities_project_recent_idx
+    ON project_activities (project_id, created_at DESC);
 
-CREATE INDEX project_activity_log_account_recent_idx
-    ON project_activity_log (account_id, created_at DESC)
+CREATE INDEX project_activities_account_recent_idx
+    ON project_activities (account_id, created_at DESC)
     WHERE account_id IS NOT NULL;
 
-CREATE INDEX project_activity_log_activity_type_idx
-    ON project_activity_log (activity_type, project_id, created_at DESC);
+CREATE INDEX project_activities_activity_type_idx
+    ON project_activities (activity_type, project_id, created_at DESC);
 
 -- Add table and column comments
-COMMENT ON TABLE project_activity_log IS
+COMMENT ON TABLE project_activities IS
     'Comprehensive audit log for all project activities and changes.';
 
-COMMENT ON COLUMN project_activity_log.id IS 'Unique activity log entry identifier';
-COMMENT ON COLUMN project_activity_log.project_id IS 'Reference to the project';
-COMMENT ON COLUMN project_activity_log.account_id IS 'Account that performed the activity (NULL for system)';
-COMMENT ON COLUMN project_activity_log.activity_type IS 'Type of activity performed';
-COMMENT ON COLUMN project_activity_log.description IS 'Human-readable description of the activity';
-COMMENT ON COLUMN project_activity_log.metadata IS 'Additional activity context (JSON, 2B-4KB)';
-COMMENT ON COLUMN project_activity_log.ip_address IS 'IP address where activity originated';
-COMMENT ON COLUMN project_activity_log.user_agent IS 'User agent of the client';
-COMMENT ON COLUMN project_activity_log.created_at IS 'Timestamp when the activity occurred';
+COMMENT ON COLUMN project_activities.id IS 'Unique activity log entry identifier';
+COMMENT ON COLUMN project_activities.project_id IS 'Reference to the project';
+COMMENT ON COLUMN project_activities.account_id IS 'Account that performed the activity (NULL for system)';
+COMMENT ON COLUMN project_activities.activity_type IS 'Type of activity performed';
+COMMENT ON COLUMN project_activities.description IS 'Human-readable description of the activity';
+COMMENT ON COLUMN project_activities.metadata IS 'Additional activity context (JSON, 2B-4KB)';
+COMMENT ON COLUMN project_activities.ip_address IS 'IP address where activity originated';
+COMMENT ON COLUMN project_activities.user_agent IS 'User agent of the client';
+COMMENT ON COLUMN project_activities.created_at IS 'Timestamp when the activity occurred';
 
 -- Create project integrations table
 CREATE TABLE project_integrations (

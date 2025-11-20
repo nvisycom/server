@@ -15,7 +15,7 @@ DROP VIEW IF EXISTS project_member_summary;
 
 -- Drop tables (indexes and triggers dropped automatically with tables)
 DROP TABLE IF EXISTS project_integrations;
-DROP TABLE IF EXISTS project_activity_log;
+DROP TABLE IF EXISTS project_activities;
 DROP TABLE IF EXISTS project_invites;
 DROP TABLE IF EXISTS project_members;
 DROP TABLE IF EXISTS projects;

@@ -27,8 +27,6 @@ pub struct DocumentComment {
     pub reply_to_account_id: Option<Uuid>,
     /// Comment text content.
     pub content: Option<String>,
-    /// Additional metadata.
-    pub metadata: serde_json::Value,
     /// Timestamp when the comment was created.
     pub created_at: OffsetDateTime,
     /// Timestamp when the comment was last updated.
@@ -46,7 +44,6 @@ impl From<model::DocumentComment> for DocumentComment {
             parent_comment_id: comment.parent_comment_id,
             reply_to_account_id: comment.reply_to_account_id,
             content: comment.get_content(),
-            metadata: comment.metadata,
             created_at: comment.created_at,
             updated_at: comment.updated_at,
         }
