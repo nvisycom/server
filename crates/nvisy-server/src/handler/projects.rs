@@ -74,39 +74,29 @@ async fn create_project(
         "Creating new project",
     );
 
-    let mut conn = pg_client.get_connection().await?;
+    let new_project = NewProject {
+        display_name: request.display_name,
+        description: request.description,
+        keep_for_sec: request.keep_for_sec,
+        auto_cleanup: request.auto_cleanup,
+        require_approval: request.require_approval,
+        max_members: request.max_members,
+        max_storage: request.max_storage,
+        enable_comments: request.enable_comments,
+        created_by: auth_claims.account_id,
+        ..Default::default()
+    };
+    let project = pg_client.create_project(new_project).await?;
 
-    let response = conn
-        .build_transaction()
-        .run(|conn| {
-            async move {
-                let new_project = NewProject {
-                    display_name: request.display_name,
-                    description: request.description,
-                    keep_for_sec: request.keep_for_sec,
-                    auto_cleanup: request.auto_cleanup,
-                    require_approval: request.require_approval,
-                    max_members: request.max_members,
-                    max_storage: request.max_storage,
-                    enable_comments: request.enable_comments,
-                    created_by: auth_claims.account_id,
-                    ..Default::default()
-                };
-                let project = ProjectRepository::create_project(conn, new_project).await?;
+    let new_member = NewProjectMember {
+        project_id: project.id,
+        account_id: auth_claims.account_id,
+        member_role: ProjectRole::Owner,
+        ..Default::default()
+    };
+    pg_client.add_project_member(new_member).await?;
 
-                let new_member = NewProjectMember {
-                    project_id: project.id,
-                    account_id: auth_claims.account_id,
-                    member_role: ProjectRole::Owner,
-                    ..Default::default()
-                };
-                ProjectMemberRepository::add_project_member(conn, new_member).await?;
-                let project = Project::from_model(project);
-                Ok::<Project, PgError>(project)
-            }
-            .scope_boxed()
-        })
-        .await?;
+    let response = Project::from_model(project);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -150,14 +140,9 @@ async fn list_projects(
     AuthState(auth_claims): AuthState,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Projects>)> {
-    let mut conn = pg_client.get_connection().await?;
-
-    let project_memberships = ProjectMemberRepository::list_user_projects_with_details(
-        &mut conn,
-        auth_claims.account_id,
-        pagination.into(),
-    )
-    .await?;
+    let project_memberships = pg_client
+        .list_user_projects_with_details(auth_claims.account_id, pagination.into())
+        .await?;
 
     // Convert to response items
     let projects: Projects = project_memberships
@@ -209,9 +194,7 @@ async fn read_project(
         .authorize_project(&mut conn, path_params.project_id, Permission::ViewProject)
         .await?;
 
-    let Some(project) =
-        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
-    else {
+    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
@@ -287,8 +270,9 @@ async fn update_project(
         ..Default::default()
     };
 
-    let project =
-        ProjectRepository::update_project(&mut conn, path_params.project_id, update_data).await?;
+    let project = pg_client
+        .update_project(path_params.project_id, update_data)
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -352,15 +336,13 @@ async fn delete_project(
         .await?;
 
     // Verify project exists before deletion
-    let Some(_project) =
-        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
-    else {
+    let Some(_project) = pg_client.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
     };
 
-    ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
+    pg_client.delete_project(path_params.project_id).await?;
 
     tracing::warn!(
         target: TRACING_TARGET,
