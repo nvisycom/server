@@ -14,8 +14,8 @@ use deadpool::managed::{Object, Pool};
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 pub use migrate::{
-    MigrationResult, MigrationStatus, PgClientExt, get_applied_migrations, get_migration_status,
-    run_pending_migrations, verify_schema_integrity,
+    MigrationResult, MigrationStatus, PgClientMigrationExt, get_applied_migrations,
+    get_migration_status, run_pending_migrations, verify_schema_integrity,
 };
 pub use pg_database::PgClient;
 pub use pool_configs::{PgConfig, PgPoolConfig};

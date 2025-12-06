@@ -85,7 +85,7 @@ pub enum CommentTarget {
 }
 
 impl DocumentComment {
-    /// Returns the comment content, showing "[deleted]" if the comment is deleted.
+    /// Returns the comment content, or `None` if the comment is deleted.
     pub fn get_content(&self) -> Option<String> {
         if self.is_deleted() {
             None

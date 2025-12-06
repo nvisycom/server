@@ -4,12 +4,11 @@ use std::time::Duration;
 use deadpool::managed::{Hook, Pool};
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig};
-use tracing::{debug, error, info, instrument, warn};
 
 use super::custom_hooks;
 use crate::{
     ConnectionPool, PgConfig, PgError, PgPoolStatus, PgResult, PooledConnection,
-    TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION,
+    TRACING_TARGET_CONNECTION,
 };
 
 /// High-level database client that manages connections and migrations.
@@ -41,9 +40,13 @@ impl PgClient {
     /// Returns an error if:
     ///
     /// - Pool configuration is invalid
-    #[instrument(skip(config), target = TRACING_TARGET_CLIENT, fields(database_url = %config.database_url_masked()))]
+    #[tracing::instrument(
+        skip(config),
+        target = TRACING_TARGET_CONNECTION,
+        fields(database_url = %config.database_url_masked())
+    )]
     pub fn new(config: PgConfig) -> PgResult<Self> {
-        info!(target: TRACING_TARGET_CLIENT, "Initializing database client");
+        tracing::info!(target: TRACING_TARGET_CONNECTION, "Initializing database client");
 
         let mut manager_config = ManagerConfig::default();
         manager_config.custom_setup = Box::new(custom_hooks::setup_callback);
@@ -61,7 +64,7 @@ impl PgClient {
             .post_recycle(Hook::sync_fn(custom_hooks::post_recycle))
             .build()
             .map_err(|e| {
-                error!(target: TRACING_TARGET_CLIENT, error = %e, "Failed to create connection pool");
+                tracing::error!(target: TRACING_TARGET_CONNECTION, error = %e, "Failed to create connection pool");
                 PgError::Unexpected(format!("Failed to build connection pool: {}", e).into())
             })?;
 
@@ -85,15 +88,19 @@ impl PgClient {
     /// - The database connection cannot be established
     /// - Pool configuration is invalid
     /// - Database connectivity test fails
-    #[instrument(skip(config), target = TRACING_TARGET_CLIENT, fields(database_url = %config.database_url_masked()))]
+    #[tracing::instrument(
+        skip(config),
+        target = TRACING_TARGET_CONNECTION,
+        fields(database_url = %config.database_url_masked())
+    )]
     pub async fn new_with_test(config: PgConfig) -> PgResult<Self> {
         let this = Self::new(config)?;
 
         // Test connectivity
-        debug!(target: TRACING_TARGET_CONNECTION, "Testing database connectivity");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Testing database connectivity");
         let mut conn: PooledConnection = this.inner.pool.get().await.map_err(
             |e: deadpool::managed::PoolError<diesel_async::pooled_connection::PoolError>| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CONNECTION, error = %e,
                     "Failed to get connection from pool during initialization"
                 );
@@ -113,12 +120,12 @@ impl PgClient {
             .get_result(&mut *conn)
             .await
             .map_err(|e| {
-                error!(target: TRACING_TARGET_CONNECTION, error = %e, "Database connectivity test failed");
+                tracing::error!(target: TRACING_TARGET_CONNECTION, error = %e, "Database connectivity test failed");
                 PgError::from(e)
             })?;
 
-        info!(
-            target: TRACING_TARGET_CLIENT,
+        tracing::info!(
+            target: TRACING_TARGET_CONNECTION,
             max_size = this.inner.config.pool.max_size,
             connection_timeout = ?this.inner.config.pool.connection_timeout,
             idle_timeout = ?this.inner.config.pool.idle_timeout,
@@ -135,13 +142,13 @@ impl PgClient {
     /// # Errors
     ///
     /// Returns an error if no connection is available within the timeout period.
-    #[instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub async fn get_connection(&self) -> PgResult<PooledConnection> {
-        debug!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
 
         let start = std::time::Instant::now();
         let conn = self.inner.pool.get().await.map_err(|e| {
-            error!(
+            tracing::error!(
                 target: TRACING_TARGET_CONNECTION,
                 error = %e,
                 elapsed = ?start.elapsed(),
@@ -152,14 +159,14 @@ impl PgClient {
 
         let elapsed = start.elapsed();
         if elapsed > Duration::from_millis(100) {
-            warn!(
+            tracing::warn!(
                 target: TRACING_TARGET_CONNECTION,
                 elapsed = ?elapsed,
                 "Connection acquisition took longer than expected"
             );
         }
 
-        debug!(target: TRACING_TARGET_CONNECTION, elapsed = ?elapsed, "Connection acquired successfully");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, elapsed = ?elapsed, "Connection acquired successfully");
         Ok(conn)
     }
 

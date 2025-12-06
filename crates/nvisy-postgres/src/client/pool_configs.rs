@@ -8,9 +8,8 @@ use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, instrument, warn};
 
-use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CLIENT};
+use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
 
 /// Complete database configuration including connection string and pool settings.
 ///
@@ -91,11 +90,15 @@ impl PgConfig {
     ///
     /// * `database_url` - PostgreSQL connection string
     /// * `pool` - Connection pool configuration
-    #[instrument(skip(database_url), fields(database_url = %Self::mask_url(&database_url)), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(
+        skip(database_url),
+        fields(database_url = %Self::mask_url(&database_url)),
+        target = TRACING_TARGET_CONNECTION
+    )]
     pub fn new(database_url: String, pool: PgPoolConfig) -> Self {
         let this = Self { database_url, pool };
-        debug!(
-            target: TRACING_TARGET_CLIENT,
+        tracing::debug!(
+            target: TRACING_TARGET_CONNECTION,
             max_size = this.pool.max_size,
             connection_timeout = ?this.pool.connection_timeout,
             idle_timeout = ?this.pool.idle_timeout,
@@ -131,33 +134,33 @@ impl PgConfig {
     }
 
     /// Sets the database URL.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_database_url(mut self, database_url: &str) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, "Setting database URL");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Setting database URL");
         self.database_url = database_url.to_string();
         self
     }
 
     /// Sets the maximum number of connections in the pool.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_max_size(mut self, max_size: u32) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, max_size, "Setting pool max size");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, max_size, "Setting pool max size");
         self.pool.max_size = max_size;
         self
     }
 
     /// Sets the connection timeout.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_connection_timeout(mut self, timeout: Duration) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, ?timeout, "Setting connection timeout");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, ?timeout, "Setting connection timeout");
         self.pool.connection_timeout = timeout;
         self
     }
 
     /// Sets the idle timeout for connections.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_idle_timeout(mut self, timeout: Duration) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, ?timeout, "Setting idle timeout");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, ?timeout, "Setting idle timeout");
         self.pool.idle_timeout = Some(timeout);
         self
     }
@@ -165,9 +168,9 @@ impl PgConfig {
     /// Builds a new database instance with the given configuration.
     ///
     /// Validates the configuration for consistency and safety.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn build(self) -> PgResult<PgClient> {
-        debug!(target: TRACING_TARGET_CLIENT, "Validating database configuration");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Validating database configuration");
 
         // Validate database URL
         if self.database_url.is_empty() {
@@ -178,12 +181,12 @@ impl PgConfig {
         if !self.database_url.starts_with("postgres://")
             && !self.database_url.starts_with("postgresql://")
         {
-            warn!(target: TRACING_TARGET_CLIENT, "Database URL may not be a PostgreSQL URL");
+            tracing::warn!(target: TRACING_TARGET_CONNECTION, "Database URL may not be a PostgreSQL URL");
         }
 
         self.pool.validate()?;
 
-        debug!(target: TRACING_TARGET_CLIENT, "Database configuration validation passed");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Database configuration validation passed");
         PgClient::new(self)
     }
 }
@@ -216,7 +219,7 @@ impl PgPoolConfig {
     }
 
     /// Validates the pool configuration.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn validate(&self) -> PgResult<()> {
         // Validate connection count
         if !(MIN_CONNECTIONS..=MAX_CONNECTIONS).contains(&self.max_size) {

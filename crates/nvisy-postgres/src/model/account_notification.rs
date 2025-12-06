@@ -1,7 +1,7 @@
 //! Account notification model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::schema::account_notifications;
@@ -99,7 +99,7 @@ impl AccountNotification {
     }
 
     /// Returns the time remaining until expiration.
-    pub fn time_until_expiry(&self) -> Option<time::Duration> {
+    pub fn time_until_expiry(&self) -> Option<Duration> {
         if let Some(expires_at) = self.expires_at {
             let now = OffsetDateTime::now_utc();
             if expires_at > now {
@@ -113,22 +113,17 @@ impl AccountNotification {
     }
 
     /// Returns the duration since the notification was created.
-    pub fn age(&self) -> time::Duration {
+    pub fn age(&self) -> Duration {
         OffsetDateTime::now_utc() - self.created_at
     }
 
     /// Returns whether the notification is expiring soon (within 24 hours).
     pub fn is_expiring_soon(&self) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
-            remaining <= time::Duration::days(1)
+            remaining <= Duration::days(1)
         } else {
             false
         }
-    }
-
-    /// Returns whether this is a high-priority notification.
-    pub fn is_high_priority(&self) -> bool {
-        matches!(self.notify_type, NotificationType::SystemAnnouncement)
     }
 
     /// Returns whether this is a system notification.
@@ -148,12 +143,12 @@ impl AccountNotification {
 
     /// Returns whether the notification can be dismissed.
     pub fn can_be_dismissed(&self) -> bool {
-        !self.is_high_priority() || self.is_read
+        !self.is_system_notification() || self.is_read
     }
 
     /// Returns whether the notification should be shown to the user.
     pub fn should_display(&self) -> bool {
-        !self.is_expired() && (!self.is_read || self.is_high_priority())
+        !self.is_expired() && (!self.is_read || self.is_system_notification())
     }
 
     /// Returns whether the notification has custom metadata.
@@ -171,7 +166,7 @@ impl AccountNotification {
 
     /// Returns the notification priority level (0 = low, 2 = high).
     pub fn priority_level(&self) -> u8 {
-        if self.is_high_priority() {
+        if self.is_system_notification() {
             2
         } else if self.requires_action() {
             1
@@ -190,8 +185,7 @@ impl HasCreatedAt for AccountNotification {
 impl HasExpiresAt for AccountNotification {
     fn expires_at(&self) -> OffsetDateTime {
         self.expires_at.unwrap_or(
-            OffsetDateTime::now_utc()
-                + time::Duration::days(notification::DEFAULT_RETENTION_DAYS as i64),
+            OffsetDateTime::now_utc() + Duration::days(notification::DEFAULT_RETENTION_DAYS as i64),
         )
     }
 }

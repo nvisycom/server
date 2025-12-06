@@ -144,7 +144,7 @@ pub fn post_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResu
             target: TRACING_TARGET_CONNECTION,
             hook = "post_recycle",
             recycle_count = metrics.recycle_count,
-            "Connection is broken after recycling - should be removed from pool"
+            "Connection is broken after recycling, should be removed from pool"
         );
     }
 

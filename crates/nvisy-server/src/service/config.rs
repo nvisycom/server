@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use derive_builder::Builder;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_openrouter::{LlmClient, LlmConfig};
-use nvisy_postgres::{PgClient, PgClientExt, PgConfig};
+use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::service::{AuthKeysConfig, Result, ServiceError, SessionKeys};

@@ -8,11 +8,6 @@ pub(crate) const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
 
 // Tracing target constants for consistent logging.
 
-/// Tracing target for client-related operations.
-///
-/// Use this target for logging client initialization, configuration, and lifecycle events.
-pub const TRACING_TARGET_CLIENT: &str = "nvisy_postgres::client";
-
 /// Tracing target for database query operations.
 ///
 /// Use this target for logging query execution, results, and query-related errors.
@@ -25,7 +20,8 @@ pub const TRACING_TARGET_MIGRATION: &str = "nvisy_postgres::migrations";
 
 /// Tracing target for database connection operations.
 ///
-/// Use this target for logging connection establishment, pool management, and connection errors.
+/// Use this target for logging connection establishment, pool management, client initialization,
+/// configuration, and connection errors.
 pub const TRACING_TARGET_CONNECTION: &str = "nvisy_postgres::connection";
 
 mod client;
@@ -41,9 +37,10 @@ use diesel::ConnectionError;
 use diesel::result::Error;
 pub use diesel_async::AsyncPgConnection as PgConnection;
 
+pub(crate) use crate::client::PooledConnection;
 pub use crate::client::{
-    ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientExt, PgConfig,
-    PgPoolConfig, PgPoolStatus, PooledConnection, get_applied_migrations, get_migration_status,
+    ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientMigrationExt, PgConfig,
+    PgPoolConfig, PgPoolStatus, get_applied_migrations, get_migration_status,
     run_pending_migrations, verify_schema_integrity,
 };
 use crate::types::ConstraintViolation;

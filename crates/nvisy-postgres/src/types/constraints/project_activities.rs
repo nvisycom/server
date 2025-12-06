@@ -18,7 +18,7 @@ pub enum ProjectActivitiesConstraints {
 }
 
 impl ProjectActivitiesConstraints {
-    /// Creates a new [`ProjectActivityLogConstraints`] from the constraint name.
+    /// Creates a new [`ProjectActivitiesConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
     }

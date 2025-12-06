@@ -29,7 +29,7 @@ pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
         tracing::error!(
             target: TRACING_TARGET_MIGRATION,
             hook = "pre_migrate",
-            "Connection is broken before migrations - migrations may fail"
+            "Connection is broken before migrations, migrations may fail"
         );
     }
 
@@ -56,7 +56,7 @@ pub async fn post_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
         tracing::error!(
             target: TRACING_TARGET_MIGRATION,
             hook = "post_migrate",
-            "Connection is broken after migrations - possible migration failure"
+            "Connection is broken after migrations, possible migration failure"
         );
     }
 
