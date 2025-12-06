@@ -69,7 +69,8 @@ async fn get_own_account(
         "account retrieved"
     );
 
-    Ok((StatusCode::OK, Json(account.into())))
+    let account = Account::from_model(account);
+    Ok((StatusCode::OK, Json(account)))
 }
 
 /// Updates the authenticated account.
@@ -197,7 +198,8 @@ async fn update_own_account(
         "account updated"
     );
 
-    Ok((StatusCode::OK, Json(account.into())))
+    let account = Account::from_model(account);
+    Ok((StatusCode::OK, Json(account)))
 }
 
 /// Deletes the authenticated account.

@@ -32,6 +32,12 @@ mod defaults {
     pub fn openrouter_api_key() -> String {
         format!("sk-or-v1-{}", "A".repeat(64))
     }
+
+    /// Default PostgreSQL max connections.
+    pub const POSTGRES_MAX_CONNECTIONS: u32 = 10;
+
+    /// Default PostgreSQL connection timeout in seconds.
+    pub const POSTGRES_CONNECTION_TIMEOUT_SECS: u64 = 30;
 }
 
 /// Wrapper for builder validation that returns String errors.
@@ -68,6 +74,26 @@ fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Resul
         }
     }
 
+    // Validate postgres max connections
+    if let Some(max_connections) = &builder.postgres_max_connections {
+        if *max_connections == 0 {
+            return Err("Postgres max connections must be greater than 0".to_string());
+        }
+        if *max_connections > 16 {
+            return Err("Postgres max connections cannot exceed 16".to_string());
+        }
+    }
+
+    // Validate postgres connection timeout
+    if let Some(timeout_secs) = &builder.postgres_connection_timeout_secs {
+        if *timeout_secs < 1 {
+            return Err("Postgres connection timeout must be at least 1 second".to_string());
+        }
+        if *timeout_secs > 300 {
+            return Err("Postgres connection timeout cannot exceed 300 seconds".to_string());
+        }
+    }
+
     Ok(())
 }
 
@@ -85,6 +111,14 @@ pub struct ServiceConfig {
     /// Postgres database connection string.
     #[builder(default = "defaults::POSTGRES_ENDPOINT.to_string()")]
     pub postgres_endpoint: String,
+
+    /// Maximum number of connections in the Postgres connection pool.
+    #[builder(default = "defaults::POSTGRES_MAX_CONNECTIONS")]
+    pub postgres_max_connections: u32,
+
+    /// Connection timeout for Postgres operations in seconds.
+    #[builder(default = "defaults::POSTGRES_CONNECTION_TIMEOUT_SECS")]
+    pub postgres_connection_timeout_secs: u64,
 
     /// NATS server URL.
     #[builder(default = "defaults::NATS_URL.to_string()")]
@@ -115,7 +149,13 @@ impl ServiceConfig {
 
     /// Connects to Postgres database and runs migrations.
     pub async fn connect_postgres(&self) -> Result<PgClient> {
-        let pool_config = nvisy_postgres::PgPoolConfig::default();
+        let pool_config = nvisy_postgres::PgPoolConfig {
+            max_size: self.postgres_max_connections,
+            connection_timeout: std::time::Duration::from_secs(
+                self.postgres_connection_timeout_secs,
+            ),
+            ..nvisy_postgres::PgPoolConfig::default()
+        };
         let config = PgConfig::new(self.postgres_endpoint.clone(), pool_config);
         let pg_client = PgClient::new(config).map_err(|e| {
             ServiceError::internal("postgres", "Failed to create database client").with_source(e)
@@ -166,6 +206,8 @@ impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             postgres_endpoint: defaults::POSTGRES_ENDPOINT.to_string(),
+            postgres_max_connections: defaults::POSTGRES_MAX_CONNECTIONS,
+            postgres_connection_timeout_secs: defaults::POSTGRES_CONNECTION_TIMEOUT_SECS,
             auth_decoding_key: defaults::auth_decoding_key(),
             auth_encoding_key: defaults::auth_encoding_key(),
             openrouter_api_key: defaults::openrouter_api_key(),

@@ -101,7 +101,8 @@ async fn create_project(
                     ..Default::default()
                 };
                 ProjectMemberRepository::add_project_member(conn, new_member).await?;
-                Ok::<Project, PgError>(project.into())
+                let project = Project::from_model(project);
+                Ok::<Project, PgError>(project)
             }
             .scope_boxed()
         })
@@ -151,7 +152,6 @@ async fn list_projects(
 ) -> Result<(StatusCode, Json<Projects>)> {
     let mut conn = pg_client.get_connection().await?;
 
-    // Use the combined query to fetch both project and membership data in a single query
     let project_memberships = ProjectMemberRepository::list_user_projects_with_details(
         &mut conn,
         auth_claims.account_id,
@@ -162,7 +162,7 @@ async fn list_projects(
     // Convert to response items
     let projects: Projects = project_memberships
         .into_iter()
-        .map(|(project, membership)| (project, membership).into())
+        .map(|(project, membership)| Project::from_model_with_membership(project, membership))
         .collect();
 
     tracing::debug!(
@@ -224,7 +224,8 @@ async fn read_project(
         "Retrieved project details"
     );
 
-    Ok((StatusCode::OK, Json(project.into())))
+    let project = Project::from_model(project);
+    Ok((StatusCode::OK, Json(project)))
 }
 
 /// Updates a project by the project ID.
@@ -296,7 +297,8 @@ async fn update_project(
         "Project updated successfully",
     );
 
-    Ok((StatusCode::OK, Json(project.into())))
+    let project = Project::from_model(project);
+    Ok((StatusCode::OK, Json(project)))
 }
 
 /// Deletes a project by its project ID.

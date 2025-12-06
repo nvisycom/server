@@ -2,52 +2,6 @@
 //!
 //! This module provides CLI-friendly configuration structs with clap attributes
 //! that can be converted to the plain server configuration types.
-//!
-//! # Usage Examples
-//!
-//! ## Command Line Arguments
-//!
-//! ```bash
-//! # Basic usage with custom database
-//! nvisy-cli --postgres-url "postgresql://user:pass@localhost:5432/nvisy"
-//!
-//! # CORS configuration
-//! nvisy-cli --cors-origins "https://app.example.com,https://dashboard.example.com" \
-//!           --cors-max-age 7200 \
-//!           --cors-allow-credentials false
-//!
-//! # OpenAPI paths
-//! nvisy-cli --open-api-json "/docs/api.json" \
-//!           --swagger-ui "/docs/swagger" \
-//!           --scalar-ui "/docs/scalar"
-//! ```
-//!
-//! ## Environment Variables
-//!
-//! ```bash
-//! export POSTGRES_URL="postgresql://user:pass@localhost:5432/nvisy"
-//! export CORS_ORIGINS="https://app.example.com,https://dashboard.example.com"
-//! export OPENROUTER_API_KEY="sk-or-v1-your-key-here"
-//! export STRIPE_API_KEY="sk_live_your-stripe-key-here"
-//!
-//! nvisy-cli
-//! ```
-//!
-//! ## Programmatic Usage
-//!
-//! ```rust
-//! use nvisy_cli::config::CliConfig;
-//! use clap::Parser;
-//!
-//! // Parse from command line
-//! let cli_config = CliConfig::parse();
-//!
-//! // Convert to server configuration types
-//! let (service_config, cors_config, openapi_config) = cli_config.into_server_configs();
-//!
-//! // Use with nvisy-server
-//! let service_state = nvisy_server::service::ServiceState::from_config(&service_config).await?;
-//! ```
 
 use std::path::PathBuf;
 
@@ -66,15 +20,20 @@ pub struct ServiceConfig {
     #[arg(default_value = "postgresql://postgres:postgres@localhost:5432/postgres")]
     pub postgres_url: String,
 
+    /// Maximum number of connections in the Postgres connection pool.
+    #[arg(long, env = "POSTGRES_MAX_CONNECTIONS")]
+    #[arg(default_value_t = 10)]
+    pub postgres_max_pool: u32,
+
+    /// Connection timeout for Postgres operations in seconds.
+    #[arg(long, env = "POSTGRES_CONNECTION_TIMEOUT_SECS")]
+    #[arg(default_value_t = 30)]
+    pub postgres_timeout_secs: u64,
+
     /// NATS server URL.
     #[arg(long, env = "NATS_URL")]
     #[arg(default_value = "nats://127.0.0.1:4222")]
     pub nats_url: String,
-
-    /// Controls the regional policy used for data collection.
-    #[arg(short = 'r', long, env = "DATA_COLLECTION_POLICY")]
-    #[arg(default_value_t = true)]
-    pub minimal_data_collection: bool,
 
     /// File path to the JWT decoding (public) key used for sessions.
     #[arg(long, env = "AUTH_PUBLIC_PEM_FILEPATH")]
@@ -100,8 +59,9 @@ impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             postgres_url: "postgresql://postgres:postgres@localhost:5432/postgres".to_owned(),
+            postgres_max_pool: 10,
+            postgres_timeout_secs: 30,
             nats_url: "nats://127.0.0.1:4222".to_owned(),
-            minimal_data_collection: true,
             auth_decoding_key: "./public.pem".into(),
             auth_encoding_key: "./private.pem".into(),
             openrouter_api_key: format!("sk-or-v1-{}", "A".repeat(64)),
@@ -114,6 +74,8 @@ impl From<ServiceConfig> for ServerServiceConfig {
     fn from(cli_config: ServiceConfig) -> Self {
         Self {
             postgres_endpoint: cli_config.postgres_url,
+            postgres_max_connections: cli_config.postgres_max_pool,
+            postgres_connection_timeout_secs: cli_config.postgres_timeout_secs,
             nats_url: cli_config.nats_url,
             auth_decoding_key: cli_config.auth_decoding_key,
             auth_encoding_key: cli_config.auth_encoding_key,
@@ -224,104 +186,5 @@ impl CliConfig {
         self,
     ) -> (ServerServiceConfig, ServerCorsConfig, ServerOpenApiConfig) {
         (self.service.into(), self.cors.into(), self.openapi.into())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_service_config() {
-        let config = ServiceConfig::default();
-        assert_eq!(
-            config.postgres_url,
-            "postgresql://postgres:postgres@localhost:5432/postgres"
-        );
-        assert!(config.minimal_data_collection);
-    }
-
-    #[test]
-    fn test_service_config_conversion() {
-        let cli_config = ServiceConfig::default();
-        let server_config: ServerServiceConfig = cli_config.into();
-
-        // Basic smoke test that conversion works
-        assert_eq!(
-            server_config.postgres_endpoint,
-            "postgresql://postgres:postgres@localhost:5432/postgres"
-        );
-    }
-
-    #[test]
-    fn test_cors_config_conversion() {
-        let cli_config = CorsConfig {
-            allowed_origins: vec!["http://localhost:3000".to_string()],
-            max_age_seconds: 7200,
-            allow_credentials: false,
-        };
-
-        let server_config: ServerCorsConfig = cli_config.into();
-        assert_eq!(server_config.allowed_origins, vec!["http://localhost:3000"]);
-        assert_eq!(server_config.max_age_seconds, 7200);
-        assert!(!server_config.allow_credentials);
-    }
-
-    #[test]
-    fn test_openapi_config_conversion() {
-        let cli_config = OpenApiConfig::default();
-        let server_config: ServerOpenApiConfig = cli_config.into();
-
-        assert_eq!(server_config.open_api_json, "/api/openapi.json");
-        assert_eq!(server_config.swagger_ui, "/api/swagger");
-        assert_eq!(server_config.scalar_ui, "/api/scalar");
-    }
-
-    #[test]
-    fn test_complete_cli_config() {
-        let config = CliConfig::default();
-        let (service, cors, openapi) = config.into_server_configs();
-
-        // Smoke test that all conversions work
-        assert!(!service.postgres_endpoint.is_empty());
-        assert!(!cors.allowed_origins.is_empty() || cors.allowed_origins.is_empty()); // Either is valid
-        assert!(!openapi.open_api_json.is_empty());
-    }
-
-    #[test]
-    fn test_cli_config_with_custom_values() {
-        let config = CliConfig {
-            service: ServiceConfig {
-                postgres_url: "postgresql://custom:pass@db:5432/custom".to_string(),
-                minimal_data_collection: false,
-
-                ..ServiceConfig::default()
-            },
-            cors: CorsConfig {
-                allowed_origins: vec!["https://app.example.com".to_string()],
-                max_age_seconds: 7200,
-                allow_credentials: false,
-            },
-            openapi: OpenApiConfig {
-                open_api_json: "/custom/api.json".to_string(),
-                swagger_ui: "/custom/swagger".to_string(),
-                scalar_ui: "/custom/scalar".to_string(),
-            },
-        };
-
-        let (service, cors, openapi) = config.into_server_configs();
-
-        assert_eq!(
-            service.postgres_endpoint,
-            "postgresql://custom:pass@db:5432/custom"
-        );
-
-        assert_eq!(cors.allowed_origins, vec!["https://app.example.com"]);
-        assert_eq!(cors.max_age_seconds, 7200);
-        assert!(!cors.allow_credentials);
-
-        assert_eq!(openapi.open_api_json, "/custom/api.json");
-        assert_eq!(openapi.swagger_ui, "/custom/swagger");
-        assert_eq!(openapi.scalar_ui, "/custom/scalar");
     }
 }

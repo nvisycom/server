@@ -21,7 +21,7 @@ pub struct CreateProject {
     pub display_name: String,
 
     /// Description of the project.
-    #[validate(length(min = 1, max = 200))]
+    #[validate(length(max = 200))]
     pub description: Option<String>,
 
     /// Duration in seconds to keep the original files.
@@ -39,7 +39,7 @@ pub struct CreateProject {
     pub max_members: Option<i32>,
 
     /// Maximum storage size in megabytes allowed for the project.
-    #[validate(range(min = 1, max = 1048576))]
+    #[validate(range(min = 1024, max = 1048576))]
     pub max_storage: Option<i32>,
 
     /// Whether comments are enabled for this project.

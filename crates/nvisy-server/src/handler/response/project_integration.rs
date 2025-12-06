@@ -146,7 +146,7 @@ impl ProjectIntegration {
 
 impl ProjectIntegrationWithCredentials {
     /// Creates a new instance of [`ProjectIntegrationWithCredentials`] from database model.
-    pub fn new(integration: model::ProjectIntegration) -> Self {
+    pub fn from_model(integration: model::ProjectIntegration) -> Self {
         Self {
             integration_id: integration.id,
             project_id: integration.project_id,
@@ -167,7 +167,7 @@ impl ProjectIntegrationWithCredentials {
 
 impl ProjectIntegrationSummary {
     /// Creates a new instance of [`ProjectIntegrationSummary`] from database model.
-    pub fn new(integration: model::ProjectIntegration) -> Self {
+    pub fn from_model(integration: model::ProjectIntegration) -> Self {
         Self {
             integration_id: integration.id,
             project_id: integration.project_id,
@@ -191,14 +191,14 @@ impl From<model::ProjectIntegration> for ProjectIntegration {
 impl From<model::ProjectIntegration> for ProjectIntegrationWithCredentials {
     #[inline]
     fn from(integration: model::ProjectIntegration) -> Self {
-        Self::new(integration)
+        Self::from_model(integration)
     }
 }
 
 impl From<model::ProjectIntegration> for ProjectIntegrationSummary {
     #[inline]
     fn from(integration: model::ProjectIntegration) -> Self {
-        Self::new(integration)
+        Self::from_model(integration)
     }
 }
 

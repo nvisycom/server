@@ -1,4 +1,4 @@
-//! Document request types with basic validation.
+//! Document request types.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;

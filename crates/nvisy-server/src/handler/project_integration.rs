@@ -474,21 +474,21 @@ async fn update_integration(
     }
 
     // Check if new name conflicts with existing integrations (if name is being changed)
-    if let Some(ref new_name) = payload.integration_name {
-        if new_name != &existing_integration.integration_name {
-            let name_exists = ProjectIntegrationRepository::is_integration_name_unique(
-                &mut conn,
-                path_params.project_id,
-                new_name,
-                Some(path_params.integration_id),
-            )
-            .await?;
+    if let Some(ref new_name) = payload.integration_name
+        && new_name != &existing_integration.integration_name
+    {
+        let name_exists = ProjectIntegrationRepository::is_integration_name_unique(
+            &mut conn,
+            path_params.project_id,
+            new_name,
+            Some(path_params.integration_id),
+        )
+        .await?;
 
-            if !name_exists {
-                return Err(
-                    ErrorKind::Conflict.with_message("Integration name already exists in project")
-                );
-            }
+        if !name_exists {
+            return Err(
+                ErrorKind::Conflict.with_message("Integration name already exists in project")
+            );
         }
     }
 

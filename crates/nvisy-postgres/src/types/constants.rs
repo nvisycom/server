@@ -7,19 +7,10 @@ pub mod database {
 
     /// Maximum pagination limit.
     pub const MAX_PAGE_SIZE: i64 = 1000;
-
-    /// Default ordering direction.
-    pub const DEFAULT_ORDER: &str = "DESC";
 }
 
 /// Security-related constants.
 pub mod security {
-    /// Minimum password length requirement.
-    pub const MIN_PASSWORD_LENGTH: usize = 8;
-
-    /// Maximum password length to prevent DoS.
-    pub const MAX_PASSWORD_LENGTH: usize = 128;
-
     /// Default bcrypt cost for password hashing.
     pub const DEFAULT_BCRYPT_COST: u32 = 12;
 
@@ -34,33 +25,10 @@ pub mod storage {
 
     /// Maximum total storage per project in MB.
     pub const MAX_PROJECT_STORAGE_MB: i32 = 1000;
-
-    /// Supported file extensions for uploads.
-    pub const ALLOWED_FILE_EXTENSIONS: &[&str] = &[
-        "pdf", "doc", "docx", "txt", "md", "png", "jpg", "jpeg", "gif", "svg",
-    ];
-}
-
-/// API and rate limiting constants.
-pub mod api {
-    /// Default API rate limit per minute.
-    pub const DEFAULT_RATE_LIMIT_PER_MINUTE: i32 = 100;
-
-    /// Maximum API rate limit per minute.
-    pub const MAX_RATE_LIMIT_PER_MINUTE: i32 = 1000;
-
-    /// API version string.
-    pub const API_VERSION: &str = "v1";
 }
 
 /// Notification and communication constants.
 pub mod notification {
-    /// Maximum notification message length.
-    pub const MAX_MESSAGE_LENGTH: usize = 500;
-
-    /// Maximum notification title length.
-    pub const MAX_TITLE_LENGTH: usize = 100;
-
     /// Default notification retention days.
     pub const DEFAULT_RETENTION_DAYS: i32 = 90;
 

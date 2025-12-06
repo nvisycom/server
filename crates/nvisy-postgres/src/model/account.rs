@@ -12,7 +12,7 @@
 
 use diesel::prelude::*;
 use ipnet::IpNet;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::schema::accounts;
@@ -144,7 +144,7 @@ impl Account {
     /// Returns whether the account is currently locked due to failed login attempts.
     pub fn is_locked(&self) -> bool {
         if let Some(locked_until) = self.locked_until {
-            locked_until > time::OffsetDateTime::now_utc()
+            locked_until > OffsetDateTime::now_utc()
         } else {
             false
         }
@@ -208,9 +208,9 @@ impl Account {
     ///
     /// When an account is temporarily locked due to failed login attempts,
     /// this method calculates how much time remains before automatic unlock.
-    pub fn time_until_unlock(&self) -> Option<time::Duration> {
+    pub fn time_until_unlock(&self) -> Option<Duration> {
         if let Some(locked_until) = self.locked_until {
-            let now = time::OffsetDateTime::now_utc();
+            let now = OffsetDateTime::now_utc();
             if locked_until > now {
                 Some(locked_until - now)
             } else {
@@ -246,6 +246,6 @@ impl HasSecurityContext for Account {
     }
 
     fn user_agent(&self) -> Option<&str> {
-        None // Account model doesn't track user agent
+        None
     }
 }

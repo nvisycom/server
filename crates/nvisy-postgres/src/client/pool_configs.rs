@@ -55,7 +55,7 @@ pub struct PgPoolConfig {
     ///
     /// Default: 10
     /// Range: 1-100 connections
-    pub max_size: usize,
+    pub max_size: u32,
 
     /// Timeout for connection operations (create, acquire, recycle).
     ///
@@ -76,8 +76,8 @@ pub struct PgPoolConfig {
 }
 
 // Configuration constants
-const MIN_CONNECTIONS: usize = 1;
-const MAX_CONNECTIONS: usize = 1024;
+const MIN_CONNECTIONS: u32 = 1;
+const MAX_CONNECTIONS: u32 = 16;
 const MIN_CONN_TIMEOUT: Duration = Duration::from_millis(100);
 const MAX_CONN_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -140,7 +140,7 @@ impl PgConfig {
 
     /// Sets the maximum number of connections in the pool.
     #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub fn with_max_size(mut self, max_size: usize) -> Self {
+    pub fn with_max_size(mut self, max_size: u32) -> Self {
         debug!(target: TRACING_TARGET_CLIENT, max_size, "Setting pool max size");
         self.pool.max_size = max_size;
         self

@@ -35,8 +35,9 @@ pub struct Account {
     pub updated_at: OffsetDateTime,
 }
 
-impl From<model::Account> for Account {
-    fn from(account: model::Account) -> Self {
+impl Account {
+    /// Creates a new instance of [`Account`].
+    pub fn from_model(account: model::Account) -> Self {
         Self {
             account_id: account.id,
             is_activated: account.is_verified,

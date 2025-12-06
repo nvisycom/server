@@ -51,7 +51,7 @@ impl PgClient {
             AsyncDieselConnectionManager::new_with_config(&config.database_url, manager_config);
 
         let pool = Pool::builder(manager)
-            .max_size(config.pool.max_size)
+            .max_size(config.pool.max_size as usize)
             .wait_timeout(Some(config.pool.connection_timeout))
             .create_timeout(Some(config.pool.connection_timeout))
             .recycle_timeout(config.pool.idle_timeout)

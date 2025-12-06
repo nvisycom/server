@@ -27,7 +27,7 @@ pub struct UpdateAccount {
     pub email_address: Option<String>,
 
     /// New password (will be hashed before storage).
-    #[validate(length(min = 8, max = 128))]
+    #[validate(length(min = 8, max = 256))]
     pub password: Option<String>,
 
     /// Company or organization name.

@@ -51,6 +51,11 @@ pub struct ValidationErrorDetail {
 /// information, and user-friendly messages.
 #[must_use = "error responses do nothing unless serialized"]
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(example = json!({
+    "name": "bad_request",
+    "message": "The request could not be processed due to invalid data",
+    "context": "Invalid email format",
+}))]
 pub struct ErrorResponse<'a> {
     /// The error name/type identifier
     pub name: Cow<'a, str>,
