@@ -12,16 +12,10 @@ use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNot
 use crate::types::NotificationType;
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive account notification database operations.
+/// Repository for account notification database operations.
 ///
-/// Provides database operations for managing user notifications across the system.
-/// Handles the complete lifecycle of notifications including creation, delivery
-/// tracking, read status management, and cleanup operations. Notifications can
-/// be associated with specific entities and have optional expiration times.
-///
-/// This repository supports various notification types and provides filtering
-/// capabilities for building notification feeds, dashboards, and administrative
-/// interfaces.
+/// Handles user notifications including creation, delivery tracking, read status
+/// management, and cleanup operations.
 pub trait AccountNotificationRepository {
     fn create_notification(
         &self,

@@ -1,9 +1,4 @@
 //! Project activity repository for managing project activity log operations.
-//!
-//! This module provides database query operations for project activity logs,
-//! enabling comprehensive tracking and analysis of all project-related activities.
-//! It handles creation, retrieval, filtering, and analysis of activity data with
-//! support for various query patterns and reporting needs.
 
 use std::future::Future;
 
@@ -18,41 +13,26 @@ use crate::model::{NewProjectActivity, ProjectActivity};
 use crate::types::ActivityType;
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Parameters for logging entity-specific activities with full context capture.
-///
-/// This structure encapsulates all the information needed to create comprehensive
-/// activity log entries for various types of project activities. It provides a
-/// standardized way to capture user actions, system events, and security-relevant
-/// information across different entity types (documents, members, integrations, etc.).
-///
-/// The parameters support both user-initiated and system-generated activities,
-/// with optional fields for scenarios where complete information isn't available.
+/// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
 pub struct LogEntityActivityParams {
-    /// The account that performed or initiated the activity.
+    /// The account that performed the activity.
     pub account_id: Option<Uuid>,
-
-    /// The specific type of activity being logged.
+    /// The type of activity being logged.
     pub activity_type: ActivityType,
-
-    /// Human-readable description of what occurred.
+    /// Human-readable description.
     pub description: String,
-
-    /// Structured metadata containing activity-specific details.
+    /// Structured metadata with activity details.
     pub metadata: serde_json::Value,
-
-    /// Network address of the client that initiated the activity.
+    /// Client IP address.
     pub ip_address: Option<IpNet>,
-
-    /// User agent string from the client request.
+    /// Client user agent string.
     pub user_agent: Option<String>,
 }
 
-/// Repository for project activity log table operations.
+/// Repository for project activity log database operations.
 ///
-/// Provides comprehensive database operations for managing project activity logs,
-/// including activity creation, querying, analysis, and maintenance. This repository
-/// handles all database interactions related to activity tracking and audit trails.
+/// Handles activity logging, querying, and audit trail management.
 pub trait ProjectActivityRepository {
     /// Logs a new activity in the project activity log.
     fn log_activity(

@@ -13,19 +13,10 @@ use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use crate::types::{ProcessingStatus, VirusScanStatus};
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive document file database operations.
+/// Repository for document file database operations.
 ///
-/// Provides database operations for managing document files throughout their
-/// lifecycle, including upload processing, virus scanning, deduplication,
-/// storage management, and analytics. This repository handles all database
-/// interactions related to file attachment management within document
-/// workflows, serving as the primary interface for binary content storage.
-///
-/// The repository supports file processing pipelines, security scanning,
-/// storage optimization through deduplication, and comprehensive monitoring
-/// capabilities to enable reliable and secure file management experiences.
-/// Files are treated as immutable content attachments that enhance document
-/// collaboration through rich media support and version-controlled storage.
+/// Handles file lifecycle management including upload processing, virus scanning,
+/// deduplication, and storage tracking.
 pub trait DocumentFileRepository {
     fn create_document_file(
         &self,

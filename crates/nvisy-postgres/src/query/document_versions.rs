@@ -12,19 +12,10 @@ use super::Pagination;
 use crate::model::{DocumentVersion, NewDocumentVersion, UpdateDocumentVersion};
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive document version database operations.
+/// Repository for document version database operations.
 ///
-/// Provides database operations for managing document versions throughout their
-/// lifecycle, including creation, retrieval, version tracking, and analytics.
-/// This repository handles all database interactions related to version control
-/// within document workflows, serving as the primary interface for document
-/// history management and collaborative editing coordination.
-///
-/// The repository supports sequential version numbering, content size tracking,
-/// temporal queries, and comprehensive analytics capabilities to enable rich
-/// version control experiences. Versions create immutable snapshots of document
-/// content that enable rollback capabilities, change tracking, and collaborative
-/// editing workflows with full audit trails.
+/// Handles version control including creation, tracking, sequential numbering,
+/// and version history management.
 pub trait DocumentVersionRepository {
     fn create_document_version(
         &self,

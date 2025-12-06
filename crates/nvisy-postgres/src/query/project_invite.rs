@@ -12,16 +12,10 @@ use crate::model::{NewProjectInvite, ProjectInvite, UpdateProjectInvite};
 use crate::types::InviteStatus;
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive project invitation database operations.
+/// Repository for project invitation database operations.
 ///
-/// Provides database operations for managing project invitations throughout
-/// their lifecycle, from creation and delivery through acceptance, rejection,
-/// and cleanup. This repository handles all database interactions related to
-/// project member invitations and supports various invitation workflows.
-///
-/// The repository manages invitation tokens, expiration times, status tracking,
-/// and provides comprehensive querying capabilities for building invitation
-/// management interfaces and automated invitation processes.
+/// Handles project invitations including creation, acceptance, rejection, and token
+/// management with expiration tracking.
 pub trait ProjectInviteRepository {
     /// Creates a new project invitation with secure token generation.
     fn create_project_invite(

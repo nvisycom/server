@@ -1,9 +1,4 @@
 //! Account repository for managing account database operations.
-//!
-//! This module provides comprehensive database operations for user account management,
-//! including authentication, profile management, security operations, and account
-//! lifecycle management. It serves as the primary interface for all account-related
-//! database interactions.
 
 use std::future::Future;
 
@@ -17,11 +12,10 @@ use super::Pagination;
 use crate::model::{Account, NewAccount, UpdateAccount};
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive account database operations.
+/// Repository for account database operations.
 ///
-/// Provides a complete set of database operations for managing user accounts throughout
-/// their lifecycle. This repository handles authentication, profile management, security
-/// features, and administrative operations with proper error handling and transaction support.
+/// Handles account lifecycle management including authentication, profile management,
+/// and security operations.
 pub trait AccountRepository {
     /// Creates a new user account with complete profile information.
     fn create_account(

@@ -12,17 +12,10 @@ use crate::model::{AccountActionToken, NewAccountActionToken, UpdateAccountActio
 use crate::types::ActionTokenType;
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive account action token database operations.
+/// Repository for account action token database operations.
 ///
-/// Provides database operations for managing temporary action tokens used for
-/// account-related actions like password resets, email verification, account
-/// activation, and other time-sensitive operations. This repository handles
-/// the full lifecycle of action tokens including creation, validation, usage
-/// tracking, and cleanup operations.
-///
-/// Action tokens are security-sensitive components that require careful handling
-/// to prevent abuse and ensure system security. All tokens have expiration times
-/// and attempt limits to mitigate potential attacks.
+/// Handles temporary action tokens for password resets, email verification, and other
+/// time-sensitive operations with expiration and attempt tracking.
 pub trait AccountActionTokenRepository {
     fn create_token(
         &self,

@@ -11,19 +11,10 @@ use super::Pagination;
 use crate::model::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive document comment database operations.
+/// Repository for document comment database operations.
 ///
-/// Provides database operations for managing document comments throughout their
-/// lifecycle, including creation, updates, threading management, and moderation
-/// capabilities. This repository handles all database interactions related to
-/// collaborative commenting on documents, files, and versions, serving as the
-/// primary interface for discussion and feedback workflows.
-///
-/// The repository supports hierarchical comment threading, reply management,
-/// mention tracking, and comprehensive search and filtering capabilities to
-/// enable rich collaborative discussion experiences. Comments facilitate
-/// knowledge sharing, peer review, and iterative content improvement within
-/// document-centric workflows.
+/// Handles comment lifecycle management including creation, threading, replies,
+/// and mention tracking.
 pub trait DocumentCommentRepository {
     fn create_comment(
         &self,

@@ -1,8 +1,4 @@
 //! Project integration repository for managing project integration operations.
-//!
-//! This module provides comprehensive database operations for managing third-party
-//! integrations connected to projects. It handles the full lifecycle of integrations
-//! from creation and configuration through status monitoring, updates, and maintenance.
 
 use std::future::Future;
 
@@ -16,15 +12,10 @@ use crate::model::{NewProjectIntegration, ProjectIntegration, UpdateProjectInteg
 use crate::types::IntegrationStatus;
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for project integration table operations.
+/// Repository for project integration database operations.
 ///
-/// Provides comprehensive database operations for managing project integrations,
-/// including CRUD operations, status management, and analytical queries. This repository
-/// handles all database interactions related to third-party service integrations.
-///
-/// The repository is stateless and thread-safe, designed to be used as a singleton
-/// or instantiated as needed. All methods require an active database connection
-/// and return results wrapped in the standard `PgResult` type for error handling.
+/// Handles third-party integration management including CRUD operations, status tracking,
+/// and integration lifecycle management.
 pub trait ProjectIntegrationRepository {
     /// Creates a new project integration with the provided configuration.
     fn create_integration(

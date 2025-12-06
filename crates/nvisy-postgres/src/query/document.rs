@@ -12,19 +12,10 @@ use crate::model::{Document, NewDocument, UpdateDocument};
 use crate::types::DocumentStatus;
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive document database operations.
+/// Repository for document database operations.
 ///
-/// Provides database operations for managing documents throughout their lifecycle,
-/// including creation, updates, status management, search functionality, and
-/// analytics. This repository handles all database interactions related to
-/// document management and serves as the primary interface for document data
-/// within projects and collaborative workflows.
-///
-/// The repository supports document visibility controls, status tracking,
-/// project-based organization, and comprehensive search and filtering capabilities
-/// to enable rich document management and collaboration experiences. Documents
-/// are the core content entities that enable knowledge sharing, version control,
-/// and collaborative editing within project workspaces.
+/// Handles document lifecycle management including creation, updates, status tracking,
+/// and search functionality.
 pub trait DocumentRepository {
     fn create_document(
         &self,

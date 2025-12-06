@@ -11,17 +11,10 @@ use super::Pagination;
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
 use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for comprehensive account API token database operations.
+/// Repository for account API token database operations.
 ///
-/// Provides database operations for managing long-lived API tokens used for
-/// programmatic access to the system. These tokens enable applications and
-/// services to authenticate and access resources on behalf of user accounts.
-/// This repository handles the complete lifecycle of API tokens including
-/// creation, refresh, validation, and cleanup operations.
-///
-/// API tokens are security-critical components that require careful handling
-/// to prevent unauthorized access. All tokens have expiration times and
-/// usage tracking to maintain security and enable proper audit trails.
+/// Handles long-lived API tokens for programmatic access with support for token
+/// refresh, expiration tracking, and cleanup operations.
 pub trait AccountApiTokenRepository {
     fn create_token(
         &self,
