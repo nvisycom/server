@@ -1,14 +1,16 @@
 //! Document versions repository for managing version control and history operations.
 
+use std::future::Future;
+
 use bigdecimal::BigDecimal;
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentVersion, NewDocumentVersion, UpdateDocumentVersion};
-use crate::{PgError, PgResult, schema};
+use crate::{PgClient, PgError, PgResult, schema};
 
 /// Repository for comprehensive document version database operations.
 ///
@@ -23,57 +25,119 @@ use crate::{PgError, PgResult, schema};
 /// version control experiences. Versions create immutable snapshots of document
 /// content that enable rollback capabilities, change tracking, and collaborative
 /// editing workflows with full audit trails.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DocumentVersionRepository;
+pub trait DocumentVersionRepository {
+    fn create_document_version(
+        &self,
+        new_version: NewDocumentVersion,
+    ) -> impl Future<Output = PgResult<DocumentVersion>> + Send;
 
-impl DocumentVersionRepository {
-    /// Creates a new document version repository instance.
-    ///
-    /// Returns a new repository instance ready for database operations.
-    /// Since the repository is stateless, this is equivalent to using
-    /// `Default::default()` or accessing repository methods statically.
-    ///
-    /// # Returns
-    ///
-    /// A new `DocumentVersionRepository` instance.
-    pub fn new() -> Self {
-        Self
-    }
+    fn find_document_version_by_id(
+        &self,
+        version_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<DocumentVersion>>> + Send;
 
-    /// Creates a new document version with complete version control setup.
-    ///
-    /// Initializes a new version record within the document version control
-    /// system with sequential numbering, content metadata, and audit trail
-    /// information. The version is immediately available for retrieval and
-    /// comparison, enabling comprehensive document history management.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the operation
-    /// * `new_version` - Complete version data including content size and metadata
-    ///
-    /// # Returns
-    ///
-    /// The created `DocumentVersion` with database-generated ID and timestamps,
-    /// or a database error if the operation fails.
-    ///
-    /// # Business Impact
-    ///
-    /// - Version becomes immediately available for content comparison
-    /// - Enables rollback and restore capabilities for document content
-    /// - Creates comprehensive audit trail for compliance and accountability
-    /// - Supports collaborative editing with conflict resolution
-    /// - Enables detailed change tracking and authorship attribution
-    pub async fn create_document_version(
-        conn: &mut AsyncPgConnection,
+    fn list_document_versions(
+        &self,
+        document_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn list_account_versions(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn get_latest_document_version(
+        &self,
+        document_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<DocumentVersion>>> + Send;
+
+    fn get_next_version_number(
+        &self,
+        document_id: Uuid,
+    ) -> impl Future<Output = PgResult<i32>> + Send;
+
+    fn find_version_by_number(
+        &self,
+        document_id: Uuid,
+        version_number: i32,
+    ) -> impl Future<Output = PgResult<Option<DocumentVersion>>> + Send;
+
+    fn update_document_version(
+        &self,
+        version_id: Uuid,
+        updates: UpdateDocumentVersion,
+    ) -> impl Future<Output = PgResult<DocumentVersion>> + Send;
+
+    fn delete_document_version(
+        &self,
+        version_id: Uuid,
+    ) -> impl Future<Output = PgResult<()>> + Send;
+
+    fn find_versions_by_date_range(
+        &self,
+        start_date: OffsetDateTime,
+        end_date: OffsetDateTime,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn find_versions_by_size_range(
+        &self,
+        min_size: i64,
+        max_size: i64,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn find_large_versions(
+        &self,
+        size_threshold: i64,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn find_recent_versions(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn count_document_versions(
+        &self,
+        document_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn get_user_version_storage_usage(
+        &self,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<BigDecimal>> + Send;
+
+    fn cleanup_auto_delete_versions(&self) -> impl Future<Output = PgResult<usize>> + Send;
+
+    fn purge_old_versions(
+        &self,
+        retention_days: i32,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
+
+    fn find_orphaned_versions(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentVersion>>> + Send;
+
+    fn cleanup_orphaned_versions(&self) -> impl Future<Output = PgResult<usize>> + Send;
+}
+
+impl DocumentVersionRepository for PgClient {
+    async fn create_document_version(
+        &self,
         new_version: NewDocumentVersion,
     ) -> PgResult<DocumentVersion> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions;
 
         let version = diesel::insert_into(document_versions::table)
             .values(&new_version)
             .returning(DocumentVersion::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -96,17 +160,19 @@ impl DocumentVersionRepository {
     ///
     /// The matching `DocumentVersion` if found and not deleted, `None` if not found,
     /// or a database error if the query fails.
-    pub async fn find_document_version_by_id(
-        conn: &mut AsyncPgConnection,
+    async fn find_document_version_by_id(
+        &self,
         version_id: Uuid,
     ) -> PgResult<Option<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let version = document_versions::table
             .filter(dsl::id.eq(version_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentVersion::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -131,11 +197,13 @@ impl DocumentVersionRepository {
     ///
     /// A vector of `DocumentVersion` entries for the document, ordered by
     /// version number (newest first), or a database error if the query fails.
-    pub async fn list_document_versions(
-        conn: &mut AsyncPgConnection,
+    async fn list_document_versions(
+        &self,
         document_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let versions = document_versions::table
@@ -145,7 +213,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -169,11 +237,13 @@ impl DocumentVersionRepository {
     ///
     /// A vector of `DocumentVersion` entries created by the account, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn list_account_versions(
-        conn: &mut AsyncPgConnection,
+    async fn list_account_versions(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let versions = document_versions::table
@@ -183,7 +253,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -206,10 +276,12 @@ impl DocumentVersionRepository {
     ///
     /// The latest `DocumentVersion` for the document if any versions exist,
     /// `None` if no versions found, or a database error if the query fails.
-    pub async fn get_latest_document_version(
-        conn: &mut AsyncPgConnection,
+    async fn get_latest_document_version(
+        &self,
         document_id: Uuid,
     ) -> PgResult<Option<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let version = document_versions::table
@@ -217,7 +289,7 @@ impl DocumentVersionRepository {
             .filter(dsl::deleted_at.is_null())
             .order(dsl::version_number.desc())
             .select(DocumentVersion::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -241,17 +313,16 @@ impl DocumentVersionRepository {
     ///
     /// The next sequential version number for the document,
     /// or a database error if the query fails.
-    pub async fn get_next_version_number(
-        conn: &mut AsyncPgConnection,
-        document_id: Uuid,
-    ) -> PgResult<i32> {
+    async fn get_next_version_number(&self, document_id: Uuid) -> PgResult<i32> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let max_version: Option<i32> = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::max(dsl::version_number))
-            .first(conn)
+            .first(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -275,11 +346,13 @@ impl DocumentVersionRepository {
     ///
     /// The matching `DocumentVersion` if found, `None` if not found,
     /// or a database error if the query fails.
-    pub async fn find_version_by_number(
-        conn: &mut AsyncPgConnection,
+    async fn find_version_by_number(
+        &self,
         document_id: Uuid,
         version_number: i32,
     ) -> PgResult<Option<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let version = document_versions::table
@@ -287,7 +360,7 @@ impl DocumentVersionRepository {
             .filter(dsl::version_number.eq(version_number))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentVersion::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -312,17 +385,19 @@ impl DocumentVersionRepository {
     ///
     /// The updated `DocumentVersion` with new values,
     /// or a database error if the operation fails.
-    pub async fn update_document_version(
-        conn: &mut AsyncPgConnection,
+    async fn update_document_version(
+        &self,
         version_id: Uuid,
         updates: UpdateDocumentVersion,
     ) -> PgResult<DocumentVersion> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let version = diesel::update(document_versions::table.filter(dsl::id.eq(version_id)))
             .set(&updates)
             .returning(DocumentVersion::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -350,15 +425,14 @@ impl DocumentVersionRepository {
     /// Deleting versions may impact document history integrity and rollback
     /// capabilities. Consider the implications for audit trails and compliance
     /// requirements before performing this operation.
-    pub async fn delete_document_version(
-        conn: &mut AsyncPgConnection,
-        version_id: Uuid,
-    ) -> PgResult<()> {
+    async fn delete_document_version(&self, version_id: Uuid) -> PgResult<()> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         diesel::update(document_versions::table.filter(dsl::id.eq(version_id)))
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -383,12 +457,14 @@ impl DocumentVersionRepository {
     ///
     /// A vector of `DocumentVersion` entries created within the date range,
     /// ordered by creation time (most recent first), or a database error if the query fails.
-    pub async fn find_versions_by_date_range(
-        conn: &mut AsyncPgConnection,
+    async fn find_versions_by_date_range(
+        &self,
         start_date: OffsetDateTime,
         end_date: OffsetDateTime,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let versions = document_versions::table
@@ -398,7 +474,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -423,12 +499,14 @@ impl DocumentVersionRepository {
     ///
     /// A vector of `DocumentVersion` entries within the size range,
     /// ordered by content size (largest first), or a database error if the query fails.
-    pub async fn find_versions_by_size_range(
-        conn: &mut AsyncPgConnection,
+    async fn find_versions_by_size_range(
+        &self,
         min_size: i64,
         max_size: i64,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let versions = document_versions::table
@@ -438,7 +516,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -462,11 +540,13 @@ impl DocumentVersionRepository {
     ///
     /// A vector of large `DocumentVersion` entries ordered by content size
     /// (largest first), or a database error if the query fails.
-    pub async fn find_large_versions(
-        conn: &mut AsyncPgConnection,
+    async fn find_large_versions(
+        &self,
         size_threshold: i64,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let versions = document_versions::table
@@ -476,7 +556,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -499,10 +579,9 @@ impl DocumentVersionRepository {
     ///
     /// A vector of recently created `DocumentVersion` entries ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_recent_versions(
-        conn: &mut AsyncPgConnection,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentVersion>> {
+    async fn find_recent_versions(&self, pagination: Pagination) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
@@ -514,7 +593,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -536,17 +615,16 @@ impl DocumentVersionRepository {
     ///
     /// The total count of active versions for the document,
     /// or a database error if the query fails.
-    pub async fn count_document_versions(
-        conn: &mut AsyncPgConnection,
-        document_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn count_document_versions(&self, document_id: Uuid) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let count = document_versions::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -568,17 +646,16 @@ impl DocumentVersionRepository {
     ///
     /// The total storage used by the user's versions in bytes as a `BigDecimal`,
     /// or a database error if the query fails.
-    pub async fn get_user_version_storage_usage(
-        conn: &mut AsyncPgConnection,
-        account_id: Uuid,
-    ) -> PgResult<BigDecimal> {
+    async fn get_user_version_storage_usage(&self, account_id: Uuid) -> PgResult<BigDecimal> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let usage: Option<BigDecimal> = document_versions::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::sum(dsl::file_size_bytes))
-            .first(conn)
+            .first(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -600,14 +677,16 @@ impl DocumentVersionRepository {
     ///
     /// The number of versions that were marked for deletion,
     /// or a database error if the operation fails.
-    pub async fn cleanup_auto_delete_versions(conn: &mut AsyncPgConnection) -> PgResult<usize> {
+    async fn cleanup_auto_delete_versions(&self) -> PgResult<usize> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let affected = diesel::update(document_versions::table)
             .filter(dsl::auto_delete_at.le(OffsetDateTime::now_utc()))
             .filter(dsl::deleted_at.is_null())
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -630,10 +709,9 @@ impl DocumentVersionRepository {
     ///
     /// The number of versions that were marked for deletion,
     /// or a database error if the operation fails.
-    pub async fn purge_old_versions(
-        conn: &mut AsyncPgConnection,
-        retention_days: i32,
-    ) -> PgResult<usize> {
+    async fn purge_old_versions(&self, retention_days: i32) -> PgResult<usize> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::{self, dsl};
 
         let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
@@ -642,7 +720,7 @@ impl DocumentVersionRepository {
             .filter(dsl::created_at.lt(cutoff_date))
             .filter(dsl::deleted_at.is_null())
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -665,10 +743,12 @@ impl DocumentVersionRepository {
     ///
     /// A vector of orphaned `DocumentVersion` entries,
     /// or a database error if the query fails.
-    pub async fn find_orphaned_versions(
-        conn: &mut AsyncPgConnection,
+    async fn find_orphaned_versions(
+        &self,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentVersion>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::dsl as version_dsl;
         use schema::documents::dsl as doc_dsl;
         use schema::{document_versions, documents};
@@ -681,7 +761,7 @@ impl DocumentVersionRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentVersion::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -703,7 +783,9 @@ impl DocumentVersionRepository {
     ///
     /// The number of orphaned versions that were marked for deletion,
     /// or a database error if the operation fails.
-    pub async fn cleanup_orphaned_versions(conn: &mut AsyncPgConnection) -> PgResult<usize> {
+    async fn cleanup_orphaned_versions(&self) -> PgResult<usize> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_versions::dsl as version_dsl;
         use schema::documents::dsl as doc_dsl;
         use schema::{document_versions, documents};
@@ -718,7 +800,7 @@ impl DocumentVersionRepository {
             )
             .filter(version_dsl::deleted_at.is_null())
             .set(version_dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 

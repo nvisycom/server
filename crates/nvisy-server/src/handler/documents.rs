@@ -77,11 +77,9 @@ async fn create_document(
         "creating new document",
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     auth_claims
         .authorize_project(
-            &mut conn,
+            &pg_client,
             path_params.project_id,
             Permission::CreateDocuments,
         )
@@ -94,7 +92,7 @@ async fn create_document(
         ..Default::default()
     };
 
-    let document = DocumentRepository::create_document(&mut conn, new_document).await?;
+    let document = pg_client.create_document(new_document).await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -141,18 +139,17 @@ async fn get_all_documents(
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Documents>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewDocuments)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::ViewDocuments,
+        )
         .await?;
 
-    let documents = DocumentRepository::find_documents_by_project(
-        &mut conn,
-        path_params.project_id,
-        pagination.into(),
-    )
-    .await?;
+    let documents = pg_client
+        .find_documents_by_project(path_params.project_id, pagination.into())
+        .await?;
 
     let response: Documents = documents.into_iter().map(Document::from).collect();
 
@@ -195,18 +192,17 @@ async fn get_document(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<Document>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     auth_claims
         .authorize_document(
-            &mut conn,
+            &pg_client,
             path_params.document_id,
             Permission::ViewDocuments,
         )
         .await?;
 
-    let Some(document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("document"));
     };
@@ -255,8 +251,6 @@ async fn update_document(
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -266,15 +260,16 @@ async fn update_document(
 
     auth_claims
         .authorize_document(
-            &mut conn,
+            &pg_client,
             path_params.document_id,
             Permission::UpdateDocuments,
         )
         .await?;
 
     // Verify document exists before updating
-    let Some(_existing_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_existing_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("document"));
     };
@@ -284,9 +279,9 @@ async fn update_document(
         ..Default::default()
     };
 
-    let document =
-        DocumentRepository::update_document(&mut conn, path_params.document_id, update_data)
-            .await?;
+    let document = pg_client
+        .update_document(path_params.document_id, update_data)
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -333,24 +328,23 @@ async fn delete_document(
         "document deletion requested - this is a destructive operation",
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     auth_claims
         .authorize_document(
-            &mut conn,
+            &pg_client,
             path_params.document_id,
             Permission::DeleteDocuments,
         )
         .await?;
 
     // Verify document exists before deleting
-    let Some(_existing_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_existing_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("document"));
     };
 
-    DocumentRepository::delete_document(&mut conn, path_params.document_id).await?;
+    pg_client.delete_document(path_params.document_id).await?;
 
     tracing::warn!(
         target: TRACING_TARGET,

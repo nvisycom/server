@@ -92,8 +92,6 @@ async fn send_invite(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -105,16 +103,17 @@ async fn send_invite(
 
     // Verify user has permission to send invitations
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::InviteMembers,
+        )
         .await?;
 
     // Check if user is already a member
-    if let Some(existing_member) = ProjectMemberRepository::find_project_member(
-        &mut conn,
-        path_params.project_id,
-        auth_claims.account_id,
-    )
-    .await?
+    if let Some(existing_member) = pg_client
+        .find_project_member(path_params.project_id, auth_claims.account_id)
+        .await?
         && existing_member.is_active
     {
         return Err(ErrorKind::Conflict
@@ -128,15 +127,15 @@ async fn send_invite(
 
     // Check for existing pending invites to the same email
     let normalized_email = request.invitee_email.to_lowercase();
-    let all_invites = ProjectInviteRepository::list_user_invites(
-        &mut conn,
-        None,
-        nvisy_postgres::query::Pagination {
-            limit: 100,
-            offset: 0,
-        },
-    )
-    .await?;
+    let all_invites = pg_client
+        .list_user_invites(
+            None,
+            nvisy_postgres::query::Pagination {
+                limit: 100,
+                offset: 0,
+            },
+        )
+        .await?;
 
     // Filter by project_id since list_user_invites doesn't filter by project
     let existing_invites: Vec<_> = all_invites
@@ -175,8 +174,7 @@ async fn send_invite(
         ..Default::default()
     };
 
-    let project_invite =
-        ProjectInviteRepository::create_project_invite(&mut conn, new_invite).await?;
+    let project_invite = pg_client.create_project_invite(new_invite).await?;
 
     let response = Invite::from(project_invite);
 
@@ -241,8 +239,6 @@ async fn list_invites(
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Invites>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -252,16 +248,13 @@ async fn list_invites(
 
     // Verify user has permission to view project invitations
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
+        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
         .await?;
 
     // Retrieve project invitations with pagination
-    let project_invites = ProjectInviteRepository::list_project_invites(
-        &mut conn,
-        path_params.project_id,
-        pagination.into(),
-    )
-    .await?;
+    let project_invites = pg_client
+        .list_project_invites(path_params.project_id, pagination.into())
+        .await?;
 
     let invites: Invites = project_invites.into_iter().map(Invite::from).collect();
 
@@ -316,8 +309,6 @@ async fn cancel_invite(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -328,16 +319,17 @@ async fn cancel_invite(
 
     // Verify user has permission to manage project invitations
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::InviteMembers,
+        )
         .await?;
 
     // Cancel the invitation
-    ProjectInviteRepository::cancel_invite(
-        &mut conn,
-        path_params.invite_id,
-        auth_claims.account_id,
-    )
-    .await?;
+    pg_client
+        .cancel_invite(path_params.invite_id, auth_claims.account_id)
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -403,8 +395,6 @@ async fn reply_to_invite(
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -415,9 +405,7 @@ async fn reply_to_invite(
     );
 
     // Find the invitation
-    let Some(invite) =
-        ProjectInviteRepository::find_invite_by_id(&mut conn, path_params.invite_id).await?
-    else {
+    let Some(invite) = pg_client.find_invite_by_id(path_params.invite_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project_invite")
             .with_message("Project invitation not found")
@@ -448,12 +436,9 @@ async fn reply_to_invite(
 
     let project_invite = if request.accept_invite {
         // Accept the invitation
-        let accepted_invite = ProjectInviteRepository::accept_invite(
-            &mut conn,
-            path_params.invite_id,
-            auth_claims.account_id,
-        )
-        .await?;
+        let accepted_invite = pg_client
+            .accept_invite(path_params.invite_id, auth_claims.account_id)
+            .await?;
 
         tracing::info!(
             target: TRACING_TARGET,
@@ -466,12 +451,9 @@ async fn reply_to_invite(
         accepted_invite
     } else {
         // Decline the invitation
-        let declined_invite = ProjectInviteRepository::reject_invite(
-            &mut conn,
-            path_params.invite_id,
-            auth_claims.account_id,
-        )
-        .await?;
+        let declined_invite = pg_client
+            .reject_invite(path_params.invite_id, auth_claims.account_id)
+            .await?;
 
         tracing::info!(
             target: TRACING_TARGET,

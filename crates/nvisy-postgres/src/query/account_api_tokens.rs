@@ -1,13 +1,15 @@
 //! Account API token repository for managing token database operations.
 
+use std::future::Future;
+
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use crate::{PgError, PgResult, schema};
+use crate::{PgClient, PgError, PgResult, schema};
 
 /// Repository for comprehensive account API token database operations.
 ///
@@ -20,57 +22,95 @@ use crate::{PgError, PgResult, schema};
 /// API tokens are security-critical components that require careful handling
 /// to prevent unauthorized access. All tokens have expiration times and
 /// usage tracking to maintain security and enable proper audit trails.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct AccountApiTokenRepository;
-
-impl AccountApiTokenRepository {
-    /// Creates a new account API token repository instance.
-    ///
-    /// Returns a new repository instance ready for database operations.
-    /// Since the repository is stateless, this is equivalent to using
-    /// `Default::default()` or accessing repository methods statically.
-    ///
-    /// # Returns
-    ///
-    /// A new `AccountApiTokenRepository` instance.
-    pub fn new() -> Self {
-        Self
-    }
-
-    // Token management methods
-
-    /// Creates a new account API token for programmatic access.
-    ///
-    /// Generates a new long-lived API token that applications can use for
-    /// authentication and API access. The token includes both access and
-    /// refresh sequences for secure token rotation and extended validity.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the operation
-    /// * `new_token` - Complete token data including account ID, expiration, and metadata
-    ///
-    /// # Returns
-    ///
-    /// The created `AccountApiToken` with database-generated ID and timestamp,
-    /// or a database error if the operation fails.
-    ///
-    /// # Security Considerations
-    ///
-    /// - Token sequences should be cryptographically secure UUIDs
-    /// - Expiration times should balance usability with security
-    /// - Consider rate limiting token creation per account
-    /// - Implement proper token rotation policies
-    pub async fn create_token(
-        conn: &mut AsyncPgConnection,
+pub trait AccountApiTokenRepository {
+    fn create_token(
+        &self,
         new_token: NewAccountApiToken,
-    ) -> PgResult<AccountApiToken> {
+    ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
+
+    fn find_token_by_access_token(
+        &self,
+        access_token: Uuid,
+    ) -> impl Future<Output = PgResult<Option<AccountApiToken>>> + Send;
+
+    fn find_token_by_refresh_token(
+        &self,
+        refresh_token: Uuid,
+    ) -> impl Future<Output = PgResult<Option<AccountApiToken>>> + Send;
+
+    fn update_token(
+        &self,
+        access_token: Uuid,
+        updates: UpdateAccountApiToken,
+    ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
+
+    fn touch_token(
+        &self,
+        access_token: Uuid,
+    ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
+
+    fn extend_token(
+        &self,
+        access_token: Uuid,
+        extension: time::Duration,
+    ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
+
+    fn refresh_token(
+        &self,
+        refresh_token: Uuid,
+    ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
+
+    fn delete_token(&self, access_token: Uuid) -> impl Future<Output = PgResult<bool>> + Send;
+
+    fn delete_all_tokens_for_account(
+        &self,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn list_account_tokens(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
+
+    fn list_all_account_tokens(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
+
+    fn find_expiring_tokens(
+        &self,
+        account_id: Uuid,
+        expires_within: time::Duration,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
+
+    fn find_latest_token(
+        &self,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<AccountApiToken>>> + Send;
+
+    fn cleanup_expired_tokens(&self) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn purge_old_tokens(&self, older_than_days: u32) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn revoke_old_tokens(
+        &self,
+        older_than: time::Duration,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
+}
+
+impl AccountApiTokenRepository for PgClient {
+    async fn create_token(&self, new_token: NewAccountApiToken) -> PgResult<AccountApiToken> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens;
 
         diesel::insert_into(account_api_tokens::table)
             .values(&new_token)
             .returning(AccountApiToken::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)
     }
@@ -97,17 +137,19 @@ impl AccountApiTokenRepository {
     /// - Should be followed by expiration time validation
     /// - Consider updating last_used_at timestamp after successful use
     /// - Implement rate limiting to prevent token enumeration attacks
-    pub async fn find_token_by_access_token(
-        conn: &mut AsyncPgConnection,
+    async fn find_token_by_access_token(
+        &self,
         access_token: Uuid,
     ) -> PgResult<Option<AccountApiToken>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
             .filter(dsl::access_seq.eq(access_token))
             .filter(dsl::deleted_at.is_null())
             .select(AccountApiToken::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)
@@ -136,17 +178,19 @@ impl AccountApiTokenRepository {
     /// - Should validate token expiration before refresh
     /// - Generates new access and refresh sequences
     /// - Critical for maintaining long-term API access
-    pub async fn find_token_by_refresh_token(
-        conn: &mut AsyncPgConnection,
+    async fn find_token_by_refresh_token(
+        &self,
         refresh_token: Uuid,
     ) -> PgResult<Option<AccountApiToken>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
             .filter(dsl::refresh_seq.eq(refresh_token))
             .filter(dsl::deleted_at.is_null())
             .select(AccountApiToken::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)
@@ -176,17 +220,19 @@ impl AccountApiTokenRepository {
     /// - Extending token expiration times
     /// - Modifying token metadata
     /// - Administrative token adjustments
-    pub async fn update_token(
-        conn: &mut AsyncPgConnection,
+    async fn update_token(
+        &self,
         access_token: Uuid,
         updates: UpdateAccountApiToken,
     ) -> PgResult<AccountApiToken> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(account_api_tokens::table.filter(dsl::access_seq.eq(access_token)))
             .set(&updates)
             .returning(AccountApiToken::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)
     }
@@ -213,12 +259,8 @@ impl AccountApiTokenRepository {
     /// - Supports security monitoring and alerting
     /// - Provides data for usage analytics
     /// - Helps with token lifecycle management
-    pub async fn touch_token(
-        conn: &mut AsyncPgConnection,
-        access_token: Uuid,
-    ) -> PgResult<AccountApiToken> {
-        Self::update_token(
-            conn,
+    async fn touch_token(&self, access_token: Uuid) -> PgResult<AccountApiToken> {
+        self.update_token(
             access_token,
             UpdateAccountApiToken {
                 last_used_at: Some(OffsetDateTime::now_utc()),
@@ -244,14 +286,13 @@ impl AccountApiTokenRepository {
     ///
     /// The updated `AccountApiToken` with new expiration time,
     /// or a database error if the operation fails.
-    pub async fn extend_token(
-        conn: &mut AsyncPgConnection,
+    async fn extend_token(
+        &self,
         access_token: Uuid,
         extension: time::Duration,
     ) -> PgResult<AccountApiToken> {
         let new_expiry = OffsetDateTime::now_utc() + extension;
-        Self::update_token(
-            conn,
+        self.update_token(
             access_token,
             UpdateAccountApiToken {
                 expired_at: Some(new_expiry),
@@ -290,10 +331,9 @@ impl AccountApiTokenRepository {
     /// - Sets expiration to 7 days from current time
     /// - Generates new random UUIDs for both sequences
     /// - Updates last used timestamp to current time
-    pub async fn refresh_token(
-        conn: &mut AsyncPgConnection,
-        refresh_token: Uuid,
-    ) -> PgResult<AccountApiToken> {
+    async fn refresh_token(&self, refresh_token: Uuid) -> PgResult<AccountApiToken> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         let new_access_seq = Uuid::new_v4();
@@ -308,7 +348,7 @@ impl AccountApiTokenRepository {
                 dsl::last_used_at.eq(Some(OffsetDateTime::now_utc())),
             ))
             .returning(AccountApiToken::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)
     }
@@ -336,13 +376,15 @@ impl AccountApiTokenRepository {
     /// - Prevents unauthorized use of potentially compromised tokens
     /// - Maintains audit trail of logout events
     /// - Supports user-initiated security actions
-    pub async fn delete_token(conn: &mut AsyncPgConnection, access_token: Uuid) -> PgResult<bool> {
+    async fn delete_token(&self, access_token: Uuid) -> PgResult<bool> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         let rows_affected =
             diesel::update(account_api_tokens::table.filter(dsl::access_seq.eq(access_token)))
                 .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-                .execute(conn)
+                .execute(&mut conn)
                 .await
                 .map_err(PgError::from)?;
 
@@ -373,10 +415,9 @@ impl AccountApiTokenRepository {
     /// - User-requested global logout from all devices
     /// - Account suspension or termination processes
     /// - Compliance with security policies
-    pub async fn delete_all_tokens_for_account(
-        conn: &mut AsyncPgConnection,
-        account_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn delete_all_tokens_for_account(&self, account_id: Uuid) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(
@@ -385,7 +426,7 @@ impl AccountApiTokenRepository {
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-        .execute(conn)
+        .execute(&mut conn)
         .await
         .map_err(PgError::from)
         .map(|rows| rows as i64)
@@ -407,11 +448,13 @@ impl AccountApiTokenRepository {
     ///
     /// A vector of active `AccountApiToken` entries for the account,
     /// ordered by issue date (newest first), or a database error if the query fails.
-    pub async fn list_account_tokens(
-        conn: &mut AsyncPgConnection,
+    async fn list_account_tokens(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -422,7 +465,7 @@ impl AccountApiTokenRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountApiToken::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)
     }
@@ -451,11 +494,13 @@ impl AccountApiTokenRepository {
     /// - Token usage pattern analysis
     /// - Security incident investigation
     /// - Compliance reporting and documentation
-    pub async fn list_all_account_tokens(
-        conn: &mut AsyncPgConnection,
+    async fn list_all_account_tokens(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -465,7 +510,7 @@ impl AccountApiTokenRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountApiToken::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)
     }
@@ -489,12 +534,14 @@ impl AccountApiTokenRepository {
     /// ordered by expiration time (soonest first), or a database error if the query fails.
     ///
     /// - API client maintenance planning
-    pub async fn find_expiring_tokens(
-        conn: &mut AsyncPgConnection,
+    async fn find_expiring_tokens(
+        &self,
         account_id: Uuid,
         expires_within: time::Duration,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         let expiry_threshold = OffsetDateTime::now_utc() + expires_within;
@@ -508,7 +555,7 @@ impl AccountApiTokenRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountApiToken::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)
     }
@@ -535,10 +582,9 @@ impl AccountApiTokenRepository {
     /// - Identifying the most active token for renewal
     /// - User support and troubleshooting
     /// - Security monitoring for account activity
-    pub async fn find_latest_token(
-        conn: &mut AsyncPgConnection,
-        account_id: Uuid,
-    ) -> PgResult<Option<AccountApiToken>> {
+    async fn find_latest_token(&self, account_id: Uuid) -> PgResult<Option<AccountApiToken>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -546,7 +592,7 @@ impl AccountApiTokenRepository {
             .filter(dsl::deleted_at.is_null())
             .order(dsl::last_used_at.desc().nulls_last())
             .select(AccountApiToken::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)
@@ -581,7 +627,9 @@ impl AccountApiTokenRepository {
     ///
     /// Run this operation daily or weekly depending on token volume
     /// and expiration patterns to maintain optimal performance.
-    pub async fn cleanup_expired_tokens(conn: &mut AsyncPgConnection) -> PgResult<i64> {
+    async fn cleanup_expired_tokens(&self) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(
@@ -590,7 +638,7 @@ impl AccountApiTokenRepository {
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-        .execute(conn)
+        .execute(&mut conn)
         .await
         .map_err(PgError::from)
         .map(|rows| rows as i64)
@@ -625,16 +673,15 @@ impl AccountApiTokenRepository {
     /// This operation permanently and irreversibly deletes data.
     /// Ensure compliance with legal and audit requirements before
     /// implementing automated purging processes.
-    pub async fn purge_old_tokens(
-        conn: &mut AsyncPgConnection,
-        older_than_days: u32,
-    ) -> PgResult<i64> {
+    async fn purge_old_tokens(&self, older_than_days: u32) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(older_than_days as i64);
 
         diesel::delete(account_api_tokens::table.filter(dsl::deleted_at.lt(cutoff_date)))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)
             .map(|rows| rows as i64)
@@ -668,10 +715,9 @@ impl AccountApiTokenRepository {
     ///
     /// Can be used to implement organizational policies requiring
     /// periodic token rotation regardless of expiration times.
-    pub async fn revoke_old_tokens(
-        conn: &mut AsyncPgConnection,
-        older_than: time::Duration,
-    ) -> PgResult<i64> {
+    async fn revoke_old_tokens(&self, older_than: time::Duration) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::account_api_tokens::{self, dsl};
 
         let cutoff_date = OffsetDateTime::now_utc() - older_than;
@@ -682,7 +728,7 @@ impl AccountApiTokenRepository {
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-        .execute(conn)
+        .execute(&mut conn)
         .await
         .map_err(PgError::from)
         .map(|rows| rows as i64)

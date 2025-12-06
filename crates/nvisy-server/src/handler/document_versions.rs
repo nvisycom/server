@@ -77,11 +77,9 @@ async fn get_version_files(
     AuthState(auth_claims): AuthState,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Versions>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document access
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::ViewFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::ViewFiles)
         .await?;
 
     tracing::debug!(
@@ -93,21 +91,18 @@ async fn get_version_files(
     );
 
     // Get versions with pagination
-    let versions = DocumentVersionRepository::list_document_versions(
-        &mut conn,
-        path_params.document_id,
-        pagination.into(),
-    )
-    .await
-    .map_err(|err| {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %err,
-            document_id = %path_params.document_id,
-            "failed to fetch versions"
-        );
-        ErrorKind::InternalServerError.with_message("Failed to fetch versions")
-    })?;
+    let versions = pg_client
+        .list_document_versions(path_params.document_id, pagination.into())
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                document_id = %path_params.document_id,
+                "failed to fetch versions"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to fetch versions")
+        })?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -159,21 +154,19 @@ async fn get_version_info(
     Path(path_params): Path<DocVersionIdPathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<VersionResponse>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document access
     auth_claims
         .authorize_document(
-            &mut conn,
+            &pg_client,
             path_params.document_id,
             Permission::ViewDocuments,
         )
         .await?;
 
     // Get version
-    let Some(version) =
-        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
-            .await?
+    let Some(version) = pg_client
+        .find_document_version_by_id(path_params.version_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("Version not found"));
     };
@@ -232,17 +225,15 @@ async fn download_version_file(
 
     use nvisy_nats::object::{ObjectKey, OutputFiles};
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document access
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::ViewFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::ViewFiles)
         .await?;
 
     // Get version
-    let Some(version) =
-        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
-            .await?
+    let Some(version) = pg_client
+        .find_document_version_by_id(path_params.version_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("Version not found"));
     };
@@ -373,17 +364,15 @@ async fn delete_version(
 
     use nvisy_nats::object::{ObjectKey, OutputFiles};
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify permissions (need editor role to delete)
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::DeleteFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::DeleteFiles)
         .await?;
 
     // Get version
-    let Some(version) =
-        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
-            .await?
+    let Some(version) = pg_client
+        .find_document_version_by_id(path_params.version_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("Version not found"));
     };
@@ -439,7 +428,8 @@ async fn delete_version(
     }
 
     // Soft delete version in database
-    DocumentVersionRepository::delete_document_version(&mut conn, path_params.version_id)
+    pg_client
+        .delete_document_version(path_params.version_id)
         .await
         .map_err(|err| {
             tracing::error!(

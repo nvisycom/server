@@ -6,11 +6,10 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{self, NewProject, NewProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
-use nvisy_postgres::{PgClient, PgError};
-use scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -188,10 +187,8 @@ async fn read_project(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewProject)
+        .authorize_project(&pg_client, path_params.project_id, Permission::ViewProject)
         .await?;
 
     let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
@@ -245,8 +242,6 @@ async fn update_project(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<UpdateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -255,7 +250,11 @@ async fn update_project(
     );
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::UpdateProject,
+        )
         .await?;
 
     let update_data = model::UpdateProject {
@@ -322,8 +321,6 @@ async fn delete_project(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -332,7 +329,11 @@ async fn delete_project(
     );
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::DeleteProject,
+        )
         .await?;
 
     // Verify project exists before deletion

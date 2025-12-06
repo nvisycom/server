@@ -1,14 +1,16 @@
 //! Document repository for managing comprehensive document operations.
 
+use std::future::Future;
+
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{Document, NewDocument, UpdateDocument};
 use crate::types::DocumentStatus;
-use crate::{PgError, PgResult, schema};
+use crate::{PgClient, PgError, PgResult, schema};
 
 /// Repository for comprehensive document database operations.
 ///
@@ -23,58 +25,82 @@ use crate::{PgError, PgResult, schema};
 /// to enable rich document management and collaboration experiences. Documents
 /// are the core content entities that enable knowledge sharing, version control,
 /// and collaborative editing within project workspaces.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DocumentRepository;
-
-impl DocumentRepository {
-    /// Creates a new document repository instance.
-    ///
-    /// Returns a new repository instance ready for database operations.
-    /// Since the repository is stateless, this is equivalent to using
-    /// `Default::default()` or accessing repository methods statically.
-    ///
-    /// # Returns
-    ///
-    /// A new `DocumentRepository` instance.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Creates a new document in the database with complete initial setup.
-    ///
-    /// Initializes a new document within a project workspace with the provided
-    /// metadata and content structure. The document is immediately available for
-    /// collaboration, editing, and can be discovered through search interfaces.
-    /// This is the primary method for document creation and content onboarding
-    /// within project environments.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the operation
-    /// * `new_document` - Complete document data including name, description, and project association
-    ///
-    /// # Returns
-    ///
-    /// The created `Document` with database-generated ID and timestamps,
-    /// or a database error if the operation fails.
-    ///
-    /// # Business Impact
-    ///
-    /// - Document becomes immediately available for team collaboration
-    /// - Creator automatically becomes document owner with full permissions
-    /// - Document appears in project document listings and search results
-    /// - Enables content creation and knowledge sharing workflows
-    /// - Supports version control and collaborative editing capabilities
-    pub async fn create_document(
-        conn: &mut AsyncPgConnection,
+pub trait DocumentRepository {
+    fn create_document(
+        &self,
         new_document: NewDocument,
-    ) -> PgResult<Document> {
+    ) -> impl Future<Output = PgResult<Document>> + Send;
+
+    fn find_document_by_id(
+        &self,
+        document_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<Document>>> + Send;
+
+    fn find_documents_by_project(
+        &self,
+        project_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn find_documents_by_account(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn update_document(
+        &self,
+        document_id: Uuid,
+        updates: UpdateDocument,
+    ) -> impl Future<Output = PgResult<Document>> + Send;
+
+    fn delete_document(&self, document_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+
+    fn list_documents(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn search_documents(
+        &self,
+        search_query: &str,
+        project_id: Option<Uuid>,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn find_documents_by_status(
+        &self,
+        status: DocumentStatus,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn find_recently_created_documents(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn find_recently_updated_documents(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    fn check_document_access(
+        &self,
+        document_id: Uuid,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+}
+
+impl DocumentRepository for PgClient {
+    async fn create_document(&self, new_document: NewDocument) -> PgResult<Document> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents;
 
         let document = diesel::insert_into(documents::table)
             .values(&new_document)
             .returning(Document::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -97,17 +123,16 @@ impl DocumentRepository {
     ///
     /// The matching `Document` if found and not deleted, `None` if not found,
     /// or a database error if the query fails.
-    pub async fn find_document_by_id(
-        conn: &mut AsyncPgConnection,
-        document_id: Uuid,
-    ) -> PgResult<Option<Document>> {
+    async fn find_document_by_id(&self, document_id: Uuid) -> PgResult<Option<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let document = documents::table
             .filter(dsl::id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .select(Document::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -132,11 +157,13 @@ impl DocumentRepository {
     ///
     /// A vector of `Document` entries within the project, ordered by
     /// update time (most recent first), or a database error if the query fails.
-    pub async fn find_documents_by_project(
-        conn: &mut AsyncPgConnection,
+    async fn find_documents_by_project(
+        &self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -146,7 +173,7 @@ impl DocumentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -170,11 +197,13 @@ impl DocumentRepository {
     ///
     /// A vector of `Document` entries created by the account, ordered by
     /// update time (most recent first), or a database error if the query fails.
-    pub async fn find_documents_by_account(
-        conn: &mut AsyncPgConnection,
+    async fn find_documents_by_account(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -184,7 +213,7 @@ impl DocumentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -208,17 +237,19 @@ impl DocumentRepository {
     ///
     /// The updated `Document` with new values and timestamp,
     /// or a database error if the operation fails.
-    pub async fn update_document(
-        conn: &mut AsyncPgConnection,
+    async fn update_document(
+        &self,
         document_id: Uuid,
         updates: UpdateDocument,
     ) -> PgResult<Document> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let document = diesel::update(documents::table.filter(dsl::id.eq(document_id)))
             .set(&updates)
             .returning(Document::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -254,12 +285,14 @@ impl DocumentRepository {
     /// Consider the impact on collaborative workflows and dependent content
     /// before performing this operation. Implement proper cleanup procedures
     /// for associated files and versions.
-    pub async fn delete_document(conn: &mut AsyncPgConnection, document_id: Uuid) -> PgResult<()> {
+    async fn delete_document(&self, document_id: Uuid) -> PgResult<()> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         diesel::update(documents::table.filter(dsl::id.eq(document_id)))
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -282,10 +315,9 @@ impl DocumentRepository {
     ///
     /// A vector of `Document` entries ordered by update time (most recent first),
     /// or a database error if the query fails.
-    pub async fn list_documents(
-        conn: &mut AsyncPgConnection,
-        pagination: Pagination,
-    ) -> PgResult<Vec<Document>> {
+    async fn list_documents(&self, pagination: Pagination) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -294,7 +326,7 @@ impl DocumentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -320,12 +352,14 @@ impl DocumentRepository {
     ///
     /// A vector of matching `Document` entries ordered alphabetically by name,
     /// or a database error if the query fails.
-    pub async fn search_documents(
-        conn: &mut AsyncPgConnection,
+    async fn search_documents(
+        &self,
         search_query: &str,
         project_id: Option<Uuid>,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let search_pattern = format!("%{}%", search_query.to_lowercase());
@@ -347,7 +381,7 @@ impl DocumentRepository {
             query = query.filter(dsl::project_id.eq(proj_id));
         }
 
-        let documents = query.load(conn).await.map_err(PgError::from)?;
+        let documents = query.load(&mut conn).await.map_err(PgError::from)?;
         Ok(documents)
     }
 
@@ -368,11 +402,13 @@ impl DocumentRepository {
     ///
     /// A vector of `Document` entries with the specified status, ordered by
     /// update time (most recent first), or a database error if the query fails.
-    pub async fn find_documents_by_status(
-        conn: &mut AsyncPgConnection,
+    async fn find_documents_by_status(
+        &self,
         status: DocumentStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -382,7 +418,7 @@ impl DocumentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -405,10 +441,12 @@ impl DocumentRepository {
     ///
     /// A vector of recently created `Document` entries ordered by creation time
     /// (most recent first), or a database error if the query fails.
-    pub async fn find_recently_created_documents(
-        conn: &mut AsyncPgConnection,
+    async fn find_recently_created_documents(
+        &self,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
@@ -420,7 +458,7 @@ impl DocumentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -443,10 +481,12 @@ impl DocumentRepository {
     ///
     /// A vector of recently updated `Document` entries ordered by update time
     /// (most recent first), or a database error if the query fails.
-    pub async fn find_recently_updated_documents(
-        conn: &mut AsyncPgConnection,
+    async fn find_recently_updated_documents(
+        &self,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
@@ -458,7 +498,7 @@ impl DocumentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -482,11 +522,9 @@ impl DocumentRepository {
     ///
     /// `true` if the user has access to the document, `false` otherwise,
     /// or a database error if the query fails.
-    pub async fn check_document_access(
-        conn: &mut AsyncPgConnection,
-        document_id: Uuid,
-        account_id: Uuid,
-    ) -> PgResult<bool> {
+    async fn check_document_access(&self, document_id: Uuid, account_id: Uuid) -> PgResult<bool> {
+        let mut conn = self.get_connection().await?;
+
         use schema::documents::{self, dsl};
 
         let count: i64 = documents::table
@@ -494,7 +532,7 @@ impl DocumentRepository {
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 

@@ -52,10 +52,7 @@ async fn get_own_account(
         "retrieving own account"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-    let Some(account) =
-        AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id).await?
-    else {
+    let Some(account) = pg_client.find_account_by_id(auth_claims.account_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("account")
             .with_message("Account not found")
@@ -117,12 +114,8 @@ async fn update_own_account(
         "updating account"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Get current account info for password validation
-    let Some(current_account) =
-        AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id).await?
-    else {
+    let Some(current_account) = pg_client.find_account_by_id(auth_claims.account_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("account")
             .with_message("Account not found")
@@ -165,7 +158,7 @@ async fn update_own_account(
 
     // Check if email already exists for another account
     if let Some(ref email) = normalized_email
-        && AccountRepository::email_exists(&mut conn, email).await?
+        && pg_client.email_exists(email).await?
         && current_account.email_address != *email
     {
         tracing::warn!(
@@ -188,9 +181,9 @@ async fn update_own_account(
         ..Default::default()
     };
 
-    let account =
-        AccountRepository::update_account(&mut conn, auth_claims.account_id, update_account)
-            .await?;
+    let account = pg_client
+        .update_account(auth_claims.account_id, update_account)
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -233,8 +226,7 @@ async fn delete_own_account(
         "deleting own account"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-    AccountRepository::delete_account(&mut conn, auth_claims.account_id).await?;
+    pg_client.delete_account(auth_claims.account_id).await?;
 
     tracing::info!(
         target: TRACING_TARGET,

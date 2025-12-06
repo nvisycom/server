@@ -10,9 +10,9 @@ use std::hash::Hash;
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut};
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use nvisy_postgres::{PgClient, PgConnection};
 use serde::Deserialize;
 
 use super::{AuthClaims, AuthHeader, TRACING_TARGET_AUTHENTICATION};
@@ -124,25 +124,9 @@ where
     /// only once per request (caching handles subsequent uses).
     pub async fn from_unverified_header(
         auth_header: AuthHeader<T>,
-        pg_database: PgClient,
+        pg_client: PgClient,
     ) -> Result<Self> {
         let auth_claims = auth_header.into_auth_claims();
-
-        // Acquire database connection with detailed error context
-        let mut conn = pg_database.get_connection().await.map_err(|db_error| {
-            tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
-                error = %db_error,
-                account_id = %auth_claims.account_id,
-                token_id = %auth_claims.token_id,
-                "database connection failed during authentication verification"
-            );
-
-            ErrorKind::InternalServerError
-                .with_message("Authentication verification is temporarily unavailable")
-                .with_context("Unable to connect to authentication database")
-                .with_resource("authentication")
-        })?;
 
         tracing::debug!(
             target: TRACING_TARGET_AUTHENTICATION,
@@ -154,10 +138,10 @@ where
         );
 
         // Step 1: Verify API token exists and is active
-        let api_token = Self::verify_token_validity(&mut conn, &auth_claims).await?;
+        let api_token = Self::verify_token_validity(&pg_client, &auth_claims).await?;
 
         // Step 2: Verify account exists and is in good standing
-        let account = Self::verify_account_status(&mut conn, &auth_claims).await?;
+        let account = Self::verify_account_status(&pg_client, &auth_claims).await?;
 
         // Step 3: Ensure token claims match current account state
         Self::verify_privilege_consistency(&auth_claims, &account)?;
@@ -206,39 +190,39 @@ where
     /// * [`ErrorKind::Unauthorized`]: API token not found or expired
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_token_validity(
-        conn: &mut PgConnection,
+        pg_client: &PgClient,
         auth_claims: &AuthClaims<T>,
     ) -> Result<AccountApiToken> {
-        let api_token =
-            AccountApiTokenRepository::find_token_by_access_token(conn, auth_claims.token_id)
-                .await
-                .map_err(|db_error| {
-                    tracing::error!(
-                        target: TRACING_TARGET_AUTHENTICATION,
-                        error = %db_error,
-                        token_id = %auth_claims.token_id,
-                        account_id = %auth_claims.account_id,
-                        "database error occurred during API token validation query"
-                    );
+        let api_token = pg_client
+            .find_token_by_access_token(auth_claims.token_id)
+            .await
+            .map_err(|db_error| {
+                tracing::error!(
+                    target: TRACING_TARGET_AUTHENTICATION,
+                    error = %db_error,
+                    token_id = %auth_claims.token_id,
+                    account_id = %auth_claims.account_id,
+                    "database error occurred during API token validation query"
+                );
 
-                    ErrorKind::InternalServerError
-                        .with_message("Authentication verification encountered an error")
-                        .with_context("Unable to validate API token credentials")
-                        .with_resource("authentication")
-                })?
-                .ok_or_else(|| {
-                    tracing::warn!(
-                        target: TRACING_TARGET_AUTHENTICATION,
-                        token_id = %auth_claims.token_id,
-                        account_id = %auth_claims.account_id,
-                        "authentication failed: API token not found in database"
-                    );
+                ErrorKind::InternalServerError
+                    .with_message("Authentication verification encountered an error")
+                    .with_context("Unable to validate API token credentials")
+                    .with_resource("authentication")
+            })?
+            .ok_or_else(|| {
+                tracing::warn!(
+                    target: TRACING_TARGET_AUTHENTICATION,
+                    token_id = %auth_claims.token_id,
+                    account_id = %auth_claims.account_id,
+                    "authentication failed: API token not found in database"
+                );
 
-                    ErrorKind::Unauthorized
-                        .with_message("Authentication token is invalid")
-                        .with_context("Your token may have been revoked or expired")
-                        .with_resource("authentication")
-                })?;
+                ErrorKind::Unauthorized
+                    .with_message("Authentication token is invalid")
+                    .with_context("Your token may have been revoked or expired")
+                    .with_resource("authentication")
+            })?;
 
         // Verify API token hasn't expired at the database level
         if api_token.is_expired() {
@@ -299,10 +283,11 @@ where
     /// * [`ErrorKind::Unauthorized`]: Account not found, unverified, or suspended
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_account_status(
-        conn: &mut PgConnection,
+        pg_client: &PgClient,
         auth_claims: &AuthClaims<T>,
     ) -> Result<Account> {
-        let account = AccountRepository::find_account_by_id(conn, auth_claims.account_id)
+        let account = pg_client
+            .find_account_by_id(auth_claims.account_id)
             .await
             .map_err(|db_error| {
                 tracing::error!(

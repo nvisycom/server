@@ -86,8 +86,6 @@ async fn list_members(
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Members>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -97,13 +95,11 @@ async fn list_members(
 
     // Verify user has permission to view project members
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
+        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
         .await?;
 
     // Fetch project to check if it's private
-    let Some(project) =
-        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
-    else {
+    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project")
             .with_message("Project not found")
@@ -116,12 +112,9 @@ async fn list_members(
         Vec::new()
     } else {
         // Retrieve project members with pagination
-        let project_members = ProjectMemberRepository::list_project_members(
-            &mut conn,
-            path_params.project_id,
-            pagination.into(),
-        )
-        .await?;
+        let project_members = pg_client
+            .list_project_members(path_params.project_id, pagination.into())
+            .await?;
 
         project_members.into_iter().map(Member::from).collect()
     };
@@ -178,8 +171,6 @@ async fn get_member(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -190,13 +181,11 @@ async fn get_member(
 
     // Verify user has permission to view project member details
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
+        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
         .await?;
 
     // Check if project is private
-    let Some(project) =
-        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
-    else {
+    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project")
             .with_message("Project not found")
@@ -211,12 +200,9 @@ async fn get_member(
     }
 
     // Find the specific project member
-    let Some(project_member) = ProjectMemberRepository::find_project_member(
-        &mut conn,
-        path_params.project_id,
-        path_params.account_id,
-    )
-    .await?
+    let Some(project_member) = pg_client
+        .find_project_member(path_params.project_id, path_params.account_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_resource("project member")
@@ -280,8 +266,6 @@ async fn delete_member(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -292,7 +276,11 @@ async fn delete_member(
 
     // Verify user has permission to remove members
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::RemoveMembers)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::RemoveMembers,
+        )
         .await?;
 
     // Prevent users from removing themselves (they should use leave endpoint instead)
@@ -303,12 +291,9 @@ async fn delete_member(
     }
 
     // Get the member being removed
-    let Some(member_to_remove) = ProjectMemberRepository::find_project_member(
-        &mut conn,
-        path_params.project_id,
-        path_params.account_id,
-    )
-    .await?
+    let Some(member_to_remove) = pg_client
+        .find_project_member(path_params.project_id, path_params.account_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("project member"));
     };
@@ -316,15 +301,15 @@ async fn delete_member(
     // Check if removing the last owner
     if member_to_remove.member_role == nvisy_postgres::types::ProjectRole::Owner {
         // Count how many active owners exist
-        let all_members = ProjectMemberRepository::list_project_members(
-            &mut conn,
-            path_params.project_id,
-            nvisy_postgres::query::Pagination {
-                limit: 1000,
-                offset: 0,
-            },
-        )
-        .await?;
+        let all_members = pg_client
+            .list_project_members(
+                path_params.project_id,
+                nvisy_postgres::query::Pagination {
+                    limit: 1000,
+                    offset: 0,
+                },
+            )
+            .await?;
 
         let owner_count = all_members
             .iter()
@@ -341,12 +326,9 @@ async fn delete_member(
     }
 
     // Remove the member from the project
-    ProjectMemberRepository::remove_project_member(
-        &mut conn,
-        path_params.project_id,
-        path_params.account_id,
-    )
-    .await?;
+    pg_client
+        .remove_project_member(path_params.project_id, path_params.account_id)
+        .await?;
 
     tracing::warn!(
         target: TRACING_TARGET,
@@ -402,8 +384,6 @@ async fn update_member(
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMemberRole>,
 ) -> Result<(StatusCode, Json<Member>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -415,7 +395,7 @@ async fn update_member(
 
     // Verify user has permission to manage member roles
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ManageRoles)
+        .authorize_project(&pg_client, path_params.project_id, Permission::ManageRoles)
         .await?;
 
     // Prevent users from updating their own role
@@ -427,27 +407,24 @@ async fn update_member(
 
     // Get the current member
     // Get current member information
-    let Some(current_member) = ProjectMemberRepository::find_project_member(
-        &mut conn,
-        path_params.project_id,
-        path_params.account_id,
-    )
-    .await?
+    let Some(current_member) = pg_client
+        .find_project_member(path_params.project_id, path_params.account_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("project member"));
     };
 
     // If demoting from owner, check we're not removing the last owner
     if current_member.member_role == ProjectRole::Owner && request.role != ProjectRole::Owner {
-        let all_members = ProjectMemberRepository::list_project_members(
-            &mut conn,
-            path_params.project_id,
-            nvisy_postgres::query::Pagination {
-                limit: 1000,
-                offset: 0,
-            },
-        )
-        .await?;
+        let all_members = pg_client
+            .list_project_members(
+                path_params.project_id,
+                nvisy_postgres::query::Pagination {
+                    limit: 1000,
+                    offset: 0,
+                },
+            )
+            .await?;
 
         let owner_count = all_members
             .iter()
@@ -478,22 +455,18 @@ async fn update_member(
         updated_by: None,
     };
 
-    let updated_member = ProjectMemberRepository::update_project_member(
-        &mut conn,
-        path_params.project_id,
-        path_params.account_id,
-        changes,
-    )
-    .await
-    .map_err(|err| {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %err,
-            member_id = %path_params.account_id,
-            "Failed to update member role"
-        );
-        ErrorKind::InternalServerError.with_message("Failed to update member role")
-    })?;
+    let updated_member = pg_client
+        .update_project_member(path_params.project_id, path_params.account_id, changes)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                member_id = %path_params.account_id,
+                "Failed to update member role"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to update member role")
+        })?;
 
     tracing::info!(
         target: TRACING_TARGET,

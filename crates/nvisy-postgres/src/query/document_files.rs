@@ -1,15 +1,17 @@
 //! Document files repository for managing file storage and processing operations.
 
+use std::future::Future;
+
 use bigdecimal::BigDecimal;
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use crate::types::{ProcessingStatus, VirusScanStatus};
-use crate::{PgError, PgResult, schema};
+use crate::{PgClient, PgError, PgResult, schema};
 
 /// Repository for comprehensive document file database operations.
 ///
@@ -24,57 +26,107 @@ use crate::{PgError, PgResult, schema};
 /// capabilities to enable reliable and secure file management experiences.
 /// Files are treated as immutable content attachments that enhance document
 /// collaboration through rich media support and version-controlled storage.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DocumentFileRepository;
-
-impl DocumentFileRepository {
-    /// Creates a new document file repository instance.
-    ///
-    /// Returns a new repository instance ready for database operations.
-    /// Since the repository is stateless, this is equivalent to using
-    /// `Default::default()` or accessing repository methods statically.
-    ///
-    /// # Returns
-    ///
-    /// A new `DocumentFileRepository` instance.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Creates a new document file record in the database with processing setup.
-    ///
-    /// Initializes a new file record within the document storage system with
-    /// metadata, processing status, and security scanning configuration. The file
-    /// record is immediately queued for processing and security validation,
-    /// enabling secure and reliable file attachment workflows.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the operation
-    /// * `new_file` - Complete file metadata including storage references and processing settings
-    ///
-    /// # Returns
-    ///
-    /// The created `DocumentFile` with database-generated ID and timestamps,
-    /// or a database error if the operation fails.
-    ///
-    /// # Business Impact
-    ///
-    /// - File becomes queued for processing and security scanning
-    /// - Enables rich media attachment capabilities for documents
-    /// - Supports collaborative workflows with file sharing
-    /// - Creates audit trail for content security and compliance
-    /// - Enables deduplication and storage optimization strategies
-    pub async fn create_document_file(
-        conn: &mut AsyncPgConnection,
+pub trait DocumentFileRepository {
+    fn create_document_file(
+        &self,
         new_file: NewDocumentFile,
-    ) -> PgResult<DocumentFile> {
+    ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
+
+    fn find_document_file_by_id(
+        &self,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<DocumentFile>>> + Send;
+
+    fn list_document_files(
+        &self,
+        document_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn list_account_files(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn update_document_file(
+        &self,
+        file_id: Uuid,
+        updates: UpdateDocumentFile,
+    ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
+
+    fn delete_document_file(&self, file_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+
+    fn get_pending_files(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn update_processing_status(
+        &self,
+        file_id: Uuid,
+        status: ProcessingStatus,
+    ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
+
+    fn update_virus_scan_status(
+        &self,
+        file_id: Uuid,
+        scan_status: VirusScanStatus,
+    ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
+
+    fn find_files_by_hash(
+        &self,
+        file_hash: &[u8],
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn find_files_by_status(
+        &self,
+        status: ProcessingStatus,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn find_files_by_scan_status(
+        &self,
+        scan_status: VirusScanStatus,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn find_failed_files(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn find_large_files(
+        &self,
+        size_threshold: i64,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    fn get_user_storage_usage(
+        &self,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<BigDecimal>> + Send;
+
+    fn cleanup_auto_delete_files(&self) -> impl Future<Output = PgResult<usize>> + Send;
+
+    fn reset_failed_processing(
+        &self,
+        file_ids: Vec<Uuid>,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
+
+    fn purge_old_files(&self, retention_days: i32) -> impl Future<Output = PgResult<usize>> + Send;
+}
+
+impl DocumentFileRepository for PgClient {
+    async fn create_document_file(&self, new_file: NewDocumentFile) -> PgResult<DocumentFile> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files;
 
         let file = diesel::insert_into(document_files::table)
             .values(&new_file)
             .returning(DocumentFile::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -97,17 +149,16 @@ impl DocumentFileRepository {
     ///
     /// The matching `DocumentFile` if found and not deleted, `None` if not found,
     /// or a database error if the query fails.
-    pub async fn find_document_file_by_id(
-        conn: &mut AsyncPgConnection,
-        file_id: Uuid,
-    ) -> PgResult<Option<DocumentFile>> {
+    async fn find_document_file_by_id(&self, file_id: Uuid) -> PgResult<Option<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let file = document_files::table
             .filter(dsl::id.eq(file_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentFile::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -132,11 +183,13 @@ impl DocumentFileRepository {
     ///
     /// A vector of `DocumentFile` entries for the document, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn list_document_files(
-        conn: &mut AsyncPgConnection,
+    async fn list_document_files(
+        &self,
         document_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -146,7 +199,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -170,11 +223,13 @@ impl DocumentFileRepository {
     ///
     /// A vector of `DocumentFile` entries uploaded by the account, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn list_account_files(
-        conn: &mut AsyncPgConnection,
+    async fn list_account_files(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -184,7 +239,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -208,17 +263,19 @@ impl DocumentFileRepository {
     ///
     /// The updated `DocumentFile` with new values and timestamp,
     /// or a database error if the operation fails.
-    pub async fn update_document_file(
-        conn: &mut AsyncPgConnection,
+    async fn update_document_file(
+        &self,
         file_id: Uuid,
         updates: UpdateDocumentFile,
     ) -> PgResult<DocumentFile> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let file = diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
             .set(&updates)
             .returning(DocumentFile::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -246,12 +303,14 @@ impl DocumentFileRepository {
     /// Physical file storage cleanup should be handled separately through
     /// appropriate cleanup processes to ensure storage optimization while
     /// maintaining audit compliance requirements.
-    pub async fn delete_document_file(conn: &mut AsyncPgConnection, file_id: Uuid) -> PgResult<()> {
+    async fn delete_document_file(&self, file_id: Uuid) -> PgResult<()> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -275,10 +334,9 @@ impl DocumentFileRepository {
     /// A vector of `DocumentFile` entries pending processing, ordered by
     /// priority (highest first) then creation time (oldest first),
     /// or a database error if the query fails.
-    pub async fn get_pending_files(
-        conn: &mut AsyncPgConnection,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentFile>> {
+    async fn get_pending_files(&self, pagination: Pagination) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -289,7 +347,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -313,11 +371,13 @@ impl DocumentFileRepository {
     ///
     /// The updated `DocumentFile` with new processing status,
     /// or a database error if the operation fails.
-    pub async fn update_processing_status(
-        conn: &mut AsyncPgConnection,
+    async fn update_processing_status(
+        &self,
         file_id: Uuid,
         status: ProcessingStatus,
     ) -> PgResult<DocumentFile> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let updates = UpdateDocumentFile {
@@ -328,7 +388,7 @@ impl DocumentFileRepository {
         let file = diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
             .set(&updates)
             .returning(DocumentFile::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -352,13 +412,12 @@ impl DocumentFileRepository {
     ///
     /// The updated `DocumentFile` with new scan status,
     /// or a database error if the operation fails.
-    pub async fn update_virus_scan_status(
-        conn: &mut AsyncPgConnection,
+    async fn update_virus_scan_status(
+        &self,
         file_id: Uuid,
         scan_status: VirusScanStatus,
     ) -> PgResult<DocumentFile> {
-        Self::update_document_file(
-            conn,
+        self.update_document_file(
             file_id,
             UpdateDocumentFile {
                 virus_scan_status: Some(scan_status),
@@ -384,17 +443,16 @@ impl DocumentFileRepository {
     ///
     /// A vector of `DocumentFile` entries with matching hash,
     /// or a database error if the query fails.
-    pub async fn find_files_by_hash(
-        conn: &mut AsyncPgConnection,
-        file_hash: &[u8],
-    ) -> PgResult<Vec<DocumentFile>> {
+    async fn find_files_by_hash(&self, file_hash: &[u8]) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
             .filter(dsl::file_hash_sha256.eq(file_hash))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -418,11 +476,13 @@ impl DocumentFileRepository {
     ///
     /// A vector of `DocumentFile` entries with the specified status, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_files_by_status(
-        conn: &mut AsyncPgConnection,
+    async fn find_files_by_status(
+        &self,
         status: ProcessingStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -432,7 +492,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -456,11 +516,13 @@ impl DocumentFileRepository {
     ///
     /// A vector of `DocumentFile` entries with the specified scan status, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_files_by_scan_status(
-        conn: &mut AsyncPgConnection,
+    async fn find_files_by_scan_status(
+        &self,
         scan_status: VirusScanStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -470,7 +532,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -493,10 +555,9 @@ impl DocumentFileRepository {
     ///
     /// A vector of failed `DocumentFile` entries ordered by failure time
     /// (most recent first), or a database error if the query fails.
-    pub async fn find_failed_files(
-        conn: &mut AsyncPgConnection,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentFile>> {
+    async fn find_failed_files(&self, pagination: Pagination) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -506,7 +567,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -530,11 +591,13 @@ impl DocumentFileRepository {
     ///
     /// A vector of large `DocumentFile` entries ordered by size
     /// (largest first), or a database error if the query fails.
-    pub async fn find_large_files(
-        conn: &mut AsyncPgConnection,
+    async fn find_large_files(
+        &self,
         size_threshold: i64,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -544,7 +607,7 @@ impl DocumentFileRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -566,17 +629,16 @@ impl DocumentFileRepository {
     ///
     /// The total storage used in bytes as a `BigDecimal`,
     /// or a database error if the query fails.
-    pub async fn get_user_storage_usage(
-        conn: &mut AsyncPgConnection,
-        account_id: Uuid,
-    ) -> PgResult<BigDecimal> {
+    async fn get_user_storage_usage(&self, account_id: Uuid) -> PgResult<BigDecimal> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let usage: Option<BigDecimal> = document_files::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .select(diesel::dsl::sum(dsl::file_size_bytes))
-            .first(conn)
+            .first(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -598,14 +660,16 @@ impl DocumentFileRepository {
     ///
     /// The number of files that were marked for deletion,
     /// or a database error if the operation fails.
-    pub async fn cleanup_auto_delete_files(conn: &mut AsyncPgConnection) -> PgResult<usize> {
+    async fn cleanup_auto_delete_files(&self) -> PgResult<usize> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let affected = diesel::update(document_files::table)
             .filter(dsl::auto_delete_at.le(OffsetDateTime::now_utc()))
             .filter(dsl::deleted_at.is_null())
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -628,17 +692,16 @@ impl DocumentFileRepository {
     ///
     /// The number of files that were reset to pending status,
     /// or a database error if the operation fails.
-    pub async fn reset_failed_processing(
-        conn: &mut AsyncPgConnection,
-        file_ids: Vec<Uuid>,
-    ) -> PgResult<usize> {
+    async fn reset_failed_processing(&self, file_ids: Vec<Uuid>) -> PgResult<usize> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let affected = diesel::update(document_files::table)
             .filter(dsl::id.eq_any(file_ids))
             .filter(dsl::processing_status.eq(ProcessingStatus::Failed))
             .set(dsl::processing_status.eq(ProcessingStatus::Pending))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -661,10 +724,9 @@ impl DocumentFileRepository {
     ///
     /// The number of files that were marked for deletion,
     /// or a database error if the operation fails.
-    pub async fn purge_old_files(
-        conn: &mut AsyncPgConnection,
-        retention_days: i32,
-    ) -> PgResult<usize> {
+    async fn purge_old_files(&self, retention_days: i32) -> PgResult<usize> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_files::{self, dsl};
 
         let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
@@ -673,7 +735,7 @@ impl DocumentFileRepository {
             .filter(dsl::created_at.lt(cutoff_date))
             .filter(dsl::deleted_at.is_null())
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 

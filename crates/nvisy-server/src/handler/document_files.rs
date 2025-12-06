@@ -105,11 +105,10 @@ async fn upload_file(
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
-    let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::UploadFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::UploadFiles)
         .await?;
 
     let upload_mode = query.upload_mode;
@@ -250,7 +249,8 @@ async fn upload_file(
         };
 
         // Insert file record into database
-        let created_file = DocumentFileRepository::create_document_file(&mut conn, file_record)
+        let created_file = pg_client
+            .create_document_file(file_record)
             .await
             .map_err(|err| {
                 tracing::error!(
@@ -397,22 +397,22 @@ async fn update_file(
     _version: Version,
     ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
-    let mut conn = pg_client.get_connection().await?;
     let _input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Verify permissions
     // Verify document write permissions
     auth_claims
         .authorize_document(
-            &mut conn,
+            &pg_client,
             path_params.document_id,
             Permission::UpdateDocuments,
         )
         .await?;
 
     // Get existing file
-    let Some(file) =
-        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.file_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("File not found"));
     };
@@ -430,13 +430,13 @@ async fn update_file(
     };
 
     // Save changes
-    let updated_file =
-        DocumentFileRepository::update_document_file(&mut conn, path_params.file_id, updates)
-            .await
-            .map_err(|err| {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
-                ErrorKind::InternalServerError.with_message("Failed to update file")
-            })?;
+    let updated_file = pg_client
+        .update_document_file(path_params.file_id, updates)
+        .await
+        .map_err(|err| {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
+            ErrorKind::InternalServerError.with_message("Failed to update file")
+        })?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -490,11 +490,11 @@ async fn download_file(
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
-    let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Get file metadata from database
-    let file = DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id)
+    let file = pg_client
+        .find_document_file_by_id(path_params.file_id)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -612,16 +612,16 @@ async fn delete_file(
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::DeleteFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::DeleteFiles)
         .await?;
 
     // Get file metadata
-    let Some(file) =
-        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.file_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("File not found"));
     };
@@ -633,7 +633,8 @@ async fn delete_file(
 
     // TODO: Replace with NATS object store implementation
     // Get file metadata from database
-    let file = DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id)
+    let file = pg_client
+        .find_document_file_by_id(path_params.file_id)
         .await
         .map_err(|err| {
             tracing::error!(

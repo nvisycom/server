@@ -45,10 +45,8 @@ pub trait ProjectRepository {
     /// - Creator automatically becomes project owner
     /// - Project appears in relevant search and discovery interfaces
     /// - Enables collaborative workflows and resource sharing
-    fn create_project(
-        &self,
-        project: NewProject,
-    ) -> impl Future<Output = PgResult<Project>> + Send;
+    fn create_project(&self, project: NewProject)
+    -> impl Future<Output = PgResult<Project>> + Send;
 
     /// Finds a project by its unique identifier.
     ///
@@ -183,10 +181,7 @@ pub trait ProjectRepository {
     ///
     /// Only Active projects can be archived. The operation will fail
     /// if the project is already archived or in another state.
-    fn archive_project(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<Project>> + Send;
+    fn archive_project(&self, project_id: Uuid) -> impl Future<Output = PgResult<Project>> + Send;
 
     /// Unarchives a project to restore it to active status.
     ///
@@ -214,10 +209,8 @@ pub trait ProjectRepository {
     ///
     /// Only Archived projects can be unarchived. The operation will fail
     /// if the project is not currently in archived state.
-    fn unarchive_project(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<Project>> + Send;
+    fn unarchive_project(&self, project_id: Uuid)
+    -> impl Future<Output = PgResult<Project>> + Send;
 
     /// Lists projects with comprehensive filtering and pagination support.
     ///
@@ -377,10 +370,7 @@ pub trait ProjectRepository {
     /// - Administrative user activity monitoring
     /// - Platform engagement analytics
     /// - User contribution metrics
-    fn get_user_project_count(
-        &self,
-        user_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
+    fn get_user_project_count(&self, user_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
 /// Default implementation of ProjectRepository for PgClient.
@@ -437,11 +427,7 @@ impl ProjectRepository for PgClient {
         Ok(project_list)
     }
 
-    async fn update_project(
-        &self,
-        project_id: Uuid,
-        changes: UpdateProject,
-    ) -> PgResult<Project> {
+    async fn update_project(&self, project_id: Uuid, changes: UpdateProject) -> PgResult<Project> {
         use schema::projects::dsl::*;
 
         let mut conn = self.get_connection().await?;

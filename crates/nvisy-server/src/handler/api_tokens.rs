@@ -69,8 +69,6 @@ async fn create_api_token(
         "creating API token"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Sanitize and validate input
     let sanitized_name = request.name.trim().to_string();
     if sanitized_name.is_empty() {
@@ -134,7 +132,7 @@ async fn create_api_token(
         expired_at: expires_at,
     };
 
-    let token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
+    let token = pg_client.create_token(new_token).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -191,8 +189,6 @@ async fn list_api_tokens(
         "listing API tokens"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Validate pagination parameters
     if let Some(limit) = pagination.limit {
         if limit == 0 {
@@ -213,19 +209,13 @@ async fn list_api_tokens(
     // For now, we'll use the basic list method and filter in application
     // In a production app, you'd want to add these filters to the database query
     let tokens = if query_params.include_expired.unwrap_or(false) {
-        AccountApiTokenRepository::list_all_account_tokens(
-            &mut conn,
-            auth_claims.account_id,
-            pagination,
-        )
-        .await?
+        pg_client
+            .list_all_account_tokens(auth_claims.account_id, pagination)
+            .await?
     } else {
-        AccountApiTokenRepository::list_account_tokens(
-            &mut conn,
-            auth_claims.account_id,
-            pagination,
-        )
-        .await?
+        pg_client
+            .list_account_tokens(auth_claims.account_id, pagination)
+            .await?
     };
 
     // Apply additional filters
@@ -301,11 +291,7 @@ async fn get_api_token(
         "getting API token"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let Some(token) =
-        AccountApiTokenRepository::find_token_by_access_token(&mut conn, access_token).await?
-    else {
+    let Some(token) = pg_client.find_token_by_access_token(access_token).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")
             .with_message("API token not found")
@@ -373,12 +359,8 @@ async fn update_api_token(
         "updating API token"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // First, verify the token exists and belongs to the authenticated account
-    let Some(existing_token) =
-        AccountApiTokenRepository::find_token_by_access_token(&mut conn, access_token).await?
-    else {
+    let Some(existing_token) = pg_client.find_token_by_access_token(access_token).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")
             .with_message("API token not found")
@@ -398,7 +380,7 @@ async fn update_api_token(
         ..Default::default()
     };
 
-    AccountApiTokenRepository::update_token(&mut conn, access_token, update_token).await?;
+    pg_client.update_token(access_token, update_token).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -450,12 +432,8 @@ async fn revoke_api_token(
         "revoking API token"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // First, verify the token exists and belongs to the authenticated account
-    let Some(existing_token) =
-        AccountApiTokenRepository::find_token_by_access_token(&mut conn, access_token).await?
-    else {
+    let Some(existing_token) = pg_client.find_token_by_access_token(access_token).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")
             .with_message("API token not found")
@@ -468,7 +446,7 @@ async fn revoke_api_token(
             .with_message("You do not have permission to revoke this API token"));
     }
 
-    let deleted = AccountApiTokenRepository::delete_token(&mut conn, access_token).await?;
+    let deleted = pg_client.delete_token(access_token).await?;
 
     if !deleted {
         return Err(ErrorKind::BadRequest

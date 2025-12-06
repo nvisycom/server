@@ -1,13 +1,15 @@
 //! Document comments repository for managing collaborative commenting operations.
 
+use std::future::Future;
+
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
-use crate::{PgError, PgResult, schema};
+use crate::{PgClient, PgError, PgResult, schema};
 
 /// Repository for comprehensive document comment database operations.
 ///
@@ -22,57 +24,118 @@ use crate::{PgError, PgResult, schema};
 /// enable rich collaborative discussion experiences. Comments facilitate
 /// knowledge sharing, peer review, and iterative content improvement within
 /// document-centric workflows.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DocumentCommentRepository;
-
-impl DocumentCommentRepository {
-    /// Creates a new document comment repository instance.
-    ///
-    /// Returns a new repository instance ready for database operations.
-    /// Since the repository is stateless, this is equivalent to using
-    /// `Default::default()` or accessing repository methods statically.
-    ///
-    /// # Returns
-    ///
-    /// A new `DocumentCommentRepository` instance.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Creates a new comment in the database with complete threading support.
-    ///
-    /// Initializes a new comment within the collaborative discussion system
-    /// with support for document, file, or version-specific commenting.
-    /// The comment is immediately available for viewing and replying,
-    /// enabling real-time collaborative feedback and discussion workflows.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the operation
-    /// * `new_comment` - Complete comment data including content and target references
-    ///
-    /// # Returns
-    ///
-    /// The created `DocumentComment` with database-generated ID and timestamps,
-    /// or a database error if the operation fails.
-    ///
-    /// # Business Impact
-    ///
-    /// - Comment becomes immediately visible to project collaborators
-    /// - Enables threaded discussions and knowledge sharing
-    /// - Supports peer review and iterative content improvement
-    /// - Facilitates asynchronous collaboration across time zones
-    /// - Creates audit trail for content evolution and decision making
-    pub async fn create_comment(
-        conn: &mut AsyncPgConnection,
+pub trait DocumentCommentRepository {
+    fn create_comment(
+        &self,
         new_comment: NewDocumentComment,
-    ) -> PgResult<DocumentComment> {
+    ) -> impl Future<Output = PgResult<DocumentComment>> + Send;
+
+    fn find_comment_by_id(
+        &self,
+        comment_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<DocumentComment>>> + Send;
+
+    fn find_comments_by_document(
+        &self,
+        document_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_comments_by_file(
+        &self,
+        file_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_comments_by_version(
+        &self,
+        version_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_comment_replies(
+        &self,
+        parent_comment_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_top_level_comments_by_document(
+        &self,
+        document_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_top_level_comments_by_file(
+        &self,
+        file_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_top_level_comments_by_version(
+        &self,
+        version_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_comments_by_account(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn find_comments_mentioning_account(
+        &self,
+        account_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn update_comment(
+        &self,
+        comment_id: Uuid,
+        updates: UpdateDocumentComment,
+    ) -> impl Future<Output = PgResult<DocumentComment>> + Send;
+
+    fn delete_comment(&self, comment_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+
+    fn count_comments_by_document(
+        &self,
+        document_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn count_comments_by_file(&self, file_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn count_comments_by_version(
+        &self,
+        version_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn count_comment_replies(
+        &self,
+        parent_comment_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
+
+    fn find_recent_comments(
+        &self,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
+
+    fn check_comment_ownership(
+        &self,
+        comment_id: Uuid,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+}
+
+impl DocumentCommentRepository for PgClient {
+    async fn create_comment(&self, new_comment: NewDocumentComment) -> PgResult<DocumentComment> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments;
 
         let comment = diesel::insert_into(document_comments::table)
             .values(&new_comment)
             .returning(DocumentComment::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -95,17 +158,16 @@ impl DocumentCommentRepository {
     ///
     /// The matching `DocumentComment` if found and not deleted, `None` if not found,
     /// or a database error if the query fails.
-    pub async fn find_comment_by_id(
-        conn: &mut AsyncPgConnection,
-        comment_id: Uuid,
-    ) -> PgResult<Option<DocumentComment>> {
+    async fn find_comment_by_id(&self, comment_id: Uuid) -> PgResult<Option<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comment = document_comments::table
             .filter(dsl::id.eq(comment_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentComment::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -130,11 +192,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of `DocumentComment` entries for the document, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_comments_by_document(
-        conn: &mut AsyncPgConnection,
+    async fn find_comments_by_document(
+        &self,
         document_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -143,7 +207,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -167,11 +231,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of active `DocumentComment` entries for the file, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_comments_by_file(
-        conn: &mut AsyncPgConnection,
+    async fn find_comments_by_file(
+        &self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -181,7 +247,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -205,11 +271,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of active `DocumentComment` entries for the version, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_comments_by_version(
-        conn: &mut AsyncPgConnection,
+    async fn find_comments_by_version(
+        &self,
         version_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -219,7 +287,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -243,11 +311,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of reply `DocumentComment` entries ordered by creation time
     /// (oldest first to maintain conversation flow), or a database error if the query fails.
-    pub async fn find_comment_replies(
-        conn: &mut AsyncPgConnection,
+    async fn find_comment_replies(
+        &self,
         parent_comment_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let replies = document_comments::table
@@ -257,7 +327,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -281,11 +351,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of top-level `DocumentComment` entries ordered by creation time
     /// (most recent first), or a database error if the query fails.
-    pub async fn find_top_level_comments_by_document(
-        conn: &mut AsyncPgConnection,
+    async fn find_top_level_comments_by_document(
+        &self,
         document_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -296,7 +368,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -320,11 +392,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of top-level `DocumentComment` entries for the file ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_top_level_comments_by_file(
-        conn: &mut AsyncPgConnection,
+    async fn find_top_level_comments_by_file(
+        &self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -335,7 +409,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -359,11 +433,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of top-level `DocumentComment` entries for the version ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_top_level_comments_by_version(
-        conn: &mut AsyncPgConnection,
+    async fn find_top_level_comments_by_version(
+        &self,
         version_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -374,7 +450,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -398,11 +474,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of `DocumentComment` entries created by the account, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_comments_by_account(
-        conn: &mut AsyncPgConnection,
+    async fn find_comments_by_account(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -412,7 +490,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -436,11 +514,13 @@ impl DocumentCommentRepository {
     ///
     /// A vector of `DocumentComment` entries mentioning the account, ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_comments_mentioning_account(
-        conn: &mut AsyncPgConnection,
+    async fn find_comments_mentioning_account(
+        &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -450,7 +530,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -474,17 +554,19 @@ impl DocumentCommentRepository {
     ///
     /// The updated `DocumentComment` with new values and timestamp,
     /// or a database error if the operation fails.
-    pub async fn update_comment(
-        conn: &mut AsyncPgConnection,
+    async fn update_comment(
+        &self,
         comment_id: Uuid,
         updates: UpdateDocumentComment,
     ) -> PgResult<DocumentComment> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let comment = diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
             .set(&updates)
             .returning(DocumentComment::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -514,12 +596,14 @@ impl DocumentCommentRepository {
     /// - Discussion context and audit trail is preserved
     /// - Thread structure may be maintained for conversation flow
     /// - Supports content moderation and user self-editing capabilities
-    pub async fn delete_comment(conn: &mut AsyncPgConnection, comment_id: Uuid) -> PgResult<()> {
+    async fn delete_comment(&self, comment_id: Uuid) -> PgResult<()> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
             .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -541,17 +625,16 @@ impl DocumentCommentRepository {
     ///
     /// The total count of active comments for the document,
     /// or a database error if the query fails.
-    pub async fn count_comments_by_document(
-        conn: &mut AsyncPgConnection,
-        document_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn count_comments_by_document(&self, document_id: Uuid) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let count = document_comments::table
             .filter(dsl::document_id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -573,17 +656,16 @@ impl DocumentCommentRepository {
     ///
     /// The total count of active comments for the file,
     /// or a database error if the query fails.
-    pub async fn count_comments_by_file(
-        conn: &mut AsyncPgConnection,
-        file_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn count_comments_by_file(&self, file_id: Uuid) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let count = document_comments::table
             .filter(dsl::document_file_id.eq(file_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -605,17 +687,16 @@ impl DocumentCommentRepository {
     ///
     /// The total count of active comments for the version,
     /// or a database error if the query fails.
-    pub async fn count_comments_by_version(
-        conn: &mut AsyncPgConnection,
-        version_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn count_comments_by_version(&self, version_id: Uuid) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let count = document_comments::table
             .filter(dsl::document_version_id.eq(version_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -637,17 +718,16 @@ impl DocumentCommentRepository {
     ///
     /// The total count of active replies to the parent comment,
     /// or a database error if the query fails.
-    pub async fn count_comment_replies(
-        conn: &mut AsyncPgConnection,
-        parent_comment_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn count_comment_replies(&self, parent_comment_id: Uuid) -> PgResult<i64> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let count = document_comments::table
             .filter(dsl::parent_comment_id.eq(parent_comment_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -670,10 +750,9 @@ impl DocumentCommentRepository {
     ///
     /// A vector of recently created `DocumentComment` entries ordered by
     /// creation time (most recent first), or a database error if the query fails.
-    pub async fn find_recent_comments(
-        conn: &mut AsyncPgConnection,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentComment>> {
+    async fn find_recent_comments(&self, pagination: Pagination) -> PgResult<Vec<DocumentComment>> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
@@ -685,7 +764,7 @@ impl DocumentCommentRepository {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -709,11 +788,9 @@ impl DocumentCommentRepository {
     ///
     /// `true` if the account owns the comment, `false` otherwise,
     /// or a database error if the query fails.
-    pub async fn check_comment_ownership(
-        conn: &mut AsyncPgConnection,
-        comment_id: Uuid,
-        account_id: Uuid,
-    ) -> PgResult<bool> {
+    async fn check_comment_ownership(&self, comment_id: Uuid, account_id: Uuid) -> PgResult<bool> {
+        let mut conn = self.get_connection().await?;
+
         use schema::document_comments::{self, dsl};
 
         let count: i64 = document_comments::table
@@ -721,7 +798,7 @@ impl DocumentCommentRepository {
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
