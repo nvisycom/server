@@ -2,54 +2,31 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-//! Task-focused NATS client for the Nvisy platform.
-//!
-//! This crate provides a minimal, task-focused NATS client with specialized modules for:
-//! - **Client**: Connection management and configuration
-//! - **KV**: Type-safe Key-Value store for sessions and caching (NATS KV)
-//! - **Object**: Object storage for files and binary data (NATS JetStream)
-//! - **Stream**: Real-time updates and type-safe job queues via JetStream
-//!
-//! # Quick Start
-//!
-//! ```ignore
-//! use nvisy_nats::{NatsClient, NatsConfig};
-//! use std::time::Duration;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), nvisy_nats::Error> {
-//!     // Configure and connect
-//!     let config = NatsConfig::new("nats://localhost:4222")
-//!         .with_name("my-service")
-//!         .with_request_timeout(Duration::from_secs(10));
-//!
-//!     let client = NatsClient::connect(config).await?;
-//!
-//!     // Use KV store with type safety
-//!     let kv = client.kv_store("my-bucket", None, None).await?;
-//!     kv.put("key", &"value").await?;
-//!
-//!     // Use object storage
-//!     let objects = client.object_store("files", None, None).await?;
-//!     objects.put_bytes("file.txt", b"content".to_vec().into(), None).await?;
-//!
-//!     Ok(())
-//! }
-//! ```
-//!
-//! # Architecture
-//!
-//! Each module provides focused, type-safe operations for specific use cases while
-//! maintaining access to the underlying NATS client for extensibility. Generic types
-//! with PhantomData markers ensure compile-time type safety for payloads and values.
-
 use std::time::Duration;
 
-// Tracing target constants for consistent logging
+/// Tracing target for NATS client operations.
+///
+/// Use this target for logging client initialization, configuration, and client-level errors.
 pub const TRACING_TARGET_CLIENT: &str = "nvisy_nats::client";
+
+/// Tracing target for NATS key-value store operations.
+///
+/// Use this target for logging KV bucket operations, key operations, and KV-related errors.
 pub const TRACING_TARGET_KV: &str = "nvisy_nats::kv";
+
+/// Tracing target for NATS object store operations.
+///
+/// Use this target for logging object storage operations, bucket operations, and object-related errors.
 pub const TRACING_TARGET_OBJECT: &str = "nvisy_nats::object";
+
+/// Tracing target for NATS JetStream operations.
+///
+/// Use this target for logging stream operations, consumer operations, and JetStream-related errors.
 pub const TRACING_TARGET_STREAM: &str = "nvisy_nats::stream";
+
+/// Tracing target for NATS connection operations.
+///
+/// Use this target for logging connection establishment, reconnection, and connection errors.
 pub const TRACING_TARGET_CONNECTION: &str = "nvisy_nats::connection";
 
 mod client;

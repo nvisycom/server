@@ -6,8 +6,6 @@
 pub(crate) const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
     diesel_migrations::embed_migrations!();
 
-// Tracing target constants for consistent logging.
-
 /// Tracing target for database query operations.
 ///
 /// Use this target for logging query execution, results, and query-related errors.

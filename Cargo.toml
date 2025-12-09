@@ -5,9 +5,9 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-nats",
-    "./crates/nvisy-openrouter",
-    "./crates/nvisy-paddle",
+    "./crates/nvisy-portkey",
     "./crates/nvisy-postgres",
+    "./crates/nvisy-runpod",
     "./crates/nvisy-server",
 ]
 
@@ -31,9 +31,9 @@ documentation = "https://docs.rs/nvisy-server"
 
 # Internal crates
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-openrouter = { path = "./crates/nvisy-openrouter", version = "0.1.0" }
-nvisy-paddle = { path = "./crates/nvisy-paddle", version = "0.1.0" }
+nvisy-portkey = { path = "./crates/nvisy-portkey", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-runpod = { path = "./crates/nvisy-runpod", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 
 # CLI
