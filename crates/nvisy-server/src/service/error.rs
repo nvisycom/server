@@ -28,18 +28,7 @@ pub type BoxedError = Box<dyn StdError + Send + Sync>;
 ///
 /// This is a convenience alias that uses [`ServiceError`] as the error type,
 /// reducing boilerplate in function signatures throughout the service layer.
-///
-/// # Examples
-///
-/// ```
-/// use nvisy_server::service::error::Result;
-///
-/// fn validate_config(config: &str) -> Result<()> {
-///     // validation logic
-///     Ok(())
-/// }
-/// ```
-pub type Result<T> = std::result::Result<T, ServiceError>;
+pub type Result<T, E = ServiceError> = std::result::Result<T, E>;
 
 /// Error kind enumeration for categorizing service layer errors.
 ///

@@ -40,7 +40,7 @@ impl RedactionItem {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionItem;
+    /// use nvisy_portkey::completion::RedactionItem;
     ///
     /// let item = RedactionItem::new("123 Main St");
     /// ```
@@ -63,7 +63,7 @@ impl RedactionItem {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionItem;
+    /// use nvisy_portkey::completion::RedactionItem;
     /// use uuid::Uuid;
     ///
     /// let id = Uuid::new_v4();
@@ -87,7 +87,7 @@ impl RedactionItem {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionItem;
+    /// use nvisy_portkey::completion::RedactionItem;
     ///
     /// let item = RedactionItem::new("123 Main St")
     ///     .with_entity("John Doe");
@@ -106,7 +106,7 @@ impl RedactionItem {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::{RedactionItem, RedactionCategory};
+    /// use nvisy_portkey::completion::{RedactionItem, RedactionCategory};
     ///
     /// let item = RedactionItem::new("john@example.com, 555-1234")
     ///     .with_categories(vec![
@@ -153,7 +153,7 @@ impl RedactionRequest {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::{RedactionRequest, RedactionItem};
+    /// use nvisy_portkey::completion::{RedactionRequest, RedactionItem};
     ///
     /// let request = RedactionRequest::new(
     ///     vec![RedactionItem::new("123 Main St")],
@@ -177,7 +177,7 @@ impl RedactionRequest {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::{RedactionRequest, RedactionItem, RedactionCategory};
+    /// use nvisy_portkey::completion::{RedactionRequest, RedactionItem, RedactionCategory};
     ///
     /// let request = RedactionRequest::new(
     ///     vec![RedactionItem::new("john@example.com")],

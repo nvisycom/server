@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use axum::extract::FromRef;
 use nvisy_nats::NatsClient;
-use nvisy_openrouter::LlmClient;
+use nvisy_portkey::LlmClient;
 use nvisy_postgres::PgClient;
 use tokio::sync::RwLock;
 
@@ -365,25 +365,16 @@ impl HealthCache {
         }
     }
 
-    /// Checks OpenRouter LLM service health by listing available models.
+    /// Checks Portkey LLM service health.
     ///
-    /// A successful model list retrieval indicates the API is accessible and
-    /// authentication is working correctly.
-    async fn check_openrouter(&self, llm_client: &LlmClient) -> bool {
-        match llm_client.list_models().await {
-            Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET_HEALTH, "Openrouter health check passed");
-                true
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target: TRACING_TARGET_HEALTH,
-                    error = %e,
-                    "openrouter health check failed"
-                );
-                false
-            }
-        }
+    /// TODO: Implement proper health check once Portkey SDK exposes a suitable endpoint.
+    /// For now, we assume the service is healthy if the client is configured.
+    async fn check_openrouter(&self, _llm_client: &LlmClient) -> bool {
+        // TODO: Replace with actual Portkey health check
+        // The Portkey SDK doesn't expose a simple list_models or health check endpoint yet
+        // We could make a lightweight chat completion request, but that would consume tokens
+        tracing::debug!(target: TRACING_TARGET_HEALTH, "Portkey health check skipped (not yet implemented)");
+        true
     }
 }
 

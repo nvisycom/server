@@ -24,6 +24,8 @@ pub const TRACING_TARGET_CONNECTION: &str = "nvisy_postgres::connection";
 
 mod client;
 pub mod model;
+#[doc(hidden)]
+pub mod prelude;
 pub mod query;
 mod schema;
 pub mod types;

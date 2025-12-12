@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 /// # Examples
 ///
 /// ```rust
-/// use nvisy_openrouter::completion::RedactionCategory;
+/// use nvisy_portkey::completion::RedactionCategory;
 /// use std::str::FromStr;
 ///
 /// // Parse from string
@@ -291,7 +291,7 @@ impl RedactionCategory {
     /// # Examples
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
+    /// use nvisy_portkey::completion::RedactionCategory;
     ///
     /// let categories = RedactionCategory::all();
     /// assert!(categories.len() > 0);
@@ -306,7 +306,7 @@ impl RedactionCategory {
     /// # Examples
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
+    /// use nvisy_portkey::completion::RedactionCategory;
     ///
     /// let count = RedactionCategory::count();
     /// assert_eq!(count, 50);
@@ -320,7 +320,7 @@ impl RedactionCategory {
     /// # Examples
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionCategory;
+    /// use nvisy_portkey::completion::RedactionCategory;
     ///
     /// let names = RedactionCategory::names();
     /// assert!(names.contains(&"Email Addresses"));

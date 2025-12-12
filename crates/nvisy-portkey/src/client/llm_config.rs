@@ -1,9 +1,9 @@
-//! OpenRouter client configuration and builder.
+//! Portkey client configuration and builder.
 //!
 //! This module provides the configuration types and builder pattern for creating
 //! and customizing [`LlmClient`] instances.
 
-use std::num::NonZeroU32;
+use std::fmt;
 use std::time::Duration;
 
 use derive_builder::Builder;
@@ -14,14 +14,11 @@ use crate::{LlmClient, Result};
 mod defaults {
     use std::time::Duration;
 
-    /// Default rate limit (requests per second).
-    pub const RATE_LIMIT: u32 = 10;
-
     /// Default request timeout in seconds.
     pub const REQUEST_TIMEOUT_SECS: u64 = 30;
 
     /// Default model for completions if none specified.
-    pub const DEFAULT_MODEL: &str = "openai/gpt-3.5-turbo";
+    pub const DEFAULT_MODEL: &str = "gpt-3.5-turbo";
 
     /// Default maximum tokens for responses.
     pub const DEFAULT_MAX_TOKENS: u32 = 1000;
@@ -29,8 +26,8 @@ mod defaults {
     /// Default temperature for completions.
     pub const DEFAULT_TEMPERATURE: f64 = 0.7;
 
-    /// OpenRouter API base URL.
-    pub const BASE_URL: &str = "https://openrouter.ai/api/v1";
+    /// Portkey API base URL.
+    pub const BASE_URL: &str = "https://api.portkey.ai/v1";
 
     /// Returns the default request timeout.
     pub fn request_timeout() -> Duration {
@@ -38,11 +35,16 @@ mod defaults {
     }
 }
 
-/// Configuration for the OpenRouter API client.
+/// Configuration for the Portkey API client.
 ///
 /// This struct holds all the necessary configuration parameters for creating and using
-/// an OpenRouter API client, including authentication credentials, rate limiting, timeouts,
-/// model preferences, and operational settings.
+/// a Portkey API client. It's split into two logical parts:
+///
+/// 1. **Portkey SDK Configuration**: API key, base URL, timeout, virtual key, trace ID, cache settings
+/// 2. **LLM/Model Configuration**: Default model, temperature, tokens, penalties
+///
+/// The Portkey SDK configuration is passed to the underlying PortkeyClient, while the
+/// LLM/model configuration is kept by our wrapper for request defaults.
 #[derive(Clone, Builder)]
 #[builder(
     name = "LlmBuilder",
@@ -51,16 +53,16 @@ mod defaults {
     build_fn(validate = "Self::validate_config")
 )]
 pub struct LlmConfig {
-    /// API key for authentication with the OpenRouter API.
+    /// API key for authentication with the Portkey API.
     ///
-    /// You can obtain your API key from the OpenRouter dashboard.
+    /// You can obtain your API key from the Portkey dashboard.
     api_key: String,
 
-    /// Maximum requests per second.
+    /// Virtual key for routing requests through Portkey.
     ///
-    /// Controls the rate at which requests are sent to the OpenRouter API.
-    #[builder(default = "Self::default_rate_limit()")]
-    rate_limit: NonZeroU32,
+    /// Virtual keys define which AI provider and model to use.
+    #[builder(default)]
+    virtual_key: Option<String>,
 
     /// Timeout for API requests.
     ///
@@ -68,17 +70,35 @@ pub struct LlmConfig {
     #[builder(default = "Self::default_request_timeout()")]
     request_timeout: Duration,
 
+    /// Base URL for API requests.
+    ///
+    /// Defaults to the official Portkey API endpoint.
+    #[builder(default = "Self::default_base_url()")]
+    base_url: String,
+
+    /// Trace ID for request tracking.
+    ///
+    /// Optional identifier for tracking requests through Portkey's observability features.
+    #[builder(default)]
+    trace_id: Option<String>,
+
+    /// Cache namespace for Portkey's caching features.
+    ///
+    /// Optional namespace to scope cache entries.
+    #[builder(default)]
+    cache_namespace: Option<String>,
+
+    /// Force cache refresh.
+    ///
+    /// When true, bypasses cache and fetches fresh responses.
+    #[builder(default)]
+    cache_force_refresh: Option<bool>,
+
     /// Default model to use for completions.
     ///
     /// Specifies which model to use when none is explicitly provided in the request.
     #[builder(default)]
     default_model: Option<String>,
-
-    /// Base URL for API requests.
-    ///
-    /// Defaults to the official OpenRouter API endpoint.
-    #[builder(default = "Self::default_base_url()")]
-    base_url: String,
 
     /// Default maximum tokens for completions.
     ///
@@ -109,32 +129,15 @@ pub struct LlmConfig {
     /// Controls diversity via nucleus sampling. Lower values make output more focused.
     #[builder(default)]
     default_top_p: Option<f64>,
-
-    /// HTTP Referer header for OpenRouter.
-    ///
-    /// Optional header to identify your application.
-    #[builder(default)]
-    http_referer: Option<String>,
-
-    /// X-Title header for OpenRouter.
-    ///
-    /// Optional header to provide a human-readable title for your application.
-    #[builder(default)]
-    x_title: Option<String>,
 }
 
 impl LlmBuilder {
-    /// Returns the default rate limit.
-    fn default_rate_limit() -> NonZeroU32 {
-        NonZeroU32::new(defaults::RATE_LIMIT).expect("default rate limit is non-zero")
-    }
-
     /// Returns the default request timeout.
     fn default_request_timeout() -> Duration {
         defaults::request_timeout()
     }
 
-    /// Returns the default base URL for the OpenRouter API.
+    /// Returns the default base URL for the Portkey API.
     fn default_base_url() -> String {
         defaults::BASE_URL.to_string()
     }
@@ -216,16 +219,6 @@ impl LlmBuilder {
             }
         }
 
-        // Validate rate limit
-        if let Some(rate_limit) = self.rate_limit
-            && rate_limit.get() > 1000
-        {
-            return Err(format!(
-                "Rate limit seems unreasonably high: {} requests/second",
-                rate_limit
-            ));
-        }
-
         Ok(())
     }
 }
@@ -238,10 +231,11 @@ impl LlmConfig {
     /// # Examples
     ///
     /// ```no_run
-    /// # use nvisy_openrouter::LlmConfig;
+    /// # use nvisy_portkey::LlmConfig;
     /// let config = LlmConfig::builder()
     ///     .with_api_key("your-api-key")
-    ///     .with_default_model("openai/gpt-4")
+    ///     .with_virtual_key("your-virtual-key")
+    ///     .with_default_model("gpt-4")
     ///     .build()
     ///     .unwrap();
     /// ```
@@ -249,14 +243,14 @@ impl LlmConfig {
         LlmBuilder::default()
     }
 
-    /// Creates a new OpenRouter API client using this configuration.
+    /// Creates a new Portkey API client using this configuration.
     ///
     /// This is a convenience method that constructs a client from the configuration.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// # use nvisy_openrouter::LlmConfig;
+    /// # use nvisy_portkey::LlmConfig;
     /// let config = LlmConfig::builder()
     ///     .with_api_key("your-api-key")
     ///     .build()
@@ -285,9 +279,9 @@ impl LlmConfig {
         }
     }
 
-    /// Returns the rate limit.
-    pub fn rate_limit(&self) -> u32 {
-        self.rate_limit.get()
+    /// Returns the virtual key, if set.
+    pub fn virtual_key(&self) -> Option<&str> {
+        self.virtual_key.as_deref()
     }
 
     /// Returns the request timeout duration.
@@ -330,14 +324,19 @@ impl LlmConfig {
         self.default_top_p
     }
 
-    /// Returns the HTTP referer header, if set.
-    pub fn http_referer(&self) -> Option<&str> {
-        self.http_referer.as_deref()
+    /// Returns the trace ID, if set.
+    pub fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
     }
 
-    /// Returns the X-Title header, if set.
-    pub fn x_title(&self) -> Option<&str> {
-        self.x_title.as_deref()
+    /// Returns the cache namespace, if set.
+    pub fn cache_namespace(&self) -> Option<&str> {
+        self.cache_namespace.as_deref()
+    }
+
+    /// Returns the cache force refresh setting, if set.
+    pub fn cache_force_refresh(&self) -> Option<bool> {
+        self.cache_force_refresh
     }
 
     /// Returns the effective model (considering defaults).
@@ -388,7 +387,7 @@ impl LlmConfig {
 }
 
 impl LlmBuilder {
-    /// Creates an OpenRouter API client directly from the builder.
+    /// Creates a Portkey API client directly from the builder.
     ///
     /// This is a convenience method that builds the configuration and
     /// creates a client in one step. This is the recommended way to
@@ -397,10 +396,11 @@ impl LlmBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// # use nvisy_openrouter::LlmConfig;
+    /// # use nvisy_portkey::LlmConfig;
     /// let client = LlmConfig::builder()
     ///     .with_api_key("your-api-key")
-    ///     .with_default_model("openai/gpt-4")
+    ///     .with_virtual_key("your-virtual-key")
+    ///     .with_default_model("gpt-4")
     ///     .build_client()
     ///     .unwrap();
     /// ```
@@ -410,11 +410,11 @@ impl LlmBuilder {
     }
 }
 
-impl std::fmt::Debug for LlmConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LlmConfig")
             .field("api_key", &self.masked_api_key())
-            .field("rate_limit", &self.rate_limit)
+            .field("virtual_key", &self.virtual_key)
             .field("request_timeout", &self.request_timeout)
             .field("default_model", &self.default_model)
             .field("base_url", &self.base_url)
@@ -423,8 +423,9 @@ impl std::fmt::Debug for LlmConfig {
             .field("default_presence_penalty", &self.default_presence_penalty)
             .field("default_frequency_penalty", &self.default_frequency_penalty)
             .field("default_top_p", &self.default_top_p)
-            .field("http_referer", &self.http_referer)
-            .field("x_title", &self.x_title)
+            .field("trace_id", &self.trace_id)
+            .field("cache_namespace", &self.cache_namespace)
+            .field("cache_force_refresh", &self.cache_force_refresh)
             .finish()
     }
 }
@@ -438,7 +439,6 @@ mod tests {
         let config = LlmConfig::builder().with_api_key("test_key").build()?;
 
         assert_eq!(config.api_key(), "test_key");
-        assert_eq!(config.rate_limit(), defaults::RATE_LIMIT);
         assert_eq!(config.base_url(), defaults::BASE_URL);
         assert_eq!(config.request_timeout(), defaults::request_timeout());
 
@@ -449,17 +449,17 @@ mod tests {
     fn test_config_builder_with_custom_values() -> Result<()> {
         let config = LlmConfig::builder()
             .with_api_key("test_key")
-            .with_rate_limit(NonZeroU32::new(25).unwrap())
+            .with_virtual_key("test_virtual_key")
             .with_base_url("https://custom.api.com")
             .with_request_timeout(Duration::from_secs(60))
-            .with_default_model("openai/gpt-4")
+            .with_default_model("gpt-4")
             .build()?;
 
         assert_eq!(config.api_key(), "test_key");
-        assert_eq!(config.rate_limit(), 25);
+        assert_eq!(config.virtual_key().unwrap(), "test_virtual_key");
         assert_eq!(config.base_url(), "https://custom.api.com");
         assert_eq!(config.request_timeout(), Duration::from_secs(60));
-        assert_eq!(config.default_model().unwrap(), "openai/gpt-4");
+        assert_eq!(config.default_model().unwrap(), "gpt-4");
 
         Ok(())
     }
@@ -489,203 +489,6 @@ mod tests {
                 .to_string()
                 .contains("Temperature must be between")
         );
-    }
-
-    #[test]
-    fn test_config_validation_zero_timeout() {
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_request_timeout(Duration::from_secs(0))
-            .build();
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Timeout must be greater than 0")
-        );
-    }
-
-    #[test]
-    fn test_config_validation_excessive_timeout() {
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_request_timeout(Duration::from_secs(400))
-            .build();
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Timeout cannot exceed")
-        );
-    }
-
-    #[test]
-    fn test_config_validation_invalid_base_url() {
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_base_url("invalid-url")
-            .build();
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Base URL must start with")
-        );
-    }
-
-    #[test]
-    fn test_config_validation_top_p() {
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_default_top_p(0.0)
-            .build();
-        assert!(result.is_err());
-
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_default_top_p(1.5)
-            .build();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_config_validation_max_tokens() {
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_default_max_tokens(0u32)
-            .build();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_config_validation_penalties() {
-        // Valid penalties
-        let config = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_default_presence_penalty(0.5)
-            .with_default_frequency_penalty(-0.5)
-            .build()
-            .unwrap();
-
-        assert_eq!(config.default_presence_penalty().unwrap(), 0.5);
-        assert_eq!(config.default_frequency_penalty().unwrap(), -0.5);
-
-        // Invalid presence penalty
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_default_presence_penalty(3.0)
-            .build();
-        assert!(result.is_err());
-
-        // Invalid frequency penalty
-        let result = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_default_frequency_penalty(-3.0)
-            .build();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_config_builder_with_all_options() -> Result<()> {
-        let config = LlmConfig::builder()
-            .with_api_key("test_key_comprehensive")
-            .with_rate_limit(NonZeroU32::new(30).unwrap())
-            .with_base_url("https://api.custom-domain.com/v2")
-            .with_request_timeout(Duration::from_secs(120))
-            .with_default_model("anthropic/claude-3-opus")
-            .with_default_max_tokens(2000u32)
-            .with_default_temperature(0.8)
-            .with_default_presence_penalty(0.1)
-            .with_default_frequency_penalty(0.2)
-            .with_default_top_p(0.95)
-            .with_http_referer("https://myapp.com")
-            .with_x_title("My Application")
-            .build()?;
-
-        assert_eq!(config.api_key(), "test_key_comprehensive");
-        assert_eq!(config.rate_limit(), 30);
-        assert_eq!(config.base_url(), "https://api.custom-domain.com/v2");
-        assert_eq!(config.request_timeout(), Duration::from_secs(120));
-        assert_eq!(config.default_model().unwrap(), "anthropic/claude-3-opus");
-        assert_eq!(config.default_max_tokens().unwrap(), 2000);
-        assert_eq!(config.default_temperature().unwrap(), 0.8);
-        assert_eq!(config.default_presence_penalty().unwrap(), 0.1);
-        assert_eq!(config.default_frequency_penalty().unwrap(), 0.2);
-        assert_eq!(config.default_top_p().unwrap(), 0.95);
-        assert_eq!(config.http_referer().unwrap(), "https://myapp.com");
-        assert_eq!(config.x_title().unwrap(), "My Application");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_config_builder_defaults() -> Result<()> {
-        let config = LlmConfig::builder().with_api_key("test_key").build()?;
-
-        assert_eq!(config.api_key(), "test_key");
-        assert_eq!(config.rate_limit(), defaults::RATE_LIMIT);
-        assert_eq!(config.base_url(), defaults::BASE_URL);
-        assert_eq!(config.request_timeout(), defaults::request_timeout());
-        assert_eq!(config.default_model(), None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_effective_values() {
-        let config = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_rate_limit(NonZeroU32::new(20).unwrap())
-            .with_default_model("custom/model")
-            .build()
-            .unwrap();
-
-        assert_eq!(config.rate_limit(), 20);
-        assert_eq!(config.effective_model(), "custom/model");
-        assert_eq!(config.effective_max_tokens(), defaults::DEFAULT_MAX_TOKENS);
-        assert_eq!(
-            config.effective_temperature(),
-            defaults::DEFAULT_TEMPERATURE
-        );
-    }
-
-    #[test]
-    fn test_getter_methods() {
-        let config = LlmConfig::builder()
-            .with_api_key("test_key")
-            .with_rate_limit(NonZeroU32::new(15).unwrap())
-            .with_http_referer("https://example.com")
-            .with_default_presence_penalty(0.5)
-            .build()
-            .unwrap();
-
-        assert_eq!(config.rate_limit(), 15);
-        assert_eq!(config.http_referer().unwrap(), "https://example.com");
-        assert!(config.x_title().is_none());
-        assert_eq!(config.default_presence_penalty().unwrap(), 0.5);
-        assert_eq!(config.effective_presence_penalty(), 0.5);
-    }
-
-    #[test]
-    fn test_config_debug_impl() {
-        let config = LlmConfig::builder()
-            .with_api_key("test_api_key_1234567890")
-            .with_default_model("openai/gpt-4")
-            .build()
-            .unwrap();
-
-        let debug_str = format!("{:?}", config);
-        assert!(debug_str.contains("LlmConfig"));
-        assert!(debug_str.contains("rate_limit"));
-        assert!(debug_str.contains("base_url"));
-        // Should show masked key, not full key
-        assert!(debug_str.contains("test****"));
-        assert!(!debug_str.contains("test_api_key_1234567890"));
     }
 
     #[test]

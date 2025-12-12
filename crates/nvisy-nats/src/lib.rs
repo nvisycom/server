@@ -32,6 +32,8 @@ pub const TRACING_TARGET_CONNECTION: &str = "nvisy_nats::connection";
 mod client;
 pub mod kv;
 pub mod object;
+#[doc(hidden)]
+pub mod prelude;
 pub mod stream;
 
 pub use client::{NatsClient, NatsConfig, NatsConnection, NatsCredentials, NatsTlsConfig};

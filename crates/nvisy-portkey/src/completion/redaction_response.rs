@@ -34,7 +34,7 @@ impl Entity {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::Entity;
+    /// use nvisy_portkey::completion::Entity;
     ///
     /// let entity = Entity::new("John Smith");
     /// ```
@@ -54,7 +54,7 @@ impl Entity {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::{Entity, RedactionCategory};
+    /// use nvisy_portkey::completion::{Entity, RedactionCategory};
     ///
     /// let entity = Entity::new("John Smith")
     ///     .with_category(RedactionCategory::FullNames);
@@ -73,7 +73,6 @@ impl Entity {
 /// A piece of data that should be redacted.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Builder)]
 #[builder(pattern = "owned", setter(into, strip_option, prefix = "with"))]
-#[schemars(bound = "Uuid: JsonSchema")]
 pub struct RedactedData {
     /// The original item ID from the request
     #[schemars(with = "String")]
@@ -104,7 +103,7 @@ impl RedactedData {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactedData;
+    /// use nvisy_portkey::completion::RedactedData;
     /// use uuid::Uuid;
     ///
     /// let id = Uuid::new_v4();
@@ -124,7 +123,7 @@ impl RedactedData {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::{RedactedData, RedactionCategory};
+    /// use nvisy_portkey::completion::{RedactedData, RedactionCategory};
     /// use uuid::Uuid;
     ///
     /// let id = Uuid::new_v4();
@@ -141,7 +140,7 @@ impl RedactedData {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactedData;
+    /// use nvisy_portkey::completion::RedactedData;
     /// use uuid::Uuid;
     ///
     /// let id = Uuid::new_v4();
@@ -238,7 +237,7 @@ impl RedactionResponse {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_openrouter::completion::RedactionResponse;
+    /// use nvisy_portkey::completion::RedactionResponse;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let json = r#"{"entities": [], "data": []}"#;

@@ -82,8 +82,9 @@ deadpool = { version = "0.12", features = [] }
 # Messaging (NATS)
 async-nats = { version = "0.45", features = [] }
 
-# AI/OpenAI services (OpenRouter)
-openrouter-rs = { version = "0.4.5", features = [] }
+# AI/LLM Gateway & Services
+portkey-sdk = { version = "0.2", features = [] }
+runpod-sdk = { version = "0.2", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }
@@ -98,7 +99,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 serde_toon = { version = "0.2", features = [] }
 validator = { version = "0.20", features = ["derive"] }
-schemars = { version = "1.1", features = [] }
+schemars = { version = "0.8", features = [] }
 
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }

@@ -5,4 +5,6 @@
 pub mod extract;
 pub mod handler;
 pub mod middleware;
+#[doc(hidden)]
+pub mod prelude;
 pub mod service;

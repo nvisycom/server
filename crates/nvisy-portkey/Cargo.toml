@@ -26,9 +26,8 @@ utoipa = ["dep:utoipa"]
 # Async runtime
 tokio = { workspace = true, features = ["time"] }
 
-# AI/OpenAI services
-openrouter-rs = { workspace = true, features = [] }
-governor = { workspace = true, features = [] }
+# AI/LLM services via Portkey
+portkey-sdk = { workspace = true, features = ["schema"] }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
@@ -38,7 +37,6 @@ strum = { workspace = true, features = ["derive"] }
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
-serde_toon = { workspace = true, features = [] }
 schemars = { workspace = true, features = ["derive"] }
 
 # Text processing

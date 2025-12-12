@@ -5,71 +5,42 @@
 
 use std::collections::HashSet;
 
-use openrouter_rs::api::chat::Message;
-use openrouter_rs::types::Role;
+use portkey_sdk::model::{ChatCompletionRequest, ChatCompletionRequestMessage, ResponseFormat};
 use uuid::Uuid;
 
-use super::chat_completion::TypedChatCompletion;
-use super::chat_request::TypedChatRequest;
+use super::chat_completion::ChatCompletion;
 use super::redaction_prompts::{create_system_prompt, create_user_prompt};
 use super::redaction_request::RedactionRequest;
 use super::redaction_response::RedactionResponse;
 use crate::client::LlmClient;
 use crate::{Error, Result, TRACING_TARGET_COMPLETION};
 
-/// A service for performing data redaction tasks with OpenRouter LLMs.
+/// Trait for performing data redaction tasks with Portkey AI Gateway.
 ///
-/// This service combines redaction prompt formatting with the underlying
-/// LLM client to provide a seamless experience for redaction tasks.
+/// This trait provides methods for identifying sensitive data to redact
+/// based on user-specified criteria.
 ///
 /// # Example
 ///
 /// ```rust,no_run
-/// use nvisy_openrouter::{LlmClient, completion::{RedactionService, RedactionRequest, RedactionItem}};
+/// use nvisy_portkey::{LlmClient, completion::{RedactionService, RedactionRequest, RedactionItem}};
 ///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let llm_client = LlmClient::from_api_key("your-api-key")?;
-///     let redaction_service = RedactionService::new(llm_client);
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = LlmClient::from_api_key("your-api-key")?;
 ///
-///     let request = RedactionRequest::new(
-///         vec![RedactionItem::new("123 Main St, 555-1234")
-///             .with_entity("John Doe")],
-///         "Redact all addresses that belong to John Doe"
-///     );
+/// let request = RedactionRequest::new(
+///     vec![RedactionItem::new("123 Main St, 555-1234")
+///         .with_entity("John Doe")],
+///     "Redact all addresses that belong to John Doe"
+/// );
 ///
-///     let response = redaction_service.redact(&request).await?;
-///     println!("Found {} entities", response.entities.len());
-///     println!("Redacting {} items", response.data.len());
-///     Ok(())
-/// }
+/// let response = client.redact(&request).await?;
+/// println!("Found {} entities", response.entities.len());
+/// println!("Redacting {} items", response.data.len());
+/// # Ok(())
+/// # }
 /// ```
-pub struct RedactionService {
-    client: LlmClient,
-}
-
-impl RedactionService {
-    /// Creates a new redaction service with the given LLM client.
-    ///
-    /// # Arguments
-    ///
-    /// * `client` - The LLM client to use for redaction analysis
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// use nvisy_openrouter::{LlmClient, completion::RedactionService};
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = LlmClient::from_api_key("your-api-key")?;
-    /// let service = RedactionService::new(client);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new(client: LlmClient) -> Self {
-        Self { client }
-    }
-
+pub trait RedactionService {
     /// Performs a redaction analysis on the given data.
     ///
     /// This method formats the redaction request, sends it to the LLM,
@@ -93,170 +64,170 @@ impl RedactionService {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use nvisy_openrouter::{LlmClient, completion::{RedactionService, RedactionRequest, RedactionItem}};
+    /// # use nvisy_portkey::{LlmClient, completion::{RedactionService, RedactionRequest, RedactionItem}};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let service = RedactionService::new(LlmClient::from_api_key("key")?);
+    /// # let client = LlmClient::from_api_key("key")?;
     /// let request = RedactionRequest::builder()
     ///     .with_data(vec![RedactionItem::new("123 Main St")])
-    ///     .with_prompt("Redact addresses")
+    ///     .with_prompt("Redact all addresses")
     ///     .build()?;
     ///
-    /// let response = service.redact(&request).await?;
+    /// let response = client.redact(&request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn redact(&self, request: &RedactionRequest) -> Result<RedactionResponse> {
+    fn redact(
+        &self,
+        request: &RedactionRequest,
+    ) -> impl std::future::Future<Output = Result<RedactionResponse>> + Send;
+}
+
+impl RedactionService for LlmClient {
+    async fn redact(&self, request: &RedactionRequest) -> Result<RedactionResponse> {
         tracing::debug!(
             target: TRACING_TARGET_COMPLETION,
-            data_items = request.data.len(),
-            prompt_length = request.prompt.len(),
+            data_count = request.data.len(),
             "Starting redaction analysis"
         );
 
-        // Create prompts
+        // Create the prompts for the LLM
         let system_prompt = create_system_prompt();
         let user_prompt = create_user_prompt(request);
 
-        tracing::trace!(
-            target: TRACING_TARGET_COMPLETION,
-            system_prompt_length = system_prompt.len(),
-            user_prompt_length = user_prompt.len(),
-            "Generated prompts for redaction"
-        );
-
-        // Create messages for the LLM
+        // Build messages
         let messages = vec![
-            Message::new(Role::System, &system_prompt),
-            Message::new(Role::User, &user_prompt),
+            ChatCompletionRequestMessage::System {
+                content: system_prompt,
+                name: None,
+            },
+            ChatCompletionRequestMessage::user(user_prompt),
         ];
 
-        // Create a dummy request (we don't need request data for redaction)
-        // The actual request data is in the user prompt
-        #[derive(serde::Serialize, serde::Deserialize)]
-        struct EmptyRequest;
+        // Get model from config
+        let model = self.as_config().effective_model().to_string();
 
-        // Use typed chat completion with RedactionResponse schema
-        let typed_completion =
-            TypedChatCompletion::<EmptyRequest, RedactionResponse>::new(self.client.clone());
+        // Build the chat completion request with JSON Schema
+        let mut chat_request = ChatCompletionRequest::new(model, messages);
 
-        let typed_request = TypedChatRequest::builder()
-            .with_messages(messages)
-            .with_request(EmptyRequest)
-            .build()?;
+        // Configure structured output using JSON Schema
+        chat_request.response_format = Some(ResponseFormat::JsonSchema {
+            json_schema: portkey_sdk::model::JsonSchema::from_type::<RedactionResponse>()
+                .with_description("Redaction analysis response with identified entities and data")
+                .with_strict(true),
+        });
 
-        let typed_response = typed_completion.chat_completion(typed_request).await?;
+        // Execute the structured completion
+        let mut context = super::ChatContext::empty();
+        let response = self
+            .structured_chat_completion::<RedactionResponse>(&mut context, chat_request)
+            .await?
+            .ok_or_else(|| Error::invalid_response("No redaction response received"))?;
 
-        tracing::trace!(
-            target: TRACING_TARGET_COMPLETION,
-            response_length = typed_response.raw_response.as_ref().map(|s| s.len()).unwrap_or(0),
-            "Received LLM response"
-        );
-
-        let redaction_response = typed_response.data;
-
-        // Validate that returned IDs exist in the original request
-        self.validate_response(request, &redaction_response)?;
+        // Validate the response
+        validate_response(request, &response)?;
 
         tracing::info!(
             target: TRACING_TARGET_COMPLETION,
-            entities_found = redaction_response.entities.len(),
-            data_to_redact = redaction_response.data.len(),
-            "Redaction analysis completed successfully"
+            entity_count = response.entities.len(),
+            redact_count = response.data.len(),
+            "Redaction analysis completed"
         );
 
-        Ok(redaction_response)
+        Ok(response)
     }
+}
 
-    /// Validates that all UUIDs in the response exist in the request.
-    ///
-    /// This ensures the LLM hasn't hallucinated IDs that weren't in the original request.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - The original redaction request
-    /// * `response` - The parsed redaction response
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any UUID in the response doesn't exist in the request
-    fn validate_response(
-        &self,
-        request: &RedactionRequest,
-        response: &RedactionResponse,
-    ) -> Result<()> {
-        let valid_ids: HashSet<Uuid> = request.data.iter().map(|item| item.id).collect();
+/// Validates that the redaction response is consistent with the request.
+///
+/// Checks:
+/// - All item IDs in the response exist in the request
+/// - No duplicate item IDs in the response
+fn validate_response(request: &RedactionRequest, response: &RedactionResponse) -> Result<()> {
+    // Build a set of valid IDs from the request
+    let valid_ids: HashSet<Uuid> = request.data.iter().map(|item| item.id).collect();
 
-        for data in &response.data {
-            if !valid_ids.contains(&data.id) {
-                tracing::error!(
-                    target: TRACING_TARGET_COMPLETION,
-                    invalid_id = %data.id,
-                    valid_ids = ?valid_ids,
-                    "LLM returned invalid UUID not present in request"
-                );
-                return Err(Error::invalid_response(format!(
-                    "Invalid redaction ID in response: {}",
-                    data.id
-                )));
-            }
+    // Check all response item IDs are valid
+    let mut seen_ids = HashSet::new();
+    for item in &response.data {
+        if !valid_ids.contains(&item.id) {
+            return Err(Error::invalid_response(format!(
+                "Response contains unknown item ID: {}",
+                item.id
+            )));
         }
 
-        tracing::trace!(
-            target: TRACING_TARGET_COMPLETION,
-            validated_count = response.data.len(),
-            "All response IDs validated successfully"
-        );
-
-        Ok(())
+        if !seen_ids.insert(item.id) {
+            return Err(Error::invalid_response(format!(
+                "Response contains duplicate item ID: {}",
+                item.id
+            )));
+        }
     }
 
-    /// Returns the underlying LLM client.
-    ///
-    /// This can be useful for accessing client configuration or performing
-    /// other operations with the same client.
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// # use nvisy_openrouter::{LlmClient, completion::RedactionService};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let service = RedactionService::new(LlmClient::from_api_key("key")?);
-    /// let client = service.client();
-    /// let config = client.as_config();
-    /// println!("Using model: {}", config.effective_model());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn client(&self) -> LlmClient {
-        self.client.clone()
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completion::redaction_request::RedactionItem;
+    use crate::completion::{RedactedData, RedactionItem};
 
     #[test]
-    fn test_redaction_service_creation() {
-        // This test just verifies the types work correctly
-        // Real tests would require API keys or mocks
-        // Test passes if no panic occurs during redaction processing
+    fn test_validate_response_success() {
+        let item1 = RedactionItem::new("test data 1");
+        let item2 = RedactionItem::new("test data 2");
+
+        let request = RedactionRequest::new(vec![item1.clone(), item2.clone()], "test criteria");
+
+        let response = RedactionResponse {
+            entities: vec![],
+            data: vec![
+                RedactedData::builder()
+                    .with_id(item1.id)
+                    .with_data("test data 1".to_string())
+                    .build()
+                    .unwrap(),
+            ],
+        };
+
+        assert!(validate_response(&request, &response).is_ok());
     }
 
     #[test]
-    fn test_request_structure() {
-        let request = RedactionRequest::builder()
-            .with_data(vec![
-                RedactionItem::new("123 Main St, 555-1234").with_entity("John Doe"),
-                RedactionItem::new("8th of January, 1990").with_entity("John Doe"),
-            ])
-            .with_prompt("Redact all addresses that belong to John Doe")
+    fn test_validate_response_unknown_id() {
+        let item = RedactionItem::new("test data");
+        let request = RedactionRequest::new(vec![item], "test criteria");
+
+        let response = RedactionResponse {
+            entities: vec![],
+            data: vec![
+                RedactedData::builder()
+                    .with_id(Uuid::new_v4()) // Random unknown ID
+                    .with_data("test data".to_string())
+                    .build()
+                    .unwrap(),
+            ],
+        };
+
+        assert!(validate_response(&request, &response).is_err());
+    }
+
+    #[test]
+    fn test_validate_response_duplicate_id() {
+        let item = RedactionItem::new("test data");
+        let request = RedactionRequest::new(vec![item.clone()], "test criteria");
+
+        let redacted = RedactedData::builder()
+            .with_id(item.id)
+            .with_data("test data".to_string())
             .build()
             .unwrap();
 
-        assert_eq!(request.data.len(), 2);
-        assert_eq!(request.data[0].text, "123 Main St, 555-1234");
-        assert_eq!(request.data[0].entity.as_ref().unwrap(), "John Doe");
+        let response = RedactionResponse {
+            entities: vec![],
+            data: vec![redacted.clone(), redacted], // Duplicate
+        };
+
+        assert!(validate_response(&request, &response).is_err());
     }
 }

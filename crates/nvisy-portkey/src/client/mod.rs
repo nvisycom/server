@@ -1,6 +1,6 @@
-//! OpenRouter API client and configuration.
+//! Portkey AI Gateway client and configuration.
 //!
-//! This module provides the core client for interacting with OpenRouter's API,
+//! This module provides the core client for interacting with Portkey AI Gateway's API,
 //! including configuration and rate limiting.
 
 pub use self::llm_client::LlmClient;

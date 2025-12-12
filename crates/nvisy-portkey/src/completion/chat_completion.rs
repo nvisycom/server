@@ -1,344 +1,256 @@
-//! Typed chat completion handler.
+//! Chat completion orchestration.
+//!
+//! This module provides high-level abstractions for chat completions with structured output support.
 
-use std::marker::PhantomData;
+use std::future::Future;
 
-use openrouter_rs::types::ResponseFormat;
-use schemars::{JsonSchema, schema_for};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use portkey_sdk::model::{ChatCompletionRequest, ChatCompletionResponse};
+use portkey_sdk::service::ChatService;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
-use super::chat_request::TypedChatRequest;
-use super::chat_response::TypedChatResponse;
+use super::ChatContext;
 use crate::client::LlmClient;
-use crate::{Error, Result, TRACING_TARGET_SCHEMA};
+use crate::{Result, TRACING_TARGET_COMPLETION};
 
-/// A typed chat completion handler that enforces request and response schemas.
+/// Trait for performing chat completions with structured output.
 ///
-/// This struct provides a type-safe interface for chat completions, ensuring
-/// that requests are properly serialized and responses are validated against
-/// a JSON schema.
+/// This trait provides methods for both untyped and typed (structured) chat completions
+/// that automatically manage conversation context and token usage tracking.
 ///
-/// # Type Parameters
+/// # Examples
 ///
-/// * `T` - The request type that implements `Serialize`
-/// * `U` - The response type that implements `JsonSchema + DeserializeOwned`
+/// ## Basic Chat Completion
 ///
-/// # Example
+/// ```rust,no_run
+/// use nvisy_portkey::{LlmClient, completion::{ChatCompletion, ChatContext}};
+/// use portkey_sdk::model::{ChatCompletionRequest, ChatCompletionRequestMessage};
 ///
-/// ```rust
-/// use nvisy_openrouter::{LlmClient, completion::TypedChatCompletion};
-/// use serde::{Deserialize, Serialize};
-/// use schemars::JsonSchema;
-///
-/// #[derive(Serialize)]
-/// struct MyRequest {
-///     query: String,
-/// }
-///
-/// #[derive(Serialize, Deserialize, JsonSchema)]
-/// struct MyResponse {
-///     answer: String,
-/// }
-///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = LlmClient::from_api_key("your-api-key")?;
-/// let completion = TypedChatCompletion::<MyRequest, MyResponse>::new(client);
+/// let mut context = ChatContext::new("You are a helpful assistant");
+/// context.add_user_message("What is 2+2?");
+///
+/// let request = ChatCompletionRequest::new(
+///     "gpt-4o",
+///     context.to_messages()
+/// );
+///
+/// let response = client.chat_completion(&mut context, request).await?;
+/// println!("Response: {:?}", response.choices.first().unwrap().message.content);
 /// # Ok(())
 /// # }
 /// ```
-pub struct TypedChatCompletion<T, U>
-where
-    T: Serialize,
-    U: JsonSchema + DeserializeOwned,
-{
-    client: LlmClient,
-    _phantom_request: PhantomData<T>,
-    _phantom_response: PhantomData<U>,
+///
+/// ## Structured Output with JSON Schema
+///
+/// ```rust,no_run
+/// use nvisy_portkey::{LlmClient, completion::{ChatCompletion, ChatContext}};
+/// use portkey_sdk::model::{ChatCompletionRequest, ChatCompletionRequestMessage, ResponseFormat};
+/// use serde::{Serialize, Deserialize};
+/// use schemars::JsonSchema;
+///
+/// #[derive(Serialize, Deserialize, JsonSchema, Debug)]
+/// struct MovieRecommendation {
+///     title: String,
+///     year: u16,
+///     rating: f32,
+///     genre: String,
+///     reason: String,
+/// }
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = LlmClient::from_api_key("your-api-key")?;
+/// let mut context = ChatContext::new("You are a movie expert");
+/// context.add_user_message("Recommend a great sci-fi movie from the 1980s");
+///
+/// let mut request = ChatCompletionRequest::new(
+///     "gpt-4o",
+///     context.to_messages()
+/// );
+///
+/// // Configure structured output using JSON Schema
+/// request.response_format = Some(ResponseFormat::JsonSchema {
+///     json_schema: ResponseFormat::json_schema::<MovieRecommendation>()
+///         .with_description("A movie recommendation with details")
+///         .with_strict(true),
+/// });
+///
+/// let response = client.structured_chat_completion::<MovieRecommendation>(
+///     &mut context,
+///     request
+/// ).await?;
+///
+/// if let Some(movie) = response {
+///     println!("Title: {}", movie.title);
+///     println!("Year: {}", movie.year);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub trait ChatCompletion {
+    /// Executes a chat completion with a raw request.
+    ///
+    /// This method automatically updates the context with the assistant's response
+    /// and tracks token usage.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Mutable reference to the chat context (updated with response and usage)
+    /// * `request` - The chat completion request
+    ///
+    /// # Returns
+    ///
+    /// The raw chat completion response from the API
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails
+    fn chat_completion(
+        &self,
+        context: &mut ChatContext,
+        request: ChatCompletionRequest,
+    ) -> impl Future<Output = Result<ChatCompletionResponse>> + Send;
+
+    /// Executes a structured chat completion with automatic JSON schema parsing.
+    ///
+    /// This method:
+    /// 1. Sends the request to the API with JSON Schema response format configured
+    /// 2. Receives and parses the structured JSON response
+    /// 3. Deserializes into the target type
+    /// 4. Updates the context with the assistant's response and token usage
+    ///
+    /// The request should already have `response_format` configured with `ResponseFormat::JsonSchema`.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - The response type that implements `Deserialize` and `JsonSchema`
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Mutable reference to the chat context (updated with response and usage)
+    /// * `request` - The chat completion request with response_format configured
+    ///
+    /// # Returns
+    ///
+    /// An optional typed response (None if no content in response)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The API request fails
+    /// - The response cannot be deserialized into type T
+    fn structured_chat_completion<T>(
+        &self,
+        context: &mut ChatContext,
+        request: ChatCompletionRequest,
+    ) -> impl Future<Output = Result<Option<T>>> + Send
+    where
+        T: for<'de> Deserialize<'de> + JsonSchema + Send;
 }
 
-impl<T, U> TypedChatCompletion<T, U>
-where
-    T: Serialize,
-    U: JsonSchema + DeserializeOwned,
-{
-    /// Creates a new typed chat completion handler.
-    ///
-    /// # Arguments
-    ///
-    /// * `client` - The LLM client to use for completions
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::{LlmClient, completion::TypedChatCompletion};
-    /// use serde::{Deserialize, Serialize};
-    /// use schemars::JsonSchema;
-    ///
-    /// #[derive(Serialize)]
-    /// struct Request { query: String }
-    ///
-    /// #[derive(Serialize, Deserialize, JsonSchema)]
-    /// struct Response { answer: String }
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = LlmClient::from_api_key("key")?;
-    /// let completion = TypedChatCompletion::<Request, Response>::new(client);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new(client: LlmClient) -> Self {
-        Self {
-            client,
-            _phantom_request: PhantomData,
-            _phantom_response: PhantomData,
-        }
-    }
-
-    /// Performs a typed chat completion.
-    ///
-    /// This method sends a typed request to the LLM and returns a typed response,
-    /// with automatic schema generation and validation.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - The typed chat request
-    ///
-    /// # Returns
-    ///
-    /// A typed chat response containing the parsed data
-    ///
-    /// # Errors
-    ///
-    /// - [`Error::Api`]: If the API request fails or schema generation fails
-    /// - [`Error::RateLimit`]: If rate limit is exceeded
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use nvisy_openrouter::{LlmClient, completion::{TypedChatCompletion, TypedChatRequest}};
-    /// # use serde::{Deserialize, Serialize};
-    /// # use schemars::JsonSchema;
-    /// # use openrouter_rs::{api::chat::Message, types::Role};
-    /// #
-    /// # #[derive(Serialize)]
-    /// # struct Request { query: String }
-    /// #
-    /// # #[derive(Serialize, Deserialize, JsonSchema)]
-    /// # struct Response { answer: String }
-    /// #
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let client = LlmClient::from_api_key("key")?;
-    /// let completion = TypedChatCompletion::<Request, Response>::new(client);
-    ///
-    /// let request = TypedChatRequest::builder()
-    ///     .with_messages(vec![Message::new(Role::User, "Hello")])
-    ///     .with_request(Request { query: "test".to_string() })
-    ///     .build()?;
-    ///
-    /// let response = completion.chat_completion(request).await?;
-    /// println!("Answer: {}", response.data.answer);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn chat_completion(
+impl ChatCompletion for LlmClient {
+    async fn chat_completion(
         &self,
-        request: TypedChatRequest<T>,
-    ) -> Result<TypedChatResponse<U>> {
-        let response_format = self.generate_response_schema()?;
-
-        let llm_response = self
-            .client
-            .send_request(|client, config| {
-                let client = client.clone();
-                let chat_request_result = request.build_chat_request(config, response_format);
-                async move {
-                    let chat_request = chat_request_result?;
-                    client
-                        .send_chat_completion(&chat_request)
-                        .await
-                        .map_err(Into::into)
-                }
-            })
-            .await?;
-
-        TypedChatResponse::<U>::from_llm_response(&llm_response)
-    }
-
-    /// Returns the underlying LLM client.
-    ///
-    /// This can be useful for accessing the client configuration or
-    /// performing other operations with the same client instance.
-    ///
-    /// # Returns
-    ///
-    /// A clone of the LLM client
-    pub fn client(&self) -> LlmClient {
-        self.client.clone()
-    }
-
-    /// Generates the JSON schema for the response type.
-    ///
-    /// This method creates a JSON schema from the response type's `JsonSchema`
-    /// implementation and wraps it in the appropriate `ResponseFormat` for
-    /// OpenRouter's structured output feature.
-    ///
-    /// # Returns
-    ///
-    /// A `ResponseFormat` containing the JSON schema
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the schema cannot be serialized to JSON
-    fn generate_response_schema(&self) -> Result<ResponseFormat> {
-        let schema_name = std::any::type_name::<U>()
-            .split("::")
-            .last()
-            .unwrap_or("response_schema");
-
+        context: &mut ChatContext,
+        request: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse> {
         tracing::debug!(
-            target: TRACING_TARGET_SCHEMA,
-            schema_name = %schema_name,
-            "Generating JSON schema for typed completion"
+            target: TRACING_TARGET_COMPLETION,
+            model = request.model,
+            message_count = request.messages.len(),
+            "Starting chat completion"
         );
 
-        let schema = schema_for!(U);
-        let json_value = serde_json::to_value(&schema).map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGET_SCHEMA,
-                error = %e,
-                schema_name = %schema_name,
-                "Failed to serialize JSON schema"
-            );
-            Error::JsonSerialization(e)
-        })?;
+        // Send the request using the underlying Portkey client
+        let response = self.as_client().create_chat_completion(request).await?;
 
-        let response_format = ResponseFormat::json_schema(schema_name, true, json_value);
+        tracing::info!(
+            target: TRACING_TARGET_COMPLETION,
+            response_id = response.id,
+            "Chat completion successful"
+        );
 
-        Ok(response_format)
+        // Extract assistant message and update context
+        if let Some(choice) = response.choices.first() {
+            if let Some(content) = &choice.message.content {
+                context.add_assistant_message(content.clone());
+            }
+        }
+
+        // Update usage tracking
+        if let Some(usage) = &response.usage {
+            context.update_usage(usage.clone());
+        }
+
+        Ok(response)
     }
-}
 
-impl<T, U> Clone for TypedChatCompletion<T, U>
-where
-    T: Serialize,
-    U: JsonSchema + DeserializeOwned,
-{
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            _phantom_request: PhantomData,
-            _phantom_response: PhantomData,
+    async fn structured_chat_completion<T>(
+        &self,
+        context: &mut ChatContext,
+        request: ChatCompletionRequest,
+    ) -> Result<Option<T>>
+    where
+        T: for<'de> Deserialize<'de> + JsonSchema + Send,
+    {
+        tracing::debug!(
+            target: TRACING_TARGET_COMPLETION,
+            model = request.model,
+            message_count = request.messages.len(),
+            "Starting structured chat completion"
+        );
+
+        // Send the request using chat_completion
+        let response = self.chat_completion(context, request).await?;
+
+        tracing::debug!(
+            target: TRACING_TARGET_COMPLETION,
+            response_id = response.id,
+            "Received structured response, parsing..."
+        );
+
+        // Use the deserialize_content method from portkey-sdk 0.2
+        if let Some(choice) = response.choices.first() {
+            let parsed = choice.message.deserialize_content::<T>()?;
+
+            tracing::info!(
+                target: TRACING_TARGET_COMPLETION,
+                "Structured chat completion parsed successfully"
+            );
+
+            Ok(parsed)
+        } else {
+            tracing::warn!(
+                target: TRACING_TARGET_COMPLETION,
+                "No choices in response"
+            );
+            Ok(None)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use openrouter_rs::api::chat::Message;
-    use openrouter_rs::types::Role;
-    use serde::Deserialize;
-
     use super::*;
-    use crate::LlmClient;
 
-    #[derive(Serialize, Deserialize)]
-    struct TestRequest {
-        query: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug)]
+    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
     struct TestResponse {
         answer: String,
     }
 
     #[test]
-    fn test_typed_chat_completion_creation() {
-        let client = LlmClient::from_api_key("test-key").unwrap();
-        let completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client.clone());
+    fn test_chat_completion_trait_exists() {
+        // Verify the trait is properly defined and can be used
+        fn assert_implements_trait<T: ChatCompletion>(_: &T) {}
 
-        // Verify we can get the client back
-        let retrieved_client = completion.client();
-        assert_eq!(
-            retrieved_client.as_config().effective_model(),
-            client.as_config().effective_model()
-        );
-    }
-
-    #[test]
-    fn test_generate_response_schema() -> Result<()> {
-        let client = LlmClient::from_api_key("test-key")?;
-        let completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client);
-
-        let _schema = completion.generate_response_schema()?;
-
-        // Verify the schema is created (we can't easily check the exact format)
-        // but we can verify it doesn't error
-        Ok(())
-    }
-
-    #[test]
-    fn test_build_chat_request_with_defaults() -> Result<()> {
-        let client = LlmClient::from_api_key("test-key")?;
-        let _completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client.clone());
-
-        let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
-            .with_messages(vec![Message::new(Role::User, "Hello")])
-            .with_request(TestRequest {
-                query: "test".to_string(),
-            })
-            .build()
-            .unwrap();
-
-        let response_format = ResponseFormat::json_schema("test", true, serde_json::json!({}));
-
-        let _chat_request = request.build_chat_request(client.as_config(), response_format)?;
-
-        // Verify request is built correctly (doesn't panic)
-        Ok(())
-    }
-
-    #[test]
-    fn test_build_chat_request_with_overrides() -> Result<()> {
-        let config = crate::LlmConfig::builder()
+        let config = crate::client::LlmConfig::builder()
             .with_api_key("test-key")
-            .with_default_temperature(0.5)
-            .with_default_max_tokens(100u32)
+            .with_virtual_key("test-virtual-key")
+            .with_default_model("gpt-4")
             .build()
             .unwrap();
-        let client = LlmClient::new(config)?;
-        let _completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client.clone());
-
-        let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
-            .with_messages(vec![Message::new(Role::User, "Hello")])
-            .with_request(TestRequest {
-                query: "test".to_string(),
-            })
-            .with_temperature(0.9)
-            .with_max_tokens(500u32)
-            .with_model("custom-model")
-            .build()
-            .unwrap();
-
-        let response_format = ResponseFormat::json_schema("test", true, serde_json::json!({}));
-
-        let _chat_request = request.build_chat_request(client.as_config(), response_format)?;
-
-        // Verify request is built correctly with overrides (doesn't panic)
-        // We can't easily test the actual values since ChatCompletionRequest fields are private
-        Ok(())
-    }
-
-    #[test]
-    fn test_clone() {
-        let client = LlmClient::from_api_key("test-key").unwrap();
-        let completion = TypedChatCompletion::<TestRequest, TestResponse>::new(client);
-
-        let cloned = completion.clone();
-
-        // Verify both have the same config
-        assert_eq!(
-            completion.client().as_config().effective_model(),
-            cloned.client().as_config().effective_model()
-        );
+        let client = LlmClient::new(config).unwrap();
+        assert_implements_trait(&client);
     }
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use derive_builder::Builder;
 use nvisy_nats::{NatsClient, NatsConfig};
-use nvisy_openrouter::{LlmClient, LlmConfig};
+use nvisy_portkey::{LlmClient, LlmConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
@@ -40,63 +40,6 @@ mod defaults {
     pub const POSTGRES_CONNECTION_TIMEOUT_SECS: u64 = 30;
 }
 
-/// Wrapper for builder validation that returns String errors.
-fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Result<(), String> {
-    // Validate postgres connection URL format
-    if let Some(endpoint) = &builder.postgres_endpoint {
-        if endpoint.is_empty() {
-            return Err("Postgres connection URL cannot be empty".to_string());
-        }
-
-        if !endpoint.starts_with("postgresql://") && !endpoint.starts_with("postgres://") {
-            return Err(
-                "Postgres connection URL must start with 'postgresql://' or 'postgres://'"
-                    .to_string(),
-            );
-        }
-    }
-
-    // Validate OpenRouter API key
-    if let Some(api_key) = &builder.openrouter_api_key
-        && api_key.is_empty()
-    {
-        return Err("OpenRouter API key cannot be empty".to_string());
-    }
-
-    // Validate NATS URL
-    if let Some(nats_url) = &builder.nats_url {
-        if nats_url.is_empty() {
-            return Err("NATS URL cannot be empty".to_string());
-        }
-
-        if !nats_url.starts_with("nats://") && !nats_url.starts_with("tls://") {
-            return Err("NATS URL must start with 'nats://' or 'tls://'".to_string());
-        }
-    }
-
-    // Validate postgres max connections
-    if let Some(max_connections) = &builder.postgres_max_connections {
-        if *max_connections == 0 {
-            return Err("Postgres max connections must be greater than 0".to_string());
-        }
-        if *max_connections > 16 {
-            return Err("Postgres max connections cannot exceed 16".to_string());
-        }
-    }
-
-    // Validate postgres connection timeout
-    if let Some(timeout_secs) = &builder.postgres_connection_timeout_secs {
-        if *timeout_secs < 1 {
-            return Err("Postgres connection timeout must be at least 1 second".to_string());
-        }
-        if *timeout_secs > 300 {
-            return Err("Postgres connection timeout cannot exceed 300 seconds".to_string());
-        }
-    }
-
-    Ok(())
-}
-
 /// App [`state`] configuration.
 ///
 /// [`state`]: crate::service::ServiceState
@@ -105,7 +48,7 @@ fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Resul
 #[builder(
     pattern = "owned",
     setter(into, strip_option, prefix = "with"),
-    build_fn(validate = "builder_validate_config")
+    build_fn(validate = "Self::validate")
 )]
 pub struct ServiceConfig {
     /// Postgres database connection string.
@@ -198,6 +141,65 @@ impl ServiceConfig {
     pub async fn load_auth_keys(&self) -> Result<SessionKeys> {
         let config = AuthKeysConfig::new(&self.auth_decoding_key, &self.auth_encoding_key);
         SessionKeys::from_config(config).await
+    }
+}
+
+impl ServiceConfigBuilder {
+    /// Wrapper for builder validation that returns String errors.
+    fn validate(builder: &ServiceConfigBuilder) -> Result<(), String> {
+        // Validate postgres connection URL format
+        if let Some(endpoint) = &builder.postgres_endpoint {
+            if endpoint.is_empty() {
+                return Err("Postgres connection URL cannot be empty".to_string());
+            }
+
+            if !endpoint.starts_with("postgresql://") && !endpoint.starts_with("postgres://") {
+                return Err(
+                    "Postgres connection URL must start with 'postgresql://' or 'postgres://'"
+                        .to_string(),
+                );
+            }
+        }
+
+        // Validate OpenRouter API key
+        if let Some(api_key) = &builder.openrouter_api_key
+            && api_key.is_empty()
+        {
+            return Err("OpenRouter API key cannot be empty".to_string());
+        }
+
+        // Validate NATS URL
+        if let Some(nats_url) = &builder.nats_url {
+            if nats_url.is_empty() {
+                return Err("NATS URL cannot be empty".to_string());
+            }
+
+            if !nats_url.starts_with("nats://") && !nats_url.starts_with("tls://") {
+                return Err("NATS URL must start with 'nats://' or 'tls://'".to_string());
+            }
+        }
+
+        // Validate postgres max connections
+        if let Some(max_connections) = &builder.postgres_max_connections {
+            if *max_connections == 0 {
+                return Err("Postgres max connections must be greater than 0".to_string());
+            }
+            if *max_connections > 16 {
+                return Err("Postgres max connections cannot exceed 16".to_string());
+            }
+        }
+
+        // Validate postgres connection timeout
+        if let Some(timeout_secs) = &builder.postgres_connection_timeout_secs {
+            if *timeout_secs < 1 {
+                return Err("Postgres connection timeout must be at least 1 second".to_string());
+            }
+            if *timeout_secs > 300 {
+                return Err("Postgres connection timeout cannot exceed 300 seconds".to_string());
+            }
+        }
+
+        Ok(())
     }
 }
 

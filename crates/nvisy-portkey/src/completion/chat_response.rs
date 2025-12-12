@@ -1,173 +1,206 @@
 //! Typed chat completion response types.
 
 use derive_builder::Builder;
-use openrouter_rs::types::completion::CompletionsResponse;
-use schemars::JsonSchema;
-use serde::Deserialize;
+use portkey_sdk::model::ChatCompletionResponse;
 use serde::de::DeserializeOwned;
 
-use crate::Result;
-use crate::typed::{extract_response_content, parse_json_response};
+use crate::{Error, Result};
 
 /// A typed chat completion response.
 ///
-/// This wraps the parsed response data from an LLM completion request.
+/// This wraps a chat completion response along with the parsed, typed response data
+/// using portkey-sdk 0.2's built-in deserialization.
 ///
 /// # Type Parameters
 ///
-/// * `T` - The response payload type that implements `JsonSchema + DeserializeOwned`
-///
-/// # Example
-///
-/// ```rust
-/// use nvisy_openrouter::completion::TypedChatResponse;
-/// use serde::{Deserialize, Serialize};
-/// use schemars::JsonSchema;
-///
-/// #[derive(Serialize, Deserialize, JsonSchema)]
-/// struct MyResponse {
-///     answer: String,
-/// }
-///
-/// let response = TypedChatResponse::<MyResponse>::builder()
-///     .with_data(MyResponse { answer: "test".to_string() })
-///     .build()
-///     .unwrap();
-/// ```
-#[derive(Debug, Clone, Builder, Deserialize)]
-#[builder(pattern = "owned", setter(into, strip_option, prefix = "with"))]
-#[serde(bound(deserialize = "T: DeserializeOwned"))]
-pub struct TypedChatResponse<T>
-where
-    T: JsonSchema + DeserializeOwned,
-{
-    /// The parsed response data
-    pub data: T,
+/// * `T` - The response type that implements `DeserializeOwned`
+#[derive(Debug, Clone, Builder)]
+#[builder(
+    name = "TypedChatResponseBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with")
+)]
+pub struct TypedChatResponse<T> {
+    /// The raw chat completion response
+    pub raw_response: ChatCompletionResponse,
 
-    /// Optional raw response text
-    #[builder(default)]
-    pub raw_response: Option<String>,
+    /// The parsed, typed response data
+    pub response: T,
 
-    /// Optional token usage information
-    #[builder(default)]
-    pub prompt_tokens: Option<u32>,
-
-    #[builder(default)]
-    pub completion_tokens: Option<u32>,
-
-    #[builder(default)]
-    pub total_tokens: Option<u32>,
+    /// The response message content
+    pub content: String,
 }
 
 impl<T> TypedChatResponse<T>
 where
-    T: JsonSchema + DeserializeOwned,
+    T: DeserializeOwned,
 {
     /// Creates a new typed chat response builder.
     pub fn builder() -> TypedChatResponseBuilder<T> {
         TypedChatResponseBuilder::default()
     }
 
-    /// Parses a completion response into the typed response.
+    /// Parses a Portkey chat completion response into a typed response.
     ///
-    /// This method:
-    /// - Extracts the content from the first choice in the response
-    /// - Handles various response formats (pure JSON, markdown-wrapped, etc.)
-    /// - Adds token usage information from the response
+    /// This method uses portkey-sdk 0.2's `deserialize_content` method for parsing.
     ///
     /// # Arguments
     ///
-    /// * `response` - The completion response from the LLM
+    /// * `response` - The raw chat completion response from Portkey
     ///
     /// # Returns
     ///
-    /// A parsed typed response with token usage information
+    /// A typed response containing both the raw response and parsed data
     ///
     /// # Errors
     ///
-    /// - Returns an error if no response choices are available
-    /// - Returns an error if the response cannot be parsed as JSON
-    pub fn from_llm_response(response: &CompletionsResponse) -> Result<Self> {
-        // Extract content from the first choice with content
-        let content = extract_response_content(response)?;
+    /// Returns an error if:
+    /// - The response has no choices
+    /// - The response content cannot be extracted
+    /// - The content cannot be parsed into type T
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use nvisy_portkey::completion::TypedChatResponse;
+    /// use portkey_sdk::model::ChatCompletionResponse;
+    /// use serde::Deserialize;
+    /// use schemars::JsonSchema;
+    ///
+    /// #[derive(Deserialize, JsonSchema)]
+    /// struct MyResponse {
+    ///     answer: String,
+    /// }
+    ///
+    /// # fn example(response: ChatCompletionResponse) -> Result<(), Box<dyn std::error::Error>> {
+    /// let typed_response = TypedChatResponse::<MyResponse>::from_response(response)?;
+    /// println!("Answer: {}", typed_response.response.answer);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn from_response(response: ChatCompletionResponse) -> Result<Self> {
+        // Extract the first choice
+        let choice = response
+            .choices
+            .first()
+            .ok_or_else(|| Error::invalid_response("No choices in response"))?;
 
-        // Parse the content into typed data
-        let data = parse_json_response::<T>(&content)?;
-        let mut this = Self::builder().with_data(data).with_raw_response(content);
+        // Get content string for storage
+        let content = choice
+            .message
+            .content
+            .clone()
+            .ok_or_else(|| Error::invalid_response("No content in response message"))?;
 
-        if let Some(ref usage) = response.usage {
-            this = this
-                .with_prompt_tokens(usage.prompt_tokens)
-                .with_completion_tokens(usage.completion_tokens)
-                .with_total_tokens(usage.total_tokens);
-        }
+        // Use portkey-sdk 0.2's deserialize_content method
+        let parsed_response = choice
+            .message
+            .deserialize_content::<T>()?
+            .ok_or_else(|| Error::invalid_response("Failed to deserialize content"))?;
 
-        Ok(this.build()?)
+        Ok(Self {
+            raw_response: response,
+            response: parsed_response,
+            content,
+        })
+    }
+
+    /// Gets a reference to the raw chat completion response.
+    pub fn raw(&self) -> &ChatCompletionResponse {
+        &self.raw_response
+    }
+
+    /// Gets a reference to the parsed response data.
+    pub fn data(&self) -> &T {
+        &self.response
+    }
+
+    /// Gets the response message content as a string.
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Consumes self and returns the parsed response data.
+    pub fn into_data(self) -> T {
+        self.response
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde::{Deserialize, Serialize};
+    use portkey_sdk::model::{ChatCompletionChoice, ChatCompletionResponseMessage, Usage};
+    use schemars::JsonSchema;
+    use serde::Deserialize;
 
     use super::*;
 
-    #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+    #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
     struct TestResponse {
-        value: String,
+        answer: String,
+        confidence: f64,
+    }
+
+    fn create_mock_response(content: String) -> ChatCompletionResponse {
+        ChatCompletionResponse {
+            id: "test-id".to_string(),
+            model: "gpt-4".to_string(),
+            choices: vec![ChatCompletionChoice {
+                index: 0,
+                message: ChatCompletionResponseMessage {
+                    role: "assistant".to_string(),
+                    content: Some(content),
+                    tool_calls: None,
+                    content_blocks: None,
+                    function_call: None,
+                },
+                finish_reason: "stop".to_string(),
+                logprobs: None,
+            }],
+            usage: Some(Usage {
+                prompt_tokens: 10,
+                completion_tokens: 20,
+                total_tokens: 30,
+            }),
+            created: 1234567890,
+            object: "chat.completion".to_string(),
+            system_fingerprint: None,
+        }
     }
 
     #[test]
-    fn test_typed_chat_response_builder() -> crate::Result<()> {
-        let response: TypedChatResponse<TestResponse> = TypedChatResponse::builder()
-            .with_data(TestResponse {
-                value: "test".to_string(),
-            })
-            .build()?;
+    fn test_from_response_with_json() {
+        let json_content = r#"{"answer": "42", "confidence": 0.95}"#;
+        let response = create_mock_response(json_content.to_string());
 
-        assert_eq!(response.data.value, "test");
-        assert!(response.raw_response.is_none());
-        Ok(())
+        let typed_response = TypedChatResponse::<TestResponse>::from_response(response);
+        assert!(typed_response.is_ok());
+
+        let typed = typed_response.unwrap();
+        assert_eq!(typed.response.answer, "42");
+        assert_eq!(typed.response.confidence, 0.95);
     }
 
     #[test]
-    fn test_typed_chat_response_with_metadata() -> crate::Result<()> {
-        let response: TypedChatResponse<TestResponse> = TypedChatResponse::builder()
-            .with_data(TestResponse {
-                value: "test".to_string(),
-            })
-            .with_raw_response("raw text")
-            .with_prompt_tokens(10u32)
-            .with_completion_tokens(20u32)
-            .with_total_tokens(30u32)
-            .build()?;
-        assert_eq!(response.prompt_tokens, Some(10));
-        assert_eq!(response.completion_tokens, Some(20));
-        assert_eq!(response.total_tokens, Some(30));
-        Ok(())
+    fn test_from_response_no_choices() {
+        let mut response = create_mock_response("test".to_string());
+        response.choices.clear();
+
+        let result = TypedChatResponse::<TestResponse>::from_response(response);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_parse_response_content() -> crate::Result<()> {
-        let json = r#"{"value": "test"}"#;
-        let data = parse_json_response::<TestResponse>(json)?;
-        assert_eq!(data.value, "test");
-        Ok(())
-    }
+    fn test_accessors() {
+        let json_content = r#"{"answer": "test", "confidence": 0.8}"#;
+        let response = create_mock_response(json_content.to_string());
 
-    #[test]
-    fn test_parse_response_content_with_markdown() -> crate::Result<()> {
-        let json = "```json\n{\"value\": \"test\"}\n```";
-        let data = parse_json_response::<TestResponse>(json)?;
-        assert_eq!(data.value, "test");
-        Ok(())
-    }
+        let typed = TypedChatResponse::<TestResponse>::from_response(response).unwrap();
 
-    #[test]
-    fn test_parse_response_content_with_extra_text() -> crate::Result<()> {
-        let json = "Here is the response: {\"value\": \"test\"} - done";
-        let data = parse_json_response::<TestResponse>(json)?;
-        assert_eq!(data.value, "test");
-        Ok(())
+        assert_eq!(typed.data().answer, "test");
+        assert_eq!(typed.content(), json_content);
+        assert_eq!(typed.raw().id, "test-id");
+
+        let data = typed.into_data();
+        assert_eq!(data.answer, "test");
     }
 }

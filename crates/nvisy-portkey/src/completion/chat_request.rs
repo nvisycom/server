@@ -3,33 +3,34 @@
 use std::borrow::Cow;
 
 use derive_builder::Builder;
-use openrouter_rs::api::chat::{ChatCompletionRequest, Message};
-use openrouter_rs::types::{ResponseFormat, Role};
+use portkey_sdk::model::{ChatCompletionRequest, ChatCompletionRequestMessage, ResponseFormat};
+use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::Error;
+use crate::Result;
 use crate::client::LlmConfig;
 
-/// A typed chat completion request.
+/// A typed chat completion request with structured output support.
 ///
-/// This wraps messages along with a typed request payload that will be
-/// included in the conversation for structured prompting.
+/// This wraps messages along with a typed request payload and automatic
+/// JSON Schema generation for structured responses.
 ///
 /// # Type Parameters
 ///
-/// * `T` - The request payload type that implements `Serialize`
+/// * `Req` - The request payload type that implements `Serialize`
+/// * `Res` - The expected response type that implements `Deserialize` and `JsonSchema`
 #[derive(Debug, Clone, Builder, Serialize)]
 #[builder(
     name = "TypedChatRequestBuilder",
     pattern = "owned",
     setter(into, strip_option, prefix = "with")
 )]
-pub struct TypedChatRequest<T> {
+pub struct TypedChatRequest<Req, Res> {
     /// The conversation messages
-    pub messages: Vec<Message>,
+    pub messages: Vec<ChatCompletionRequestMessage>,
 
     /// The typed request payload
-    pub request: T,
+    pub request: Req,
 
     /// Optional system prompt override
     #[builder(default)]
@@ -46,31 +47,46 @@ pub struct TypedChatRequest<T> {
     /// Optional max tokens override
     #[builder(default)]
     pub max_tokens: Option<u32>,
+
+    /// Optional JSON schema description
+    #[builder(default)]
+    pub schema_description: Option<Cow<'static, str>>,
+
+    /// Whether to use strict JSON schema validation
+    #[builder(default = "true")]
+    pub strict_schema: bool,
+
+    /// Phantom data for response type
+    #[serde(skip)]
+    #[builder(setter(skip))]
+    _phantom: std::marker::PhantomData<Res>,
 }
 
-impl<T> TypedChatRequest<T> {
+impl<Req, Res> TypedChatRequest<Req, Res>
+where
+    Res: JsonSchema,
+{
     /// Creates a new typed chat request builder.
-    pub fn builder() -> TypedChatRequestBuilder<T> {
+    pub fn builder() -> TypedChatRequestBuilder<Req, Res> {
         TypedChatRequestBuilder::default()
     }
 
-    /// Builds an OpenRouter chat completion request from this typed request.
+    /// Builds a Portkey chat completion request with JSON Schema response format.
     ///
     /// This method:
     /// - Prepares the messages (including system prompt if present)
     /// - Applies the model from the request or uses the default from config
-    /// - Sets the response format for structured output
-    /// - Applies configuration defaults
-    /// - Applies request-specific overrides (temperature, max_tokens)
+    /// - Generates JSON Schema from the response type
+    /// - Configures structured output using ResponseFormat::JsonSchema
+    /// - Applies configuration defaults and request-specific overrides
     ///
     /// # Arguments
     ///
     /// * `config` - The LLM configuration to use for defaults
-    /// * `response_format` - The JSON schema format for the response
     ///
     /// # Returns
     ///
-    /// A configured `ChatCompletionRequest` ready to send
+    /// A configured `ChatCompletionRequest` with JSON Schema response format
     ///
     /// # Errors
     ///
@@ -78,196 +94,188 @@ impl<T> TypedChatRequest<T> {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use nvisy_openrouter::completion::TypedChatRequest;
-    /// use nvisy_openrouter::{LlmConfig, Result};
-    /// use openrouter_rs::{api::chat::Message, types::{Role, ResponseFormat}};
-    /// use serde::Serialize;
+    /// ```rust,no_run
+    /// use nvisy_portkey::completion::TypedChatRequest;
+    /// use nvisy_portkey::{LlmConfig, Result};
+    /// use portkey_sdk::model::ChatCompletionRequestMessage;
+    /// use serde::{Serialize, Deserialize};
+    /// use schemars::JsonSchema;
     ///
     /// #[derive(Serialize)]
     /// struct Request { query: String }
     ///
+    /// #[derive(Deserialize, JsonSchema)]
+    /// struct Response { answer: String }
+    ///
     /// # fn example() -> Result<()> {
-    /// let config = LlmConfig::builder().with_api_key("test-key").build()?;
-    /// let request: TypedChatRequest<Request> = TypedChatRequest::builder()
-    ///     .with_messages(vec![Message::new(Role::User, "Hello")])
-    ///     .with_request(Request { query: "test".to_string() })
+    /// let config = LlmConfig::builder()
+    ///     .with_api_key("test-key")
+    ///     .with_default_model("gpt-4o")
     ///     .build()?;
     ///
-    /// let response_format = ResponseFormat::json_schema("test", true, serde_json::json!({}));
-    /// let chat_request = request.build_chat_request(&config, response_format)?;
+    /// let request: TypedChatRequest<Request, Response> = TypedChatRequest::builder()
+    ///     .with_messages(vec![ChatCompletionRequestMessage::user("What is 2+2?")])
+    ///     .with_request(Request { query: "math".to_string() })
+    ///     .with_schema_description("A mathematical answer")
+    ///     .build()?;
+    ///
+    /// let chat_request = request.build_chat_request(&config)?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn build_chat_request(
-        &self,
-        config: &LlmConfig,
-        response_format: ResponseFormat,
-    ) -> Result<ChatCompletionRequest, Error> {
-        let mut builder = ChatCompletionRequest::builder();
+    pub fn build_chat_request(&self, config: &LlmConfig) -> Result<ChatCompletionRequest> {
+        let mut messages = Vec::new();
 
+        // Add system prompt if present
+        if let Some(system_prompt) = &self.system_prompt {
+            messages.push(ChatCompletionRequestMessage::System {
+                content: system_prompt.to_string(),
+                name: None,
+            });
+        }
+
+        // Add conversation messages
+        messages.extend(self.messages.clone());
+
+        // Determine the model to use
         let model = self
             .model
-            .as_deref()
-            .unwrap_or_else(|| config.effective_model());
+            .as_ref()
+            .map(|m| m.to_string())
+            .or_else(|| config.default_model().map(|m| m.to_string()))
+            .unwrap_or_else(|| config.effective_model().to_string());
 
-        let messages = self.prepare_messages();
+        // Build the request using the new constructor
+        let mut request = ChatCompletionRequest::new(model, messages);
 
-        builder
-            .model(model)
-            .messages(messages)
-            .response_format(response_format);
+        // Generate JSON Schema for structured output
+        let json_schema = portkey_sdk::model::JsonSchema::from_type::<Res>()
+            .with_description(
+                self.schema_description
+                    .as_ref()
+                    .map(|s| s.as_ref())
+                    .unwrap_or("Structured response schema"),
+            )
+            .with_strict(self.strict_schema);
 
-        // Apply config defaults first
-        builder.max_tokens(config.effective_max_tokens());
+        // Set the response format
+        request.response_format = Some(ResponseFormat::JsonSchema { json_schema });
 
-        builder.temperature(config.effective_temperature());
+        // Set optional parameters
+        request.temperature = self
+            .temperature
+            .or(config.default_temperature())
+            .map(|v| v as f32);
+        request.max_tokens = self
+            .max_tokens
+            .or(config.default_max_tokens())
+            .map(|v| v as i32);
+        request.top_p = config.default_top_p().map(|v| v as f32);
+        request.frequency_penalty = config.default_frequency_penalty().map(|v| v as f32);
+        request.presence_penalty = config.default_presence_penalty().map(|v| v as f32);
 
-        builder.top_p(config.effective_top_p());
-
-        builder.presence_penalty(config.effective_presence_penalty());
-
-        builder.frequency_penalty(config.effective_frequency_penalty());
-
-        // Request-specific overrides take precedence over config defaults
-        if let Some(temperature) = self.temperature {
-            builder.temperature(temperature);
-        }
-
-        if let Some(max_tokens) = self.max_tokens {
-            builder.max_tokens(max_tokens);
-        }
-
-        builder.build().map_err(Into::into)
-    }
-
-    /// Prepares the final message list for the chat completion request.
-    ///
-    /// This method:
-    /// - Clones the messages from the request
-    /// - Inserts the system prompt at the beginning if provided
-    ///
-    /// # Returns
-    ///
-    /// A vector of messages ready to be sent to the LLM
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nvisy_openrouter::completion::TypedChatRequest;
-    /// use openrouter_rs::{api::chat::Message, types::Role};
-    /// use serde::Serialize;
-    ///
-    /// #[derive(Serialize)]
-    /// struct Request { query: String }
-    ///
-    /// let request: TypedChatRequest<Request> = TypedChatRequest::builder()
-    ///     .with_messages(vec![Message::new(Role::User, "Hello")])
-    ///     .with_request(Request { query: "test".to_string() })
-    ///     .with_system_prompt("You are helpful")
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// let messages = request.prepare_messages();
-    /// assert_eq!(messages.len(), 2); // System + User
-    /// ```
-    pub fn prepare_messages(&self) -> Vec<Message> {
-        let mut messages = self.messages.clone();
-
-        if let Some(system_prompt) = &self.system_prompt {
-            messages.insert(0, Message::new(Role::System, system_prompt.as_ref()));
-        }
-
-        messages
+        Ok(request)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use openrouter_rs::types::Role;
     use serde::Deserialize;
 
     use super::*;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize)]
     struct TestRequest {
-        value: String,
+        query: String,
+    }
+
+    #[derive(Debug, Deserialize, JsonSchema)]
+    struct TestResponse {
+        answer: String,
     }
 
     #[test]
-    fn test_typed_chat_request_builder() -> crate::Result<()> {
-        let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
-            .with_messages(vec![Message::new(Role::User, "test")])
+    fn test_typed_request_builder() {
+        let request: TypedChatRequest<TestRequest, TestResponse> = TypedChatRequest::builder()
+            .with_messages(vec![ChatCompletionRequestMessage::user("Hello")])
             .with_request(TestRequest {
-                value: "test".to_string(),
+                query: "test".to_string(),
             })
-            .build()?;
+            .build()
+            .unwrap();
 
         assert_eq!(request.messages.len(), 1);
-        assert!(request.system_prompt.is_none());
-        Ok(())
+        assert_eq!(request.request.query, "test");
+        assert!(request.strict_schema);
     }
 
     #[test]
-    fn test_typed_chat_request_with_overrides() -> crate::Result<()> {
-        let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
-            .with_messages(vec![Message::new(Role::User, "test")])
-            .with_request(TestRequest {
-                value: "test".to_string(),
-            })
-            .with_system_prompt(Cow::Borrowed("Custom system prompt"))
-            .with_model(Cow::Borrowed("custom-model"))
-            .with_temperature(0.8f64)
-            .with_max_tokens(1000u32)
-            .build()?;
+    fn test_build_chat_request_with_defaults() {
+        let config = LlmConfig::builder()
+            .with_api_key("test-key")
+            .with_default_model("gpt-4o")
+            .build()
+            .unwrap();
 
-        assert_eq!(
-            request.system_prompt.as_deref(),
-            Some("Custom system prompt")
-        );
-        assert_eq!(request.model.as_deref(), Some("custom-model"));
-        assert_eq!(request.temperature, Some(0.8));
-        assert_eq!(request.max_tokens, Some(1000));
-        Ok(())
+        let request: TypedChatRequest<TestRequest, TestResponse> = TypedChatRequest::builder()
+            .with_messages(vec![ChatCompletionRequestMessage::user("Hello")])
+            .with_request(TestRequest {
+                query: "test".to_string(),
+            })
+            .build()
+            .unwrap();
+
+        let chat_request = request.build_chat_request(&config).unwrap();
+
+        assert_eq!(chat_request.model, "gpt-4o");
+        assert_eq!(chat_request.messages.len(), 1);
+        assert!(chat_request.response_format.is_some());
     }
 
     #[test]
-    fn test_prepare_messages_without_system_prompt() -> crate::Result<()> {
-        let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
-            .with_messages(vec![
-                Message::new(Role::User, "Hello"),
-                Message::new(Role::Assistant, "Hi there"),
-            ])
+    fn test_build_chat_request_with_system_prompt() {
+        let config = LlmConfig::builder()
+            .with_api_key("test-key")
+            .build()
+            .unwrap();
+
+        let request: TypedChatRequest<TestRequest, TestResponse> = TypedChatRequest::builder()
+            .with_messages(vec![ChatCompletionRequestMessage::user("Hello")])
             .with_request(TestRequest {
-                value: "test".to_string(),
+                query: "test".to_string(),
             })
-            .build()?;
+            .with_system_prompt("You are a helpful assistant")
+            .build()
+            .unwrap();
 
-        let messages = request.prepare_messages();
+        let chat_request = request.build_chat_request(&config).unwrap();
 
-        // Verify no system prompt was added
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "Hello");
-        assert_eq!(messages[1].content, "Hi there");
-        Ok(())
+        // Should have system message + user message
+        assert_eq!(chat_request.messages.len(), 2);
+        if let ChatCompletionRequestMessage::System { content, .. } = &chat_request.messages[0] {
+            assert_eq!(content, "You are a helpful assistant");
+        } else {
+            panic!("Expected System message");
+        }
     }
 
     #[test]
-    fn test_prepare_messages_with_system_prompt() -> crate::Result<()> {
-        let request: TypedChatRequest<TestRequest> = TypedChatRequest::builder()
-            .with_messages(vec![Message::new(Role::User, "Hello")])
+    fn test_build_with_schema_description() {
+        let config = LlmConfig::builder()
+            .with_api_key("test-key")
+            .build()
+            .unwrap();
+
+        let request: TypedChatRequest<TestRequest, TestResponse> = TypedChatRequest::builder()
+            .with_messages(vec![ChatCompletionRequestMessage::user("Hello")])
             .with_request(TestRequest {
-                value: "test".to_string(),
+                query: "test".to_string(),
             })
-            .with_system_prompt(Cow::Borrowed("You are a helpful assistant"))
-            .build()?;
+            .with_schema_description("A test response schema")
+            .build()
+            .unwrap();
 
-        let messages = request.prepare_messages();
-
-        // Verify system prompt was inserted at the beginning
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "You are a helpful assistant");
-        assert_eq!(messages[1].content, "Hello");
-        Ok(())
+        let chat_request = request.build_chat_request(&config).unwrap();
+        assert!(chat_request.response_format.is_some());
     }
 }

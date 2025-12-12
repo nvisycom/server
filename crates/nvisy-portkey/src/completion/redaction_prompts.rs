@@ -14,7 +14,7 @@ use super::redaction_request::{RedactionItem, RedactionRequest};
 /// # Example
 ///
 /// ```rust
-/// use nvisy_openrouter::completion::redaction_prompts::create_system_prompt;
+/// use nvisy_portkey::completion::redaction_prompts::create_system_prompt;
 ///
 /// let system_prompt = create_system_prompt();
 /// println!("{}", system_prompt);
@@ -96,7 +96,7 @@ Example response:
 /// # Example
 ///
 /// ```rust
-/// use nvisy_openrouter::completion::{RedactionRequest, RedactionItem, redaction_prompts::create_user_prompt};
+/// use nvisy_portkey::completion::{RedactionRequest, RedactionItem, redaction_prompts::create_user_prompt};
 ///
 /// let request = RedactionRequest::new(
 ///     vec![RedactionItem::new("123 Main St, 555-1234").with_entity("John Doe")],
