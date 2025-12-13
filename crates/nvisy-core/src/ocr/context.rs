@@ -408,6 +408,7 @@ pub struct ImageQuality {
 
 /// Usage statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct UsageStats {
     /// Total characters extracted.
     pub total_characters: u32,
@@ -427,20 +428,6 @@ pub struct UsageStats {
     pub estimated_cost: Option<f64>,
 }
 
-impl Default for UsageStats {
-    fn default() -> Self {
-        Self {
-            total_characters: 0,
-            total_words: 0,
-            total_regions: 0,
-            pages_processed: 0,
-            total_processing_time_ms: 0,
-            successful_extractions: 0,
-            failed_extractions: 0,
-            estimated_cost: None,
-        }
-    }
-}
 
 impl UsageStats {
     /// Get total number of extractions (successful + failed).

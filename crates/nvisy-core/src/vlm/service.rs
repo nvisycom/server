@@ -182,7 +182,7 @@ where
             }
         }
 
-        Err(last_error.unwrap_or_else(|| Error::internal_error()))
+        Err(last_error.unwrap_or_else(Error::internal_error))
     }
 
     async fn process_stream(&self, request: &Request) -> Result<BoxedStream<Response>> {

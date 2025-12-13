@@ -301,6 +301,7 @@ impl ImageData {
 
 /// Usage statistics for VLM operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct UsageStats {
     /// Total number of messages in the conversation.
     pub total_messages: usize,
@@ -320,20 +321,6 @@ pub struct UsageStats {
     pub estimated_cost: Option<f64>,
 }
 
-impl Default for UsageStats {
-    fn default() -> Self {
-        Self {
-            total_messages: 0,
-            user_messages: 0,
-            assistant_messages: 0,
-            total_tokens: 0,
-            successful_responses: 0,
-            failed_responses: 0,
-            total_processing_time_ms: 0,
-            estimated_cost: None,
-        }
-    }
-}
 
 impl UsageStats {
     /// Get total number of responses.

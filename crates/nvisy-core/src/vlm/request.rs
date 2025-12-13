@@ -201,18 +201,16 @@ impl Request {
         }
 
         // Check temperature range
-        if let Some(temp) = self.options.temperature {
-            if temp < 0.0 || temp > 2.0 {
+        if let Some(temp) = self.options.temperature
+            && (!(0.0..=2.0).contains(&temp)) {
                 return Err(Error::invalid_input());
             }
-        }
 
         // Check max tokens
-        if let Some(max_tokens) = self.options.max_tokens {
-            if max_tokens == 0 || max_tokens > 8192 {
+        if let Some(max_tokens) = self.options.max_tokens
+            && (max_tokens == 0 || max_tokens > 8192) {
                 return Err(Error::invalid_input());
             }
-        }
 
         Ok(())
     }
