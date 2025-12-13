@@ -1,4 +1,8 @@
 //! Request types for VLM operations.
+//!
+//! This module provides types for constructing VLM requests, including text prompts,
+//! image inputs, and processing options. Requests support both single and multi-image
+//! scenarios for various multimodal AI tasks.
 
 use std::collections::HashMap;
 

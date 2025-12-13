@@ -36,6 +36,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::BoxedError;
+
 /// Result type alias for VLM operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -51,7 +53,7 @@ pub struct Error {
     pub kind: ErrorKind,
     /// Optional source error for additional context.
     #[source]
-    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    pub source: Option<BoxedError>,
 }
 
 impl Error {
@@ -60,12 +62,20 @@ impl Error {
         Self { kind, source: None }
     }
 
-    /// Creates a new error with the given kind and source error.
-    pub fn with_source(kind: ErrorKind, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        Self {
-            kind,
-            source: Some(source),
-        }
+    /// Adds a source error to this error.
+    ///
+    /// This method consumes the error and returns a new error with the source attached,
+    /// allowing for method chaining when constructing errors.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// Error::new(ErrorKind::NetworkError)
+    ///     .with_source(io_error)
+    /// ```
+    pub fn with_source(mut self, source: BoxedError) -> Self {
+        self.source = Some(source);
+        self
     }
 
     /// Returns true if this is a client error (4xx-style).
@@ -259,27 +269,5 @@ impl Error {
     /// Creates an internal error.
     pub fn internal_error() -> Self {
         Self::new(ErrorKind::InternalError)
-    }
-
-    /// Creates an authentication error with source.
-    pub fn authentication_with_source(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        Self::with_source(ErrorKind::Authentication, source)
-    }
-
-    /// Creates a network error with source.
-    pub fn network_error_with_source(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        Self::with_source(ErrorKind::NetworkError, source)
-    }
-
-    /// Creates a model inference error with source.
-    pub fn model_inference_failed_with_source(
-        source: Box<dyn std::error::Error + Send + Sync>,
-    ) -> Self {
-        Self::with_source(ErrorKind::ModelInferenceFailed, source)
-    }
-
-    /// Creates an internal error with source.
-    pub fn internal_error_with_source(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        Self::with_source(ErrorKind::InternalError, source)
     }
 }

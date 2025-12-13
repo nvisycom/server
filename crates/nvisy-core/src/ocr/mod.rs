@@ -2,178 +2,105 @@
 //!
 //! This module provides traits and types for extracting structured text from images
 //! and documents. It supports various OCR capabilities including image text extraction,
-//! document processing, language detection, and structured output.
+//! document processing, and structured output.
+//!
+//! # Generic Design
+//!
+//! The OCR trait is generic over request and response types, allowing different
+//! implementations to use their own specific formats while maintaining a consistent
+//! interface:
+//!
+//! ```rust,ignore
+//! use nvisy_core::ocr::{Ocr, Request, Response};
+//!
+//! // Generic OCR implementation
+//! struct MyOcr;
+//!
+//! impl Ocr<MyRequest, MyResponse> for MyOcr {
+//!     async fn process_with_ocr(&self, request: Request<MyRequest>) -> Result<Response<MyResponse>> {
+//!         // Implementation
+//!     }
+//!
+//!     async fn health_check(&self) -> Result<ServiceHealth> {
+//!         // Implementation
+//!     }
+//! }
+//! ```
 
+use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 
-use async_trait::async_trait;
+use futures_util::Stream;
 
 pub mod context;
 pub mod error;
 pub mod request;
 pub mod response;
+pub mod service;
 
 pub use context::{Context, Document, ProcessingOptions};
 pub use error::{Error, Result};
 pub use request::Request;
 pub use response::Response;
+pub use service::OcrService;
 
 use crate::health::ServiceHealth;
 
-/// Type alias for a boxed OCR service.
-pub type BoxedOcr = Arc<dyn Ocr + Send + Sync>;
+/// Type alias for a boxed OCR service with specific request and response types.
+pub type BoxedOcr<Req, Resp> = Arc<dyn Ocr<Req, Resp> + Send + Sync>;
+
+/// Type alias for boxed response stream.
+pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
 
 /// Core trait for OCR operations.
-#[async_trait]
-pub trait Ocr {
-    /// Extract text from an image or document.
-    async fn extract_text(&self, request: &Request) -> Result<Response>;
+///
+/// This trait is generic over request (`Req`) and response (`Resp`) types,
+/// allowing implementations to define their own specific data structures
+/// while maintaining a consistent interface.
+///
+/// # Type Parameters
+///
+/// * `Req` - The request payload type specific to the OCR implementation
+/// * `Resp` - The response payload type specific to the OCR implementation
+pub trait Ocr<Req, Resp> {
+    /// Process an image or document with OCR to extract text and structured data.
+    ///
+    /// This method takes ownership of the request to allow efficient processing
+    /// without unnecessary cloning.
+    ///
+    /// # Parameters
+    ///
+    /// * `request` - OCR request containing the image/document and processing options
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Response<Resp>` containing the extracted text, regions, and metadata.
+    fn process_with_ocr(
+        &self,
+        request: Request<Req>,
+    ) -> impl Future<Output = Result<Response<Resp>>> + Send;
 
-    /// Detect the language of text in an image or document.
-    async fn detect_language(&self, request: &Request) -> Result<context::LanguageDetectionResult>;
+    /// Process an image or document with OCR using streaming responses.
+    ///
+    /// This method returns a stream of partial responses, allowing for real-time
+    /// processing of long-running OCR operations or large documents.
+    ///
+    /// # Parameters
+    ///
+    /// * `request` - OCR request containing the image/document and processing options
+    ///
+    /// # Returns
+    ///
+    /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
+    fn process_stream(
+        &self,
+        request: Request<Req>,
+    ) -> impl Future<Output = Result<BoxedStream<Response<Resp>>>> + Send;
 
-    /// Perform a health check on the service.
-    async fn health_check(&self) -> Result<ServiceHealth>;
-}
-
-/// OCR service wrapper with additional functionality.
-pub struct OcrService<T> {
-    inner: T,
-    retry_attempts: u32,
-    timeout: Duration,
-    enable_logging: bool,
-    service_name: String,
-}
-
-impl<T> OcrService<T> {
-    /// Create a new service wrapper.
-    pub fn new(inner: T) -> Self {
-        Self {
-            inner,
-            retry_attempts: 3,
-            timeout: Duration::from_secs(30),
-            enable_logging: false,
-            service_name: "ocr-service".to_string(),
-        }
-    }
-
-    /// Set retry policy.
-    pub fn with_retry_policy(mut self, attempts: u32) -> Self {
-        self.retry_attempts = attempts;
-        self
-    }
-
-    /// Set timeout duration.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// Enable or disable logging.
-    pub fn with_logging(mut self, enable: bool) -> Self {
-        self.enable_logging = enable;
-        self
-    }
-
-    /// Set service name for logging and identification.
-    pub fn with_service_name(mut self, name: impl Into<String>) -> Self {
-        self.service_name = name.into();
-        self
-    }
-
-    /// Get a reference to the inner service.
-    pub fn inner(&self) -> &T {
-        &self.inner
-    }
-
-    /// Consume the wrapper and return the inner service.
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-}
-
-#[async_trait]
-impl<T> Ocr for OcrService<T>
-where
-    T: Ocr + Send + Sync,
-{
-    async fn extract_text(&self, request: &Request) -> Result<Response> {
-        let mut last_error = None;
-
-        for attempt in 1..=self.retry_attempts {
-            if self.enable_logging {
-                tracing::debug!(
-                    "[{}] Extracting text, attempt {}/{}",
-                    self.service_name,
-                    attempt,
-                    self.retry_attempts
-                );
-            }
-
-            let start = std::time::Instant::now();
-
-            match tokio::time::timeout(self.timeout, self.inner.extract_text(request)).await {
-                Ok(Ok(response)) => {
-                    if self.enable_logging {
-                        tracing::debug!(
-                            "[{}] Text extraction successful in {:?}",
-                            self.service_name,
-                            start.elapsed()
-                        );
-                    }
-                    return Ok(response);
-                }
-                Ok(Err(error)) => {
-                    if self.enable_logging {
-                        tracing::warn!(
-                            "[{}] Text extraction failed on attempt {}: {}",
-                            self.service_name,
-                            attempt,
-                            error
-                        );
-                    }
-
-                    if !error.is_retryable() || attempt == self.retry_attempts {
-                        return Err(error);
-                    }
-
-                    if let Some(delay) = error.retry_delay() {
-                        tokio::time::sleep(delay).await;
-                    }
-
-                    last_error = Some(error);
-                }
-                Err(_) => {
-                    let error = Error::timeout();
-                    if self.enable_logging {
-                        tracing::warn!(
-                            "[{}] Text extraction timed out on attempt {}",
-                            self.service_name,
-                            attempt
-                        );
-                    }
-
-                    if attempt == self.retry_attempts {
-                        return Err(error);
-                    }
-
-                    tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
-                    last_error = Some(error);
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| Error::internal_error()))
-    }
-
-    async fn detect_language(&self, request: &Request) -> Result<context::LanguageDetectionResult> {
-        tokio::time::timeout(self.timeout, self.inner.detect_language(request))
-            .await
-            .map_err(|_| Error::timeout())?
-    }
-
-    async fn health_check(&self) -> Result<ServiceHealth> {
-        self.inner.health_check().await
-    }
+    /// Perform a health check on the OCR service.
+    ///
+    /// # Returns
+    ///
+    /// Returns service health information including status, response time, and metrics.
+    fn health_check(&self) -> impl Future<Output = Result<ServiceHealth>> + Send;
 }

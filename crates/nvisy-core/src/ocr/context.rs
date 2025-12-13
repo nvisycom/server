@@ -1,4 +1,11 @@
 //! Context management for OCR operations.
+//!
+//! This module provides types for managing OCR processing sessions, including
+//! document information, processing options, extracted content, and quality metrics.
+//!
+//! The `Context` type serves as a stateful container that tracks the entire OCR
+//! processing lifecycle, from document intake through text extraction to quality
+//! assessment.
 
 use std::collections::HashMap;
 
@@ -12,17 +19,15 @@ pub struct Context {
     /// Unique identifier for this context session.
     pub session_id: Uuid,
     /// User identifier associated with this context.
-    pub user_id: String,
+    pub user_id: Uuid,
     /// Document identifier for tracking related extractions.
-    pub document_id: String,
+    pub document_id: Uuid,
     /// Information about the document being processed.
     pub document: Option<Document>,
     /// Processing options and configuration.
     pub processing_options: ProcessingOptions,
     /// Extracted content from previous operations.
     pub extracted_content: Vec<ExtractedContent>,
-    /// Language detection results (automatic).
-    pub language_detection: Option<LanguageDetectionResult>,
     /// Processing quality metrics.
     pub quality_metrics: QualityMetrics,
     /// Usage statistics for this context.
@@ -33,15 +38,14 @@ pub struct Context {
 
 impl Context {
     /// Create a new OCR context.
-    pub fn new<U: Into<String>, D: Into<String>>(user_id: U, document_id: D) -> Self {
+    pub fn new(user_id: Uuid, document_id: Uuid) -> Self {
         Self {
             session_id: Uuid::new_v4(),
-            user_id: user_id.into(),
-            document_id: document_id.into(),
+            user_id,
+            document_id,
             document: None,
             processing_options: ProcessingOptions::default(),
             extracted_content: Vec::new(),
-            language_detection: None,
             quality_metrics: QualityMetrics::default(),
             usage: UsageStats::default(),
             metadata: ContextMetadata::default(),
@@ -69,11 +73,6 @@ impl Context {
 
         self.extracted_content.push(content);
         self.metadata.last_updated = Timestamp::now();
-    }
-
-    /// Set language detection result.
-    pub fn set_language_detection(&mut self, result: LanguageDetectionResult) {
-        self.language_detection = Some(result);
     }
 
     /// Get combined text from all extracted content.
@@ -139,29 +138,20 @@ pub struct Document {
 /// Processing options for OCR operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessingOptions {
-    /// Whether to detect tables in the document.
-    pub detect_tables: bool,
     /// Whether to preserve layout information.
     pub preserve_layout: bool,
     /// Minimum confidence threshold for text extraction.
     pub confidence_threshold: Option<f32>,
     /// DPI setting for image processing.
     pub dpi: Option<u32>,
-    /// Whether to preprocess images for better OCR results.
-    pub preprocess_image: bool,
-    /// Custom parameters for specific OCR engines.
-    pub custom_parameters: HashMap<String, serde_json::Value>,
 }
 
 impl Default for ProcessingOptions {
     fn default() -> Self {
         Self {
-            detect_tables: false,
             preserve_layout: true,
             confidence_threshold: Some(0.5),
             dpi: Some(300),
-            preprocess_image: true,
-            custom_parameters: HashMap::new(),
         }
     }
 }
@@ -337,32 +327,6 @@ pub struct Word {
     pub confidence: f32,
 }
 
-/// Language detection result (automatic detection).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LanguageDetectionResult {
-    /// Primary detected language code.
-    pub primary_language: String,
-    /// Alternative language candidates.
-    pub candidates: Vec<LanguageCandidate>,
-    /// Overall detection confidence.
-    pub detection_confidence: f32,
-    /// Whether multiple languages were detected.
-    pub multilingual: bool,
-}
-
-/// Language candidate with confidence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LanguageCandidate {
-    /// Language code (ISO 639-1).
-    pub language_code: String,
-    /// Human-readable language name.
-    pub language_name: String,
-    /// Detection confidence for this language.
-    pub confidence: f32,
-    /// Percentage of text in this language.
-    pub text_percentage: f32,
-}
-
 /// Quality metrics for OCR processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualityMetrics {
@@ -524,8 +488,6 @@ pub struct ContextMetadata {
     pub processing_mode: Option<String>,
     /// Custom tags for categorization.
     pub tags: Vec<String>,
-    /// Custom metadata fields.
-    pub custom: HashMap<String, serde_json::Value>,
 }
 
 impl Default for ContextMetadata {
@@ -538,7 +500,6 @@ impl Default for ContextMetadata {
             engine_version: None,
             processing_mode: None,
             tags: Vec::new(),
-            custom: HashMap::new(),
         }
     }
 }

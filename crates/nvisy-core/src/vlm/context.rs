@@ -1,4 +1,11 @@
-//! Context management for VLM operations.
+//! Context management for VLM (Vision Language Model) operations.
+//!
+//! This module provides types for managing multimodal conversation sessions,
+//! including message history, processing options, usage tracking, and metadata.
+//!
+//! The `Context` type serves as a stateful container for VLM interactions,
+//! maintaining conversation state and tracking resource usage across multiple
+//! request-response cycles.
 
 use std::collections::HashMap;
 
@@ -12,9 +19,9 @@ pub struct Context {
     /// Unique identifier for this context session.
     pub session_id: Uuid,
     /// User identifier associated with this context.
-    pub user_id: String,
+    pub user_id: Uuid,
     /// Conversation identifier for tracking related interactions.
-    pub conversation_id: String,
+    pub conversation_id: Uuid,
     /// Processing options and configuration.
     pub processing_options: ProcessingOptions,
     /// Messages in the conversation history.
@@ -27,11 +34,11 @@ pub struct Context {
 
 impl Context {
     /// Create a new VLM context.
-    pub fn new<U: Into<String>, C: Into<String>>(user_id: U, conversation_id: C) -> Self {
+    pub fn new(user_id: Uuid, conversation_id: Uuid) -> Self {
         Self {
             session_id: Uuid::new_v4(),
-            user_id: user_id.into(),
-            conversation_id: conversation_id.into(),
+            user_id,
+            conversation_id,
             processing_options: ProcessingOptions::default(),
             messages: Vec::new(),
             usage: UsageStats::default(),
@@ -384,8 +391,6 @@ pub struct ContextMetadata {
     pub processing_mode: Option<String>,
     /// Custom tags.
     pub tags: Vec<String>,
-    /// Custom metadata fields.
-    pub custom: HashMap<String, serde_json::Value>,
 }
 
 impl Default for ContextMetadata {
@@ -398,7 +403,6 @@ impl Default for ContextMetadata {
             model_version: None,
             processing_mode: None,
             tags: Vec::new(),
-            custom: HashMap::new(),
         }
     }
 }

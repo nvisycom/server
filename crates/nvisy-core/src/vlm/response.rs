@@ -67,7 +67,7 @@ impl Usage {
 /// assert!(response.is_complete());
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VlmResponse {
+pub struct Response {
     /// The generated text content describing or analyzing the visual input.
     pub content: String,
     /// The model that generated this response.
@@ -86,7 +86,7 @@ pub struct VlmResponse {
     pub metadata: ResponseMetadata,
 }
 
-impl VlmResponse {
+impl Response {
     /// Create a new VLM response.
     ///
     /// # Arguments
@@ -297,8 +297,8 @@ impl VlmResponseChunk {
     }
 
     /// Convert to a full response (for final chunks).
-    pub fn to_response(&self) -> VlmResponse {
-        VlmResponse {
+    pub fn to_response(&self) -> Response {
+        Response {
             content: self.content.clone(),
             model: self.model.clone(),
             usage: self.usage.clone(),
@@ -639,8 +639,8 @@ impl VlmResponseBuilder {
     }
 
     /// Build the final response.
-    pub fn build(self) -> VlmResponse {
-        VlmResponse {
+    pub fn build(self) -> Response {
+        Response {
             content: self.content,
             model: self.model,
             usage: self.usage,
@@ -652,6 +652,3 @@ impl VlmResponseBuilder {
         }
     }
 }
-
-/// Type alias for VlmResponse to match the pattern used in other modules.
-pub type Response = VlmResponse;

@@ -639,6 +639,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link 0.2.1",
 ]
@@ -2411,6 +2412,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvisy-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-util",
+ "jiff",
+ "mime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "nvisy-nats"
 version = "0.1.0"
 dependencies = [
@@ -2431,9 +2450,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvisy-paddle"
+name = "nvisy-olmocr2"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "derive_more",
+ "futures",
+ "jiff",
+ "mime",
  "reqwest",
  "serde",
  "serde_json",
@@ -2441,6 +2468,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
