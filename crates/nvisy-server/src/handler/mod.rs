@@ -128,7 +128,7 @@ mod test {
         router: impl Fn(ServiceState) -> OpenApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::default();
-        let state = ServiceState::from_config(&config).await?;
+        let state = ServiceState::from_config(config).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }
@@ -147,7 +147,7 @@ mod test {
     /// Returns a new [`TestServer`] with the default router and state.
     pub async fn create_test_server() -> anyhow::Result<TestServer> {
         let config = ServiceConfig::default();
-        let state = ServiceState::from_config(&config).await?;
+        let state = ServiceState::from_config(config).await?;
         let router = openapi_routes(CustomRoutes::new(), state.clone());
         create_test_server_with_state(router, state).await
     }

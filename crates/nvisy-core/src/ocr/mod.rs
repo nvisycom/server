@@ -27,9 +27,9 @@
 //! }
 //! ```
 
-use std::future::Future;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures_util::Stream;
 
 pub mod context;
@@ -62,7 +62,8 @@ pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> +
 ///
 /// * `Req` - The request payload type specific to the OCR implementation
 /// * `Resp` - The response payload type specific to the OCR implementation
-pub trait Ocr<Req, Resp> {
+#[async_trait]
+pub trait Ocr<Req, Resp>: Send + Sync {
     /// Process an image or document with OCR to extract text and structured data.
     ///
     /// This method takes ownership of the request to allow efficient processing
@@ -75,10 +76,7 @@ pub trait Ocr<Req, Resp> {
     /// # Returns
     ///
     /// Returns a `Response<Resp>` containing the extracted text, regions, and metadata.
-    fn process_with_ocr(
-        &self,
-        request: Request<Req>,
-    ) -> impl Future<Output = Result<Response<Resp>>> + Send;
+    async fn process_with_ocr(&self, request: Request<Req>) -> Result<Response<Resp>>;
 
     /// Process an image or document with OCR using streaming responses.
     ///
@@ -92,15 +90,12 @@ pub trait Ocr<Req, Resp> {
     /// # Returns
     ///
     /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
-    fn process_stream(
-        &self,
-        request: Request<Req>,
-    ) -> impl Future<Output = Result<BoxedStream<Response<Resp>>>> + Send;
+    async fn process_stream(&self, request: Request<Req>) -> Result<BoxedStream<Response<Resp>>>;
 
     /// Perform a health check on the OCR service.
     ///
     /// # Returns
     ///
     /// Returns service health information including status, response time, and metrics.
-    fn health_check(&self) -> impl Future<Output = Result<ServiceHealth>> + Send;
+    async fn health_check(&self) -> Result<ServiceHealth>;
 }

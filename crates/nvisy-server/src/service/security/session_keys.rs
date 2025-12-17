@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use jsonwebtoken::{DecodingKey, EncodingKey};
 
-use crate::service::{Result, ServiceError};
+use crate::service::{Result, Error};
 
 /// Logging target for authentication key operations.
 const TRACING_TARGET_AUTH_KEYS: &str = "nvisy_server::service::auth_keys";
@@ -50,20 +50,20 @@ impl AuthKeysConfig {
     /// Validates that both key files exist and are readable.
     pub fn validate(&self) -> Result<()> {
         if !self.decoding_key_path.exists() {
-            return Err(ServiceError::config("Decoding key file does not exist"));
+            return Err(Error::config("Decoding key file does not exist"));
         }
 
         if !self.encoding_key_path.exists() {
-            return Err(ServiceError::config("Encoding key file does not exist"));
+            return Err(Error::config("Encoding key file does not exist"));
         }
 
         // Check if files are readable
         if !self.decoding_key_path.is_file() {
-            return Err(ServiceError::config("Decoding key path is not a file"));
+            return Err(Error::config("Decoding key path is not a file"));
         }
 
         if !self.encoding_key_path.is_file() {
-            return Err(ServiceError::config("Encoding key path is not a file"));
+            return Err(Error::config("Encoding key path is not a file"));
         }
 
         Ok(())
@@ -235,7 +235,7 @@ impl SessionKeys {
                 "key validation failed during encoding",
             );
 
-            ServiceError::auth("key validation encoding failed").with_source(e)
+            Error::auth("key validation encoding failed").with_source(e)
         })?;
 
         // Try to decode with the decoding key
@@ -248,7 +248,7 @@ impl SessionKeys {
                 error = %e,
                 "key validation failed during decoding",
             );
-            ServiceError::auth("key validation decoding failed").with_source(e)
+            Error::auth("key validation decoding failed").with_source(e)
         })?;
 
         tracing::debug!(
@@ -276,7 +276,7 @@ impl SessionKeys {
                 error = %e,
                 "failed to read decoding key file",
             );
-            ServiceError::file_system("failed to read decoding key file").with_source(e)
+            Error::file_system("failed to read decoding key file").with_source(e)
         })?;
 
         let key = DecodingKey::from_ed_pem(&pem_data).map_err(|e| {
@@ -286,7 +286,7 @@ impl SessionKeys {
                 error = %e,
                 "failed to parse decoding key PEM data",
             );
-            ServiceError::auth("invalid decoding key PEM format").with_source(e)
+            Error::auth("invalid decoding key PEM format").with_source(e)
         })?;
 
         tracing::debug!(
@@ -317,7 +317,7 @@ impl SessionKeys {
                 "failed to read encoding key file",
             );
 
-            ServiceError::file_system("failed to read encoding key file").with_source(e)
+            Error::file_system("failed to read encoding key file").with_source(e)
         })?;
 
         let key = EncodingKey::from_ed_pem(&pem_data).map_err(|e| {
@@ -328,7 +328,7 @@ impl SessionKeys {
                 "failed to parse encoding key PEM data",
             );
 
-            ServiceError::auth("invalid encoding key PEM format").with_source(e)
+            Error::auth("invalid encoding key PEM format").with_source(e)
         })?;
 
         tracing::debug!(

@@ -7,7 +7,6 @@ members = [
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-olmocr2",
-    "./crates/nvisy-portkey",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
 ]
@@ -20,8 +19,8 @@ license = "MIT"
 publish = false
 
 authors = ["nvisy <contact@nvisy.com>"]
-repository = "https://github.com/nvisycom/api"
-homepage = "https://github.com/nvisycom/api"
+repository = "https://github.com/nvisycom/server"
+homepage = "https://github.com/nvisycom/server"
 documentation = "https://docs.rs/nvisy-server"
 
 [workspace.dependencies]

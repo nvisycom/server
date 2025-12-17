@@ -22,16 +22,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 [dependencies]
-# Async runtime for trait definitions
+# Async runtime and utilities
 tokio = { workspace = true, features = ["macros", "time"] }
-
-# Async utilities
 futures-util = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
 
 # Error handling
 thiserror = { workspace = true, features = [] }
 
-# Logging
+# Observability
 tracing = { workspace = true, features = [] }
 
 # (De)serialization for request/response types
@@ -41,9 +40,6 @@ serde_json = { workspace = true, features = [] }
 # Data types commonly used across AI services
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
-bytes = { workspace = true, features = [] }
-url = { workspace = true, features = [] }
-mime = { workspace = true, features = [] }
 
 # Base64 encoding for data handling
 base64 = { workspace = true, features = [] }

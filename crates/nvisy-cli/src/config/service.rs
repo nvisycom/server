@@ -79,8 +79,6 @@ impl From<ServiceConfig> for ServerServiceConfig {
             nats_url: cli_config.nats_url,
             auth_decoding_key: cli_config.auth_decoding_key,
             auth_encoding_key: cli_config.auth_encoding_key,
-            openrouter_api_key: cli_config.openrouter_api_key,
-            openrouter_base_url: cli_config.openrouter_base_url,
         }
     }
 }

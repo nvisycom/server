@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use super::error::{Error, Result};
 
 /// Request for VLM operations.
+///
+/// Generic over the implementation-specific request payload type `Req`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Request {
+pub struct Request<Req> {
     /// Unique identifier for this request.
     pub request_id: uuid::Uuid,
     /// Text prompt for the VLM.
@@ -22,6 +24,8 @@ pub struct Request {
     pub images: Vec<ImageInput>,
     /// Processing options.
     pub options: RequestOptions,
+    /// Implementation-specific request payload.
+    pub payload: Req,
 }
 
 /// Processing options for VLM requests.
@@ -99,34 +103,37 @@ impl ImageInput {
     }
 }
 
-impl Request {
+impl<Req> Request<Req> {
     /// Create a new VLM request with text only.
-    pub fn new(prompt: String) -> Self {
+    pub fn new(prompt: String, payload: Req) -> Self {
         Self {
             request_id: uuid::Uuid::new_v4(),
             prompt,
             images: Vec::new(),
             options: RequestOptions::default(),
+            payload,
         }
     }
 
     /// Create a new request with text and images.
-    pub fn with_images(prompt: String, images: Vec<ImageInput>) -> Self {
+    pub fn with_images(prompt: String, images: Vec<ImageInput>, payload: Req) -> Self {
         Self {
             request_id: uuid::Uuid::new_v4(),
             prompt,
             images,
             options: RequestOptions::default(),
+            payload,
         }
     }
 
     /// Create a new request with custom options.
-    pub fn with_options(prompt: String, options: RequestOptions) -> Self {
+    pub fn with_options(prompt: String, options: RequestOptions, payload: Req) -> Self {
         Self {
             request_id: uuid::Uuid::new_v4(),
             prompt,
             images: Vec::new(),
             options,
+            payload,
         }
     }
 
@@ -163,7 +170,7 @@ impl Request {
     /// Validate the request.
     pub fn validate(&self) -> Result<()> {
         if self.prompt.trim().is_empty() {
-            return Err(Error::invalid_prompt());
+            return Err(Error::invalid_input());
         }
 
         // Check image count limits
@@ -196,21 +203,23 @@ impl Request {
 
             // Check image size (rough estimate from base64)
             if image.estimated_size() > 20 * 1024 * 1024 {
-                return Err(Error::image_too_large());
+                return Err(Error::invalid_input());
             }
         }
 
         // Check temperature range
         if let Some(temp) = self.options.temperature
-            && (!(0.0..=2.0).contains(&temp)) {
-                return Err(Error::invalid_input());
-            }
+            && (!(0.0..=2.0).contains(&temp))
+        {
+            return Err(Error::invalid_input());
+        }
 
         // Check max tokens
         if let Some(max_tokens) = self.options.max_tokens
-            && (max_tokens == 0 || max_tokens > 8192) {
-                return Err(Error::invalid_input());
-            }
+            && (max_tokens == 0 || max_tokens > 8192)
+        {
+            return Err(Error::invalid_input());
+        }
 
         Ok(())
     }

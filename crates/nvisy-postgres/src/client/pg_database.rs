@@ -54,10 +54,10 @@ impl PgClient {
             AsyncDieselConnectionManager::new_with_config(&config.database_url, manager_config);
 
         let pool = Pool::builder(manager)
-            .max_size(config.pool.max_size as usize)
-            .wait_timeout(Some(config.pool.connection_timeout))
-            .create_timeout(Some(config.pool.connection_timeout))
-            .recycle_timeout(config.pool.idle_timeout)
+            .max_size(config.get_max_size())
+            .wait_timeout(config.get_connection_timeout())
+            .create_timeout(config.get_connection_timeout())
+            .recycle_timeout(config.get_idle_timeout())
             .runtime(deadpool::Runtime::Tokio1)
             .post_create(Hook::sync_fn(custom_hooks::post_create))
             .pre_recycle(Hook::sync_fn(custom_hooks::pre_recycle))
@@ -126,9 +126,9 @@ impl PgClient {
 
         tracing::info!(
             target: TRACING_TARGET_CONNECTION,
-            max_size = this.inner.config.pool.max_size,
-            connection_timeout = ?this.inner.config.pool.connection_timeout,
-            idle_timeout = ?this.inner.config.pool.idle_timeout,
+            max_size = this.inner.config.get_max_size(),
+            connection_timeout = ?this.inner.config.get_connection_timeout(),
+            idle_timeout = ?this.inner.config.get_idle_timeout(),
             "Database client initialized successfully"
         );
 
@@ -197,15 +197,15 @@ impl std::fmt::Debug for PgClient {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")
             .field("database_url", &self.inner.config.database_url_masked())
-            .field("pool_max_size", &self.inner.config.pool.max_size)
+            .field("pool_max_size", &self.inner.config.get_max_size())
             .field("pool_current_size", &pool_status.size)
             .field("pool_available", &pool_status.available)
             .field("pool_waiting", &pool_status.waiting)
             .field(
                 "connection_timeout",
-                &self.inner.config.pool.connection_timeout,
+                &self.inner.config.get_connection_timeout(),
             )
-            .field("idle_timeout", &self.inner.config.pool.idle_timeout)
+            .field("idle_timeout", &self.inner.config.get_idle_timeout())
             .finish()
     }
 }

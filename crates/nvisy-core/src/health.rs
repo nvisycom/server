@@ -44,29 +44,32 @@ pub struct ServiceHealth {
 impl ServiceHealth {
     /// Creates a new healthy service health report.
     pub fn healthy() -> Self {
-        let mut this = Self::default();
-        this.status = ServiceStatus::Healthy;
-        this.checked_at = Timestamp::now();
-        this
+        Self {
+            status: ServiceStatus::Healthy,
+            checked_at: Timestamp::now(),
+            ..Default::default()
+        }
     }
 
     /// Creates a new degraded service health report.
     pub fn degraded(message: impl Into<String>) -> Self {
-        let mut this = Self::default();
-        this.status = ServiceStatus::Degraded;
-        this.message = Some(message.into());
-        this.checked_at = Timestamp::now();
-        this
+        Self {
+            status: ServiceStatus::Degraded,
+            message: Some(message.into()),
+            checked_at: Timestamp::now(),
+            ..Default::default()
+        }
     }
 
     /// Creates a new unhealthy service health report.
     pub fn unhealthy(message: impl Into<String>) -> Self {
-        let mut this = Self::default();
-        this.status = ServiceStatus::Unhealthy;
-        this.message = Some(message.into());
-        this.checked_at = Timestamp::now();
-        this.metrics = HashMap::new();
-        this
+        Self {
+            status: ServiceStatus::Unhealthy,
+            message: Some(message.into()),
+            checked_at: Timestamp::now(),
+            metrics: HashMap::new(),
+            ..Default::default()
+        }
     }
 
     /// Sets the response time for this health check.

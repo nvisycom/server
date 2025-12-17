@@ -24,7 +24,7 @@ pub use diesel_async::RunQueryDsl;
 pub use crate::PgConnection;
 pub use crate::client::{
     ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientMigrationExt, PgConfig,
-    PgPoolConfig, PgPoolStatus,
+    PgPoolStatus,
 };
 // Error types
 pub use crate::{PgError, PgResult};

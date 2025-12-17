@@ -42,6 +42,8 @@ impl Usage {
 
 /// Response from Vision Language Model operations.
 ///
+/// Generic over the implementation-specific response payload type `Resp`.
+///
 /// This structure represents the complete response from a VLM service,
 /// including the generated analysis, visual metadata, confidence scores,
 /// and usage statistics.
@@ -49,10 +51,10 @@ impl Usage {
 /// # Examples
 ///
 /// ```rust
-/// use nvisy_core::vlm::response::{VlmResponse, VisualAnalysis};
+/// use nvisy_core::vlm::response::{Response, VisualAnalysis, ResponseMetadata};
 /// use std::time::SystemTime;
 ///
-/// let response = VlmResponse {
+/// let response = Response {
 ///     content: "This image shows a beautiful sunset over the ocean.".to_string(),
 ///     model: "gpt-4-vision".to_string(),
 ///     usage: None,
@@ -61,13 +63,14 @@ impl Usage {
 ///     confidence: Some(0.95),
 ///     visual_analysis: None,
 ///     metadata: ResponseMetadata::default(),
+///     payload: (),
 /// };
 ///
 /// assert_eq!(response.content, "This image shows a beautiful sunset over the ocean.");
 /// assert!(response.is_complete());
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Response {
+pub struct Response<Resp> {
     /// The generated text content describing or analyzing the visual input.
     pub content: String,
     /// The model that generated this response.
@@ -84,27 +87,31 @@ pub struct Response {
     pub visual_analysis: Option<VisualAnalysis>,
     /// Additional response metadata.
     pub metadata: ResponseMetadata,
+    /// Implementation-specific response payload.
+    pub payload: Resp,
 }
 
-impl Response {
+impl<Resp> Response<Resp> {
     /// Create a new VLM response.
     ///
     /// # Arguments
     ///
     /// * `content` - The generated analysis text
     /// * `model` - The model identifier
+    /// * `payload` - The implementation-specific response payload
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use nvisy_core::vlm::response::VlmResponse;
+    /// use nvisy_core::vlm::response::Response;
     ///
-    /// let response = VlmResponse::new(
+    /// let response = Response::new(
     ///     "The image contains three cats sitting on a windowsill",
-    ///     "claude-3-vision"
+    ///     "claude-3-vision",
+    ///     ()
     /// );
     /// ```
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M) -> Self {
+    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
         Self {
             content: content.into(),
             model: model.into(),
@@ -114,6 +121,7 @@ impl Response {
             confidence: None,
             visual_analysis: None,
             metadata: ResponseMetadata::default(),
+            payload,
         }
     }
 
@@ -122,6 +130,7 @@ impl Response {
         content: C,
         model: M,
         usage: Usage,
+        payload: Resp,
     ) -> Self {
         Self {
             content: content.into(),
@@ -132,6 +141,7 @@ impl Response {
             confidence: None,
             visual_analysis: None,
             metadata: ResponseMetadata::default(),
+            payload,
         }
     }
 
@@ -204,7 +214,10 @@ impl Response {
     }
 
     /// Convert to a streaming chunk (for compatibility).
-    pub fn to_chunk(&self) -> VlmResponseChunk {
+    pub fn to_chunk(&self) -> VlmResponseChunk<Resp>
+    where
+        Resp: Clone,
+    {
         VlmResponseChunk {
             content: self.content.clone(),
             finish_reason: self.finish_reason.clone(),
@@ -212,16 +225,19 @@ impl Response {
             model: self.model.clone(),
             created: self.created,
             confidence: self.confidence,
+            payload: self.payload.clone(),
         }
     }
 }
 
 /// Streaming chunk from VLM operations.
 ///
+/// Generic over the implementation-specific response payload type `Resp`.
+///
 /// This structure represents a single chunk in a streaming VLM response,
 /// containing partial content and metadata about the streaming progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VlmResponseChunk {
+pub struct VlmResponseChunk<Resp> {
     /// Partial content in this chunk.
     pub content: String,
     /// Finish reason, if this is the final chunk.
@@ -234,11 +250,13 @@ pub struct VlmResponseChunk {
     pub created: SystemTime,
     /// Confidence score for this chunk.
     pub confidence: Option<f64>,
+    /// Implementation-specific response payload.
+    pub payload: Resp,
 }
 
-impl VlmResponseChunk {
+impl<Resp> VlmResponseChunk<Resp> {
     /// Create a new response chunk.
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M) -> Self {
+    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
         Self {
             content: content.into(),
             model: model.into(),
@@ -246,6 +264,7 @@ impl VlmResponseChunk {
             usage: None,
             created: SystemTime::now(),
             confidence: None,
+            payload,
         }
     }
 
@@ -254,6 +273,7 @@ impl VlmResponseChunk {
         content: C,
         model: M,
         finish_reason: R,
+        payload: Resp,
     ) -> Self {
         Self {
             content: content.into(),
@@ -262,6 +282,7 @@ impl VlmResponseChunk {
             usage: None,
             created: SystemTime::now(),
             confidence: None,
+            payload,
         }
     }
 
@@ -272,6 +293,7 @@ impl VlmResponseChunk {
         finish_reason: R,
         usage: Usage,
         confidence: Option<f64>,
+        payload: Resp,
     ) -> Self {
         Self {
             content: content.into(),
@@ -280,6 +302,7 @@ impl VlmResponseChunk {
             usage: Some(usage),
             created: SystemTime::now(),
             confidence,
+            payload,
         }
     }
 
@@ -297,7 +320,10 @@ impl VlmResponseChunk {
     }
 
     /// Convert to a full response (for final chunks).
-    pub fn to_response(&self) -> Response {
+    pub fn to_response(&self) -> Response<Resp>
+    where
+        Resp: Clone,
+    {
         Response {
             content: self.content.clone(),
             model: self.model.clone(),
@@ -307,6 +333,7 @@ impl VlmResponseChunk {
             confidence: self.confidence,
             visual_analysis: None,
             metadata: ResponseMetadata::default(),
+            payload: self.payload.clone(),
         }
     }
 }
@@ -570,7 +597,7 @@ pub struct ResponseMetadata {
 }
 
 /// Builder for creating comprehensive VLM responses.
-pub struct VlmResponseBuilder {
+pub struct VlmResponseBuilder<Resp> {
     content: String,
     model: String,
     usage: Option<Usage>,
@@ -578,11 +605,12 @@ pub struct VlmResponseBuilder {
     confidence: Option<f64>,
     visual_analysis: Option<VisualAnalysis>,
     metadata: ResponseMetadata,
+    payload: Resp,
 }
 
-impl VlmResponseBuilder {
+impl<Resp> VlmResponseBuilder<Resp> {
     /// Create a new response builder.
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M) -> Self {
+    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
         Self {
             content: content.into(),
             model: model.into(),
@@ -591,6 +619,7 @@ impl VlmResponseBuilder {
             confidence: None,
             visual_analysis: None,
             metadata: ResponseMetadata::default(),
+            payload,
         }
     }
 
@@ -639,7 +668,7 @@ impl VlmResponseBuilder {
     }
 
     /// Build the final response.
-    pub fn build(self) -> Response {
+    pub fn build(self) -> Response<Resp> {
         Response {
             content: self.content,
             model: self.model,
@@ -649,6 +678,7 @@ impl VlmResponseBuilder {
             confidence: self.confidence,
             visual_analysis: self.visual_analysis,
             metadata: self.metadata,
+            payload: self.payload,
         }
     }
 }

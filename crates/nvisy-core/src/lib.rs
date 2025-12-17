@@ -8,6 +8,12 @@
 //! It defines core traits and types for Vision Language Models (VLMs) and Optical Character
 //! Recognition (OCR) services without depending on any concrete implementations.
 
+/// Tracing target for OCR operations.
+pub const TRACING_TARGET_OCR: &str = "nvisy_core::ocr";
+
+/// Tracing target for VLM operations.
+pub const TRACING_TARGET_VLM: &str = "nvisy_core::vlm";
+
 mod error;
 mod health;
 

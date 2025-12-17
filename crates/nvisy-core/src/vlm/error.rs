@@ -34,8 +34,6 @@
 
 use std::time::Duration;
 
-use thiserror::Error;
-
 use crate::BoxedError;
 
 /// Result type alias for VLM operations.
@@ -46,7 +44,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// This error type provides structured information about what went wrong during
 /// VLM processing, including the specific error kind and optional source error
 /// for better debugging and error handling.
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[error("{kind}")]
 pub struct Error {
     /// The specific kind of error that occurred.
@@ -86,13 +84,7 @@ impl Error {
     pub fn is_client_error(&self) -> bool {
         matches!(
             self.kind,
-            ErrorKind::Authentication
-                | ErrorKind::InvalidInput
-                | ErrorKind::UnsupportedImageFormat
-                | ErrorKind::ImageTooLarge
-                | ErrorKind::ImageTooSmall
-                | ErrorKind::UnsupportedModel
-                | ErrorKind::InvalidPrompt
+            ErrorKind::Authentication | ErrorKind::InvalidInput | ErrorKind::UnsupportedFormat
         )
     }
 
@@ -103,7 +95,9 @@ impl Error {
     pub fn is_server_error(&self) -> bool {
         matches!(
             self.kind,
-            ErrorKind::ServiceUnavailable | ErrorKind::ServiceOverloaded | ErrorKind::InternalError
+            ErrorKind::ServiceUnavailable
+                | ErrorKind::InternalError
+                | ErrorKind::ModelInferenceFailed
         )
     }
 
@@ -118,7 +112,6 @@ impl Error {
                 | ErrorKind::NetworkError
                 | ErrorKind::Timeout
                 | ErrorKind::ServiceUnavailable
-                | ErrorKind::ServiceOverloaded
         )
     }
 
@@ -129,7 +122,6 @@ impl Error {
     pub fn retry_delay(&self) -> Option<Duration> {
         match self.kind {
             ErrorKind::RateLimited => Some(Duration::from_secs(60)),
-            ErrorKind::ServiceOverloaded => Some(Duration::from_secs(30)),
             ErrorKind::ServiceUnavailable => Some(Duration::from_secs(10)),
             ErrorKind::NetworkError => Some(Duration::from_secs(5)),
             ErrorKind::Timeout => Some(Duration::from_secs(2)),
@@ -142,71 +134,50 @@ impl Error {
 ///
 /// This enum categorizes all possible error conditions that can occur
 /// during VLM operations, from authentication failures to model inference errors.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     /// Authentication with the VLM service failed.
-    #[error("Authentication failed")]
     Authentication,
 
     /// The input provided to the VLM service is invalid.
-    #[error("Invalid input provided")]
     InvalidInput,
 
     /// The image format is not supported by the VLM service.
-    #[error("Unsupported image format")]
-    UnsupportedImageFormat,
-
-    /// The image file exceeds the maximum size limit.
-    #[error("Image file is too large")]
-    ImageTooLarge,
-
-    /// The image resolution is too small for reliable processing.
-    #[error("Image resolution is too small")]
-    ImageTooSmall,
-
-    /// The prompt provided is invalid or malformed.
-    #[error("Invalid prompt")]
-    InvalidPrompt,
-
-    /// The specified model is not supported or available.
-    #[error("Unsupported model")]
-    UnsupportedModel,
+    UnsupportedFormat,
 
     /// Model inference failed during processing.
-    #[error("Model inference failed")]
     ModelInferenceFailed,
 
     /// Rate limit has been exceeded.
-    #[error("Rate limit exceeded")]
     RateLimited,
 
     /// A network error occurred during the request.
-    #[error("Network error occurred")]
     NetworkError,
 
     /// The operation timed out.
-    #[error("Operation timed out")]
     Timeout,
 
     /// The VLM service is temporarily unavailable.
-    #[error("Service unavailable")]
     ServiceUnavailable,
 
-    /// The VLM service is overloaded.
-    #[error("Service overloaded")]
-    ServiceOverloaded,
-
-    /// The requested feature is not supported.
-    #[error("Unsupported feature")]
-    UnsupportedFeature,
-
     /// An internal service error occurred.
-    #[error("Internal service error")]
     InternalError,
+}
 
-    /// Failed to parse response or input data.
-    #[error("Parse error")]
-    ParseError,
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Authentication => write!(f, "Authentication failed"),
+            Self::InvalidInput => write!(f, "Invalid input provided"),
+            Self::UnsupportedFormat => write!(f, "Unsupported format"),
+            Self::ModelInferenceFailed => write!(f, "Model inference failed"),
+            Self::RateLimited => write!(f, "Rate limit exceeded"),
+            Self::NetworkError => write!(f, "Network error occurred"),
+            Self::Timeout => write!(f, "Operation timed out"),
+            Self::ServiceUnavailable => write!(f, "Service unavailable"),
+            Self::InternalError => write!(f, "Internal service error"),
+        }
+    }
 }
 
 // Convenience constructors for common error scenarios
@@ -223,22 +194,7 @@ impl Error {
 
     /// Creates an unsupported format error.
     pub fn unsupported_format() -> Self {
-        Self::new(ErrorKind::UnsupportedImageFormat)
-    }
-
-    /// Creates an image too large error.
-    pub fn image_too_large() -> Self {
-        Self::new(ErrorKind::ImageTooLarge)
-    }
-
-    /// Creates an invalid prompt error.
-    pub fn invalid_prompt() -> Self {
-        Self::new(ErrorKind::InvalidPrompt)
-    }
-
-    /// Creates an unsupported model error.
-    pub fn unsupported_model() -> Self {
-        Self::new(ErrorKind::UnsupportedModel)
+        Self::new(ErrorKind::UnsupportedFormat)
     }
 
     /// Creates a model inference failed error.

@@ -35,9 +35,9 @@
 //! }
 //! ```
 
-use std::future::Future;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures_util::Stream;
 
 pub mod context;
@@ -50,22 +50,28 @@ pub use context::{Context, ProcessingOptions};
 pub use error::{Error, Result};
 pub use request::Request;
 pub use response::Response;
-pub use service::Service;
+pub use service::Service as VlmService;
 
 use crate::health::ServiceHealth;
 
-/// Type alias for a boxed VLM service.
-pub type Boxed = Arc<dyn Vlm + Send + Sync>;
+/// Type alias for a boxed VLM service with specific request and response types.
+pub type Boxed<Req, Resp> = Arc<dyn Vlm<Req, Resp> + Send + Sync>;
 
 /// Type alias for boxed response stream.
 pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
 
 /// Core trait for VLM (Vision Language Model) operations.
 ///
-/// This trait defines the interface for multimodal AI services that can process
-/// both images and text. Implementations should provide both streaming and
-/// non-streaming variants of request processing.
-pub trait Vlm {
+/// This trait is generic over request (`Req`) and response (`Resp`) types,
+/// allowing implementations to define their own specific data structures
+/// while maintaining a consistent interface.
+///
+/// # Type Parameters
+///
+/// * `Req` - The request payload type specific to the VLM implementation
+/// * `Resp` - The response payload type specific to the VLM implementation
+#[async_trait]
+pub trait Vlm<Req, Resp>: Send + Sync {
     /// Process a vision-language request and return a complete response.
     ///
     /// # Parameters
@@ -74,8 +80,8 @@ pub trait Vlm {
     ///
     /// # Returns
     ///
-    /// Returns a complete `Response` with the model's output.
-    fn process(&self, request: &Request) -> impl Future<Output = Result<Response>> + Send;
+    /// Returns a complete `Response<Resp>` with the model's output.
+    async fn process(&self, request: &Request<Req>) -> Result<Response<Resp>>;
 
     /// Process a request with streaming response.
     ///
@@ -88,16 +94,13 @@ pub trait Vlm {
     ///
     /// # Returns
     ///
-    /// Returns a stream of `Response` chunks that can be consumed incrementally.
-    fn process_stream(
-        &self,
-        request: &Request,
-    ) -> impl Future<Output = Result<BoxedStream<Response>>> + Send;
+    /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
+    async fn process_stream(&self, request: &Request<Req>) -> Result<BoxedStream<Response<Resp>>>;
 
     /// Perform a health check on the VLM service.
     ///
     /// # Returns
     ///
     /// Returns service health information including status, response time, and metrics.
-    fn health_check(&self) -> impl Future<Output = Result<ServiceHealth>> + Send;
+    async fn health_check(&self) -> Result<ServiceHealth>;
 }

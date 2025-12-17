@@ -61,7 +61,7 @@ async fn health_status(
     // Get cached health status or perform new check
     let explicitly_cached = request.use_cache.is_some_and(|c| c);
     let is_healthy = if is_authenticated && !explicitly_cached {
-        health_service.is_healthy(service_state).await
+        health_service.is_healthy(&service_state).await
     } else {
         health_service.get_cached_health()
     };

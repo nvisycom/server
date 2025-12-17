@@ -28,7 +28,7 @@ pub type BoxedError = Box<dyn StdError + Send + Sync>;
 ///
 /// This is a convenience alias that uses [`ServiceError`] as the error type,
 /// reducing boilerplate in function signatures throughout the service layer.
-pub type Result<T, E = ServiceError> = std::result::Result<T, E>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Error kind enumeration for categorizing service layer errors.
 ///
@@ -80,7 +80,7 @@ impl fmt::Display for ErrorKind {
 /// - Optional source error for error chaining
 #[derive(Debug, thiserror::Error)]
 #[error("{kind} error: {message}")]
-pub struct ServiceError {
+pub struct Error {
     /// The error category/type
     kind: ErrorKind,
     /// Human-readable error message
@@ -90,7 +90,7 @@ pub struct ServiceError {
     source: Option<BoxedError>,
 }
 
-impl ServiceError {
+impl Error {
     /// Creates a new [`ServiceError`].
     #[inline]
     fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_error_creation() {
-        let error = ServiceError::config("invalid configuration");
+        let error = Error::config("invalid configuration");
         assert_eq!(error.kind(), ErrorKind::Config);
         assert_eq!(error.message(), "invalid configuration");
     }
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_error_with_source() {
         let source = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let error = ServiceError::file_system("cannot read config file").with_source(source);
+        let error = Error::file_system("cannot read config file").with_source(source);
 
         assert!(StdError::source(&error).is_some());
         assert_eq!(error.kind(), ErrorKind::FileSystem);
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_external_service_error() {
-        let error = ServiceError::external("nats", "Connection refused");
+        let error = Error::external("nats", "Connection refused");
 
         assert_eq!(error.kind(), ErrorKind::External);
         assert!(error.to_string().contains("NATS"));

@@ -23,8 +23,8 @@ default = []
 
 [dependencies]
 # Internal crates
+nvisy-core = { workspace = true, features = [] }
 nvisy-nats = { workspace = true, features = [] }
-nvisy-portkey = { workspace = true, features = ["utoipa"] }
 nvisy-postgres = { workspace = true, features = ["utoipa"] }
 
 # Async runtime
