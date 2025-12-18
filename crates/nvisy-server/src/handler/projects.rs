@@ -6,11 +6,10 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{self, NewProject, NewProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
-use nvisy_postgres::{PgClient, PgError};
-use scoped_futures::ScopedFutureExt;
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -20,7 +19,7 @@ use uuid::Uuid;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{CreateProject, UpdateProject};
 use crate::handler::response::{Project, Projects};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project operations.
@@ -74,38 +73,29 @@ async fn create_project(
         "Creating new project",
     );
 
-    let mut conn = pg_client.get_connection().await?;
+    let new_project = NewProject {
+        display_name: request.display_name,
+        description: request.description,
+        keep_for_sec: request.keep_for_sec,
+        auto_cleanup: request.auto_cleanup,
+        require_approval: request.require_approval,
+        max_members: request.max_members,
+        max_storage: request.max_storage,
+        enable_comments: request.enable_comments,
+        created_by: auth_claims.account_id,
+        ..Default::default()
+    };
+    let project = pg_client.create_project(new_project).await?;
 
-    let response = conn
-        .build_transaction()
-        .run(|conn| {
-            async move {
-                let new_project = NewProject {
-                    display_name: request.display_name,
-                    description: request.description,
-                    keep_for_sec: request.keep_for_sec,
-                    auto_cleanup: request.auto_cleanup,
-                    require_approval: request.require_approval,
-                    max_members: request.max_members,
-                    max_storage: request.max_storage,
-                    enable_comments: request.enable_comments,
-                    created_by: auth_claims.account_id,
-                    ..Default::default()
-                };
-                let project = ProjectRepository::create_project(conn, new_project).await?;
+    let new_member = NewProjectMember {
+        project_id: project.id,
+        account_id: auth_claims.account_id,
+        member_role: ProjectRole::Owner,
+        ..Default::default()
+    };
+    pg_client.add_project_member(new_member).await?;
 
-                let new_member = NewProjectMember {
-                    project_id: project.id,
-                    account_id: auth_claims.account_id,
-                    member_role: ProjectRole::Owner,
-                    ..Default::default()
-                };
-                ProjectMemberRepository::add_project_member(conn, new_member).await?;
-                Ok::<Project, PgError>(project.into())
-            }
-            .scope_boxed()
-        })
-        .await?;
+    let response = Project::from_model(project);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -122,7 +112,7 @@ async fn create_project(
 #[utoipa::path(
     get, path = "/projects/", tag = "projects",
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -147,22 +137,16 @@ async fn create_project(
 async fn list_projects(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Projects>)> {
-    let mut conn = pg_client.get_connection().await?;
-
-    // Use the combined query to fetch both project and membership data in a single query
-    let project_memberships = ProjectMemberRepository::list_user_projects_with_details(
-        &mut conn,
-        auth_claims.account_id,
-        pagination.into(),
-    )
-    .await?;
+    let project_memberships = pg_client
+        .list_user_projects_with_details(auth_claims.account_id, pagination.into())
+        .await?;
 
     // Convert to response items
     let projects: Projects = project_memberships
         .into_iter()
-        .map(|(project, membership)| (project, membership).into())
+        .map(|(project, membership)| Project::from_model_with_membership(project, membership))
         .collect();
 
     tracing::debug!(
@@ -203,15 +187,11 @@ async fn read_project(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewProject)
+        .authorize_project(&pg_client, path_params.project_id, Permission::ViewProject)
         .await?;
 
-    let Some(project) =
-        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
-    else {
+    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
@@ -224,7 +204,8 @@ async fn read_project(
         "Retrieved project details"
     );
 
-    Ok((StatusCode::OK, Json(project.into())))
+    let project = Project::from_model(project);
+    Ok((StatusCode::OK, Json(project)))
 }
 
 /// Updates a project by the project ID.
@@ -261,8 +242,6 @@ async fn update_project(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<UpdateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -271,7 +250,11 @@ async fn update_project(
     );
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::UpdateProject,
+        )
         .await?;
 
     let update_data = model::UpdateProject {
@@ -286,8 +269,9 @@ async fn update_project(
         ..Default::default()
     };
 
-    let project =
-        ProjectRepository::update_project(&mut conn, path_params.project_id, update_data).await?;
+    let project = pg_client
+        .update_project(path_params.project_id, update_data)
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -296,7 +280,8 @@ async fn update_project(
         "Project updated successfully",
     );
 
-    Ok((StatusCode::OK, Json(project.into())))
+    let project = Project::from_model(project);
+    Ok((StatusCode::OK, Json(project)))
 }
 
 /// Deletes a project by its project ID.
@@ -336,8 +321,6 @@ async fn delete_project(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -346,19 +329,21 @@ async fn delete_project(
     );
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::DeleteProject,
+        )
         .await?;
 
     // Verify project exists before deletion
-    let Some(_project) =
-        ProjectRepository::find_project_by_id(&mut conn, path_params.project_id).await?
-    else {
+    let Some(_project) = pg_client.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
     };
 
-    ProjectRepository::delete_project(&mut conn, path_params.project_id).await?;
+    pg_client.delete_project(path_params.project_id).await?;
 
     tracing::warn!(
         target: TRACING_TARGET,
@@ -433,7 +418,7 @@ mod test {
         server.post("/projects/").json(&request).await;
 
         // List projects
-        let pagination = PaginationRequest::default().with_limit(10);
+        let pagination = Pagination::default().with_limit(10);
         let response = server.get("/projects/").json(&pagination).await;
         response.assert_status_ok();
 

@@ -15,16 +15,16 @@ use std::time::Duration;
 /// # Example
 ///
 /// ```rust,no_run
-/// use nvisy_postgres::client::migrate::MigrationStatus;
+/// use nvisy_postgres::MigrationStatus;
 ///
 /// fn print_status(status: &MigrationStatus) {
 ///     println!("Database migrations: {}/{} applied",
-///              status.applied_count, status.total_migrations);
+///              status.applied_migrations(), status.total_migrations());
 ///
-///     if status.is_up_to_date {
+///     if status.is_up_to_date() {
 ///         println!("✓ Database is up to date");
 ///     } else {
-///         println!("⚠ {} migrations pending", status.pending_count);
+///         println!("⚠ {} migrations pending", status.pending_migrations());
 ///     }
 /// }
 /// ```
@@ -101,13 +101,13 @@ impl MigrationStatus {
 /// # Example
 ///
 /// ```rust,no_run
-/// use nvisy_postgres::client::migrate::MigrationResult;
+/// use nvisy_postgres::MigrationResult;
 /// use std::time::Duration;
 ///
 /// fn handle_migration_result(result: MigrationResult) {
-///     if result.success {
+///     if result.error_message.is_none() {
 ///         println!("✓ Applied {} migrations in {:?}",
-///                  result.migrations_processed, result.duration);
+///                  result.processed_versions.len(), result.duration);
 ///     } else {
 ///         eprintln!("✗ Migration failed: {}",
 ///                   result.error_message.unwrap_or_default());

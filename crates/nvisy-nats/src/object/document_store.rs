@@ -43,13 +43,8 @@ impl<S: DocumentLabel> DocumentFileStore<S> {
     }
 
     /// Create a key for a new file in this store
-    pub fn create_key(
-        &self,
-        project_uuid: Uuid,
-        document_uuid: Uuid,
-        file_uuid: Uuid,
-    ) -> ObjectKey<S> {
-        let data = ObjectKeyData::new(project_uuid, document_uuid, file_uuid);
+    pub fn create_key(&self, project_uuid: Uuid, file_uuid: Uuid) -> ObjectKey<S> {
+        let data = ObjectKeyData::new(project_uuid, file_uuid);
         data.build::<S>()
             .expect("Valid ObjectKeyData should build successfully")
     }
@@ -97,35 +92,17 @@ impl<S: DocumentLabel> DocumentFileStore<S> {
         content_data.with_metadata(metadata).with_headers(headers)
     }
 
-    /// List all files in this store for a specific document
-    pub async fn list_document_files(
-        &self,
-        project_uuid: Uuid,
-        document_uuid: Uuid,
-    ) -> Result<Vec<String>> {
-        // Get all files in the store
-        let all_files = self.store.list().await?;
-
-        // Filter by project and document
-        let prefix = ObjectKeyData::create_prefix(project_uuid, Some(document_uuid));
-
-        Ok(all_files
-            .into_iter()
-            .filter(|name| name.starts_with(&prefix))
-            .collect())
-    }
-
     /// List all files in this store for a specific project
     pub async fn list_project_files(&self, project_uuid: Uuid) -> Result<Vec<String>> {
         // Get all files in the store
         let all_files = self.store.list().await?;
 
         // Filter by project
-        let project_prefix = format!("{}/", project_uuid);
+        let prefix = ObjectKeyData::create_prefix(project_uuid);
 
         Ok(all_files
             .into_iter()
-            .filter(|name| name.starts_with(&project_prefix))
+            .filter(|name| name.starts_with(&prefix))
             .collect())
     }
 
@@ -143,15 +120,13 @@ mod tests {
     #[test]
     fn test_create_key() {
         let project_uuid = Uuid::new_v4();
-        let document_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let data = ObjectKeyData::new(project_uuid, document_uuid, file_uuid);
+        let data = ObjectKeyData::new(project_uuid, file_uuid);
 
         let key = data.build::<InputFiles>().unwrap();
 
         assert_eq!(key.project_uuid().unwrap(), project_uuid);
-        assert_eq!(key.document_uuid().unwrap(), document_uuid);
         assert_eq!(key.file_uuid().unwrap(), file_uuid);
     }
 

@@ -23,9 +23,10 @@ default = []
 
 [dependencies]
 # Internal crates
+nvisy-core = { workspace = true, features = [] }
 nvisy-nats = { workspace = true, features = [] }
-nvisy-openrouter = { workspace = true, features = ["utoipa"] }
 nvisy-postgres = { workspace = true, features = ["utoipa"] }
+nvisy-qdrant = { workspace = true, features = ["utoipa"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
@@ -62,11 +63,15 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 validator = { workspace = true, features = [] }
 
+# Text processing
+regex = { workspace = true, features = [] }
+
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
 derive_builder = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
+lazy_static = "1.4"
 
 # Data types
 time = { workspace = true, features = [] }

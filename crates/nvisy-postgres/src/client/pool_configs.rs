@@ -5,12 +5,12 @@
 //! deployment scenarios.
 
 use std::fmt;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, instrument, warn};
 
-use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CLIENT};
+use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
 
 /// Complete database configuration including connection string and pool settings.
 ///
@@ -21,41 +21,22 @@ use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CLIENT};
 /// ## Example
 ///
 /// ```rust,no_run
-/// use nvisy_postgres::client::{PgConfig, PgPoolConfig};
-/// use std::time::Duration;
+/// use nvisy_postgres::PgConfig;
 ///
-/// let config = PgConfig::from_env()?;
-/// // or
-/// let config = PgConfig::new(
-///     "postgresql://user:pass@localhost/db".to_string(),
-///     PgPoolConfig::default()
-/// );
+/// let config = PgConfig::new("postgresql://user:pass@localhost/db");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use = "database configurations must be used to create connection pools"]
 pub struct PgConfig {
     /// PostgreSQL connection URL
     pub database_url: String,
-    /// Connection pool configuration
-    pub pool: PgPoolConfig,
-}
 
-/// Connection pool configuration with comprehensive timeout and sizing options.
-///
-/// ## Connection Management
-///
-/// - `max_size`: Maximum number of connections in the pool
-/// - `connection_timeout`: Timeout for connection operations
-/// - `idle_timeout`: How long to keep idle connections
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[must_use = "pool configurations must be used to create connection pools"]
-pub struct PgPoolConfig {
     /// Maximum number of connections in the pool.
     ///
     /// Default: 10
     /// Range: 1-100 connections
-    pub max_size: usize,
+    pub max_size: Option<NonZeroU32>,
 
     /// Timeout for connection operations (create, acquire, recycle).
     ///
@@ -63,7 +44,7 @@ pub struct PgPoolConfig {
     ///
     /// Default: 30 seconds
     /// Range: 1 second - 300 seconds
-    pub connection_timeout: Duration,
+    pub connection_timeout: Option<Duration>,
 
     /// How long to keep idle connections in the pool.
     ///
@@ -76,29 +57,39 @@ pub struct PgPoolConfig {
 }
 
 // Configuration constants
-const MIN_CONNECTIONS: usize = 1;
-const MAX_CONNECTIONS: usize = 1024;
+const MIN_CONNECTIONS: u32 = 2;
+const MAX_CONNECTIONS: u32 = 16;
+
 const MIN_CONN_TIMEOUT: Duration = Duration::from_millis(100);
 const MAX_CONN_TIMEOUT: Duration = Duration::from_secs(300);
 
 const MIN_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3600); // 1 hour
+const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
 
 impl PgConfig {
-    /// Creates a new database configuration.
+    /// Creates a new database configuration with default pool settings.
     ///
     /// # Arguments
     ///
     /// * `database_url` - PostgreSQL connection string
-    /// * `pool` - Connection pool configuration
-    #[instrument(skip(database_url), fields(database_url = %Self::mask_url(&database_url)), target = TRACING_TARGET_CLIENT)]
-    pub fn new(database_url: String, pool: PgPoolConfig) -> Self {
-        let this = Self { database_url, pool };
-        debug!(
-            target: TRACING_TARGET_CLIENT,
-            max_size = this.pool.max_size,
-            connection_timeout = ?this.pool.connection_timeout,
-            idle_timeout = ?this.pool.idle_timeout,
+    #[tracing::instrument(
+        skip(database_url),
+        target = TRACING_TARGET_CONNECTION
+    )]
+    pub fn new(database_url: impl Into<String>) -> Self {
+        let this = Self {
+            database_url: database_url.into(),
+            max_size: None,
+            connection_timeout: None,
+            idle_timeout: None,
+        };
+
+        tracing::debug!(
+            target: TRACING_TARGET_CONNECTION,
+            database_url = %this.database_url_masked(),
+            max_size = this.max_size,
+            connection_timeout = ?this.connection_timeout,
+            idle_timeout = ?this.idle_timeout,
             "Created database configuration"
         );
 
@@ -111,6 +102,30 @@ impl PgConfig {
     #[inline]
     pub fn database_url_masked(&self) -> String {
         Self::mask_url(&self.database_url)
+    }
+
+    /// Returns the database URL.
+    #[inline]
+    pub fn get_database_url(&self) -> &str {
+        &self.database_url
+    }
+
+    /// Returns the maximum pool size, or the default if not set.
+    #[inline]
+    pub fn get_max_size(&self) -> usize {
+        self.max_size.map(|n| n.get() as usize).unwrap_or(10)
+    }
+
+    /// Returns the connection timeout.
+    #[inline]
+    pub fn get_connection_timeout(&self) -> Option<Duration> {
+        self.connection_timeout
+    }
+
+    /// Returns the idle timeout.
+    #[inline]
+    pub fn get_idle_timeout(&self) -> Option<Duration> {
+        self.idle_timeout
     }
 
     /// Masks sensitive information in a database URL.
@@ -131,43 +146,63 @@ impl PgConfig {
     }
 
     /// Sets the database URL.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_database_url(mut self, database_url: &str) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, "Setting database URL");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Setting database URL");
         self.database_url = database_url.to_string();
         self
     }
 
     /// Sets the maximum number of connections in the pool.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub fn with_max_size(mut self, max_size: usize) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, max_size, "Setting pool max size");
-        self.pool.max_size = max_size;
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
+    pub fn with_max_size(mut self, max_size: u32) -> Self {
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, max_size, "Setting pool max size");
+        self.max_size = NonZeroU32::new(max_size);
         self
     }
 
     /// Sets the connection timeout.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_connection_timeout(mut self, timeout: Duration) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, ?timeout, "Setting connection timeout");
-        self.pool.connection_timeout = timeout;
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, ?timeout, "Setting connection timeout");
+        self.connection_timeout = Some(timeout);
         self
     }
 
     /// Sets the idle timeout for connections.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn with_idle_timeout(mut self, timeout: Duration) -> Self {
-        debug!(target: TRACING_TARGET_CLIENT, ?timeout, "Setting idle timeout");
-        self.pool.idle_timeout = Some(timeout);
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, ?timeout, "Setting idle timeout");
+        self.idle_timeout = Some(timeout);
         self
+    }
+
+    /// Creates an optimized configuration for high-load single server deployments.
+    pub fn single_server(database_url: impl Into<String>) -> Self {
+        Self {
+            database_url: database_url.into(),
+            max_size: NonZeroU32::new(20),
+            connection_timeout: Some(Duration::from_secs(30)),
+            idle_timeout: Some(Duration::from_secs(600)),
+        }
+    }
+
+    /// Creates an optimized configuration for multi-server deployments.
+    pub fn multi_server(database_url: impl Into<String>) -> Self {
+        Self {
+            database_url: database_url.into(),
+            max_size: NonZeroU32::new(10),
+            connection_timeout: Some(Duration::from_secs(30)),
+            idle_timeout: Some(Duration::from_secs(300)),
+        }
     }
 
     /// Builds a new database instance with the given configuration.
     ///
     /// Validates the configuration for consistency and safety.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn build(self) -> PgResult<PgClient> {
-        debug!(target: TRACING_TARGET_CLIENT, "Validating database configuration");
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Validating database configuration");
 
         // Validate database URL
         if self.database_url.is_empty() {
@@ -178,56 +213,23 @@ impl PgConfig {
         if !self.database_url.starts_with("postgres://")
             && !self.database_url.starts_with("postgresql://")
         {
-            warn!(target: TRACING_TARGET_CLIENT, "Database URL may not be a PostgreSQL URL");
+            tracing::warn!(target: TRACING_TARGET_CONNECTION, "Database URL may not be a PostgreSQL URL");
         }
 
-        self.pool.validate()?;
-
-        debug!(target: TRACING_TARGET_CLIENT, "Database configuration validation passed");
-        PgClient::new(self)
-    }
-}
-
-impl PgPoolConfig {
-    /// Creates a new pool configuration with default values.
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates an optimized configuration for high-load single server deployments.
-    #[inline]
-    pub fn single_server() -> Self {
-        Self {
-            max_size: 20,
-            connection_timeout: Duration::from_secs(30),
-            idle_timeout: Some(Duration::from_secs(600)), // 10 minutes
-        }
-    }
-
-    /// Creates an optimized configuration for multi-server deployments.
-    #[inline]
-    pub fn multi_server() -> Self {
-        Self {
-            max_size: 10,
-            connection_timeout: Duration::from_secs(30),
-            idle_timeout: Some(Duration::from_secs(300)), // 5 minutes
-        }
-    }
-
-    /// Validates the pool configuration.
-    #[instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub fn validate(&self) -> PgResult<()> {
         // Validate connection count
-        if !(MIN_CONNECTIONS..=MAX_CONNECTIONS).contains(&self.max_size) {
-            return Err(PgError::Config(format!(
-                "max_size must be between {} and {}",
-                MIN_CONNECTIONS, MAX_CONNECTIONS
-            )));
+        if let Some(max_size) = self.max_size {
+            let max_size = max_size.get();
+            if !(MIN_CONNECTIONS..=MAX_CONNECTIONS).contains(&max_size) {
+                return Err(PgError::Config(format!(
+                    "max_size must be between {} and {}",
+                    MIN_CONNECTIONS, MAX_CONNECTIONS
+                )));
+            }
         }
 
         // Validate connection timeout
-        if self.connection_timeout < MIN_CONN_TIMEOUT || self.connection_timeout > MAX_CONN_TIMEOUT
+        if let Some(connection_timeout) = self.connection_timeout
+            && (connection_timeout < MIN_CONN_TIMEOUT || connection_timeout > MAX_CONN_TIMEOUT)
         {
             return Err(PgError::Config(format!(
                 "connection_timeout must be between {:?} and {:?}",
@@ -236,8 +238,8 @@ impl PgPoolConfig {
         }
 
         // Validate idle timeout if present
-        if let Some(timeout) = self.idle_timeout
-            && (timeout < MIN_IDLE_TIMEOUT || timeout > MAX_IDLE_TIMEOUT)
+        if let Some(idle_timeout) = self.idle_timeout
+            && (idle_timeout < MIN_IDLE_TIMEOUT || idle_timeout > MAX_IDLE_TIMEOUT)
         {
             return Err(PgError::Config(format!(
                 "idle_timeout must be between {:?} and {:?}",
@@ -245,20 +247,21 @@ impl PgPoolConfig {
             )));
         }
 
-        Ok(())
+        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Database configuration validation passed");
+        PgClient::new(self)
     }
 }
 
-impl Default for PgPoolConfig {
-    /// Creates a default pool configuration suitable for most applications.
+impl Default for PgConfig {
+    /// Creates a default configuration with a development database URL.
     ///
     /// This uses conservative settings that work well in most deployment scenarios.
+    /// Default database URL: `postgresql://postgres:postgres@localhost:5432/postgres`
+    ///
+    /// For production use, always override the database_url with your actual connection string.
+    #[cfg(debug_assertions)]
     fn default() -> Self {
-        Self {
-            max_size: 10,
-            connection_timeout: Duration::from_secs(30),
-            idle_timeout: Some(Duration::from_secs(600)), // 10 minutes
-        }
+        Self::single_server("postgresql://postgres:postgres@localhost:5432/postgres")
     }
 }
 
@@ -266,11 +269,11 @@ impl fmt::Display for PgConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "DatabaseConfig(url: {}, max_size: {}, connection_timeout: {:?}, idle_timeout: {:?})",
+            "DatabaseConfig(url: {}, max_size: {:?}, connection_timeout: {:?}, idle_timeout: {:?})",
             self.database_url_masked(),
-            self.pool.max_size,
-            self.pool.connection_timeout,
-            self.pool.idle_timeout
+            self.max_size,
+            self.connection_timeout,
+            self.idle_timeout
         )
     }
 }

@@ -36,7 +36,8 @@ use async_nats::{Client, ConnectOptions, jetstream};
 use bytes::Bytes;
 use tokio::time::timeout;
 
-use super::nats_config::{NatsConfig, NatsCredentials};
+use super::credentials::NatsCredentials;
+use super::nats_config::NatsConfig;
 use crate::kv::{ApiTokenStore, CacheStore, KvStore};
 use crate::object::{DocumentFileStore, DocumentLabel, ObjectStore};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};

@@ -1,5 +1,6 @@
 //! Project event stream publisher for real-time WebSocket communication.
 
+use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 use uuid::Uuid;
 
@@ -17,7 +18,7 @@ pub struct ProjectEventPublisher {
 
 impl ProjectEventPublisher {
     /// Create a new project event publisher.
-    pub async fn new(jetstream: &async_nats::jetstream::Context) -> Result<Self> {
+    pub async fn new(jetstream: &Context) -> Result<Self> {
         let publisher = StreamPublisher::new(jetstream, "PROJECT_EVENTS").await?;
         Ok(Self { publisher })
     }

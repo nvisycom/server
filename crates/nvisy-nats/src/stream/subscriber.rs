@@ -3,7 +3,8 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_nats::jetstream::{self, consumer};
+use async_nats::jetstream::consumer::{self, Consumer};
+use async_nats::jetstream::{self, Context, Message};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tracing::{debug, instrument, warn};
@@ -13,7 +14,7 @@ use crate::{Error, Result, TRACING_TARGET_STREAM};
 /// Inner data for StreamSubscriber.
 #[derive(Debug, Clone)]
 struct StreamSubscriberInner {
-    jetstream: jetstream::Context,
+    jetstream: Context,
     stream_name: String,
     consumer_name: String,
     filter_subject: Option<String>,
@@ -36,11 +37,7 @@ where
 {
     /// Create a new type-safe stream subscriber.
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
-    pub async fn new(
-        jetstream: &jetstream::Context,
-        stream_name: &str,
-        consumer_name: &str,
-    ) -> Result<Self> {
+    pub async fn new(jetstream: &Context, stream_name: &str, consumer_name: &str) -> Result<Self> {
         // Verify stream exists
         jetstream
             .get_stream(stream_name)
@@ -262,7 +259,7 @@ where
     /// Create a new subscriber with exponential backoff retry logic.
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
     pub async fn new_with_retry(
-        jetstream: &jetstream::Context,
+        jetstream: &Context,
         stream_name: &str,
         consumer_name: &str,
         max_retries: u32,
@@ -294,7 +291,7 @@ where
 
 /// Type-safe message stream wrapper.
 pub struct TypedMessageStream<T> {
-    consumer: consumer::Consumer<consumer::pull::Config>,
+    consumer: Consumer<consumer::pull::Config>,
     _marker: PhantomData<T>,
 }
 
@@ -351,7 +348,7 @@ where
 
 /// Type-safe batch message stream wrapper.
 pub struct TypedBatchStream<T> {
-    consumer: consumer::Consumer<consumer::pull::Config>,
+    consumer: Consumer<consumer::pull::Config>,
     batch_size: usize,
     _marker: PhantomData<T>,
 }
@@ -477,7 +474,7 @@ pub struct TypedMessage<T> {
     /// The deserialized payload.
     pub payload: T,
     /// The underlying NATS message for metadata and acknowledgment.
-    message: jetstream::Message,
+    message: Message,
 }
 
 impl<T> TypedMessage<T> {

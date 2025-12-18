@@ -54,11 +54,6 @@ struct Cli {
     /// to help improve the software. All telemetry is strictly opt-in and respects
     /// user privacy - no personally identifiable information is ever transmitted.
     ///
-    /// When enabled, telemetry helps developers understand:
-    /// - Feature usage patterns and performance characteristics
-    /// - Common error conditions and crash scenarios
-    /// - System compatibility and deployment environments
-    ///
     /// Users can disable telemetry at any time without affecting functionality.
     #[cfg(feature = "telemetry")]
     #[command(flatten)]

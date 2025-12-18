@@ -20,11 +20,9 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, Version,
-};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
 use crate::handler::documents::DocumentPathParams;
-use crate::handler::request::{UpdateFile, UploadMode};
+use crate::handler::request::UpdateFile;
 use crate::handler::response::{File, Files};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
 use crate::service::ServiceState;
@@ -46,22 +44,7 @@ pub struct DocFileIdPathParams {
     pub file_id: Uuid,
 }
 
-/// Query parameters for file upload
-#[derive(Debug, Default, Serialize, Deserialize, IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadFileQuery {
-    /// Upload mode: "single" for all files in one document, "individual" for one document per file
-    pub upload_mode: UploadMode,
-}
-
 /// Uploads input files to a document for processing.
-///
-/// The `mode` query parameter controls how files are organized:
-/// - `single`: All uploaded files belong to a single document (existing document)
-/// - `individual`: Each uploaded file creates a new document (default)
-///
-/// Query parameters:
-/// - `mode` (optional): Upload mode - "single" or "individual" (default: individual)
 ///
 /// Form data:
 /// - `file`: One or more files to upload
@@ -101,21 +84,18 @@ async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<DocumentPathParams>,
-    Query(query): Query<UploadFileQuery>,
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
-    let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::UploadFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::UploadFiles)
         .await?;
 
-    let upload_mode = query.upload_mode;
     let mut uploaded_files = Vec::new();
 
-    tracing::debug!(target: TRACING_TARGET, mode = ?upload_mode, "Starting file upload");
+    tracing::debug!(target: TRACING_TARGET, "Starting file upload");
 
     while let Some(field) = multipart.next_field().await.map_err(|err| {
         tracing::error!(target: TRACING_TARGET, error = %err, "failed to read multipart field");
@@ -201,7 +181,6 @@ async fn upload_file(
         // Create object key for the file
         let object_key = input_fs.create_key(
             auth_claims.account_id, // Using account_id as project_uuid
-            path_params.document_id,
             file_id,
         );
 
@@ -234,7 +213,7 @@ async fn upload_file(
 
         // Create file record in database
         let file_record = NewDocumentFile {
-            document_id: path_params.document_id,
+            document_id: None,
             account_id: auth_claims.account_id,
             display_name: Some(filename.clone()),
             original_filename: Some(filename.clone()),
@@ -250,7 +229,8 @@ async fn upload_file(
         };
 
         // Insert file record into database
-        let created_file = DocumentFileRepository::create_document_file(&mut conn, file_record)
+        let created_file = pg_client
+            .create_document_file(file_record)
             .await
             .map_err(|err| {
                 tracing::error!(
@@ -324,18 +304,7 @@ async fn upload_file(
 
         uploaded_files.push(uploaded_file);
 
-        // In single mode, we process all files for the single document
-        // In individual mode, stop after first file (for now)
-        match upload_mode {
-            UploadMode::Single => {
-                // Continue processing all files for the single document
-            }
-            UploadMode::Multiple => {
-                // In individual mode, stop after first file (for now)
-                // TODO: Create new documents for each additional file
-                break;
-            }
-        }
+        // Continue processing all files
     }
 
     // Check if any files were uploaded
@@ -348,7 +317,6 @@ async fn upload_file(
         target: TRACING_TARGET,
         document_id = %path_params.document_id,
         file_count = count,
-        mode = ?upload_mode,
         "file upload completed"
     );
 
@@ -397,46 +365,49 @@ async fn update_file(
     _version: Version,
     ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
-    let mut conn = pg_client.get_connection().await?;
     let _input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Verify permissions
     // Verify document write permissions
     auth_claims
         .authorize_document(
-            &mut conn,
+            &pg_client,
             path_params.document_id,
             Permission::UpdateDocuments,
         )
         .await?;
 
     // Get existing file
-    let Some(file) =
-        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.file_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("File not found"));
     };
 
-    // Verify file belongs to document
-    if file.document_id != path_params.document_id {
-        return Err(ErrorKind::NotFound.with_message("File not found in document"));
+    // Verify file belongs to document (if it has one assigned)
+    if let Some(existing_doc_id) = file.document_id {
+        if existing_doc_id != path_params.document_id {
+            return Err(ErrorKind::NotFound.with_message("File not found in document"));
+        }
     }
 
     // Create update struct
     let updates = UpdateDocumentFile {
+        document_id: request.document_id.map(Some),
         display_name: request.display_name,
         processing_priority: request.processing_priority,
         ..Default::default()
     };
 
     // Save changes
-    let updated_file =
-        DocumentFileRepository::update_document_file(&mut conn, path_params.file_id, updates)
-            .await
-            .map_err(|err| {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
-                ErrorKind::InternalServerError.with_message("Failed to update file")
-            })?;
+    let updated_file = pg_client
+        .update_document_file(path_params.file_id, updates)
+        .await
+        .map_err(|err| {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
+            ErrorKind::InternalServerError.with_message("Failed to update file")
+        })?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -490,11 +461,11 @@ async fn download_file(
     Path(path_params): Path<DocFileIdPathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
-    let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Get file metadata from database
-    let file = DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id)
+    let file = pg_client
+        .find_document_file_by_id(path_params.file_id)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -612,28 +583,29 @@ async fn delete_file(
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_document(&mut conn, path_params.document_id, Permission::DeleteFiles)
+        .authorize_document(&pg_client, path_params.document_id, Permission::DeleteFiles)
         .await?;
 
     // Get file metadata
-    let Some(file) =
-        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.file_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound.with_message("File not found"));
     };
 
     // Verify file belongs to document
-    if file.document_id != path_params.document_id {
+    if file.document_id != Some(path_params.document_id) {
         return Err(ErrorKind::NotFound.with_message("File not found in document"));
     }
 
     // TODO: Replace with NATS object store implementation
     // Get file metadata from database
-    let file = DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id)
+    let file = pg_client
+        .find_document_file_by_id(path_params.file_id)
         .await
         .map_err(|err| {
             tracing::error!(

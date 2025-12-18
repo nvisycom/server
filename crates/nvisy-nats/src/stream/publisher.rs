@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_nats::jetstream::{self, stream};
+use async_nats::jetstream::{Context, stream};
 use serde::Serialize;
 use tokio::sync::Semaphore;
 use tracing::{debug, instrument};
@@ -13,7 +13,7 @@ use crate::{Error, Result, TRACING_TARGET_STREAM};
 /// Inner data for StreamPublisher
 #[derive(Debug)]
 struct StreamPublisherInner {
-    jetstream: jetstream::Context,
+    jetstream: Context,
     stream_name: String,
 }
 
@@ -34,7 +34,7 @@ where
 {
     /// Create a new type-safe stream publisher
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
-    pub async fn new(jetstream: &jetstream::Context, stream_name: &str) -> Result<Self> {
+    pub async fn new(jetstream: &Context, stream_name: &str) -> Result<Self> {
         let stream_config = stream::Config {
             name: stream_name.to_string(),
             description: Some(format!("Type-safe stream: {}", stream_name)),

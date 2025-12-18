@@ -4,13 +4,14 @@
 //! organized into logical groups for better maintainability.
 
 // Account-related constraint modules
+pub mod account_action_tokens;
+pub mod account_api_tokens;
 pub mod account_notifications;
-pub mod account_sessions;
-pub mod account_tokens;
 pub mod accounts;
 
 // Project-related constraint modules
-pub mod project_activity_log;
+pub mod project_activities;
+pub mod project_integrations;
 pub mod project_invites;
 pub mod project_members;
 pub mod projects;
@@ -23,16 +24,17 @@ pub mod documents;
 
 use std::fmt;
 
+pub use account_action_tokens::AccountActionTokenConstraints;
+pub use account_api_tokens::AccountApiTokenConstraints;
 // Re-export all constraint types for convenience
 pub use account_notifications::AccountNotificationConstraints;
-pub use account_sessions::AccountSessionConstraints;
-pub use account_tokens::AccountTokenConstraints;
 pub use accounts::AccountConstraints;
 pub use document_comments::DocumentCommentConstraints;
 pub use document_files::DocumentFileConstraints;
 pub use document_versions::DocumentVersionConstraints;
 pub use documents::DocumentConstraints;
-pub use project_activity_log::ProjectActivityLogConstraints;
+pub use project_activities::ProjectActivitiesConstraints;
+pub use project_integrations::ProjectIntegrationConstraints;
 pub use project_invites::ProjectInviteConstraints;
 pub use project_members::ProjectMemberConstraints;
 pub use projects::ProjectConstraints;
@@ -49,14 +51,15 @@ pub enum ConstraintViolation {
     // Account-related constraints
     Account(AccountConstraints),
     AccountNotification(AccountNotificationConstraints),
-    AccountSession(AccountSessionConstraints),
-    AccountToken(AccountTokenConstraints),
+    AccountApiToken(AccountApiTokenConstraints),
+    AccountActionToken(AccountActionTokenConstraints),
 
     // Project-related constraints
     Project(ProjectConstraints),
     ProjectMember(ProjectMemberConstraints),
     ProjectInvite(ProjectInviteConstraints),
-    ProjectActivityLog(ProjectActivityLogConstraints),
+    ProjectActivityLog(ProjectActivitiesConstraints),
+    ProjectIntegration(ProjectIntegrationConstraints),
 
     // Document-related constraints
     Document(DocumentConstraints),
@@ -99,7 +102,7 @@ impl ConstraintViolation {
     /// # Examples
     ///
     /// ```
-    /// use nvisy_postgres::types::constraints::ConstraintViolation;
+    /// use nvisy_postgres::types::ConstraintViolation;
     ///
     /// let violation = ConstraintViolation::new("accounts_email_address_unique_idx");
     /// assert!(violation.is_some());
@@ -116,16 +119,16 @@ impl ConstraintViolation {
                 return Some(ConstraintViolation::Account(c));
             }
         } else if constraint.starts_with("account_notifications_") {
-            if let Some(c) = AccountNotificationConstraints::from_constraint_name(constraint) {
+            if let Some(c) = AccountNotificationConstraints::new(constraint) {
                 return Some(ConstraintViolation::AccountNotification(c));
             }
-        } else if constraint.starts_with("account_sessions_") {
-            if let Some(c) = AccountSessionConstraints::new(constraint) {
-                return Some(ConstraintViolation::AccountSession(c));
+        } else if constraint.starts_with("account_api_tokens_") {
+            if let Some(c) = AccountApiTokenConstraints::new(constraint) {
+                return Some(ConstraintViolation::AccountApiToken(c));
             }
-        } else if constraint.starts_with("account_tokens_") {
-            if let Some(c) = AccountTokenConstraints::new(constraint) {
-                return Some(ConstraintViolation::AccountToken(c));
+        } else if constraint.starts_with("account_action_tokens_") {
+            if let Some(c) = AccountActionTokenConstraints::new(constraint) {
+                return Some(ConstraintViolation::AccountActionToken(c));
             }
         } else if constraint.starts_with("projects_") {
             if let Some(c) = ProjectConstraints::new(constraint) {
@@ -139,9 +142,13 @@ impl ConstraintViolation {
             if let Some(c) = ProjectInviteConstraints::new(constraint) {
                 return Some(ConstraintViolation::ProjectInvite(c));
             }
-        } else if constraint.starts_with("project_activity_log_") {
-            if let Some(c) = ProjectActivityLogConstraints::new(constraint) {
+        } else if constraint.starts_with("project_activities_") {
+            if let Some(c) = ProjectActivitiesConstraints::new(constraint) {
                 return Some(ConstraintViolation::ProjectActivityLog(c));
+            }
+        } else if constraint.starts_with("project_integrations_") {
+            if let Some(c) = ProjectIntegrationConstraints::new(constraint) {
+                return Some(ConstraintViolation::ProjectIntegration(c));
             }
         } else if constraint.starts_with("documents_") {
             if let Some(c) = DocumentConstraints::new(constraint) {
@@ -172,14 +179,15 @@ impl ConstraintViolation {
             // Account-related tables
             ConstraintViolation::Account(_) => "accounts",
             ConstraintViolation::AccountNotification(_) => "account_notifications",
-            ConstraintViolation::AccountSession(_) => "account_sessions",
-            ConstraintViolation::AccountToken(_) => "account_tokens",
+            ConstraintViolation::AccountApiToken(_) => "account_api_tokens",
+            ConstraintViolation::AccountActionToken(_) => "account_action_tokens",
 
             // Project-related tables
             ConstraintViolation::Project(_) => "projects",
             ConstraintViolation::ProjectMember(_) => "project_members",
             ConstraintViolation::ProjectInvite(_) => "project_invites",
-            ConstraintViolation::ProjectActivityLog(_) => "project_activity_log",
+            ConstraintViolation::ProjectActivityLog(_) => "project_activities",
+            ConstraintViolation::ProjectIntegration(_) => "project_integrations",
 
             // Document-related tables
             ConstraintViolation::Document(_) => "documents",
@@ -197,13 +205,14 @@ impl ConstraintViolation {
         match self {
             ConstraintViolation::Account(_)
             | ConstraintViolation::AccountNotification(_)
-            | ConstraintViolation::AccountSession(_)
-            | ConstraintViolation::AccountToken(_) => "accounts",
+            | ConstraintViolation::AccountApiToken(_)
+            | ConstraintViolation::AccountActionToken(_) => "accounts",
 
             ConstraintViolation::Project(_)
             | ConstraintViolation::ProjectMember(_)
             | ConstraintViolation::ProjectInvite(_)
-            | ConstraintViolation::ProjectActivityLog(_) => "projects",
+            | ConstraintViolation::ProjectActivityLog(_)
+            | ConstraintViolation::ProjectIntegration(_) => "projects",
 
             ConstraintViolation::Document(_)
             | ConstraintViolation::DocumentComment(_)
@@ -219,13 +228,14 @@ impl ConstraintViolation {
         match self {
             ConstraintViolation::Account(c) => c.categorize(),
             ConstraintViolation::AccountNotification(c) => c.categorize(),
-            ConstraintViolation::AccountSession(c) => c.categorize(),
-            ConstraintViolation::AccountToken(c) => c.categorize(),
+            ConstraintViolation::AccountApiToken(c) => c.categorize(),
+            ConstraintViolation::AccountActionToken(c) => c.categorize(),
 
             ConstraintViolation::Project(c) => c.categorize(),
             ConstraintViolation::ProjectMember(c) => c.categorize(),
             ConstraintViolation::ProjectInvite(c) => c.categorize(),
             ConstraintViolation::ProjectActivityLog(c) => c.categorize(),
+            ConstraintViolation::ProjectIntegration(c) => c.categorize(),
 
             ConstraintViolation::Document(c) => c.categorize(),
             ConstraintViolation::DocumentComment(c) => c.categorize(),
@@ -246,13 +256,14 @@ impl fmt::Display for ConstraintViolation {
         match self {
             ConstraintViolation::Account(c) => write!(f, "{}", c),
             ConstraintViolation::AccountNotification(c) => write!(f, "{}", c),
-            ConstraintViolation::AccountSession(c) => write!(f, "{}", c),
-            ConstraintViolation::AccountToken(c) => write!(f, "{}", c),
+            ConstraintViolation::AccountApiToken(c) => write!(f, "{}", c),
+            ConstraintViolation::AccountActionToken(c) => write!(f, "{}", c),
 
             ConstraintViolation::Project(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectMember(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectInvite(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectActivityLog(c) => write!(f, "{}", c),
+            ConstraintViolation::ProjectIntegration(c) => write!(f, "{}", c),
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentComment(c) => write!(f, "{}", c),
@@ -291,9 +302,9 @@ mod tests {
         );
 
         assert_eq!(
-            ConstraintViolation::new("document_versions_unique_version"),
+            ConstraintViolation::new("document_versions_version_number_min"),
             Some(ConstraintViolation::DocumentVersion(
-                DocumentVersionConstraints::UniqueVersion
+                DocumentVersionConstraints::VersionNumberMin
             ))
         );
 
@@ -305,7 +316,7 @@ mod tests {
         let violation = ConstraintViolation::Account(AccountConstraints::EmailAddressUnique);
         assert_eq!(violation.table_name(), "accounts");
 
-        let violation = ConstraintViolation::Project(ProjectConstraints::ProjectCodeUnique);
+        let violation = ConstraintViolation::Project(ProjectConstraints::DisplayNameLength);
         assert_eq!(violation.table_name(), "projects");
 
         let violation =
@@ -319,20 +330,21 @@ mod tests {
         assert_eq!(violation.functional_area(), "accounts");
 
         let violation =
-            ConstraintViolation::AccountSession(AccountSessionConstraints::AccessSeqUnique);
+            ConstraintViolation::AccountApiToken(AccountApiTokenConstraints::AccessSeqUnique);
         assert_eq!(violation.functional_area(), "accounts");
 
-        let violation = ConstraintViolation::ProjectMember(ProjectMemberConstraints::ShowOrderMin);
+        let violation =
+            ConstraintViolation::ProjectMember(ProjectMemberConstraints::ShowOrderRange);
         assert_eq!(violation.functional_area(), "projects");
 
         let violation =
-            ConstraintViolation::DocumentVersion(DocumentVersionConstraints::UniqueVersion);
+            ConstraintViolation::DocumentVersion(DocumentVersionConstraints::VersionNumberMin);
         assert_eq!(violation.functional_area(), "documents");
     }
 
     #[test]
     fn test_constraint_categorization() {
-        let violation = ConstraintViolation::Account(AccountConstraints::DisplayNameLengthMin);
+        let violation = ConstraintViolation::Account(AccountConstraints::DisplayNameLength);
         assert_eq!(
             violation.constraint_category(),
             ConstraintCategory::Validation
@@ -347,10 +359,10 @@ mod tests {
 
     #[test]
     fn test_constraint_name_method() {
-        let violation = ConstraintViolation::Project(ProjectConstraints::ProjectCodeUnique);
+        let violation = ConstraintViolation::Project(ProjectConstraints::ActiveStatusNotArchived);
         assert_eq!(
             violation.constraint_name(),
-            "projects_project_code_unique_idx"
+            "projects_active_status_not_archived"
         );
     }
 }

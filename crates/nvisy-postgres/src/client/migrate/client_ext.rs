@@ -15,7 +15,7 @@ use crate::{PgClient, PgResult};
 /// This trait adds methods for managing database migrations, including
 /// applying pending migrations, rolling back changes, and checking
 /// migration status.
-pub trait PgClientExt {
+pub trait PgClientMigrationExt {
     /// Runs all pending database migrations.
     ///
     /// This method will apply any unapplied migrations to bring the database schema
@@ -60,7 +60,7 @@ pub trait PgClientExt {
     fn verify_schema_integrity(&self) -> impl Future<Output = PgResult<()>>;
 }
 
-impl PgClientExt for PgClient {
+impl PgClientMigrationExt for PgClient {
     async fn run_pending_migrations(&self) -> PgResult<MigrationResult> {
         run_pending_migrations(self).await
     }

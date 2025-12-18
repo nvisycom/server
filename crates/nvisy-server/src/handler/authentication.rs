@@ -111,9 +111,8 @@ async fn login(
         "login attempt"
     );
 
-    let mut conn = pg_client.get_connection().await?;
     let normalized_email = request.email_address.to_lowercase();
-    let account = AccountRepository::find_account_by_email(&mut conn, &normalized_email).await?;
+    let account = pg_client.find_account_by_email(&normalized_email).await?;
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
@@ -133,7 +132,7 @@ async fn login(
     if !login_successful {
         // Record failed login attempt for existing accounts
         if let Some(ref acc) = account
-            && let Err(e) = AccountRepository::record_failed_login(&mut conn, acc.id).await
+            && let Err(e) = pg_client.record_failed_login(acc.id).await
         {
             tracing::error!(
                 target: TRACING_TARGET,
@@ -157,8 +156,9 @@ async fn login(
     let account = account.unwrap(); // Safe because we verified above
 
     // Record successful login
-    if let Err(e) =
-        AccountRepository::record_successful_login(&mut conn, account.id, ip_address.into()).await
+    if let Err(e) = pg_client
+        .record_successful_login(account.id, ip_address.into())
+        .await
     {
         tracing::error!(
             target: TRACING_TARGET,
@@ -177,7 +177,7 @@ async fn login(
         ..Default::default()
     };
 
-    let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
+    let account_api_token = pg_client.create_token(new_token).await?;
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
@@ -245,7 +245,6 @@ async fn signup(
         "signup attempt"
     );
 
-    let mut conn = pg_client.get_connection().await?;
     let normalized_email = request.email_address.to_lowercase();
 
     // Validate password strength
@@ -262,7 +261,7 @@ async fn signup(
         .map_err(|_| ErrorKind::InternalServerError.into_error())?;
 
     // Check if email already exists
-    if AccountRepository::email_exists(&mut conn, &normalized_email).await? {
+    if pg_client.email_exists(&normalized_email).await? {
         tracing::warn!(
             target: TRACING_TARGET,
             email = %normalized_email,
@@ -278,7 +277,7 @@ async fn signup(
         ..Default::default()
     };
 
-    let account = AccountRepository::create_account(&mut conn, new_account).await?;
+    let account = pg_client.create_account(new_account).await?;
     tracing::info!(
         target: TRACING_TARGET,
         account_id = account.id.to_string(),
@@ -295,7 +294,7 @@ async fn signup(
         session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
-    let account_api_token = AccountApiTokenRepository::create_token(&mut conn, new_token).await?;
+    let account_api_token = pg_client.create_token(new_token).await?;
 
     // Extract values before moving account
     let display_name = account.display_name.clone();
@@ -354,13 +353,11 @@ async fn logout(
         "logout attempt"
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify API token exists before attempting to delete
-    let token_exists =
-        AccountApiTokenRepository::find_token_by_access_token(&mut conn, auth_claims.token_id)
-            .await?
-            .is_some();
+    let token_exists = pg_client
+        .find_token_by_access_token(auth_claims.token_id)
+        .await?
+        .is_some();
 
     if !token_exists {
         tracing::warn!(
@@ -373,7 +370,7 @@ async fn logout(
     }
 
     // Delete the API token
-    let deleted = AccountApiTokenRepository::delete_token(&mut conn, auth_claims.token_id).await?;
+    let deleted = pg_client.delete_token(auth_claims.token_id).await?;
 
     if deleted {
         tracing::info!(
@@ -393,10 +390,7 @@ async fn logout(
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
     tokio::spawn(async move {
-        if let Ok(mut cleanup_conn) = pg_client.get_connection().await
-            && let Err(e) =
-                AccountApiTokenRepository::cleanup_expired_tokens(&mut cleanup_conn).await
-        {
+        if let Err(e) = pg_client.cleanup_expired_tokens().await {
             tracing::debug!(
                 target: TRACING_TARGET_CLEANUP,
                 error = %e,

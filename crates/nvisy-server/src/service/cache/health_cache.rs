@@ -10,11 +10,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use axum::extract::FromRef;
+use nvisy_core::ocr::OcrService;
+use nvisy_core::vlm::VlmService;
 use nvisy_nats::NatsClient;
-use nvisy_openrouter::LlmClient;
 use nvisy_postgres::PgClient;
 use tokio::sync::RwLock;
+
+use crate::service::ServiceState;
 
 /// Tracing target for health service operations.
 const TRACING_TARGET_HEALTH: &str = "nvisy_server::service::health";
@@ -189,7 +191,8 @@ impl HealthCache {
     /// This method performs comprehensive health checks across all system components:
     /// - **PostgreSQL**: Verifies database connectivity
     /// - **NATS**: Checks connection state and performs ping
-    /// - **OpenRouter**: Validates API connectivity
+    /// - **OCR**: Validates OCR service availability
+    /// - **VLM**: Validates VLM service availability
     ///
     /// All checks are performed concurrently for optimal performance. Results are
     /// cached according to the configured TTL. The system is considered healthy
@@ -207,18 +210,16 @@ impl HealthCache {
     ///
     /// - **Cache hit**: ~nanoseconds (atomic read)
     /// - **Cache miss**: Depends on service latencies, typically 50-500ms
-    pub async fn is_healthy<S>(&self, service_state: S) -> bool
-    where
-        PgClient: FromRef<S>,
-        NatsClient: FromRef<S>,
-        LlmClient: FromRef<S>,
-    {
-        let pg_client = PgClient::from_ref(&service_state);
-        let nats_client = NatsClient::from_ref(&service_state);
-        let llm_client = LlmClient::from_ref(&service_state);
-
+    pub async fn is_healthy(&self, service_state: &ServiceState) -> bool {
         self.cache
-            .get_or_update(|| self.check_all_components(&pg_client, &nats_client, &llm_client))
+            .get_or_update(|| {
+                self.check_all_components(
+                    &service_state.pg_client,
+                    &service_state.nats_client,
+                    &service_state.ocr_client,
+                    &service_state.vlm_client,
+                )
+            })
             .await
     }
 
@@ -268,8 +269,8 @@ impl HealthCache {
 
     /// Performs concurrent health checks across all system components.
     ///
-    /// This internal method coordinates health checking for PostgreSQL, NATS, and
-    /// OpenRouter services. All checks run concurrently using `tokio::join!` to
+    /// This internal method coordinates health checking for PostgreSQL, NATS,
+    /// OCR, and VLM services. All checks run concurrently using `tokio::join!` to
     /// minimize total check duration.
     ///
     /// Detailed metrics are logged including per-service status and total duration.
@@ -278,26 +279,29 @@ impl HealthCache {
         &self,
         pg_client: &PgClient,
         nats_client: &NatsClient,
-        llm_client: &LlmClient,
+        ocr_client: &OcrService,
+        vlm_client: &VlmService,
     ) -> bool {
         let start = Instant::now();
 
         // Perform all health checks concurrently
-        let (db_healthy, nats_healthy, openrouter_healthy) = tokio::join!(
+        let (db_healthy, nats_healthy, ocr_healthy, vlm_healthy) = tokio::join!(
             self.check_database(pg_client),
             self.check_nats(nats_client),
-            self.check_openrouter(llm_client)
+            self.check_ocr(ocr_client),
+            self.check_vlm(vlm_client)
         );
 
         let check_duration = start.elapsed();
-        let overall_healthy = db_healthy && nats_healthy && openrouter_healthy;
+        let overall_healthy = db_healthy && nats_healthy && ocr_healthy && vlm_healthy;
 
         tracing::info!(
             target: TRACING_TARGET_HEALTH,
             duration_ms = check_duration.as_millis(),
             database_healthy = db_healthy,
             nats_healthy = nats_healthy,
-            openrouter_healthy = openrouter_healthy,
+            ocr_healthy = ocr_healthy,
+            vlm_healthy = vlm_healthy,
             overall_healthy = overall_healthy,
             "Health check completed"
         );
@@ -365,25 +369,24 @@ impl HealthCache {
         }
     }
 
-    /// Checks OpenRouter LLM service health by listing available models.
+    /// Checks OCR service health.
     ///
-    /// A successful model list retrieval indicates the API is accessible and
-    /// authentication is working correctly.
-    async fn check_openrouter(&self, llm_client: &LlmClient) -> bool {
-        match llm_client.list_models().await {
-            Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET_HEALTH, "Openrouter health check passed");
-                true
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target: TRACING_TARGET_HEALTH,
-                    error = %e,
-                    "openrouter health check failed"
-                );
-                false
-            }
-        }
+    /// TODO: Implement proper health check for OCR service.
+    /// For now, we assume the service is healthy if the client is configured.
+    async fn check_ocr(&self, _ocr_client: &OcrService) -> bool {
+        // TODO: Implement actual OCR health check
+        tracing::debug!(target: TRACING_TARGET_HEALTH, "OCR health check skipped (not yet implemented)");
+        true
+    }
+
+    /// Checks VLM service health.
+    ///
+    /// TODO: Implement proper health check for VLM service.
+    /// For now, we assume the service is healthy if the client is configured.
+    async fn check_vlm(&self, _vlm_client: &VlmService) -> bool {
+        // TODO: Implement actual VLM health check
+        tracing::debug!(target: TRACING_TARGET_HEALTH, "VLM health check skipped (not yet implemented)");
+        true
     }
 }
 

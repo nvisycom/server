@@ -9,7 +9,6 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewDocumentComment;
 use nvisy_postgres::query::{
     DocumentCommentRepository, DocumentFileRepository, DocumentRepository,
-    DocumentVersionRepository,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
@@ -23,7 +22,7 @@ use crate::handler::request::{
     CreateDocumentComment, UpdateDocumentComment as UpdateCommentRequest,
 };
 use crate::handler::response::{DocumentComment, DocumentComments};
-use crate::handler::{ErrorKind, ErrorResponse, PaginationRequest, Result};
+use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document comment operations.
@@ -99,11 +98,10 @@ async fn create_document_comment(
         "Creating new comment on document",
     );
 
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document exists and user has access
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
@@ -112,9 +110,7 @@ async fn create_document_comment(
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
-        let Some(parent_comment) =
-            DocumentCommentRepository::find_comment_by_id(&mut conn, parent_id).await?
-        else {
+        let Some(parent_comment) = pg_client.find_comment_by_id(parent_id).await? else {
             return Err(ErrorKind::BadRequest
                 .with_message("Parent comment not found")
                 .with_resource("comment"));
@@ -134,11 +130,10 @@ async fn create_document_comment(
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
         content: request.content.clone(),
-        metadata: request.metadata,
         ..Default::default()
     };
 
-    let comment = DocumentCommentRepository::create_comment(&mut conn, new_comment).await?;
+    let comment = pg_client.create_comment(new_comment).await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -157,7 +152,7 @@ async fn create_document_comment(
     get, path = "/documents/{documentId}/comments/", tag = "comments",
     params(DocumentPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -183,25 +178,21 @@ async fn list_document_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document exists and user has access
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
             .with_resource("document"));
     };
 
-    let comments = DocumentCommentRepository::find_comments_by_document(
-        &mut conn,
-        path_params.document_id,
-        pagination.into(),
-    )
-    .await?;
+    let comments = pg_client
+        .find_comments_by_document(path_params.document_id, pagination.into())
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -223,7 +214,7 @@ async fn list_document_comments(
     get, path = "/documents/{documentId}/comments/top-level/", tag = "comments",
     params(DocumentPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -249,25 +240,21 @@ async fn list_top_level_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document exists and user has access
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
             .with_resource("document"));
     };
 
-    let comments = DocumentCommentRepository::find_top_level_comments_by_document(
-        &mut conn,
-        path_params.document_id,
-        pagination.into(),
-    )
-    .await?;
+    let comments = pg_client
+        .find_top_level_comments_by_document(path_params.document_id, pagination.into())
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -316,20 +303,17 @@ async fn get_comment(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentCommentPathParams>,
 ) -> Result<(StatusCode, Json<DocumentComment>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document exists
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
             .with_resource("document"));
     };
 
-    let Some(comment) =
-        DocumentCommentRepository::find_comment_by_id(&mut conn, path_params.comment_id).await?
-    else {
+    let Some(comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Comment not found: {}", path_params.comment_id))
             .with_resource("comment"));
@@ -358,7 +342,7 @@ async fn get_comment(
     get, path = "/documents/{documentId}/comments/{commentId}/replies/", tag = "comments",
     params(DocumentCommentPathParams),
     request_body(
-        content = PaginationRequest,
+        content = Pagination,
         description = "Pagination parameters",
         content_type = "application/json",
     ),
@@ -384,13 +368,12 @@ async fn list_comment_replies(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentCommentPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify document exists
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
@@ -398,9 +381,7 @@ async fn list_comment_replies(
     };
 
     // Verify comment exists and belongs to document
-    let Some(parent_comment) =
-        DocumentCommentRepository::find_comment_by_id(&mut conn, path_params.comment_id).await?
-    else {
+    let Some(parent_comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Comment not found: {}", path_params.comment_id))
             .with_resource("comment"));
@@ -412,12 +393,9 @@ async fn list_comment_replies(
             .with_resource("comment"));
     }
 
-    let replies = DocumentCommentRepository::find_comment_replies(
-        &mut conn,
-        path_params.comment_id,
-        pagination.into(),
-    )
-    .await?;
+    let replies = pg_client
+        .find_comment_replies(path_params.comment_id, pagination.into())
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -477,8 +455,6 @@ async fn update_comment(
     Path(path_params): Path<DocumentCommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateCommentRequest>,
 ) -> Result<(StatusCode, Json<DocumentComment>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -487,8 +463,9 @@ async fn update_comment(
     );
 
     // Verify document exists
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
@@ -496,9 +473,7 @@ async fn update_comment(
     };
 
     // Fetch comment and verify ownership in one query
-    let Some(existing_comment) =
-        DocumentCommentRepository::find_comment_by_id(&mut conn, path_params.comment_id).await?
-    else {
+    let Some(existing_comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Comment not found: {}", path_params.comment_id))
             .with_resource("comment"));
@@ -520,12 +495,12 @@ async fn update_comment(
 
     let update_data = nvisy_postgres::model::UpdateDocumentComment {
         content: request.content,
-        metadata: request.metadata,
+        ..Default::default()
     };
 
-    let comment =
-        DocumentCommentRepository::update_comment(&mut conn, path_params.comment_id, update_data)
-            .await?;
+    let comment = pg_client
+        .update_comment(path_params.comment_id, update_data)
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -574,8 +549,6 @@ async fn delete_comment(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<DocumentCommentPathParams>,
 ) -> Result<StatusCode> {
-    let mut conn = pg_client.get_connection().await?;
-
     tracing::warn!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -584,8 +557,9 @@ async fn delete_comment(
     );
 
     // Verify document exists
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, path_params.document_id).await?
+    let Some(_document) = pg_client
+        .find_document_by_id(path_params.document_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", path_params.document_id))
@@ -593,9 +567,7 @@ async fn delete_comment(
     };
 
     // Fetch comment and verify ownership in one query
-    let Some(existing_comment) =
-        DocumentCommentRepository::find_comment_by_id(&mut conn, path_params.comment_id).await?
-    else {
+    let Some(existing_comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Comment not found: {}", path_params.comment_id))
             .with_resource("comment"));
@@ -615,7 +587,7 @@ async fn delete_comment(
             .with_resource("comment"));
     }
 
-    DocumentCommentRepository::delete_comment(&mut conn, path_params.comment_id).await?;
+    pg_client.delete_comment(path_params.comment_id).await?;
 
     tracing::warn!(
         target: TRACING_TARGET,
@@ -653,11 +625,10 @@ async fn create_file_comment(
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
 ) -> Result<(StatusCode, Json<DocumentComment>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify file exists and get document_id
-    let Some(file) =
-        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.file_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("File not found: {}", path_params.file_id))
@@ -665,9 +636,7 @@ async fn create_file_comment(
     };
 
     // Verify user has access to the document
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, file.document_id).await?
-    else {
+    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", file.document_id))
             .with_resource("document"));
@@ -675,9 +644,7 @@ async fn create_file_comment(
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
-        let Some(parent_comment) =
-            DocumentCommentRepository::find_comment_by_id(&mut conn, parent_id).await?
-        else {
+        let Some(parent_comment) = pg_client.find_comment_by_id(parent_id).await? else {
             return Err(ErrorKind::BadRequest
                 .with_message("Parent comment not found")
                 .with_resource("comment"));
@@ -696,11 +663,10 @@ async fn create_file_comment(
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
         content: request.content.clone(),
-        metadata: request.metadata,
         ..Default::default()
     };
 
-    let comment = DocumentCommentRepository::create_comment(&mut conn, new_comment).await?;
+    let comment = pg_client.create_comment(new_comment).await?;
 
     Ok((StatusCode::CREATED, Json(comment.into())))
 }
@@ -710,7 +676,7 @@ async fn create_file_comment(
 #[utoipa::path(
     get, path = "/files/{fileId}/comments/", tag = "comments",
     params(FilePathParams),
-    request_body(content = PaginationRequest, description = "Pagination parameters"),
+    request_body(content = Pagination, description = "Pagination parameters"),
     responses(
         (status = OK, description = "Comments listed", body = DocumentComments),
     )
@@ -719,13 +685,12 @@ async fn list_file_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify file exists and get document_id
-    let Some(file) =
-        DocumentFileRepository::find_document_file_by_id(&mut conn, path_params.file_id).await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.file_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("File not found: {}", path_params.file_id))
@@ -733,20 +698,15 @@ async fn list_file_comments(
     };
 
     // Verify user has access to the document
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, file.document_id).await?
-    else {
+    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Document not found: {}", file.document_id))
             .with_resource("document"));
     };
 
-    let comments = DocumentCommentRepository::find_comments_by_file(
-        &mut conn,
-        path_params.file_id,
-        pagination.into(),
-    )
-    .await?;
+    let comments = pg_client
+        .find_comments_by_file(path_params.file_id, pagination.into())
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -788,12 +748,10 @@ async fn create_version_comment(
     Path(path_params): Path<VersionPathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
 ) -> Result<(StatusCode, Json<DocumentComment>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify version exists and get document_id
-    let Some(version) =
-        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
-            .await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.version_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Version not found: {}", path_params.version_id))
@@ -801,25 +759,21 @@ async fn create_version_comment(
     };
 
     // Verify user has access to the document
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, version.document_id).await?
-    else {
+    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
         return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", version.document_id))
+            .with_message(format!("Document not found: {}", file.document_id))
             .with_resource("document"));
     };
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
-        let Some(parent_comment) =
-            DocumentCommentRepository::find_comment_by_id(&mut conn, parent_id).await?
-        else {
+        let Some(parent_comment) = pg_client.find_comment_by_id(parent_id).await? else {
             return Err(ErrorKind::BadRequest
                 .with_message("Parent comment not found")
                 .with_resource("comment"));
         };
 
-        if parent_comment.document_version_id != Some(path_params.version_id) {
+        if parent_comment.document_file_id != Some(path_params.version_id) {
             return Err(ErrorKind::BadRequest
                 .with_message("Parent comment must belong to the same version")
                 .with_resource("comment"));
@@ -827,16 +781,15 @@ async fn create_version_comment(
     }
 
     let new_comment = NewDocumentComment {
-        document_version_id: Some(path_params.version_id),
+        document_file_id: Some(path_params.version_id),
         account_id: auth_claims.account_id,
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
         content: request.content.clone(),
-        metadata: request.metadata,
         ..Default::default()
     };
 
-    let comment = DocumentCommentRepository::create_comment(&mut conn, new_comment).await?;
+    let comment = pg_client.create_comment(new_comment).await?;
 
     Ok((StatusCode::CREATED, Json(comment.into())))
 }
@@ -846,7 +799,7 @@ async fn create_version_comment(
 #[utoipa::path(
     get, path = "/versions/{versionId}/comments/", tag = "comments",
     params(VersionPathParams),
-    request_body(content = PaginationRequest, description = "Pagination parameters"),
+    request_body(content = Pagination, description = "Pagination parameters"),
     responses(
         (status = OK, description = "Comments listed", body = DocumentComments),
     )
@@ -855,14 +808,12 @@ async fn list_version_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<VersionPathParams>,
-    Json(pagination): Json<PaginationRequest>,
+    Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Verify version exists and get document_id
-    let Some(version) =
-        DocumentVersionRepository::find_document_version_by_id(&mut conn, path_params.version_id)
-            .await?
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.version_id)
+        .await?
     else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Version not found: {}", path_params.version_id))
@@ -870,20 +821,15 @@ async fn list_version_comments(
     };
 
     // Verify user has access to the document
-    let Some(_document) =
-        DocumentRepository::find_document_by_id(&mut conn, version.document_id).await?
-    else {
+    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
         return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", version.document_id))
+            .with_message(format!("Document not found: {}", file.document_id))
             .with_resource("document"));
     };
 
-    let comments = DocumentCommentRepository::find_comments_by_version(
-        &mut conn,
-        path_params.version_id,
-        pagination.into(),
-    )
-    .await?;
+    let comments = pg_client
+        .find_comments_by_file(path_params.version_id, pagination.into())
+        .await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -936,7 +882,6 @@ mod test {
             content: "This is a test comment".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
 
         let response = server
@@ -963,7 +908,6 @@ mod test {
             content: "Test comment for listing".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
         server
             .post(&format!("/documents/{}/comments/", document_id))
@@ -971,7 +915,7 @@ mod test {
             .await;
 
         // List comments
-        let pagination = PaginationRequest::default().with_limit(10);
+        let pagination = Pagination::default().with_limit(10);
         let response = server
             .get(&format!("/documents/{}/comments/", document_id))
             .json(&pagination)
@@ -995,7 +939,6 @@ mod test {
             content: "Original comment".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
         let create_response = server
             .post(&format!("/documents/{}/comments/", document_id))
@@ -1006,7 +949,6 @@ mod test {
         // Update the comment
         let update_request = UpdateCommentRequest {
             content: Some("Updated comment".to_string()),
-            metadata: None,
         };
 
         let response = server
@@ -1035,7 +977,6 @@ mod test {
             content: "Comment to delete".to_string(),
             parent_comment_id: None,
             reply_to_account_id: None,
-            metadata: None,
         };
         let create_response = server
             .post(&format!("/documents/{}/comments/", document_id))

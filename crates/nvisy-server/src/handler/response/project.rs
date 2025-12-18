@@ -17,7 +17,7 @@ pub struct Project {
     /// Display name of the project.
     pub display_name: String,
     /// Description of the project.
-    pub description: String,
+    pub description: Option<String>,
     /// Duration in seconds to keep the original files.
     pub keep_for_sec: i32,
     /// Whether to automatically delete processed files after expiration.
@@ -40,7 +40,7 @@ pub struct Project {
 
 impl Project {
     /// Creates a new instance of [`Project`] as an owner.
-    pub fn new(project: model::Project) -> Self {
+    pub fn from_model(project: model::Project) -> Self {
         Self {
             project_id: project.id,
             display_name: project.display_name,
@@ -58,7 +58,10 @@ impl Project {
     }
 
     /// Creates a new instance of [`Project`] with role information.
-    pub fn with_role(project: model::Project, member: model::ProjectMember) -> Self {
+    pub fn from_model_with_membership(
+        project: model::Project,
+        member: model::ProjectMember,
+    ) -> Self {
         Self {
             project_id: project.id,
             display_name: project.display_name,
@@ -76,17 +79,5 @@ impl Project {
     }
 }
 
-impl From<model::Project> for Project {
-    #[inline]
-    fn from(project: model::Project) -> Self {
-        Self::new(project)
-    }
-}
-
-impl From<(model::Project, model::ProjectMember)> for Project {
-    fn from((project, member): (model::Project, model::ProjectMember)) -> Self {
-        Self::with_role(project, member)
-    }
-}
 /// Response for listing all projects associated with the account.
 pub type Projects = Vec<Project>;

@@ -5,35 +5,36 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::schema::document_comments;
+use crate::types::constants::comment;
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Document comment model representing user discussions about documents, files, or versions.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = document_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DocumentComment {
-    /// Unique comment identifier
+    /// Unique comment identifier.
     pub id: Uuid,
-    /// Reference to the parent document (mutually exclusive with file/version)
+    /// Reference to the parent document (mutually exclusive with file/version).
     pub document_id: Option<Uuid>,
-    /// Reference to the parent document file (mutually exclusive with document/version)
+    /// Reference to the parent document file (mutually exclusive with document/version).
     pub document_file_id: Option<Uuid>,
-    /// Reference to the parent document version (mutually exclusive with document/file)
-    pub document_version_id: Option<Uuid>,
-    /// Reference to the account that authored this comment
+
+    /// Reference to the account that authored this comment.
     pub account_id: Uuid,
-    /// Parent comment for threaded replies (NULL for top-level comments)
+    /// Parent comment for threaded replies (NULL for top-level comments).
     pub parent_comment_id: Option<Uuid>,
-    /// Account being replied to (@mention)
+    /// Account being replied to (@mention).
     pub reply_to_account_id: Option<Uuid>,
-    /// Comment text content
+    /// Comment text content.
     pub content: String,
-    /// Additional comment metadata
+    /// Additional comment metadata.
     pub metadata: serde_json::Value,
-    /// Timestamp when the comment was created
+    /// Timestamp when the comment was created.
     pub created_at: OffsetDateTime,
-    /// Timestamp when the comment was last updated
+    /// Timestamp when the comment was last updated.
     pub updated_at: OffsetDateTime,
-    /// Timestamp when the comment was soft-deleted
+    /// Timestamp when the comment was soft-deleted.
     pub deleted_at: Option<OffsetDateTime>,
 }
 
@@ -42,21 +43,20 @@ pub struct DocumentComment {
 #[diesel(table_name = document_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentComment {
-    /// Document ID (mutually exclusive with file/version)
+    /// Document ID (mutually exclusive with file/version).
     pub document_id: Option<Uuid>,
-    /// Document file ID (mutually exclusive with document/version)
+    /// Document file ID (mutually exclusive with document/version).
     pub document_file_id: Option<Uuid>,
-    /// Document version ID (mutually exclusive with document/file)
-    pub document_version_id: Option<Uuid>,
-    /// Account ID
+
+    /// Account ID.
     pub account_id: Uuid,
-    /// Parent comment ID for replies
+    /// Parent comment ID for replies.
     pub parent_comment_id: Option<Uuid>,
-    /// Reply to account ID (@mention)
+    /// Reply to account ID (@mention).
     pub reply_to_account_id: Option<Uuid>,
-    /// Comment content
+    /// Comment content.
     pub content: String,
-    /// Metadata
+    /// Metadata.
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -65,25 +65,23 @@ pub struct NewDocumentComment {
 #[diesel(table_name = document_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateDocumentComment {
-    /// Comment content
+    /// Comment content.
     pub content: Option<String>,
-    /// Metadata
+    /// Metadata.
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Enum representing the target type of a comment
+/// Enum representing the target type of a comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommentTarget {
-    /// Comment is on a document
+    /// Comment is on a document.
     Document,
-    /// Comment is on a document file
+    /// Comment is on a document file.
     File,
-    /// Comment is on a document version
-    Version,
 }
 
 impl DocumentComment {
-    /// Returns the comment content, showing "[deleted]" if the comment is deleted.
+    /// Returns the comment content, or `None` if the comment is deleted.
     pub fn get_content(&self) -> Option<String> {
         if self.is_deleted() {
             None
@@ -96,10 +94,8 @@ impl DocumentComment {
     pub fn target_type(&self) -> CommentTarget {
         if self.document_id.is_some() {
             CommentTarget::Document
-        } else if self.document_file_id.is_some() {
-            CommentTarget::File
         } else {
-            CommentTarget::Version
+            CommentTarget::File
         }
     }
 
@@ -107,7 +103,6 @@ impl DocumentComment {
     pub fn target_id(&self) -> Uuid {
         self.document_id
             .or(self.document_file_id)
-            .or(self.document_version_id)
             .expect("Comment must have exactly one target")
     }
 
@@ -131,24 +126,10 @@ impl DocumentComment {
         self.deleted_at.is_some()
     }
 
-    /// Returns whether this comment was created recently (within last 24 hours).
-    pub fn is_recently_created(&self) -> bool {
-        let now = time::OffsetDateTime::now_utc();
-        let duration = now - self.created_at;
-        duration.whole_days() < 1
-    }
-
-    /// Returns whether this comment was updated recently (within last hour).
-    pub fn is_recently_updated(&self) -> bool {
-        let now = time::OffsetDateTime::now_utc();
-        let duration = now - self.updated_at;
-        duration.whole_hours() < 1
-    }
-
     /// Returns whether this comment has been edited.
     pub fn is_edited(&self) -> bool {
         let duration = self.updated_at - self.created_at;
-        duration.whole_seconds() > 5 // Allow 5 second grace period
+        duration.whole_seconds() > comment::EDIT_GRACE_PERIOD_SECONDS
     }
 
     /// Returns whether this comment is on a document.
@@ -159,11 +140,6 @@ impl DocumentComment {
     /// Returns whether this comment is on a file.
     pub fn is_file_comment(&self) -> bool {
         self.document_file_id.is_some()
-    }
-
-    /// Returns whether this comment is on a version.
-    pub fn is_version_comment(&self) -> bool {
-        self.document_version_id.is_some()
     }
 }
 
@@ -188,16 +164,6 @@ impl NewDocumentComment {
         }
     }
 
-    /// Creates a new comment on a document version.
-    pub fn for_version(document_version_id: Uuid, account_id: Uuid, content: String) -> Self {
-        Self {
-            document_version_id: Some(document_version_id),
-            account_id,
-            content,
-            ..Default::default()
-        }
-    }
-
     /// Sets the parent comment ID for threaded replies.
     pub fn with_parent(mut self, parent_comment_id: Uuid) -> Self {
         self.parent_comment_id = Some(parent_comment_id);
@@ -214,5 +180,23 @@ impl NewDocumentComment {
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
         self
+    }
+}
+
+impl HasCreatedAt for DocumentComment {
+    fn created_at(&self) -> OffsetDateTime {
+        self.created_at
+    }
+}
+
+impl HasUpdatedAt for DocumentComment {
+    fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
+    }
+}
+
+impl HasDeletedAt for DocumentComment {
+    fn deleted_at(&self) -> Option<OffsetDateTime> {
+        self.deleted_at
     }
 }

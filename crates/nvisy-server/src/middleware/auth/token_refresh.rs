@@ -86,25 +86,23 @@ async fn refresh_token(
     pg_database: PgClient,
     auth_secret_keys: SessionKeys,
 ) -> Result<AuthHeader> {
-    let mut conn = pg_database.get_connection().await?;
-
     // First get the current API token to obtain the refresh token
-    let current_token =
-        AccountApiTokenRepository::find_token_by_access_token(&mut conn, auth_claims.token_id)
-            .await?
-            .ok_or_else(|| {
-                ErrorKind::Unauthorized
-                    .with_message("Account API token not found")
-                    .with_context(format!("Account API token ID: {}", auth_claims.token_id))
-                    .with_resource("authentication")
-            })?;
+    let current_token = pg_database
+        .find_token_by_access_token(auth_claims.token_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::Unauthorized
+                .with_message("Account API token not found")
+                .with_context(format!("Account API token ID: {}", auth_claims.token_id))
+                .with_resource("authentication")
+        })?;
 
     // Refresh the API token using the refresh token
-    let updated_token =
-        AccountApiTokenRepository::refresh_token(&mut conn, current_token.refresh_seq).await?;
+    let updated_token = pg_database.refresh_token(current_token.refresh_seq).await?;
 
     // Get the account information
-    let account = AccountRepository::find_account_by_id(&mut conn, auth_claims.account_id)
+    let account = pg_database
+        .find_account_by_id(auth_claims.account_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::Unauthorized

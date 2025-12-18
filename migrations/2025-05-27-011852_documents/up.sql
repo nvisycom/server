@@ -61,7 +61,7 @@ CREATE TABLE documents (
 
     -- Core attributes
     display_name    TEXT             NOT NULL DEFAULT 'Untitled',
-    description     TEXT             NOT NULL DEFAULT '',
+    description     TEXT                      DEFAULT NULL,
     tags            TEXT[]           NOT NULL DEFAULT '{}',
     status          DOCUMENT_STATUS  NOT NULL DEFAULT 'draft',
 
@@ -129,8 +129,12 @@ CREATE TABLE document_files (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    document_id         UUID             NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+    document_id         UUID             DEFAULT NULL REFERENCES documents (id) ON DELETE CASCADE,
     account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    parent_id           UUID             DEFAULT NULL REFERENCES document_files (id) ON DELETE SET NULL,
+
+    -- Indexing configuration
+    is_indexed          BOOLEAN          NOT NULL DEFAULT FALSE,
 
     -- File metadata
     display_name        TEXT             NOT NULL DEFAULT 'Untitled',
@@ -234,135 +238,13 @@ COMMENT ON COLUMN document_files.storage_bucket IS 'Storage bucket/container';
 COMMENT ON COLUMN document_files.metadata IS 'Extended metadata (JSON, 2B-8KB)';
 COMMENT ON COLUMN document_files.keep_for_sec IS 'Retention period (1h-5y)';
 COMMENT ON COLUMN document_files.auto_delete_at IS 'Automatic deletion timestamp';
+COMMENT ON COLUMN document_files.parent_id IS 'Parent file reference for hierarchical relationships';
+COMMENT ON COLUMN document_files.is_indexed IS 'Whether file content has been indexed for search';
 COMMENT ON COLUMN document_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN document_files.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN document_files.deleted_at IS 'Soft deletion timestamp';
 
--- Create document versions table - Processed outputs
-CREATE TABLE document_versions (
-    -- Primary identifiers
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References
-    document_id         UUID             NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
-    account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-    version_number      INTEGER          NOT NULL,
-
-    CONSTRAINT document_versions_version_number_min CHECK (version_number >= 1),
-
-    -- File metadata
-    display_name        TEXT             NOT NULL DEFAULT 'Untitled',
-    file_extension      TEXT             NOT NULL DEFAULT 'txt',
-
-    CONSTRAINT document_versions_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
-    CONSTRAINT document_versions_file_extension_format CHECK (file_extension ~ '^[a-zA-Z0-9]{1,20}$'),
-
-    -- Processing metrics
-    processing_credits  INTEGER          NOT NULL DEFAULT 0,
-    processing_duration INTEGER          NOT NULL DEFAULT 0,
-    api_calls_made      INTEGER          NOT NULL DEFAULT 0,
-
-    CONSTRAINT document_versions_processing_credits_min CHECK (processing_credits >= 0),
-    CONSTRAINT document_versions_processing_duration_min CHECK (processing_duration >= 0),
-    CONSTRAINT document_versions_api_calls_min CHECK (api_calls_made >= 0),
-
-    -- Storage and integrity
-    file_size_bytes     BIGINT           NOT NULL DEFAULT 0,
-    file_hash_sha256    BYTEA            NOT NULL,
-    storage_path        TEXT             NOT NULL,
-    storage_bucket      TEXT             NOT NULL DEFAULT '',
-
-    CONSTRAINT document_versions_file_size_min CHECK (file_size_bytes >= 0),
-    CONSTRAINT document_versions_file_hash_sha256_length CHECK (octet_length(file_hash_sha256) = 32),
-    CONSTRAINT document_versions_storage_path_not_empty CHECK (trim(storage_path) <> ''),
-    CONSTRAINT document_versions_storage_bucket_not_empty CHECK (trim(storage_bucket) <> ''),
-
-    -- Content, metadata and retention policy
-    results             JSONB            NOT NULL DEFAULT '{}',
-    metadata            JSONB            NOT NULL DEFAULT '{}',
-    keep_for_sec        INTEGER          NOT NULL DEFAULT 31536000,
-    auto_delete_at      TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT document_versions_retention_period CHECK (keep_for_sec BETWEEN 3600 AND 157680000),
-    CONSTRAINT document_versions_results_size CHECK (length(results::TEXT) BETWEEN 2 AND 65536),
-    CONSTRAINT document_versions_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
-
-    -- Lifecycle timestamps
-    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    deleted_at          TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT document_versions_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT document_versions_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT document_versions_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
-    CONSTRAINT document_versions_auto_delete_after_created CHECK (auto_delete_at IS NULL OR auto_delete_at > created_at),
-
-    -- Business logic constraints
-    CONSTRAINT document_versions_unique_per_document UNIQUE (document_id, version_number)
-);
-
--- Create auto-delete trigger function
-CREATE OR REPLACE FUNCTION set_document_version_auto_delete()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.auto_delete_at := NEW.created_at + (NEW.keep_for_sec || ' seconds')::INTERVAL;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create auto-delete trigger
-CREATE TRIGGER document_versions_auto_delete_trigger
-    BEFORE INSERT OR UPDATE OF keep_for_sec ON document_versions
-    FOR EACH ROW EXECUTE FUNCTION set_document_version_auto_delete();
-
--- Set up automatic updated_at trigger
-SELECT setup_updated_at('document_versions');
-
--- Create indexes for document versions
-CREATE INDEX document_versions_document_idx
-    ON document_versions (document_id, version_number DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX document_versions_account_recent_idx
-    ON document_versions (account_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX document_versions_hash_dedup_idx
-    ON document_versions (file_hash_sha256, file_size_bytes)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX document_versions_cleanup_idx
-    ON document_versions (auto_delete_at)
-    WHERE auto_delete_at IS NOT NULL AND deleted_at IS NULL;
-
-CREATE INDEX document_versions_processing_cost_idx
-    ON document_versions (processing_credits, created_at DESC)
-    WHERE processing_credits > 0 AND deleted_at IS NULL;
-
--- Add table and column comments
-COMMENT ON TABLE document_versions IS
-    'Processed document versions with processing metrics and analysis results.';
-
-COMMENT ON COLUMN document_versions.id IS 'Unique version identifier';
-COMMENT ON COLUMN document_versions.document_id IS 'Parent document reference';
-COMMENT ON COLUMN document_versions.account_id IS 'Processing initiator reference';
-COMMENT ON COLUMN document_versions.version_number IS 'Sequential version number (starts at 1)';
-COMMENT ON COLUMN document_versions.display_name IS 'Version display name (1-255 chars)';
-COMMENT ON COLUMN document_versions.file_extension IS 'Output file extension';
-COMMENT ON COLUMN document_versions.processing_credits IS 'Processing credits consumed';
-COMMENT ON COLUMN document_versions.processing_duration IS 'Processing time (milliseconds)';
-COMMENT ON COLUMN document_versions.api_calls_made IS 'External API calls count';
-COMMENT ON COLUMN document_versions.file_size_bytes IS 'Output file size in bytes';
-COMMENT ON COLUMN document_versions.file_hash_sha256 IS 'SHA256 content hash';
-COMMENT ON COLUMN document_versions.storage_path IS 'Storage system path';
-COMMENT ON COLUMN document_versions.storage_bucket IS 'Storage bucket/container';
-COMMENT ON COLUMN document_versions.results IS 'Processing results (JSON, 2B-64KB)';
-COMMENT ON COLUMN document_versions.metadata IS 'Version metadata (JSON, 2B-16KB)';
-COMMENT ON COLUMN document_versions.keep_for_sec IS 'Retention period (1h-5y)';
-COMMENT ON COLUMN document_versions.auto_delete_at IS 'Automatic deletion timestamp';
-COMMENT ON COLUMN document_versions.created_at IS 'Processing completion timestamp';
-COMMENT ON COLUMN document_versions.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN document_versions.deleted_at IS 'Soft deletion timestamp';
 
 -- Create document processing summary view
 CREATE VIEW document_processing_summary AS
@@ -372,14 +254,10 @@ SELECT
     d.status,
     d.project_id,
     COUNT(df.id) FILTER (WHERE df.deleted_at IS NULL) AS input_files_count,
-    COUNT(dv.id) FILTER (WHERE dv.deleted_at IS NULL) AS output_versions_count,
-    COALESCE(SUM(dv.processing_credits), 0) AS total_credits_used,
-    MAX(dv.created_at) AS latest_version_at,
     d.created_at,
     d.updated_at
 FROM documents d
     LEFT JOIN document_files df ON d.id = df.document_id
-    LEFT JOIN document_versions dv ON d.id = dv.document_id
 WHERE d.deleted_at IS NULL
 GROUP BY d.id, d.display_name, d.status, d.project_id, d.created_at, d.updated_at;
 
@@ -411,33 +289,7 @@ COMMENT ON VIEW processing_queue IS
     'Files queued for processing, ordered by priority and age.';
 
 -- Create document version function
-CREATE OR REPLACE FUNCTION create_document_version(
-    _document_id UUID,
-    _account_id UUID
-) RETURNS UUID
-LANGUAGE plpgsql AS $$
-DECLARE
-    _version_id UUID;
-    _version_number INTEGER;
-BEGIN
-    -- Get next version number
-    SELECT COALESCE(MAX(version_number), 0) + 1
-    INTO _version_number
-    FROM document_versions
-    WHERE document_id = _document_id
-        AND deleted_at IS NULL;
 
-    -- Create version record
-    INSERT INTO document_versions (document_id, account_id, version_number)
-    VALUES (_document_id, _account_id, _version_number)
-    RETURNING id INTO _version_id;
-
-    RETURN _version_id;
-END;
-$$;
-
-COMMENT ON FUNCTION create_document_version(UUID, UUID) IS
-    'Creates a new version of a document with auto-incrementing version number.';
 
 -- Create cleanup function
 CREATE OR REPLACE FUNCTION cleanup_expired_documents()
@@ -469,21 +321,7 @@ BEGIN
     FROM deleted_files;
 
     -- Clean up expired versions
-    WITH deleted_versions AS (
-        UPDATE document_versions
-        SET deleted_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE (
-            auto_delete_at < CURRENT_TIMESTAMP
-            OR EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) > keep_for_sec
-        )
-        AND deleted_at IS NULL
-        RETURNING file_size_bytes
-    )
-    SELECT version_count + COUNT(*),
-           storage_freed + ROUND(COALESCE(SUM(file_size_bytes), 0) / 1048576.0, 2)
-    INTO version_count, storage_freed
-    FROM deleted_versions;
+
 
     RETURN QUERY SELECT file_count, version_count, storage_freed;
 END;
@@ -528,7 +366,7 @@ CREATE TABLE document_comments (
     -- References (exactly one target must be set)
     document_id         UUID             DEFAULT NULL REFERENCES documents (id) ON DELETE CASCADE,
     document_file_id    UUID             DEFAULT NULL REFERENCES document_files (id) ON DELETE CASCADE,
-    document_version_id UUID             DEFAULT NULL REFERENCES document_versions (id) ON DELETE CASCADE,
+
     account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Thread references
@@ -539,10 +377,9 @@ CREATE TABLE document_comments (
     content             TEXT             NOT NULL,
 
     CONSTRAINT document_comments_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
-    CONSTRAINT document_comments_one_target CHECK (
+    CONSTRAINT document_comments_single_target CHECK (
         (document_id IS NOT NULL)::INTEGER +
-        (document_file_id IS NOT NULL)::INTEGER +
-        (document_version_id IS NOT NULL)::INTEGER = 1
+        (document_file_id IS NOT NULL)::INTEGER = 1
     ),
 
     -- Metadata
@@ -572,9 +409,7 @@ CREATE INDEX document_comments_file_idx
     ON document_comments (document_file_id, created_at DESC)
     WHERE document_file_id IS NOT NULL AND deleted_at IS NULL;
 
-CREATE INDEX document_comments_version_idx
-    ON document_comments (document_version_id, created_at DESC)
-    WHERE document_version_id IS NOT NULL AND deleted_at IS NULL;
+
 
 CREATE INDEX document_comments_account_idx
     ON document_comments (account_id, created_at DESC)
@@ -594,12 +429,12 @@ CREATE INDEX document_comments_metadata_idx
 
 -- Add table and column comments
 COMMENT ON TABLE document_comments IS
-    'User comments and discussions about documents, files, or versions, supporting threaded conversations and @mentions.';
+    'User comments and discussions about documents and files, supporting threaded conversations and @mentions.';
 
 COMMENT ON COLUMN document_comments.id IS 'Unique comment identifier';
-COMMENT ON COLUMN document_comments.document_id IS 'Parent document reference (mutually exclusive with file/version)';
-COMMENT ON COLUMN document_comments.document_file_id IS 'Parent document file reference (mutually exclusive with document/version)';
-COMMENT ON COLUMN document_comments.document_version_id IS 'Parent document version reference (mutually exclusive with document/file)';
+COMMENT ON COLUMN document_comments.document_id IS 'Parent document reference (mutually exclusive with file)';
+COMMENT ON COLUMN document_comments.document_file_id IS 'Parent document file reference (mutually exclusive with document)';
+
 COMMENT ON COLUMN document_comments.account_id IS 'Comment author reference';
 COMMENT ON COLUMN document_comments.parent_comment_id IS 'Parent comment for threaded replies (NULL for top-level)';
 COMMENT ON COLUMN document_comments.reply_to_account_id IS 'Account being replied to (@mention)';

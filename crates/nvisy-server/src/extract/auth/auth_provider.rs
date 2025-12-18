@@ -6,7 +6,7 @@
 
 use nvisy_postgres::model::ProjectMember;
 use nvisy_postgres::query::{DocumentRepository, ProjectMemberRepository};
-use nvisy_postgres::{PgConnection, PgError};
+use nvisy_postgres::{PgClient, PgError};
 use uuid::Uuid;
 
 use super::{AuthResult, Permission, TRACING_TARGET_AUTHORIZATION};
@@ -40,7 +40,7 @@ pub trait AuthProvider {
     ///
     /// # Arguments
     ///
-    /// * `conn` - Database connection
+    /// * `pg_client` - Database client
     /// * `project_id` - Project to check access for
     /// * `permission` - Required permission level
     ///
@@ -54,7 +54,7 @@ pub trait AuthProvider {
     #[allow(async_fn_in_trait)]
     async fn check_project_permission(
         &self,
-        conn: &mut PgConnection,
+        pg_client: &PgClient,
         project_id: Uuid,
         permission: Permission,
     ) -> Result<AuthResult, PgError> {
@@ -72,9 +72,9 @@ pub trait AuthProvider {
         }
 
         // Check project membership
-        let member =
-            ProjectMemberRepository::find_project_member(conn, project_id, self.account_id())
-                .await?;
+        let member = pg_client
+            .find_project_member(project_id, self.account_id())
+            .await?;
 
         let Some(member) = member else {
             tracing::warn!(
@@ -138,12 +138,12 @@ pub trait AuthProvider {
     #[allow(async_fn_in_trait)]
     async fn check_document_permission(
         &self,
-        conn: &mut PgConnection,
+        pg_client: &PgClient,
         document_id: Uuid,
         permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Get the document to find its project
-        let document = DocumentRepository::find_document_by_id(conn, document_id).await?;
+        let document = pg_client.find_document_by_id(document_id).await?;
 
         let Some(document) = document else {
             tracing::warn!(
@@ -165,11 +165,11 @@ pub trait AuthProvider {
         if requires_ownership && !is_document_owner && !self.is_admin() {
             // Non-owners need explicit project-level permissions for destructive operations
             return self
-                .check_project_permission(conn, document.project_id, permission)
+                .check_project_permission(pg_client, document.project_id, permission)
                 .await;
         }
 
-        self.check_project_permission(conn, document.project_id, permission)
+        self.check_project_permission(pg_client, document.project_id, permission)
             .await
     }
 
@@ -261,12 +261,12 @@ pub trait AuthProvider {
     #[allow(async_fn_in_trait)]
     async fn authorize_project(
         &self,
-        conn: &mut PgConnection,
+        pg_client: &PgClient,
         project_id: Uuid,
         permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
-            .check_project_permission(conn, project_id, permission)
+            .check_project_permission(pg_client, project_id, permission)
             .await?;
         auth_result.into_result()
     }
@@ -280,7 +280,7 @@ pub trait AuthProvider {
     ///
     /// # Arguments
     ///
-    /// * `conn` - Database connection for verification
+    /// * `pg_client` - Database client for verification
     /// * `document_id` - Target document identifier
     /// * `permission` - Required permission level
     ///
@@ -294,12 +294,12 @@ pub trait AuthProvider {
     #[allow(async_fn_in_trait)]
     async fn authorize_document(
         &self,
-        conn: &mut PgConnection,
+        pg_client: &PgClient,
         document_id: Uuid,
         permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
-            .check_document_permission(conn, document_id, permission)
+            .check_document_permission(pg_client, document_id, permission)
             .await?;
         auth_result.into_result()
     }

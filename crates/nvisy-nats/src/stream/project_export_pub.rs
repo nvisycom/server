@@ -1,5 +1,6 @@
 //! Project export job stream publisher.
 
+use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 
 use super::project_export::ProjectExportJob;
@@ -16,7 +17,7 @@ pub struct ProjectExportPublisher {
 
 impl ProjectExportPublisher {
     /// Create a new project export job publisher
-    pub async fn new(jetstream: &async_nats::jetstream::Context) -> Result<Self> {
+    pub async fn new(jetstream: &Context) -> Result<Self> {
         let publisher = StreamPublisher::new(jetstream, "PROJECT_EXPORTS").await?;
         Ok(Self { publisher })
     }

@@ -1,0 +1,45 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-core"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+[dependencies]
+# Async runtime and utilities
+tokio = { workspace = true, features = ["macros", "time"] }
+futures-util = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
+
+# Error handling
+thiserror = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization for request/response types
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Data types commonly used across AI services
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+jiff = { workspace = true, features = ["serde"] }
+
+# Base64 encoding for data handling
+base64 = { workspace = true, features = [] }

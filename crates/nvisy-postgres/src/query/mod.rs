@@ -16,27 +16,29 @@ pub mod account_notifications;
 pub mod document;
 pub mod document_comments;
 pub mod document_files;
-pub mod document_versions;
 
 pub mod project;
 pub mod project_activity;
 pub mod project_integration;
 pub mod project_invite;
 pub mod project_member;
+pub mod project_pipelines;
+pub mod project_templates;
 
-pub use account::{AccountRepository, AccountStatistics};
-pub use account_action_tokens::{AccountActionTokenRepository, AccountActionTokenStats};
-pub use account_api_tokens::{AccountApiTokenRepository, AccountApiTokenStats};
-pub use account_notifications::{AccountNotificationRepository, NotificationStats};
-pub use document::{DocumentProjectStats, DocumentRepository, DocumentUserStats};
-pub use document_comments::{CommentStats, DocumentCommentRepository};
-pub use document_files::{DocumentFileRepository, DocumentFileStats, ProcessingSummary};
-pub use document_versions::{DocumentVersionRepository, DocumentVersionStats, UserVersionStats};
+pub use account::AccountRepository;
+pub use account_action_tokens::AccountActionTokenRepository;
+pub use account_api_tokens::AccountApiTokenRepository;
+pub use account_notifications::AccountNotificationRepository;
+pub use document::DocumentRepository;
+pub use document_comments::DocumentCommentRepository;
+pub use document_files::DocumentFileRepository;
 pub use project::ProjectRepository;
 pub use project_activity::ProjectActivityRepository;
 pub use project_integration::ProjectIntegrationRepository;
 pub use project_invite::ProjectInviteRepository;
 pub use project_member::ProjectMemberRepository;
+pub use project_pipelines::ProjectPipelineRepository;
+pub use project_templates::ProjectTemplateRepository;
 use serde::{Deserialize, Serialize};
 
 /// Pagination parameters for database queries.

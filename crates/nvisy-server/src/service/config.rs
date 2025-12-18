@@ -2,11 +2,10 @@ use std::path::PathBuf;
 
 use derive_builder::Builder;
 use nvisy_nats::{NatsClient, NatsConfig};
-use nvisy_openrouter::{LlmClient, LlmConfig};
-use nvisy_postgres::{PgClient, PgClientExt, PgConfig};
+use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::{AuthKeysConfig, Result, ServiceError, SessionKeys};
+use crate::service::{AuthKeysConfig, Result, Error, SessionKeys};
 
 /// Default values for configuration options.
 mod defaults {
@@ -27,48 +26,6 @@ mod defaults {
     pub fn auth_encoding_key() -> PathBuf {
         "./private.pem".into()
     }
-
-    /// Default OpenRouter API key for development.
-    pub fn openrouter_api_key() -> String {
-        format!("sk-or-v1-{}", "A".repeat(64))
-    }
-}
-
-/// Wrapper for builder validation that returns String errors.
-fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Result<(), String> {
-    // Validate postgres connection URL format
-    if let Some(endpoint) = &builder.postgres_endpoint {
-        if endpoint.is_empty() {
-            return Err("Postgres connection URL cannot be empty".to_string());
-        }
-
-        if !endpoint.starts_with("postgresql://") && !endpoint.starts_with("postgres://") {
-            return Err(
-                "Postgres connection URL must start with 'postgresql://' or 'postgres://'"
-                    .to_string(),
-            );
-        }
-    }
-
-    // Validate OpenRouter API key
-    if let Some(api_key) = &builder.openrouter_api_key
-        && api_key.is_empty()
-    {
-        return Err("OpenRouter API key cannot be empty".to_string());
-    }
-
-    // Validate NATS URL
-    if let Some(nats_url) = &builder.nats_url {
-        if nats_url.is_empty() {
-            return Err("NATS URL cannot be empty".to_string());
-        }
-
-        if !nats_url.starts_with("nats://") && !nats_url.starts_with("tls://") {
-            return Err("NATS URL must start with 'nats://' or 'tls://'".to_string());
-        }
-    }
-
-    Ok(())
 }
 
 /// App [`state`] configuration.
@@ -79,16 +36,16 @@ fn builder_validate_config(builder: &ServiceConfigBuilder) -> std::result::Resul
 #[builder(
     pattern = "owned",
     setter(into, strip_option, prefix = "with"),
-    build_fn(validate = "builder_validate_config")
+    build_fn(validate = "Self::validate")
 )]
 pub struct ServiceConfig {
-    /// Postgres database connection string.
-    #[builder(default = "defaults::POSTGRES_ENDPOINT.to_string()")]
-    pub postgres_endpoint: String,
+    /// Postgres database configuration.
+    #[builder(default = "PgConfig::new(defaults::POSTGRES_ENDPOINT)")]
+    pub postgres_config: PgConfig,
 
-    /// NATS server URL.
-    #[builder(default = "defaults::NATS_URL.to_string()")]
-    pub nats_url: String,
+    /// NATS configuration.
+    #[builder(default = "NatsConfig::new(defaults::NATS_URL)")]
+    pub nats_config: NatsConfig,
 
     /// File path to the JWT decoding (public) key used for sessions.
     #[builder(default = "defaults::auth_decoding_key()")]
@@ -97,14 +54,6 @@ pub struct ServiceConfig {
     /// File path to the JWT encode (private) key used for sessions.
     #[builder(default = "defaults::auth_encoding_key()")]
     pub auth_encoding_key: PathBuf,
-
-    /// OpenRouter API key.
-    #[builder(default = "defaults::openrouter_api_key()")]
-    pub openrouter_api_key: String,
-
-    /// OpenRouter base URL.
-    #[builder(default)]
-    pub openrouter_base_url: Option<String>,
 }
 
 impl ServiceConfig {
@@ -115,44 +64,22 @@ impl ServiceConfig {
 
     /// Connects to Postgres database and runs migrations.
     pub async fn connect_postgres(&self) -> Result<PgClient> {
-        let pool_config = nvisy_postgres::PgPoolConfig::default();
-        let config = PgConfig::new(self.postgres_endpoint.clone(), pool_config);
-        let pg_client = PgClient::new(config).map_err(|e| {
-            ServiceError::internal("postgres", "Failed to create database client").with_source(e)
+        let pg_client = PgClient::new(self.postgres_config.clone()).map_err(|e| {
+            Error::internal("postgres", "Failed to create database client").with_source(e)
         })?;
 
         pg_client.run_pending_migrations().await.map_err(|e| {
-            ServiceError::internal("postgres", "Failed to apply database migrations").with_source(e)
+            Error::internal("postgres", "Failed to apply database migrations").with_source(e)
         })?;
 
         Ok(pg_client)
     }
 
-    /// Connects to OpenRouter LLM service.
-    pub async fn connect_llm(&self) -> Result<LlmClient> {
-        let config = {
-            let mut builder = LlmConfig::builder();
-            if let Some(base_url) = &self.openrouter_base_url {
-                builder = builder.with_base_url(base_url.clone());
-            }
-            builder.build()
-        }
-        .map_err(|e| {
-            ServiceError::external("OpenRouter", "Failed to build LLM config").with_source(e)
-        })?;
-
-        LlmClient::from_api_key_with_config(&self.openrouter_api_key, config).map_err(|e| {
-            ServiceError::external("OpenRouter", "Failed to create LLM client").with_source(e)
-        })
-    }
-
     /// Connects to NATS server.
-    #[inline]
     pub async fn connect_nats(&self) -> Result<NatsClient> {
-        let config = NatsConfig::new(&self.nats_url);
-        NatsClient::connect(config)
+        NatsClient::connect(self.nats_config.clone())
             .await
-            .map_err(|e| ServiceError::external("NATS", "Failed to connect to NATS").with_source(e))
+            .map_err(|e| Error::external("NATS", "Failed to connect to NATS").with_source(e))
     }
 
     /// Loads authentication keys from configured paths.
@@ -162,16 +89,23 @@ impl ServiceConfig {
     }
 }
 
+impl ServiceConfigBuilder {
+    /// Wrapper for builder validation that returns String errors.
+    fn validate(_builder: &ServiceConfigBuilder) -> Result<(), String> {
+        // NATS config validation is handled by NatsConfig::validate()
+        // Postgres config validation is handled by PgConfig::validate()
+        Ok(())
+    }
+}
+
 #[cfg(debug_assertions)]
 impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
-            postgres_endpoint: defaults::POSTGRES_ENDPOINT.to_string(),
+            postgres_config: PgConfig::new(defaults::POSTGRES_ENDPOINT),
+            nats_config: NatsConfig::new(defaults::NATS_URL),
             auth_decoding_key: defaults::auth_decoding_key(),
             auth_encoding_key: defaults::auth_encoding_key(),
-            openrouter_api_key: defaults::openrouter_api_key(),
-            openrouter_base_url: None,
-            nats_url: defaults::NATS_URL.to_string(),
         }
     }
 }

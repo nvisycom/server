@@ -70,8 +70,6 @@ CREATE TABLE accounts (
     failed_login_attempts INTEGER     NOT NULL DEFAULT 0,
     locked_until          TIMESTAMPTZ DEFAULT NULL,
     password_changed_at   TIMESTAMPTZ DEFAULT NULL,
-    last_login_at         TIMESTAMPTZ DEFAULT NULL,
-    last_login_ip         INET        DEFAULT NULL,
 
     CONSTRAINT accounts_failed_login_attempts_range CHECK (failed_login_attempts BETWEEN 0 AND 10),
     CONSTRAINT accounts_locked_until_future CHECK (locked_until IS NULL OR locked_until > current_timestamp),
@@ -85,7 +83,6 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
     CONSTRAINT accounts_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
     CONSTRAINT accounts_password_changed_after_created CHECK (password_changed_at IS NULL OR password_changed_at >= created_at),
-    CONSTRAINT accounts_last_login_after_created CHECK (last_login_at IS NULL OR last_login_at >= created_at),
 
     -- Business logic constraints
     CONSTRAINT accounts_suspended_not_admin CHECK (NOT (is_suspended AND is_admin))
@@ -126,8 +123,6 @@ COMMENT ON COLUMN accounts.locale IS 'User locale for language and regional form
 COMMENT ON COLUMN accounts.failed_login_attempts IS 'Counter for consecutive failed login attempts (0-10)';
 COMMENT ON COLUMN accounts.locked_until IS 'Temporary account lock expiration after too many failed logins';
 COMMENT ON COLUMN accounts.password_changed_at IS 'Timestamp of last password change for security tracking';
-COMMENT ON COLUMN accounts.last_login_at IS 'Timestamp of most recent successful login';
-COMMENT ON COLUMN accounts.last_login_ip IS 'IP address of most recent successful login for security monitoring';
 COMMENT ON COLUMN accounts.created_at IS 'Timestamp when the account was created';
 COMMENT ON COLUMN accounts.updated_at IS 'Timestamp when the account was last modified (auto-updated by trigger)';
 COMMENT ON COLUMN accounts.deleted_at IS 'Timestamp when the account was soft-deleted (NULL if active)';
@@ -140,6 +135,14 @@ CREATE TABLE account_api_tokens (
 
     -- Account reference
     account_id            UUID        NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Token metadata
+    name                  TEXT        NOT NULL,
+    description           TEXT        DEFAULT NULL,
+
+    CONSTRAINT account_api_tokens_name_not_empty CHECK (trim(name) <> ''),
+    CONSTRAINT account_api_tokens_name_length CHECK (length(name) <= 100),
+    CONSTRAINT account_api_tokens_description_length CHECK (description IS NULL OR length(description) <= 500),
 
     -- Geographic and device tracking
     region_code           CHAR(2)     NOT NULL DEFAULT 'XX',
@@ -206,6 +209,8 @@ COMMENT ON TABLE account_api_tokens IS
 COMMENT ON COLUMN account_api_tokens.access_seq IS 'Unique session identifier used for authentication (UUID)';
 COMMENT ON COLUMN account_api_tokens.refresh_seq IS 'Unique refresh token for extending session without re-authentication (UUID)';
 COMMENT ON COLUMN account_api_tokens.account_id IS 'Reference to the account this session belongs to';
+COMMENT ON COLUMN account_api_tokens.name IS 'Human-readable name for the API token (max 100 characters)';
+COMMENT ON COLUMN account_api_tokens.description IS 'Optional description for the API token (max 500 characters)';
 COMMENT ON COLUMN account_api_tokens.region_code IS 'Two-character region/state code where session originated';
 COMMENT ON COLUMN account_api_tokens.country_code IS 'ISO 3166-1 alpha-2 country code where session originated';
 COMMENT ON COLUMN account_api_tokens.city_name IS 'City name where session originated (if available from IP geolocation)';

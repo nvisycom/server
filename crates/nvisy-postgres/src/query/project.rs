@@ -1,54 +1,114 @@
 //! Project repository for managing main project operations.
 
+use std::future::Future;
+
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{NewProject, Project, UpdateProject};
 use crate::types::{ProjectStatus, ProjectVisibility};
-use crate::{PgError, PgResult, schema};
+use crate::{PgClient, PgError, PgResult, schema};
 
-/// Repository for main project table operations.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ProjectRepository;
+/// Repository for project database operations.
+///
+/// Handles project lifecycle management including creation, updates, status changes,
+/// archiving, and search functionality. Supports visibility controls and comprehensive
+/// filtering capabilities.
+pub trait ProjectRepository {
+    /// Creates a new project.
+    fn create_project(&self, project: NewProject)
+    -> impl Future<Output = PgResult<Project>> + Send;
 
-impl ProjectRepository {
-    /// Creates a new project repository instance.
-    pub fn new() -> Self {
-        Self
-    }
+    /// Finds a project by ID, excluding soft-deleted projects.
+    fn find_project_by_id(
+        &self,
+        project_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<Project>>> + Send;
 
-    /// Creates a new project in the database.
-    pub async fn create_project(
-        conn: &mut AsyncPgConnection,
-        project: NewProject,
-    ) -> PgResult<Project> {
+    /// Finds projects created by a user, ordered by creation date (newest first).
+    fn find_projects_by_creator(
+        &self,
+        creator_id: Uuid,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Project>>> + Send;
+
+    /// Updates a project with partial changes.
+    fn update_project(
+        &self,
+        project_id: Uuid,
+        changes: UpdateProject,
+    ) -> impl Future<Output = PgResult<Project>> + Send;
+
+    /// Soft deletes a project by setting the deletion timestamp.
+    fn delete_project(&self, project_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+
+    /// Archives a project (changes status from Active to Archived).
+    fn archive_project(&self, project_id: Uuid) -> impl Future<Output = PgResult<Project>> + Send;
+
+    /// Unarchives a project (changes status from Archived to Active).
+    fn unarchive_project(&self, project_id: Uuid)
+    -> impl Future<Output = PgResult<Project>> + Send;
+
+    /// Lists projects with optional visibility and status filters, ordered by update time.
+    fn list_projects(
+        &self,
+        visibility_filter: Option<ProjectVisibility>,
+        status_filter: Option<ProjectStatus>,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Project>>> + Send;
+
+    /// Searches public projects by name or description (case-insensitive).
+    fn search_projects(
+        &self,
+        search_query: &str,
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Project>>> + Send;
+
+    /// Finds projects with overlapping tags (matches any tag in the list).
+    fn find_projects_by_tags(
+        &self,
+        search_tags: &[String],
+        pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<Project>>> + Send;
+
+    /// Gets project statistics: (member_count, pending_invites, activity_count).
+    fn get_project_stats(
+        &self,
+        project_id: Uuid,
+    ) -> impl Future<Output = PgResult<(i64, i64, i64)>> + Send;
+
+    /// Counts total projects created by a user.
+    fn get_user_project_count(&self, user_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
+}
+
+/// Default implementation of ProjectRepository for PgClient.
+impl ProjectRepository for PgClient {
+    async fn create_project(&self, project: NewProject) -> PgResult<Project> {
         use schema::projects;
 
+        let mut conn = self.get_connection().await?;
         let project = diesel::insert_into(projects::table)
             .values(&project)
             .returning(Project::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project)
     }
 
-    /// Finds a project by its ID.
-    pub async fn find_project_by_id(
-        conn: &mut AsyncPgConnection,
-        project_id: Uuid,
-    ) -> PgResult<Option<Project>> {
+    async fn find_project_by_id(&self, project_id: Uuid) -> PgResult<Option<Project>> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let project = projects
             .filter(id.eq(project_id))
             .filter(deleted_at.is_null())
             .select(Project::as_select())
-            .first(conn)
+            .first(&mut conn)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -56,14 +116,14 @@ impl ProjectRepository {
         Ok(project)
     }
 
-    /// Finds projects created by a specific user.
-    pub async fn find_projects_by_creator(
-        conn: &mut AsyncPgConnection,
+    async fn find_projects_by_creator(
+        &self,
         creator_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Project>> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let project_list = projects
             .filter(created_by.eq(creator_id))
             .filter(deleted_at.is_null())
@@ -71,55 +131,48 @@ impl ProjectRepository {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project_list)
     }
 
-    /// Updates a project.
-    pub async fn update_project(
-        conn: &mut AsyncPgConnection,
-        project_id: Uuid,
-        changes: UpdateProject,
-    ) -> PgResult<Project> {
+    async fn update_project(&self, project_id: Uuid, changes: UpdateProject) -> PgResult<Project> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let project = diesel::update(projects)
             .filter(id.eq(project_id))
             .filter(deleted_at.is_null())
             .set(&changes)
             .returning(Project::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project)
     }
 
-    /// Soft deletes a project.
-    pub async fn delete_project(conn: &mut AsyncPgConnection, project_id: Uuid) -> PgResult<()> {
+    async fn delete_project(&self, project_id: Uuid) -> PgResult<()> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         diesel::update(projects)
             .filter(id.eq(project_id))
             .filter(deleted_at.is_null())
             .set(deleted_at.eq(Some(OffsetDateTime::now_utc())))
-            .execute(conn)
+            .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(())
     }
 
-    /// Archives a project.
-    pub async fn archive_project(
-        conn: &mut AsyncPgConnection,
-        project_id: Uuid,
-    ) -> PgResult<Project> {
+    async fn archive_project(&self, project_id: Uuid) -> PgResult<Project> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let project = diesel::update(projects)
             .filter(id.eq(project_id))
             .filter(deleted_at.is_null())
@@ -129,20 +182,17 @@ impl ProjectRepository {
                 archived_at.eq(Some(OffsetDateTime::now_utc())),
             ))
             .returning(Project::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project)
     }
 
-    /// Unarchives a project.
-    pub async fn unarchive_project(
-        conn: &mut AsyncPgConnection,
-        project_id: Uuid,
-    ) -> PgResult<Project> {
+    async fn unarchive_project(&self, project_id: Uuid) -> PgResult<Project> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let project = diesel::update(projects)
             .filter(id.eq(project_id))
             .filter(deleted_at.is_null())
@@ -152,22 +202,22 @@ impl ProjectRepository {
                 archived_at.eq(None::<OffsetDateTime>),
             ))
             .returning(Project::as_returning())
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project)
     }
 
-    /// Lists projects with pagination and optional filtering.
-    pub async fn list_projects(
-        conn: &mut AsyncPgConnection,
+    async fn list_projects(
+        &self,
         visibility_filter: Option<ProjectVisibility>,
         status_filter: Option<ProjectStatus>,
         pagination: Pagination,
     ) -> PgResult<Vec<Project>> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let mut query = projects.filter(deleted_at.is_null()).into_boxed();
 
         if let Some(vis) = visibility_filter {
@@ -183,21 +233,21 @@ impl ProjectRepository {
             .order(updated_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project_list)
     }
 
-    /// Searches projects by name or description.
-    pub async fn search_projects(
-        conn: &mut AsyncPgConnection,
+    async fn search_projects(
+        &self,
         search_query: &str,
         pagination: Pagination,
     ) -> PgResult<Vec<Project>> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let search_pattern = format!("%{}%", search_query);
 
         let project_list = projects
@@ -212,21 +262,21 @@ impl ProjectRepository {
             .order(updated_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project_list)
     }
 
-    /// Finds projects by tags.
-    pub async fn find_projects_by_tags(
-        conn: &mut AsyncPgConnection,
+    async fn find_projects_by_tags(
+        &self,
         search_tags: &[String],
         pagination: Pagination,
     ) -> PgResult<Vec<Project>> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let project_list = projects
             .filter(tags.overlaps_with(search_tags))
             .filter(deleted_at.is_null())
@@ -235,26 +285,24 @@ impl ProjectRepository {
             .order(updated_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(conn)
+            .load(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(project_list)
     }
 
-    /// Gets basic project statistics.
-    pub async fn get_project_stats(
-        conn: &mut AsyncPgConnection,
-        project_id: Uuid,
-    ) -> PgResult<(i64, i64, i64)> {
+    async fn get_project_stats(&self, project_id: Uuid) -> PgResult<(i64, i64, i64)> {
         use schema::{project_invites, project_members};
+
+        let mut conn = self.get_connection().await?;
 
         // Count active members
         let member_count: i64 = project_members::table
             .filter(project_members::project_id.eq(project_id))
             .filter(project_members::is_active.eq(true))
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -263,7 +311,7 @@ impl ProjectRepository {
             .filter(project_invites::project_id.eq(project_id))
             .filter(project_invites::invite_status.eq(crate::types::InviteStatus::Pending))
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
@@ -273,60 +321,18 @@ impl ProjectRepository {
         Ok((member_count, pending_invites, activity_count))
     }
 
-    /// Gets the number of projects created by a user.
-    pub async fn get_user_project_count(
-        conn: &mut AsyncPgConnection,
-        user_id: Uuid,
-    ) -> PgResult<i64> {
+    async fn get_user_project_count(&self, user_id: Uuid) -> PgResult<i64> {
         use schema::projects::dsl::*;
 
+        let mut conn = self.get_connection().await?;
         let count: i64 = projects
             .filter(created_by.eq(user_id))
             .filter(deleted_at.is_null())
             .count()
-            .get_result(conn)
+            .get_result(&mut conn)
             .await
             .map_err(PgError::from)?;
 
         Ok(count)
-    }
-
-    /// Gets project creation statistics for a user.
-    pub async fn get_user_project_stats(
-        conn: &mut AsyncPgConnection,
-        user_id: Uuid,
-    ) -> PgResult<(i64, i64, i64)> {
-        use schema::projects::dsl::*;
-
-        // Total projects created
-        let total_created: i64 = projects
-            .filter(created_by.eq(user_id))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Active projects
-        let active_count: i64 = projects
-            .filter(created_by.eq(user_id))
-            .filter(status.eq(ProjectStatus::Active))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Archived projects
-        let archived_count: i64 = projects
-            .filter(created_by.eq(user_id))
-            .filter(status.eq(ProjectStatus::Archived))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok((total_created, active_count, archived_count))
     }
 }

@@ -149,8 +149,6 @@ async fn check_event_permission(
     ctx: &WsContext,
     msg: &ProjectWsMessage,
 ) -> Result<()> {
-    let mut conn = pg_client.get_connection().await?;
-
     // Determine required permission based on message type
     let permission = match msg {
         // Read-only events - require ViewDocuments permission
@@ -185,9 +183,9 @@ async fn check_event_permission(
     // Fetch project membership directly
     use nvisy_postgres::query::ProjectMemberRepository;
 
-    let member =
-        ProjectMemberRepository::find_project_member(&mut conn, ctx.project_id, ctx.account_id)
-            .await?;
+    let member = pg_client
+        .find_project_member(ctx.project_id, ctx.account_id)
+        .await?;
 
     // Check if member exists and has the required permission
     match member {
@@ -430,35 +428,24 @@ async fn handle_project_websocket(
     );
 
     // Fetch account display name
-    let display_name = match pg_client.get_connection().await {
-        Ok(mut conn) => match AccountRepository::find_account_by_id(&mut conn, account_id).await {
-            Ok(Some(account)) => account.display_name,
-            Ok(None) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    connection_id = %ctx.connection_id,
-                    account_id = %account_id,
-                    "account not found, aborting connection"
-                );
-                return;
-            }
-            Err(e) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    connection_id = %ctx.connection_id,
-                    account_id = %account_id,
-                    error = %e,
-                    "failed to fetch account, aborting connection"
-                );
-                return;
-            }
-        },
+    let display_name = match pg_client.find_account_by_id(account_id).await {
+        Ok(Some(account)) => account.display_name,
+        Ok(None) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                account_id = %account_id,
+                "account not found, aborting connection"
+            );
+            return;
+        }
         Err(e) => {
             tracing::error!(
                 target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
+                account_id = %account_id,
                 error = %e,
-                "failed to get database connection, aborting"
+                "failed to fetch account, aborting connection"
             );
             return;
         }
@@ -808,18 +795,14 @@ async fn project_websocket_handler(
     );
 
     // Verify project exists and user has basic access
-    let mut conn = pg_client.get_connection().await?;
 
     // Check if user has minimum permission to view documents
     auth_claims
-        .authorize_project(&mut conn, project_id, Permission::ViewDocuments)
+        .authorize_project(&pg_client, project_id, Permission::ViewDocuments)
         .await?;
 
     // Verify the project exists
-    if ProjectRepository::find_project_by_id(&mut conn, project_id)
-        .await?
-        .is_none()
-    {
+    if pg_client.find_project_by_id(project_id).await?.is_none() {
         return Err(ErrorKind::NotFound.with_resource("project"));
     }
 
