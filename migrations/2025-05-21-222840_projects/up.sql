@@ -624,3 +624,157 @@ $$;
 
 COMMENT ON FUNCTION cleanup_expired_invites() IS
     'Marks expired project invitations as expired and returns count of updated records.';
+
+-- Create project pipelines table - Processing pipelines configuration
+CREATE TABLE project_pipelines (
+    -- Primary identifiers
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    project_id          UUID             NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+
+    -- Pipeline identity
+    display_name        TEXT             NOT NULL,
+    description         TEXT             DEFAULT NULL,
+
+    CONSTRAINT project_pipelines_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 64),
+    CONSTRAINT project_pipelines_description_length CHECK (length(description) <= 1000),
+
+    -- Pipeline configuration
+    pipeline_type       TEXT             NOT NULL DEFAULT 'document',
+    is_active           BOOLEAN          NOT NULL DEFAULT TRUE,
+    is_default          BOOLEAN          NOT NULL DEFAULT FALSE,
+
+    CONSTRAINT project_pipelines_type_format CHECK (pipeline_type ~ '^[a-z_]+$'),
+
+    -- Configuration and settings
+    configuration       JSONB            NOT NULL DEFAULT '{}',
+    settings            JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT project_pipelines_configuration_size CHECK (length(configuration::TEXT) BETWEEN 2 AND 16384),
+    CONSTRAINT project_pipelines_settings_size CHECK (length(settings::TEXT) BETWEEN 2 AND 8192),
+
+    -- Audit and ownership
+    created_by          UUID             NOT NULL REFERENCES accounts (id),
+
+    -- Lifecycle timestamps
+    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    deleted_at          TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT project_pipelines_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT project_pipelines_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
+    CONSTRAINT project_pipelines_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
+);
+
+-- Set up automatic updated_at trigger
+SELECT setup_updated_at('project_pipelines');
+
+-- Create indexes for project pipelines
+CREATE INDEX project_pipelines_project_idx
+    ON project_pipelines (project_id, is_active, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX project_pipelines_type_idx
+    ON project_pipelines (pipeline_type, is_active)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX project_pipelines_default_unique_idx
+    ON project_pipelines (project_id, pipeline_type)
+    WHERE is_default = TRUE AND deleted_at IS NULL;
+
+-- Add table and column comments
+COMMENT ON TABLE project_pipelines IS
+    'Processing pipelines configuration for projects.';
+
+COMMENT ON COLUMN project_pipelines.id IS 'Unique pipeline identifier';
+COMMENT ON COLUMN project_pipelines.project_id IS 'Reference to the project';
+COMMENT ON COLUMN project_pipelines.display_name IS 'Human-readable pipeline name (3-64 chars)';
+COMMENT ON COLUMN project_pipelines.description IS 'Pipeline description (up to 1000 chars)';
+COMMENT ON COLUMN project_pipelines.pipeline_type IS 'Type of processing pipeline';
+COMMENT ON COLUMN project_pipelines.is_active IS 'Pipeline active status';
+COMMENT ON COLUMN project_pipelines.is_default IS 'Default pipeline for this type in project';
+COMMENT ON COLUMN project_pipelines.configuration IS 'Pipeline configuration (JSON, 2B-16KB)';
+COMMENT ON COLUMN project_pipelines.settings IS 'Pipeline settings (JSON, 2B-8KB)';
+COMMENT ON COLUMN project_pipelines.created_by IS 'Account that created the pipeline';
+COMMENT ON COLUMN project_pipelines.created_at IS 'Timestamp when pipeline was created';
+COMMENT ON COLUMN project_pipelines.updated_at IS 'Timestamp when pipeline was last modified';
+COMMENT ON COLUMN project_pipelines.deleted_at IS 'Soft deletion timestamp';
+
+-- Create project templates table - Reusable project templates
+CREATE TABLE project_templates (
+    -- Primary identifiers
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Template identity
+    display_name        TEXT             NOT NULL,
+    description         TEXT             DEFAULT NULL,
+
+    CONSTRAINT project_templates_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 64),
+    CONSTRAINT project_templates_description_length CHECK (length(description) <= 2000),
+
+    -- Template configuration
+    category            TEXT             NOT NULL DEFAULT 'general',
+    is_public           BOOLEAN          NOT NULL DEFAULT FALSE,
+    is_featured         BOOLEAN          NOT NULL DEFAULT FALSE,
+
+    CONSTRAINT project_templates_category_format CHECK (category ~ '^[a-z_]+$'),
+
+    -- Template data
+    template_data       JSONB            NOT NULL DEFAULT '{}',
+    default_settings    JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT project_templates_data_size CHECK (length(template_data::TEXT) BETWEEN 2 AND 32768),
+    CONSTRAINT project_templates_settings_size CHECK (length(default_settings::TEXT) BETWEEN 2 AND 8192),
+
+    -- Usage statistics
+    usage_count         INTEGER          NOT NULL DEFAULT 0,
+
+    CONSTRAINT project_templates_usage_count_min CHECK (usage_count >= 0),
+
+    -- Audit and ownership
+    created_by          UUID             NOT NULL REFERENCES accounts (id),
+
+    -- Lifecycle timestamps
+    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    deleted_at          TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT project_templates_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT project_templates_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
+    CONSTRAINT project_templates_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
+);
+
+-- Set up automatic updated_at trigger
+SELECT setup_updated_at('project_templates');
+
+-- Create indexes for project templates
+CREATE INDEX project_templates_category_idx
+    ON project_templates (category, is_public, is_featured)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX project_templates_public_idx
+    ON project_templates (is_public, usage_count DESC, created_at DESC)
+    WHERE deleted_at IS NULL AND is_public = TRUE;
+
+CREATE INDEX project_templates_creator_idx
+    ON project_templates (created_by, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+-- Add table and column comments
+COMMENT ON TABLE project_templates IS
+    'Reusable templates for creating and configuring projects.';
+
+COMMENT ON COLUMN project_templates.id IS 'Unique template identifier';
+COMMENT ON COLUMN project_templates.display_name IS 'Human-readable template name (3-64 chars)';
+COMMENT ON COLUMN project_templates.description IS 'Template description (up to 2000 chars)';
+COMMENT ON COLUMN project_templates.category IS 'Template category/type';
+COMMENT ON COLUMN project_templates.is_public IS 'Whether template is publicly available';
+COMMENT ON COLUMN project_templates.is_featured IS 'Whether template is featured/recommended';
+COMMENT ON COLUMN project_templates.template_data IS 'Template configuration data (JSON, 2B-32KB)';
+COMMENT ON COLUMN project_templates.default_settings IS 'Default project settings (JSON, 2B-8KB)';
+COMMENT ON COLUMN project_templates.usage_count IS 'Number of times template has been used';
+COMMENT ON COLUMN project_templates.created_by IS 'Account that created the template';
+COMMENT ON COLUMN project_templates.created_at IS 'Timestamp when template was created';
+COMMENT ON COLUMN project_templates.updated_at IS 'Timestamp when template was last modified';
+COMMENT ON COLUMN project_templates.deleted_at IS 'Soft deletion timestamp';

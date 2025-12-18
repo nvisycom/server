@@ -9,7 +9,6 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewDocumentComment;
 use nvisy_postgres::query::{
     DocumentCommentRepository, DocumentFileRepository, DocumentRepository,
-    DocumentVersionRepository,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
@@ -750,8 +749,8 @@ async fn create_version_comment(
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
 ) -> Result<(StatusCode, Json<DocumentComment>)> {
     // Verify version exists and get document_id
-    let Some(version) = pg_client
-        .find_document_version_by_id(path_params.version_id)
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.version_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -760,9 +759,9 @@ async fn create_version_comment(
     };
 
     // Verify user has access to the document
-    let Some(_document) = pg_client.find_document_by_id(version.document_id).await? else {
+    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
         return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", version.document_id))
+            .with_message(format!("Document not found: {}", file.document_id))
             .with_resource("document"));
     };
 
@@ -774,7 +773,7 @@ async fn create_version_comment(
                 .with_resource("comment"));
         };
 
-        if parent_comment.document_version_id != Some(path_params.version_id) {
+        if parent_comment.document_file_id != Some(path_params.version_id) {
             return Err(ErrorKind::BadRequest
                 .with_message("Parent comment must belong to the same version")
                 .with_resource("comment"));
@@ -782,7 +781,7 @@ async fn create_version_comment(
     }
 
     let new_comment = NewDocumentComment {
-        document_version_id: Some(path_params.version_id),
+        document_file_id: Some(path_params.version_id),
         account_id: auth_claims.account_id,
         parent_comment_id: request.parent_comment_id,
         reply_to_account_id: request.reply_to_account_id,
@@ -812,8 +811,8 @@ async fn list_version_comments(
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<DocumentComments>)> {
     // Verify version exists and get document_id
-    let Some(version) = pg_client
-        .find_document_version_by_id(path_params.version_id)
+    let Some(file) = pg_client
+        .find_document_file_by_id(path_params.version_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -822,14 +821,14 @@ async fn list_version_comments(
     };
 
     // Verify user has access to the document
-    let Some(_document) = pg_client.find_document_by_id(version.document_id).await? else {
+    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
         return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", version.document_id))
+            .with_message(format!("Document not found: {}", file.document_id))
             .with_resource("document"));
     };
 
     let comments = pg_client
-        .find_comments_by_version(path_params.version_id, pagination.into())
+        .find_comments_by_file(path_params.version_id, pagination.into())
         .await?;
 
     tracing::debug!(

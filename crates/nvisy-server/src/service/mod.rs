@@ -43,19 +43,19 @@ impl ServiceState {
     ///
     /// Connects to all external services and loads required resources.
     pub async fn from_config(
-        config: ServiceConfig,
+        service_config: ServiceConfig,
         ocr_service: OcrService,
         vlm_service: VlmService,
     ) -> Result<Self> {
         let service_state = Self {
-            pg_client: config.connect_postgres().await?,
-            nats_client: config.connect_nats().await?,
+            pg_client: service_config.connect_postgres().await?,
+            nats_client: service_config.connect_nats().await?,
             ocr_client: ocr_service,
             vlm_client: vlm_service,
 
             auth_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
-            auth_keys: config.load_auth_keys().await?,
+            auth_keys: service_config.load_auth_keys().await?,
             health_cache: HealthCache::new(),
         };
 

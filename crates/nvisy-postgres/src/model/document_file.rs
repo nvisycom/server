@@ -18,9 +18,13 @@ pub struct DocumentFile {
     /// Unique file identifier.
     pub id: Uuid,
     /// Reference to the document this file belongs to.
-    pub document_id: Uuid,
+    pub document_id: Option<Uuid>,
     /// Reference to the account that owns this file.
     pub account_id: Uuid,
+    /// Parent file reference for hierarchical relationships.
+    pub parent_id: Option<Uuid>,
+    /// Whether file content has been indexed for search.
+    pub is_indexed: bool,
     /// Human-readable file name for display.
     pub display_name: String,
     /// Original filename when uploaded.
@@ -63,9 +67,13 @@ pub struct DocumentFile {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentFile {
     /// Document ID.
-    pub document_id: Uuid,
+    pub document_id: Option<Uuid>,
     /// Account ID.
     pub account_id: Uuid,
+    /// Parent file ID.
+    pub parent_id: Option<Uuid>,
+    /// Is indexed flag.
+    pub is_indexed: Option<bool>,
     /// Display name.
     pub display_name: Option<String>,
     /// Original filename.
@@ -101,8 +109,14 @@ pub struct NewDocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateDocumentFile {
+    /// Document ID
+    pub document_id: Option<Option<Uuid>>,
     /// Display name
     pub display_name: Option<String>,
+    /// Parent file ID
+    pub parent_id: Option<Option<Uuid>>,
+    /// Is indexed flag
+    pub is_indexed: Option<bool>,
     /// Require mode
     pub require_mode: Option<RequireMode>,
     /// Processing priority

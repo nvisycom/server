@@ -9,8 +9,8 @@
 //! use nvisy_postgres::prelude::*;
 //!
 //! # async fn example() -> PgResult<()> {
-//! let config = PgConfig::from_url("postgresql://localhost/mydb")?;
-//! let client = PgClient::new(config).await?;
+//! let config = PgConfig::new("postgresql://localhost/mydb");
+//! let client = PgClient::new(config)?;
 //! # Ok(())
 //! # }
 //! ```

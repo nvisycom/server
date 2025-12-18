@@ -22,8 +22,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
-# OpenAPI documentation support - enables ToSchema derives on database enums
-# This allows database types to be used directly in API documentation without
+# OpenAPI documentation support: enables ToSchema derives on Postgres types
+# This allows Postgres types to be used directly in API documentation without
 # manual schema implementations, while keeping the dependency optional
 utoipa = ["dep:utoipa"]
 

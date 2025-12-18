@@ -17,8 +17,6 @@ pub struct DocumentComment {
     pub document_id: Option<Uuid>,
     /// ID of the document file (if comment is on a file).
     pub document_file_id: Option<Uuid>,
-    /// ID of the document version (if comment is on a version).
-    pub document_version_id: Option<Uuid>,
     /// ID of the account that created the comment.
     pub account_id: Uuid,
     /// Parent comment ID for threaded replies.
@@ -39,7 +37,6 @@ impl From<model::DocumentComment> for DocumentComment {
             comment_id: comment.id,
             document_id: comment.document_id,
             document_file_id: comment.document_file_id,
-            document_version_id: comment.document_version_id,
             account_id: comment.account_id,
             parent_comment_id: comment.parent_comment_id,
             reply_to_account_id: comment.reply_to_account_id,

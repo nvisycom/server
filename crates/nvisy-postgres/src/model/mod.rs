@@ -10,13 +10,14 @@ pub mod account_notification;
 pub mod document;
 pub mod document_comment;
 pub mod document_file;
-pub mod document_version;
 
 pub mod project;
 pub mod project_activity;
 pub mod project_integration;
 pub mod project_invite;
 pub mod project_member;
+pub mod project_pipeline;
+pub mod project_template;
 
 // Re-export core PostgreSQL model types
 
@@ -35,7 +36,6 @@ pub use document_comment::{
     CommentTarget, DocumentComment, NewDocumentComment, UpdateDocumentComment,
 };
 pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-pub use document_version::{DocumentVersion, NewDocumentVersion, UpdateDocumentVersion};
 // Project models
 pub use project::{NewProject, Project, UpdateProject};
 pub use project_activity::{NewProjectActivity, ProjectActivity};
@@ -44,3 +44,5 @@ pub use project_integration::{
 };
 pub use project_invite::{NewProjectInvite, ProjectInvite, UpdateProjectInvite};
 pub use project_member::{NewProjectMember, ProjectMember, UpdateProjectMember};
+pub use project_pipeline::{NewProjectPipeline, ProjectPipeline, UpdateProjectPipeline};
+pub use project_template::{NewProjectTemplate, ProjectTemplate, UpdateProjectTemplate};

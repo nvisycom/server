@@ -1,5 +1,6 @@
 //! Project import job stream subscriber.
 
+use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 
 use super::project_import::ProjectImportJob;
@@ -16,10 +17,7 @@ pub struct ProjectImportSubscriber {
 
 impl ProjectImportSubscriber {
     /// Create a new project import job subscriber.
-    pub async fn new(
-        jetstream: &async_nats::jetstream::Context,
-        consumer_name: &str,
-    ) -> Result<Self> {
+    pub async fn new(jetstream: &Context, consumer_name: &str) -> Result<Self> {
         let subscriber = StreamSubscriber::new(jetstream, "PROJECT_IMPORTS", consumer_name).await?;
         Ok(Self { subscriber })
     }

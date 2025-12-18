@@ -38,12 +38,6 @@ pub trait DocumentCommentRepository {
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
-    fn find_comments_by_version(
-        &self,
-        version_id: Uuid,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
-
     fn find_comment_replies(
         &self,
         parent_comment_id: Uuid,
@@ -59,12 +53,6 @@ pub trait DocumentCommentRepository {
     fn find_top_level_comments_by_file(
         &self,
         file_id: Uuid,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
-
-    fn find_top_level_comments_by_version(
-        &self,
-        version_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
@@ -94,11 +82,6 @@ pub trait DocumentCommentRepository {
     ) -> impl Future<Output = PgResult<i64>> + Send;
 
     fn count_comments_by_file(&self, file_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
-
-    fn count_comments_by_version(
-        &self,
-        version_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
 
     fn count_comment_replies(
         &self,
@@ -245,46 +228,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comments)
     }
 
-    /// Finds all comments associated with a specific document version.
-    ///
-    /// Retrieves comments targeted at a specific version of a document,
-    /// enabling version-specific discussions and historical feedback tracking.
-    /// This supports version-controlled collaboration workflows where
-    /// feedback may be tied to particular content iterations.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the query
-    /// * `version_id` - UUID of the document version whose comments to retrieve
-    /// * `pagination` - Pagination parameters (limit and offset)
-    ///
-    /// # Returns
-    ///
-    /// A vector of active `DocumentComment` entries for the version, ordered by
-    /// creation time (most recent first), or a database error if the query fails.
-    async fn find_comments_by_version(
-        &self,
-        version_id: Uuid,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentComment>> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::document_comments::{self, dsl};
-
-        let comments = document_comments::table
-            .filter(dsl::document_version_id.eq(version_id))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentComment::as_select())
-            .load(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(comments)
-    }
-
     /// Finds all replies to a specific comment for threaded discussions.
     ///
     /// Retrieves child comments that directly reply to a parent comment,
@@ -394,47 +337,6 @@ impl DocumentCommentRepository for PgClient {
 
         let comments = document_comments::table
             .filter(dsl::document_file_id.eq(file_id))
-            .filter(dsl::parent_comment_id.is_null())
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentComment::as_select())
-            .load(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(comments)
-    }
-
-    /// Finds top-level comments for a document version excluding replies.
-    ///
-    /// Retrieves only parent-level comments for a specific document version,
-    /// excluding threaded replies to present a clean version-specific discussion
-    /// overview. This supports version-controlled feedback workflows where
-    /// discussions may be tied to particular content iterations.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the query
-    /// * `version_id` - UUID of the document version whose top-level comments to retrieve
-    /// * `pagination` - Pagination parameters (limit and offset)
-    ///
-    /// # Returns
-    ///
-    /// A vector of top-level `DocumentComment` entries for the version ordered by
-    /// creation time (most recent first), or a database error if the query fails.
-    async fn find_top_level_comments_by_version(
-        &self,
-        version_id: Uuid,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentComment>> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::document_comments::{self, dsl};
-
-        let comments = document_comments::table
-            .filter(dsl::document_version_id.eq(version_id))
             .filter(dsl::parent_comment_id.is_null())
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
@@ -654,37 +556,6 @@ impl DocumentCommentRepository for PgClient {
 
         let count = document_comments::table
             .filter(dsl::document_file_id.eq(file_id))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    /// Counts total active comments for a specific document version.
-    ///
-    /// Calculates the total number of active comments associated with a
-    /// document version, providing version-specific discussion activity
-    /// metrics and supporting version-controlled feedback analysis.
-    ///
-    /// # Arguments
-    ///
-    /// * `conn` - Active database connection for the query
-    /// * `version_id` - UUID of the document version to count comments for
-    ///
-    /// # Returns
-    ///
-    /// The total count of active comments for the version,
-    /// or a database error if the query fails.
-    async fn count_comments_by_version(&self, version_id: Uuid) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::document_comments::{self, dsl};
-
-        let count = document_comments::table
-            .filter(dsl::document_version_id.eq(version_id))
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(&mut conn)

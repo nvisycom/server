@@ -1,5 +1,6 @@
 //! Project event stream subscriber for real-time WebSocket communication.
 
+use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 use uuid::Uuid;
 
@@ -22,10 +23,7 @@ impl ProjectEventSubscriber {
     ///
     /// * `jetstream` - JetStream context
     /// * `consumer_name` - Unique name for this consumer (e.g., "server-instance-1")
-    pub async fn new(
-        jetstream: &async_nats::jetstream::Context,
-        consumer_name: &str,
-    ) -> Result<Self> {
+    pub async fn new(jetstream: &Context, consumer_name: &str) -> Result<Self> {
         let subscriber = StreamSubscriber::new(jetstream, "PROJECT_EVENTS", consumer_name).await?;
         Ok(Self { subscriber })
     }
@@ -34,7 +32,7 @@ impl ProjectEventSubscriber {
     ///
     /// Only receives events for the specified project ID.
     pub async fn new_for_project(
-        jetstream: &async_nats::jetstream::Context,
+        jetstream: &Context,
         consumer_name: &str,
         project_id: Uuid,
     ) -> Result<Self> {

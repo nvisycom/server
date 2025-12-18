@@ -1,5 +1,6 @@
 //! Document job stream subscriber.
 
+use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 
 use super::document_job::DocumentJob;
@@ -16,10 +17,7 @@ pub struct DocumentJobSubscriber {
 
 impl DocumentJobSubscriber {
     /// Create a new document job subscriber.
-    pub async fn new(
-        jetstream: &async_nats::jetstream::Context,
-        consumer_name: &str,
-    ) -> Result<Self> {
+    pub async fn new(jetstream: &Context, consumer_name: &str) -> Result<Self> {
         let subscriber = StreamSubscriber::new(jetstream, "DOCUMENT_JOBS", consumer_name).await?;
         Ok(Self { subscriber })
     }

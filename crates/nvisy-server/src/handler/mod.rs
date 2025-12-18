@@ -8,13 +8,15 @@ mod api_tokens;
 mod authentication;
 mod document_comments;
 mod document_files;
-mod document_versions;
+
 mod documents;
 mod error;
 mod monitors;
 mod project_integration;
 mod project_invites;
 mod project_members;
+mod project_pipelines;
+mod project_templates;
 mod project_websocket;
 mod projects;
 pub mod request;
@@ -50,11 +52,12 @@ fn private_routes(
         .merge(project_integration::routes())
         .merge(project_invites::routes())
         .merge(project_members::routes())
+        .merge(project_pipelines::routes())
+        .merge(project_templates::routes())
         .merge(project_websocket::routes())
         .merge(documents::routes())
         .merge(document_comments::routes())
-        .merge(document_files::routes())
-        .merge(document_versions::routes());
+        .merge(document_files::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);

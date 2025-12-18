@@ -102,7 +102,7 @@ impl ConstraintViolation {
     /// # Examples
     ///
     /// ```
-    /// use nvisy_postgres::types::constraints::ConstraintViolation;
+    /// use nvisy_postgres::types::ConstraintViolation;
     ///
     /// let violation = ConstraintViolation::new("accounts_email_address_unique_idx");
     /// assert!(violation.is_some());

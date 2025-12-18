@@ -57,6 +57,18 @@ pub enum Permission {
     /// Can create, modify, and manage project integrations.
     ManageIntegrations,
 
+    // Pipeline permissions
+    /// Can view project pipelines.
+    ViewPipelines,
+    /// Can create, modify, and manage project pipelines.
+    ManagePipelines,
+
+    // Template permissions
+    /// Can view project templates.
+    ViewTemplates,
+    /// Can create, modify, and manage project templates.
+    ManageTemplates,
+
     // Project settings and configuration
     /// Can view project settings.
     ViewSettings,
@@ -84,6 +96,8 @@ impl Permission {
             | Self::ViewFiles
             | Self::ViewMembers
             | Self::ViewIntegrations
+            | Self::ViewPipelines
+            | Self::ViewTemplates
             | Self::ViewSettings => ProjectRole::Viewer,
 
             // Editor-level permissions
@@ -98,6 +112,8 @@ impl Permission {
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageIntegrations
+            | Self::ManagePipelines
+            | Self::ManageTemplates
             | Self::ManageSettings => ProjectRole::Admin,
 
             // Owner-only permissions

@@ -19,8 +19,7 @@ pub struct DocumentComment {
     pub document_id: Option<Uuid>,
     /// Reference to the parent document file (mutually exclusive with document/version).
     pub document_file_id: Option<Uuid>,
-    /// Reference to the parent document version (mutually exclusive with document/file).
-    pub document_version_id: Option<Uuid>,
+
     /// Reference to the account that authored this comment.
     pub account_id: Uuid,
     /// Parent comment for threaded replies (NULL for top-level comments).
@@ -48,8 +47,7 @@ pub struct NewDocumentComment {
     pub document_id: Option<Uuid>,
     /// Document file ID (mutually exclusive with document/version).
     pub document_file_id: Option<Uuid>,
-    /// Document version ID (mutually exclusive with document/file).
-    pub document_version_id: Option<Uuid>,
+
     /// Account ID.
     pub account_id: Uuid,
     /// Parent comment ID for replies.
@@ -80,8 +78,6 @@ pub enum CommentTarget {
     Document,
     /// Comment is on a document file.
     File,
-    /// Comment is on a document version.
-    Version,
 }
 
 impl DocumentComment {
@@ -98,10 +94,8 @@ impl DocumentComment {
     pub fn target_type(&self) -> CommentTarget {
         if self.document_id.is_some() {
             CommentTarget::Document
-        } else if self.document_file_id.is_some() {
-            CommentTarget::File
         } else {
-            CommentTarget::Version
+            CommentTarget::File
         }
     }
 
@@ -109,7 +103,6 @@ impl DocumentComment {
     pub fn target_id(&self) -> Uuid {
         self.document_id
             .or(self.document_file_id)
-            .or(self.document_version_id)
             .expect("Comment must have exactly one target")
     }
 
@@ -148,11 +141,6 @@ impl DocumentComment {
     pub fn is_file_comment(&self) -> bool {
         self.document_file_id.is_some()
     }
-
-    /// Returns whether this comment is on a version.
-    pub fn is_version_comment(&self) -> bool {
-        self.document_version_id.is_some()
-    }
 }
 
 impl NewDocumentComment {
@@ -170,16 +158,6 @@ impl NewDocumentComment {
     pub fn for_file(document_file_id: Uuid, account_id: Uuid, content: String) -> Self {
         Self {
             document_file_id: Some(document_file_id),
-            account_id,
-            content,
-            ..Default::default()
-        }
-    }
-
-    /// Creates a new comment on a document version.
-    pub fn for_version(document_version_id: Uuid, account_id: Uuid, content: String) -> Self {
-        Self {
-            document_version_id: Some(document_version_id),
             account_id,
             content,
             ..Default::default()

@@ -1,5 +1,6 @@
 //! Document job stream publisher.
 
+use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 
 use super::document_job::DocumentJob;
@@ -16,7 +17,7 @@ pub struct DocumentJobPublisher {
 
 impl DocumentJobPublisher {
     /// Create a new document job publisher.
-    pub async fn new(jetstream: &async_nats::jetstream::Context) -> Result<Self> {
+    pub async fn new(jetstream: &Context) -> Result<Self> {
         let publisher = StreamPublisher::new(jetstream, "DOCUMENT_JOBS").await?;
         Ok(Self { publisher })
     }
