@@ -8,10 +8,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use bytes::Bytes;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Result, TypeError, content_types};
+use super::{Annotation, Result, TypeError, content_types};
 
 /// A uniform document representation backed by efficient byte storage.
 ///
@@ -30,7 +31,7 @@ use super::{Result, TypeError, content_types};
 /// let content = "Hello, world!";
 /// let doc = Document::new(Bytes::from(content))
 ///     .with_content_type("text/plain")
-///     .with_metadata("author", "nvisy");
+///     .with_attribute("author", "nvisy");
 /// ```
 ///
 /// Creating a document from binary data:
@@ -49,14 +50,17 @@ pub struct Document {
     /// The document content as bytes.
     pub content: Bytes,
 
-    /// Document metadata including content type, filename, etc.
+    /// Rich metadata about the document.
     pub metadata: DocumentMetadata,
 
-    /// Timestamp when the document was created.
-    pub created_at: jiff::Timestamp,
+    /// Optional annotations associated with this document.
+    pub annotations: Option<Vec<Annotation>>,
 
-    /// Timestamp when the document was last modified.
-    pub updated_at: jiff::Timestamp,
+    /// When the document was created.
+    pub created_at: Timestamp,
+
+    /// When the document was last updated.
+    pub updated_at: Timestamp,
 }
 
 /// Metadata associated with a document.
@@ -106,10 +110,10 @@ impl Document {
     /// let doc = Document::new(content);
     /// assert_eq!(doc.size(), 13);
     /// ```
+    /// Creates a new document with the given content.
     pub fn new(content: Bytes) -> Self {
-        let now = jiff::Timestamp::now();
+        let now = Timestamp::now();
         let size = content.len();
-
         Self {
             id: Uuid::new_v4(),
             content,
@@ -123,14 +127,88 @@ impl Document {
                 attributes: HashMap::new(),
                 processing_hints: HashMap::new(),
             },
+            annotations: None,
             created_at: now,
             updated_at: now,
         }
     }
 
-    /// Creates a new document builder.
-    pub fn builder() -> DocumentBuilder {
-        DocumentBuilder::new()
+    /// Sets the document ID.
+    pub fn with_id(mut self, id: Uuid) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Sets the content type.
+    pub fn with_content_type(mut self, content_type: impl Into<String>) -> Self {
+        self.metadata.content_type = Some(content_type.into());
+        self
+    }
+
+    /// Sets the encoding.
+    pub fn with_encoding(mut self, encoding: impl Into<String>) -> Self {
+        self.metadata.encoding = Some(encoding.into());
+        self
+    }
+
+    /// Sets the filename.
+    pub fn with_filename(mut self, filename: impl Into<String>) -> Self {
+        self.metadata.filename = Some(filename.into());
+        self
+    }
+
+    /// Sets the file extension.
+    pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
+        self.metadata.extension = Some(extension.into());
+        self
+    }
+
+    /// Sets the language.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.metadata.language = Some(language.into());
+        self
+    }
+
+    /// Adds an attribute.
+    pub fn with_attribute(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.attributes.insert(key.into(), value.into());
+        self
+    }
+
+    /// Adds multiple attributes.
+    pub fn with_attributes(mut self, attributes: HashMap<String, String>) -> Self {
+        self.metadata.attributes.extend(attributes);
+        self
+    }
+
+    /// Adds a processing hint.
+    pub fn with_processing_hint(
+        mut self,
+        key: impl Into<String>,
+        value: serde_json::Value,
+    ) -> Self {
+        self.metadata.processing_hints.insert(key.into(), value);
+        self
+    }
+
+    /// Sets the annotations.
+    pub fn with_annotations(mut self, annotations: Vec<Annotation>) -> Self {
+        self.annotations = Some(annotations);
+        self
+    }
+
+    /// Adds an annotation.
+    pub fn with_annotation(mut self, annotation: Annotation) -> Self {
+        match self.annotations {
+            Some(mut annotations) => {
+                annotations.push(annotation);
+                self.annotations = Some(annotations);
+            }
+            None => {
+                self.annotations = Some(vec![annotation]);
+            }
+        }
+        self
     }
 
     /// Returns the size of the document content in bytes.
@@ -212,72 +290,6 @@ impl Document {
         self.metadata.processing_hints.get(key)
     }
 
-    /// Sets the content type of the document.
-    pub fn with_content_type(mut self, content_type: impl Into<String>) -> Self {
-        let content_type = content_type.into();
-
-        // Try to derive extension from content type if not already set
-        if self.metadata.extension.is_none() {
-            self.metadata.extension = derive_extension_from_content_type(&content_type);
-        }
-
-        self.metadata.content_type = Some(content_type);
-        self.metadata.size = self.content.len();
-        self.updated_at = jiff::Timestamp::now();
-        self
-    }
-
-    /// Sets the filename of the document.
-    pub fn with_filename(mut self, filename: impl Into<String>) -> Self {
-        let filename = filename.into();
-
-        // Try to derive extension from filename
-        if let Some(ext) = extract_extension(&filename) {
-            self.metadata.extension = Some(ext.to_string());
-
-            // Try to derive content type from extension if not already set
-            if self.metadata.content_type.is_none() {
-                self.metadata.content_type = derive_content_type_from_extension(ext);
-            }
-        }
-
-        self.metadata.filename = Some(filename);
-        self.updated_at = jiff::Timestamp::now();
-        self
-    }
-
-    /// Sets the encoding of the document.
-    pub fn with_encoding(mut self, encoding: impl Into<String>) -> Self {
-        self.metadata.encoding = Some(encoding.into());
-        self.updated_at = jiff::Timestamp::now();
-        self
-    }
-
-    /// Sets the language of the document.
-    pub fn with_language(mut self, language: impl Into<String>) -> Self {
-        self.metadata.language = Some(language.into());
-        self.updated_at = jiff::Timestamp::now();
-        self
-    }
-
-    /// Adds a metadata attribute.
-    pub fn with_attribute(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata.attributes.insert(key.into(), value.into());
-        self.updated_at = jiff::Timestamp::now();
-        self
-    }
-
-    /// Adds a processing hint.
-    pub fn with_processing_hint(
-        mut self,
-        key: impl Into<String>,
-        value: serde_json::Value,
-    ) -> Self {
-        self.metadata.processing_hints.insert(key.into(), value);
-        self.updated_at = jiff::Timestamp::now();
-        self
-    }
-
     /// Updates the document content.
     pub fn with_content(mut self, content: Bytes) -> Self {
         self.metadata.size = content.len();
@@ -341,156 +353,6 @@ impl fmt::Display for Document {
         }
 
         write!(f, ")")
-    }
-}
-
-/// Builder for creating documents with fluent interface.
-#[derive(Debug, Clone)]
-pub struct DocumentBuilder {
-    id: Option<Uuid>,
-    content: Option<Bytes>,
-    content_type: Option<String>,
-    encoding: Option<String>,
-    filename: Option<String>,
-    extension: Option<String>,
-    language: Option<String>,
-    attributes: HashMap<String, String>,
-    processing_hints: HashMap<String, serde_json::Value>,
-}
-
-impl DocumentBuilder {
-    /// Creates a new document builder.
-    pub fn new() -> Self {
-        Self {
-            id: None,
-            content: None,
-            content_type: None,
-            encoding: None,
-            filename: None,
-            extension: None,
-            language: None,
-            attributes: HashMap::new(),
-            processing_hints: HashMap::new(),
-        }
-    }
-
-    /// Sets the document ID.
-    pub fn id(mut self, id: Uuid) -> Self {
-        self.id = Some(id);
-        self
-    }
-
-    /// Sets the document content.
-    pub fn content(mut self, content: Bytes) -> Self {
-        self.content = Some(content);
-        self
-    }
-
-    /// Sets the document content from a string.
-    pub fn text_content(mut self, text: impl Into<String>) -> Self {
-        self.content = Some(Bytes::from(text.into()));
-        if self.content_type.is_none() {
-            self.content_type = Some(content_types::TEXT_PLAIN.to_string());
-        }
-        self
-    }
-
-    /// Sets the document content from bytes.
-    pub fn binary_content(mut self, data: Vec<u8>) -> Self {
-        self.content = Some(Bytes::from(data));
-        self
-    }
-
-    /// Sets the content type.
-    pub fn content_type(mut self, content_type: impl Into<String>) -> Self {
-        self.content_type = Some(content_type.into());
-        self
-    }
-
-    /// Sets the encoding.
-    pub fn encoding(mut self, encoding: impl Into<String>) -> Self {
-        self.encoding = Some(encoding.into());
-        self
-    }
-
-    /// Sets the filename.
-    pub fn filename(mut self, filename: impl Into<String>) -> Self {
-        self.filename = Some(filename.into());
-        self
-    }
-
-    /// Sets the file extension.
-    pub fn extension(mut self, extension: impl Into<String>) -> Self {
-        self.extension = Some(extension.into());
-        self
-    }
-
-    /// Sets the language.
-    pub fn language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(language.into());
-        self
-    }
-
-    /// Adds an attribute.
-    pub fn attribute(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.attributes.insert(key.into(), value.into());
-        self
-    }
-
-    /// Adds a processing hint.
-    pub fn processing_hint(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.processing_hints.insert(key.into(), value);
-        self
-    }
-
-    /// Builds the document.
-    pub fn build(self) -> Result<Document> {
-        let content = self.content.ok_or_else(|| {
-            TypeError::ValidationFailed("Document content is required".to_string())
-        })?;
-
-        let size = content.len();
-        let now = jiff::Timestamp::now();
-
-        // Auto-derive extension from filename if not provided
-        let extension = self.extension.or_else(|| {
-            self.filename
-                .as_ref()
-                .and_then(|f| extract_extension(f).map(|s| s.to_string()))
-        });
-
-        // Auto-derive content type from extension if not provided
-        let content_type = self.content_type.or_else(|| {
-            extension
-                .as_ref()
-                .and_then(|ext| derive_content_type_from_extension(ext))
-        });
-
-        let document = Document {
-            id: self.id.unwrap_or_else(Uuid::new_v4),
-            content,
-            metadata: DocumentMetadata {
-                content_type,
-                encoding: self.encoding,
-                filename: self.filename,
-                extension,
-                size,
-                language: self.language,
-                attributes: self.attributes,
-                processing_hints: self.processing_hints,
-            },
-            created_at: now,
-            updated_at: now,
-        };
-
-        document.validate()?;
-        Ok(document)
-    }
-}
-
-impl Default for DocumentBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

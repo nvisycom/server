@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use bytes::Bytes;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -101,16 +100,6 @@ pub enum ContentPart {
     /// Plain text content.
     Text { text: String },
 
-    /// Image content with optional description.
-    Image {
-        /// Image data as bytes.
-        data: Bytes,
-        /// MIME type of the image.
-        mime_type: String,
-        /// Optional description or alt text.
-        description: Option<String>,
-    },
-
     /// Annotation content.
     Annotation {
         /// The annotation data.
@@ -173,9 +162,69 @@ pub struct Chat {
 }
 
 impl Message {
-    /// Creates a new message builder.
-    pub fn builder() -> MessageBuilder {
-        MessageBuilder::new()
+    /// Creates a new message with the given role and content.
+    pub fn new(role: MessageRole, content: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            role,
+            content: content.into(),
+            content_parts: Vec::new(),
+            name: None,
+            model: None,
+            token_count: None,
+            created_at: Timestamp::now(),
+            processing_time: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Sets the message ID.
+    pub fn with_id(mut self, id: Uuid) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Sets the sender name.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Sets the model that generated this message.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// Sets the token count.
+    pub fn with_token_count(mut self, count: u32) -> Self {
+        self.token_count = Some(count);
+        self
+    }
+
+    /// Adds a content part.
+    pub fn with_content_part(mut self, part: ContentPart) -> Self {
+        self.content_parts.push(part);
+        self
+    }
+
+    /// Adds an annotation content part.
+    pub fn with_annotation(mut self, annotation: Annotation) -> Self {
+        self.content_parts
+            .push(ContentPart::Annotation { annotation });
+        self
+    }
+
+    /// Adds a document content part.
+    pub fn with_document(mut self, document: Document) -> Self {
+        self.content_parts.push(ContentPart::Document { document });
+        self
+    }
+
+    /// Adds metadata.
+    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata.insert(key.into(), value);
+        self
     }
 
     /// Returns true if this is a user message.
@@ -206,7 +255,7 @@ impl Message {
 
     /// Checks if the message contains any image content.
     pub fn has_images(&self) -> bool {
-        self.content_parts.iter().any(|part| part.is_image())
+        false
     }
 
     /// Checks if the message contains any annotations.
@@ -222,10 +271,7 @@ impl Message {
     /// Gets all image content parts.
     /// Gets all image content parts from this message.
     pub fn get_images(&self) -> Vec<&ContentPart> {
-        self.content_parts
-            .iter()
-            .filter(|part| part.is_image())
-            .collect()
+        Vec::new()
     }
 
     /// Gets all annotation content parts from this message.
@@ -263,7 +309,7 @@ impl Message {
 impl ContentPart {
     /// Returns true if this is an image content part.
     pub fn is_image(&self) -> bool {
-        matches!(self, Self::Image { .. })
+        false
     }
 
     /// Returns true if this is an annotation content part.
@@ -280,7 +326,6 @@ impl ContentPart {
     pub fn estimated_size(&self) -> usize {
         match self {
             Self::Text { text } => text.len(),
-            Self::Image { data, .. } => data.len(),
             Self::Annotation { .. } => 256, // Estimated size for annotation metadata
             Self::Document { document } => document.content.len(),
         }
@@ -293,20 +338,6 @@ impl ContentPart {
                 if text.is_empty() {
                     return Err(TypeError::ValidationFailed(
                         "Text content cannot be empty".to_string(),
-                    ));
-                }
-            }
-            Self::Image {
-                data, mime_type, ..
-            } => {
-                if data.is_empty() {
-                    return Err(TypeError::ValidationFailed(
-                        "Image data cannot be empty".to_string(),
-                    ));
-                }
-                if !mime_type.starts_with("image/") {
-                    return Err(TypeError::ValidationFailed(
-                        "Invalid MIME type for image content".to_string(),
                     ));
                 }
             }
@@ -392,132 +423,5 @@ impl fmt::Display for MessageRole {
             Self::Function => write!(f, "function"),
             Self::Tool => write!(f, "tool"),
         }
-    }
-}
-
-/// Builder for creating messages with fluent interface.
-#[derive(Debug, Clone)]
-pub struct MessageBuilder {
-    id: Option<Uuid>,
-    role: Option<MessageRole>,
-    content: String,
-    content_parts: Vec<ContentPart>,
-    name: Option<String>,
-    model: Option<String>,
-    token_count: Option<u32>,
-    metadata: HashMap<String, serde_json::Value>,
-}
-
-impl MessageBuilder {
-    /// Creates a new message builder.
-    pub fn new() -> Self {
-        Self {
-            id: None,
-            role: None,
-            content: String::new(),
-            content_parts: Vec::new(),
-            name: None,
-            model: None,
-            token_count: None,
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// Sets the message ID.
-    pub fn id(mut self, id: Uuid) -> Self {
-        self.id = Some(id);
-        self
-    }
-
-    /// Sets the message role.
-    pub fn role(mut self, role: MessageRole) -> Self {
-        self.role = Some(role);
-        self
-    }
-
-    /// Sets the message content.
-    pub fn content(mut self, content: impl Into<String>) -> Self {
-        self.content = content.into();
-        self
-    }
-
-    /// Adds a content part.
-    pub fn content_part(mut self, part: ContentPart) -> Self {
-        self.content_parts.push(part);
-        self
-    }
-
-    /// Adds an image content part.
-    pub fn image(mut self, data: Bytes, mime_type: impl Into<String>) -> Self {
-        self.content_parts.push(ContentPart::Image {
-            data,
-            mime_type: mime_type.into(),
-            description: None,
-        });
-        self
-    }
-
-    /// Adds an annotation content part.
-    pub fn annotation(mut self, annotation: Annotation) -> Self {
-        self.content_parts
-            .push(ContentPart::Annotation { annotation });
-        self
-    }
-
-    /// Adds a document content part.
-    pub fn document(mut self, document: Document) -> Self {
-        self.content_parts.push(ContentPart::Document { document });
-        self
-    }
-
-    /// Sets the sender name.
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Sets the model that generated this message.
-    pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.model = Some(model.into());
-        self
-    }
-
-    /// Sets the token count.
-    pub fn token_count(mut self, count: Option<u32>) -> Self {
-        self.token_count = count;
-        self
-    }
-
-    /// Adds metadata.
-    pub fn metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.metadata.insert(key.into(), value);
-        self
-    }
-
-    /// Builds the message.
-    pub fn build(self) -> Result<Message> {
-        let message = Message {
-            id: self.id.unwrap_or_else(Uuid::new_v4),
-            role: self.role.ok_or_else(|| {
-                TypeError::ValidationFailed("Message role is required".to_string())
-            })?,
-            content: self.content,
-            content_parts: self.content_parts,
-            name: self.name,
-            model: self.model,
-            token_count: self.token_count,
-            created_at: Timestamp::now(),
-            processing_time: None,
-            metadata: self.metadata,
-        };
-
-        message.validate()?;
-        Ok(message)
-    }
-}
-
-impl Default for MessageBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

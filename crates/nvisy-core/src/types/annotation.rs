@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use bytes::Bytes;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -26,24 +27,18 @@ use super::{Result, TypeError};
 /// ```rust,ignore
 /// use nvisy_core::types::{Annotation, AnnotationType, TextSpan};
 ///
-/// let annotation = Annotation::builder()
-///     .annotation_type(AnnotationType::Entity)
-///     .label("PERSON")
-///     .text_span(TextSpan::new(0, 12))
-///     .confidence(0.95)
-///     .build()?;
+/// let annotation = Annotation::new(AnnotationType::Entity, "PERSON")
+///     .with_text_span(TextSpan::new(0, 12))
+///     .with_confidence(0.95);
 /// ```
 ///
 /// Image object detection:
 /// ```rust,ignore
 /// use nvisy_core::types::{Annotation, AnnotationType, BoundingBox};
 ///
-/// let annotation = Annotation::builder()
-///     .annotation_type(AnnotationType::Object)
-///     .label("car")
-///     .bounding_box(BoundingBox::new(100, 150, 200, 300))
-///     .confidence(0.87)
-///     .build()?;
+/// let annotation = Annotation::new(AnnotationType::Object, "car")
+///     .with_bounding_box(BoundingBox::new(100, 150, 200, 300))
+///     .with_confidence(0.87);
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Annotation {
@@ -88,6 +83,9 @@ pub struct Annotation {
 
     /// Relationships to other annotations.
     pub relations: Vec<AnnotationRelation>,
+
+    /// Tags for categorization and filtering.
+    pub tags: Vec<String>,
 }
 
 /// Types of annotations that can be applied to content.
@@ -338,9 +336,97 @@ impl BoundingBox {
 }
 
 impl Annotation {
-    /// Creates a new annotation builder.
-    pub fn builder() -> AnnotationBuilder {
-        AnnotationBuilder::new()
+    /// Creates a new annotation with the given type and label.
+    pub fn new(annotation_type: AnnotationType, label: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            annotation_type,
+            label: label.into(),
+            confidence: None,
+            text_span: None,
+            bounding_box: None,
+            content: None,
+            data: None,
+            normalized_value: None,
+            source: None,
+            model: None,
+            relations: Vec::new(),
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            created_at: Timestamp::now(),
+        }
+    }
+
+    /// Sets the annotation ID.
+    pub fn with_id(mut self, id: Uuid) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Sets the confidence score.
+    pub fn with_confidence(mut self, confidence: f32) -> Self {
+        self.confidence = Some(confidence);
+        self
+    }
+
+    /// Sets the text span for text annotations.
+    pub fn with_text_span(mut self, text_span: TextSpan) -> Self {
+        self.text_span = Some(text_span);
+        self
+    }
+
+    /// Sets the bounding box for spatial annotations.
+    pub fn with_bounding_box(mut self, bounding_box: BoundingBox) -> Self {
+        self.bounding_box = Some(bounding_box);
+        self
+    }
+
+    /// Sets the content.
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.content = Some(content.into());
+        self
+    }
+
+    /// Sets the binary data.
+    pub fn with_data(mut self, data: Bytes) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    /// Sets the normalized value.
+    pub fn with_normalized_value(mut self, value: f64) -> Self {
+        self.normalized_value = Some(value);
+        self
+    }
+
+    /// Sets the source.
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    /// Adds a tag.
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.push(tag.into());
+        self
+    }
+
+    /// Adds multiple tags.
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.tags.extend(tags);
+        self
+    }
+
+    /// Adds metadata.
+    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata.insert(key.into(), value);
+        self
+    }
+
+    /// Adds a relation.
+    pub fn with_relation(mut self, relation: AnnotationRelation) -> Self {
+        self.relations.push(relation);
+        self
     }
 
     /// Returns true if this is a text-based annotation.
@@ -496,155 +582,5 @@ impl fmt::Display for AnnotationType {
             Self::Relation => write!(f, "relation"),
             Self::Custom => write!(f, "custom"),
         }
-    }
-}
-
-/// Builder for creating annotations with fluent interface.
-#[derive(Debug, Clone)]
-pub struct AnnotationBuilder {
-    id: Option<Uuid>,
-    annotation_type: Option<AnnotationType>,
-    label: Option<String>,
-    confidence: Option<f32>,
-    text_span: Option<TextSpan>,
-    bounding_box: Option<BoundingBox>,
-    content: Option<String>,
-    data: Option<Bytes>,
-    normalized_value: Option<f64>,
-    source: Option<String>,
-    model: Option<String>,
-    metadata: HashMap<String, serde_json::Value>,
-    relations: Vec<AnnotationRelation>,
-}
-
-impl AnnotationBuilder {
-    /// Creates a new annotation builder.
-    pub fn new() -> Self {
-        Self {
-            id: None,
-            annotation_type: None,
-            label: None,
-            confidence: None,
-            text_span: None,
-            bounding_box: None,
-            content: None,
-            data: None,
-            normalized_value: None,
-            source: None,
-            model: None,
-            metadata: HashMap::new(),
-            relations: Vec::new(),
-        }
-    }
-
-    /// Sets the annotation ID.
-    pub fn id(mut self, id: Uuid) -> Self {
-        self.id = Some(id);
-        self
-    }
-
-    /// Sets the annotation type.
-    pub fn annotation_type(mut self, annotation_type: AnnotationType) -> Self {
-        self.annotation_type = Some(annotation_type);
-        self
-    }
-
-    /// Sets the label.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
-    /// Sets the confidence score.
-    pub fn confidence(mut self, confidence: f32) -> Self {
-        self.confidence = Some(confidence);
-        self
-    }
-
-    /// Sets the text span.
-    pub fn text_span(mut self, span: TextSpan) -> Self {
-        self.text_span = Some(span);
-        self
-    }
-
-    /// Sets the bounding box.
-    pub fn bounding_box(mut self, bbox: BoundingBox) -> Self {
-        self.bounding_box = Some(bbox);
-        self
-    }
-
-    /// Sets the content.
-    pub fn content(mut self, content: impl Into<String>) -> Self {
-        self.content = Some(content.into());
-        self
-    }
-
-    /// Sets the binary data.
-    pub fn data(mut self, data: Bytes) -> Self {
-        self.data = Some(data);
-        self
-    }
-
-    /// Sets the normalized value.
-    pub fn normalized_value(mut self, value: f64) -> Self {
-        self.normalized_value = Some(value);
-        self
-    }
-
-    /// Sets the source.
-    pub fn source(mut self, source: impl Into<String>) -> Self {
-        self.source = Some(source.into());
-        self
-    }
-
-    /// Sets the model.
-    pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.model = Some(model.into());
-        self
-    }
-
-    /// Adds metadata.
-    pub fn metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.metadata.insert(key.into(), value);
-        self
-    }
-
-    /// Adds a relation.
-    pub fn relation(mut self, relation: AnnotationRelation) -> Self {
-        self.relations.push(relation);
-        self
-    }
-
-    /// Builds the annotation.
-    pub fn build(self) -> Result<Annotation> {
-        let annotation = Annotation {
-            id: self.id.unwrap_or_else(Uuid::new_v4),
-            annotation_type: self.annotation_type.ok_or_else(|| {
-                TypeError::ValidationFailed("Annotation type is required".to_string())
-            })?,
-            label: self
-                .label
-                .ok_or_else(|| TypeError::ValidationFailed("Label is required".to_string()))?,
-            confidence: self.confidence,
-            text_span: self.text_span,
-            bounding_box: self.bounding_box,
-            content: self.content,
-            data: self.data,
-            normalized_value: self.normalized_value,
-            source: self.source,
-            model: self.model,
-            created_at: jiff::Timestamp::now(),
-            metadata: self.metadata,
-            relations: self.relations,
-        };
-
-        annotation.validate()?;
-        Ok(annotation)
-    }
-}
-
-impl Default for AnnotationBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

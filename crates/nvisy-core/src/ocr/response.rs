@@ -246,44 +246,20 @@ impl OcrResult {
             .iter()
             .enumerate()
             .map(|(_index, extraction)| {
-                let mut builder = Annotation::builder()
-                    .annotation_type(AnnotationType::Text)
-                    .label("ocr_text")
-                    .confidence(extraction.confidence)
-                    .content(extraction.text.clone())
-                    .source("ocr");
+                let mut annotation = Annotation::new(AnnotationType::Text, "ocr_text")
+                    .with_confidence(extraction.confidence)
+                    .with_content(extraction.text.clone())
+                    .with_source("ocr");
 
                 if let Some(text_span) = &extraction.text_span {
-                    builder = builder.text_span(text_span.clone());
+                    annotation = annotation.with_text_span(text_span.clone());
                 }
 
                 if let Some(bounding_box) = &extraction.bounding_box {
-                    builder = builder.bounding_box(bounding_box.clone());
+                    annotation = annotation.with_bounding_box(bounding_box.clone());
                 }
 
-                if let Some(model) = &self.processing_info.model {
-                    builder = builder.model(model.clone());
-                }
-
-                builder.build().unwrap_or_else(|_| {
-                    // Fallback annotation if builder fails
-                    Annotation {
-                        id: uuid::Uuid::new_v4(),
-                        annotation_type: AnnotationType::Text,
-                        label: "ocr_text".to_string(),
-                        confidence: Some(extraction.confidence),
-                        text_span: extraction.text_span.clone(),
-                        bounding_box: extraction.bounding_box.clone(),
-                        content: Some(extraction.text.clone()),
-                        data: None,
-                        normalized_value: None,
-                        source: Some("ocr".to_string()),
-                        model: self.processing_info.model.clone(),
-                        created_at: jiff::Timestamp::now(),
-                        metadata: HashMap::new(),
-                        relations: Vec::new(),
-                    }
-                })
+                annotation
             })
             .collect()
     }

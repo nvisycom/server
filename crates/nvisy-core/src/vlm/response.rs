@@ -233,19 +233,18 @@ impl<Resp> Response<Resp> {
 
     /// Convert this VLM response to a Message for chat integration.
     pub fn to_message(&self) -> Message {
-        let mut message = Message::builder()
-            .role(MessageRole::Assistant)
-            .content(&self.content)
-            .model(self.model.clone());
+        let mut message = Message::new(MessageRole::Assistant, &self.content);
+
+        message = message.with_model(self.model.clone());
 
         // Add token count if available
         if let Some(usage) = &self.usage {
-            message = message.token_count(Some(usage.total_tokens as u32));
+            message = message.with_token_count(usage.total_tokens as u32);
         }
 
         // Add processing time as metadata if available
         if let Some(processing_time) = self.metadata.processing_time_ms {
-            message = message.metadata(
+            message = message.with_metadata(
                 "processing_time_ms".to_string(),
                 serde_json::json!(processing_time),
             );
@@ -253,31 +252,18 @@ impl<Resp> Response<Resp> {
 
         // Add confidence as metadata
         if let Some(confidence) = self.confidence {
-            message = message.metadata("confidence".to_string(), serde_json::json!(confidence));
+            message =
+                message.with_metadata("confidence".to_string(), serde_json::json!(confidence));
         }
 
         // Add visual analysis results as metadata if available
         if let Some(analysis) = &self.visual_analysis {
             if let Ok(analysis_json) = serde_json::to_value(analysis) {
-                message = message.metadata("visual_analysis".to_string(), analysis_json);
+                message = message.with_metadata("visual_analysis".to_string(), analysis_json);
             }
         }
 
-        message.build().unwrap_or_else(|_| {
-            // Fallback message if builder fails
-            Message {
-                id: uuid::Uuid::new_v4(),
-                role: MessageRole::Assistant,
-                content: self.content.clone(),
-                content_parts: Vec::new(),
-                name: None,
-                model: Some(self.model.clone()),
-                token_count: self.usage.as_ref().map(|u| u.total_tokens as u32),
-                created_at: jiff::Timestamp::now(),
-                processing_time: None,
-                metadata: std::collections::HashMap::new(),
-            }
-        })
+        message
     }
 }
 

@@ -16,7 +16,6 @@ pub use error::BoxedError;
 pub use types::{
     // Annotation types
     Annotation,
-    AnnotationBuilder,
     AnnotationRelation,
     AnnotationSet,
     AnnotationType,
@@ -27,11 +26,9 @@ pub use types::{
 
     // Document types
     Document,
-    DocumentBuilder,
     DocumentMetadata,
 
     Message,
-    MessageBuilder,
     MessageRole,
     RelationType,
 

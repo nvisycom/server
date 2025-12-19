@@ -25,17 +25,12 @@
 //!     .with_attribute("source", "test");
 //!
 //! // Create a chat message
-//! let message = Message::builder()
-//!     .role(MessageRole::User)
-//!     .content("What is the capital of France?")
-//!     .build()?;
+//! let message = Message::new(MessageRole::User, "What is the capital of France?")
+//!     .with_token_count(10);
 //!
 //! // Create an annotation
-//! let annotation = Annotation::builder()
-//!     .annotation_type(AnnotationType::Entity)
-//!     .label("LOCATION")
-//!     .confidence(0.95)
-//!     .build()?;
+//! let annotation = Annotation::new(AnnotationType::Entity, "LOCATION")
+//!     .with_confidence(0.95);
 //! ```
 
 mod annotation;
@@ -44,12 +39,12 @@ mod health;
 mod message;
 
 pub use annotation::{
-    Annotation, AnnotationBuilder, AnnotationRelation, AnnotationSet, AnnotationType, BoundingBox,
-    RelationType, TextSpan,
+    Annotation, AnnotationRelation, AnnotationSet, AnnotationType, BoundingBox, RelationType,
+    TextSpan,
 };
-pub use document::{Document, DocumentBuilder, DocumentMetadata};
+pub use document::{Document, DocumentMetadata};
 pub use health::{ServiceHealth, ServiceStatus};
-pub use message::{Chat, ContentPart, Message, MessageBuilder, MessageRole};
+pub use message::{Chat, ContentPart, Message, MessageRole};
 
 /// Common content types used throughout the nvisy ecosystem.
 pub mod content_types {
