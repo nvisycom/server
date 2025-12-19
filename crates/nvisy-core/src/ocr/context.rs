@@ -13,6 +13,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::types::BoundingBox;
+
 /// Context information for OCR operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
@@ -250,51 +252,6 @@ pub struct TextRegion {
     pub words: Vec<Word>,
 }
 
-/// Bounding box coordinates.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct BoundingBox {
-    /// Left coordinate.
-    pub left: f32,
-    /// Top coordinate.
-    pub top: f32,
-    /// Width of the box.
-    pub width: f32,
-    /// Height of the box.
-    pub height: f32,
-}
-
-impl BoundingBox {
-    /// Create a new bounding box.
-    pub fn new(left: f32, top: f32, width: f32, height: f32) -> Self {
-        Self {
-            left,
-            top,
-            width,
-            height,
-        }
-    }
-
-    /// Get right coordinate.
-    pub fn right(&self) -> f32 {
-        self.left + self.width
-    }
-
-    /// Get bottom coordinate.
-    pub fn bottom(&self) -> f32 {
-        self.top + self.height
-    }
-
-    /// Calculate area.
-    pub fn area(&self) -> f32 {
-        self.width * self.height
-    }
-
-    /// Check if point is contained within this box.
-    pub fn contains(&self, x: f32, y: f32) -> bool {
-        x >= self.left && x <= self.right() && y >= self.top && y <= self.bottom()
-    }
-}
-
 /// Type of text region.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TextRegionType {
@@ -427,7 +384,6 @@ pub struct UsageStats {
     /// Estimated cost for processing.
     pub estimated_cost: Option<f64>,
 }
-
 
 impl UsageStats {
     /// Get total number of extractions (successful + failed).

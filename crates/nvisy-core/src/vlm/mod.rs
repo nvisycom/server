@@ -4,36 +4,6 @@
 //! can process both images and text. It supports various VLM capabilities including
 //! visual question answering, image description, visual reasoning, and multimodal
 //! conversations.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use nvisy_core::vlm::{Vlm, Request, Response};
-//!
-//! struct MyVlm;
-//!
-//! impl Vlm for MyVlm {
-//!     async fn process(&self, request: &Request) -> Result<Response> {
-//!         // Implementation
-//!     }
-//!
-//!     async fn process_stream(&self, request: &Request) -> Result<BoxedStream<Response>> {
-//!         // Implementation
-//!     }
-//!
-//!     async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-//!         // Implementation
-//!     }
-//!
-//!     fn service_name(&self) -> &str {
-//!         "my-vlm"
-//!     }
-//!
-//!     async fn health_check(&self) -> Result<ServiceHealth> {
-//!         // Implementation
-//!     }
-//! }
-//! ```
 
 use std::sync::Arc;
 
@@ -48,17 +18,24 @@ pub mod service;
 
 pub use context::{Context, ProcessingOptions};
 pub use error::{Error, Result};
-pub use request::Request;
-pub use response::Response;
+pub use request::{ImageInput, Request, RequestOptions, VlmInput};
+pub use response::{
+    ColorInfo, DetectedObject, EmotionalAnalysis, FontProperties, ImageProperties,
+    QualityAssessment, Response, ResponseMetadata, SceneCategory, TextRegion, Usage,
+    VisualAnalysis, VlmResponseBuilder, VlmResponseChunk,
+};
 pub use service::Service as VlmService;
 
-use crate::health::ServiceHealth;
+use crate::types::ServiceHealth;
 
 /// Type alias for a boxed VLM service with specific request and response types.
-pub type Boxed<Req, Resp> = Arc<dyn Vlm<Req, Resp> + Send + Sync>;
+pub type BoxedVlm<Req, Resp> = Arc<dyn Vlm<Req, Resp> + Send + Sync>;
 
 /// Type alias for boxed response stream.
 pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
+
+/// Tracing target for VLM operations.
+pub const TRACING_TARGET: &str = "nvisy_core::vlm";
 
 /// Core trait for VLM (Vision Language Model) operations.
 ///
@@ -81,7 +58,7 @@ pub trait Vlm<Req, Resp>: Send + Sync {
     /// # Returns
     ///
     /// Returns a complete `Response<Resp>` with the model's output.
-    async fn process(&self, request: &Request<Req>) -> Result<Response<Resp>>;
+    async fn process_vlm(&self, request: &Request<Req>) -> Result<Response<Resp>>;
 
     /// Process a request with streaming response.
     ///
@@ -95,7 +72,10 @@ pub trait Vlm<Req, Resp>: Send + Sync {
     /// # Returns
     ///
     /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
-    async fn process_stream(&self, request: &Request<Req>) -> Result<BoxedStream<Response<Resp>>>;
+    async fn process_vlm_stream(
+        &self,
+        request: &Request<Req>,
+    ) -> Result<BoxedStream<Response<Resp>>>;
 
     /// Perform a health check on the VLM service.
     ///

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
 
-use crate::SearchResult;
 use crate::error::{QdrantError, QdrantResult};
 use crate::types::{Payload, Point, PointId, Vector};
 

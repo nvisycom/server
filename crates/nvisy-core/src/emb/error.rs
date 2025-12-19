@@ -1,6 +1,6 @@
-//! Error handling for OCR operations.
+//! Error handling for embedding operations.
 //!
-//! This module provides comprehensive error types for OCR services, including
+//! This module provides comprehensive error types for embedding services, including
 //! classification of errors into client vs server errors, retry policies, and
 //! structured error information to help with debugging and error handling.
 //!
@@ -8,8 +8,8 @@
 //!
 //! Errors are classified into several categories:
 //!
-//! - **Client Errors**: Authentication failures, invalid input, unsupported formats
-//! - **Server Errors**: Service unavailable, internal errors, overloaded services
+//! - **Client Errors**: Authentication failures, invalid input, unsupported models
+//! - **Server Errors**: Service unavailable, internal errors, model loading failures
 //! - **Retryable Errors**: Network issues, timeouts, rate limits, service problems
 //! - **Non-retryable Errors**: Authentication, invalid input, unsupported features
 
@@ -17,13 +17,13 @@ use std::time::Duration;
 
 use crate::BoxedError;
 
-/// Result type alias for OCR operations.
+/// Result type alias for embedding operations.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Main error type for OCR operations.
+/// Main error type for embedding operations.
 ///
 /// This error type provides structured information about what went wrong during
-/// OCR processing, including the specific error kind and optional source error
+/// embedding processing, including the specific error kind and optional source error
 /// for better debugging and error handling.
 #[derive(Debug, thiserror::Error)]
 #[error("{}", .message.as_ref().map(|m| format!("{}: {}", .kind, m)).unwrap_or_else(|| .kind.to_string()))]
@@ -56,7 +56,7 @@ impl Error {
     ///
     /// ```rust,ignore
     /// Error::new(ErrorKind::InvalidInput)
-    ///     .with_message("Image format not supported")
+    ///     .with_message("Text input exceeds maximum length")
     /// ```
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
@@ -87,7 +87,11 @@ impl Error {
     pub fn is_client_error(&self) -> bool {
         matches!(
             self.kind,
-            ErrorKind::Authentication | ErrorKind::InvalidInput | ErrorKind::UnsupportedFormat
+            ErrorKind::Authentication
+                | ErrorKind::InvalidInput
+                | ErrorKind::UnsupportedFormat
+                | ErrorKind::UnsupportedModel
+                | ErrorKind::TokenLimitExceeded
         )
     }
 
@@ -98,7 +102,7 @@ impl Error {
     pub fn is_server_error(&self) -> bool {
         matches!(
             self.kind,
-            ErrorKind::ServiceUnavailable | ErrorKind::InternalError
+            ErrorKind::ServiceUnavailable | ErrorKind::InternalError | ErrorKind::ModelLoadFailed
         )
     }
 
@@ -131,20 +135,29 @@ impl Error {
     }
 }
 
-/// Specific kinds of OCR errors.
+/// Specific kinds of embedding errors.
 ///
 /// This enum categorizes all possible error conditions that can occur
-/// during OCR operations, from authentication failures to processing errors.
+/// during embedding operations, from authentication failures to model loading errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// Authentication with the OCR service failed.
+    /// Authentication with the embedding service failed.
     Authentication,
 
-    /// The input provided to the OCR service is invalid.
+    /// The input provided to the embedding service is invalid.
     InvalidInput,
 
-    /// The image format is not supported by the OCR service.
+    /// The input format is not supported by the embedding service.
     UnsupportedFormat,
+
+    /// The requested embedding model is not supported or available.
+    UnsupportedModel,
+
+    /// The input exceeds the model's token limit.
+    TokenLimitExceeded,
+
+    /// Model loading or initialization failed.
+    ModelLoadFailed,
 
     /// Rate limit has been exceeded.
     RateLimited,
@@ -155,7 +168,7 @@ pub enum ErrorKind {
     /// The operation timed out.
     Timeout,
 
-    /// The OCR service is temporarily unavailable.
+    /// The embedding service is temporarily unavailable.
     ServiceUnavailable,
 
     /// An internal service error occurred.
@@ -168,6 +181,9 @@ impl std::fmt::Display for ErrorKind {
             Self::Authentication => write!(f, "Authentication failed"),
             Self::InvalidInput => write!(f, "Invalid input provided"),
             Self::UnsupportedFormat => write!(f, "Unsupported format"),
+            Self::UnsupportedModel => write!(f, "Unsupported or unavailable model"),
+            Self::TokenLimitExceeded => write!(f, "Token limit exceeded"),
+            Self::ModelLoadFailed => write!(f, "Model loading failed"),
             Self::RateLimited => write!(f, "Rate limit exceeded"),
             Self::NetworkError => write!(f, "Network error occurred"),
             Self::Timeout => write!(f, "Operation timed out"),
@@ -192,6 +208,21 @@ impl Error {
     /// Creates an unsupported format error.
     pub fn unsupported_format() -> Self {
         Self::new(ErrorKind::UnsupportedFormat)
+    }
+
+    /// Creates an unsupported model error.
+    pub fn unsupported_model() -> Self {
+        Self::new(ErrorKind::UnsupportedModel)
+    }
+
+    /// Creates a token limit exceeded error.
+    pub fn token_limit_exceeded() -> Self {
+        Self::new(ErrorKind::TokenLimitExceeded)
+    }
+
+    /// Creates a model load failed error.
+    pub fn model_load_failed() -> Self {
+        Self::new(ErrorKind::ModelLoadFailed)
     }
 
     /// Creates a rate limited error.

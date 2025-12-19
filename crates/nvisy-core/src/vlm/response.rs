@@ -9,8 +9,10 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::{BoundingBox, Message, MessageRole};
+
 /// Usage statistics for VLM operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     /// Number of tokens in the prompt
     pub prompt_tokens: u64,
@@ -228,6 +230,55 @@ impl<Resp> Response<Resp> {
             payload: self.payload.clone(),
         }
     }
+
+    /// Convert this VLM response to a Message for chat integration.
+    pub fn to_message(&self) -> Message {
+        let mut message = Message::builder()
+            .role(MessageRole::Assistant)
+            .content(&self.content)
+            .model(self.model.clone());
+
+        // Add token count if available
+        if let Some(usage) = &self.usage {
+            message = message.token_count(Some(usage.total_tokens as u32));
+        }
+
+        // Add processing time as metadata if available
+        if let Some(processing_time) = self.metadata.processing_time_ms {
+            message = message.metadata(
+                "processing_time_ms".to_string(),
+                serde_json::json!(processing_time),
+            );
+        }
+
+        // Add confidence as metadata
+        if let Some(confidence) = self.confidence {
+            message = message.metadata("confidence".to_string(), serde_json::json!(confidence));
+        }
+
+        // Add visual analysis results as metadata if available
+        if let Some(analysis) = &self.visual_analysis {
+            if let Ok(analysis_json) = serde_json::to_value(analysis) {
+                message = message.metadata("visual_analysis".to_string(), analysis_json);
+            }
+        }
+
+        message.build().unwrap_or_else(|_| {
+            // Fallback message if builder fails
+            Message {
+                id: uuid::Uuid::new_v4(),
+                role: MessageRole::Assistant,
+                content: self.content.clone(),
+                content_parts: Vec::new(),
+                name: None,
+                model: Some(self.model.clone()),
+                token_count: self.usage.as_ref().map(|u| u.total_tokens as u32),
+                created_at: jiff::Timestamp::now(),
+                processing_time: None,
+                metadata: std::collections::HashMap::new(),
+            }
+        })
+    }
 }
 
 /// Streaming chunk from VLM operations.
@@ -436,31 +487,6 @@ pub struct DetectedObject {
     pub bounding_box: Option<BoundingBox>,
     /// Additional attributes or properties.
     pub attributes: HashMap<String, String>,
-}
-
-/// Bounding box coordinates for detected objects.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoundingBox {
-    /// X coordinate of the top-left corner.
-    pub x: f64,
-    /// Y coordinate of the top-left corner.
-    pub y: f64,
-    /// Width of the bounding box.
-    pub width: f64,
-    /// Height of the bounding box.
-    pub height: f64,
-}
-
-impl BoundingBox {
-    /// Calculate the area of the bounding box.
-    pub fn area(&self) -> f64 {
-        self.width * self.height
-    }
-
-    /// Get the center point of the bounding box.
-    pub fn center(&self) -> (f64, f64) {
-        (self.x + self.width / 2.0, self.y + self.height / 2.0)
-    }
 }
 
 /// Text region extracted from the image.
@@ -680,5 +706,192 @@ impl<Resp> VlmResponseBuilder<Resp> {
             metadata: self.metadata,
             payload: self.payload,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn test_vlm_response_to_message() {
+        let usage = Usage::new(50, 100).with_images(2);
+        let mut metadata = ResponseMetadata::default();
+        metadata.processing_time_ms = Some(1500);
+
+        let response = Response::with_usage(
+            "This image shows a beautiful sunset.",
+            "gpt-4-vision",
+            usage,
+            (),
+        )
+        .with_confidence(0.95)
+        .with_finish_reason("complete")
+        .with_metadata(metadata);
+
+        let message = response.to_message();
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(message.content, "This image shows a beautiful sunset.");
+        assert_eq!(message.model, Some("gpt-4-vision".to_string()));
+        assert_eq!(message.token_count, Some(150)); // 50 + 100 tokens
+
+        // Check metadata
+        assert!(message.metadata.contains_key("confidence"));
+        assert!(message.metadata.contains_key("processing_time_ms"));
+    }
+
+    #[test]
+    fn test_vlm_response_to_message_without_usage() {
+        let mut metadata = ResponseMetadata::default();
+        metadata.processing_time_ms = Some(800);
+
+        let response = Response::new("Simple response without usage.", "claude-vision", ())
+            .with_confidence(0.85)
+            .with_finish_reason("stop")
+            .with_metadata(metadata);
+
+        let message = response.to_message();
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(message.content, "Simple response without usage.");
+        assert_eq!(message.model, Some("claude-vision".to_string()));
+        assert_eq!(message.token_count, None); // No usage was set
+
+        // Check metadata
+        assert!(message.metadata.contains_key("confidence"));
+        assert!(message.metadata.contains_key("processing_time_ms"));
+        assert_eq!(message.metadata["confidence"], serde_json::json!(0.85));
+        assert_eq!(
+            message.metadata["processing_time_ms"],
+            serde_json::json!(800)
+        );
+    }
+
+    #[test]
+    fn test_vlm_response_to_message_with_visual_analysis() {
+        let mut visual_analysis = VisualAnalysis::new();
+        visual_analysis.detected_objects = Some(vec![DetectedObject {
+            class: "cat".to_string(),
+            confidence: 0.9,
+            bounding_box: Some(BoundingBox::new(10.0, 20.0, 100.0, 150.0)),
+            attributes: HashMap::new(),
+        }]);
+
+        let response = Response::new("I can see a cat in the image.", "claude-3-vision", ())
+            .with_visual_analysis(visual_analysis);
+
+        let message = response.to_message();
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(message.content, "I can see a cat in the image.");
+        assert!(message.metadata.contains_key("visual_analysis"));
+    }
+
+    #[test]
+    fn test_usage_statistics() {
+        let usage = Usage::new(25, 75);
+        assert_eq!(usage.prompt_tokens, 25);
+        assert_eq!(usage.completion_tokens, 75);
+        assert_eq!(usage.total_tokens, 100);
+        assert_eq!(usage.images_processed, None);
+
+        let usage_with_images = usage.with_images(3);
+        assert_eq!(usage_with_images.images_processed, Some(3));
+    }
+
+    #[test]
+    fn test_response_status_methods() {
+        let complete_response =
+            Response::new("Complete response", "model", ()).with_finish_reason("complete");
+        assert!(complete_response.is_complete());
+        assert!(!complete_response.is_truncated());
+        assert!(!complete_response.is_filtered());
+
+        let truncated_response =
+            Response::new("Truncated", "model", ()).with_finish_reason("length");
+        assert!(!truncated_response.is_complete());
+        assert!(truncated_response.is_truncated());
+        assert!(!truncated_response.is_filtered());
+
+        let filtered_response =
+            Response::new("Filtered", "model", ()).with_finish_reason("content_filter");
+        assert!(!filtered_response.is_complete());
+        assert!(!filtered_response.is_truncated());
+        assert!(filtered_response.is_filtered());
+    }
+
+    #[test]
+    fn test_visual_analysis_methods() {
+        let mut analysis = VisualAnalysis::new();
+        assert!(!analysis.has_results());
+        assert_eq!(analysis.object_count(), 0);
+
+        let objects = vec![
+            DetectedObject {
+                class: "dog".to_string(),
+                confidence: 0.95,
+                bounding_box: Some(BoundingBox::new(0.0, 0.0, 50.0, 50.0)),
+                attributes: HashMap::new(),
+            },
+            DetectedObject {
+                class: "cat".to_string(),
+                confidence: 0.7,
+                bounding_box: Some(BoundingBox::new(60.0, 60.0, 40.0, 40.0)),
+                attributes: HashMap::new(),
+            },
+        ];
+
+        analysis.detected_objects = Some(objects);
+        assert!(analysis.has_results());
+        assert_eq!(analysis.object_count(), 2);
+
+        let high_confidence = analysis.high_confidence_objects(0.8);
+        assert_eq!(high_confidence.len(), 1);
+        assert_eq!(high_confidence[0].class, "dog");
+    }
+
+    #[test]
+    fn test_color_info_from_rgb() {
+        let color = ColorInfo::from_rgb(255, 0, 0);
+        assert_eq!(color.rgb, (255, 0, 0));
+        assert_eq!(color.hex, Some("#ff0000".to_string()));
+    }
+
+    #[test]
+    fn test_response_builder() {
+        let usage = Usage::new(30, 70);
+        let response = VlmResponseBuilder::new("Built response", "test-model", ())
+            .usage(usage.clone())
+            .confidence(0.88)
+            .finish_reason("stop")
+            .build();
+
+        assert_eq!(response.content, "Built response");
+        assert_eq!(response.model, "test-model");
+        assert_eq!(response.confidence, Some(0.88));
+        assert_eq!(response.finish_reason, Some("stop".to_string()));
+        assert_eq!(response.usage, Some(usage));
+    }
+
+    #[test]
+    fn test_streaming_chunk_to_response() {
+        let usage = Usage::new(10, 20);
+        let chunk = VlmResponseChunk::with_completion(
+            "Chunk content",
+            "stream-model",
+            "complete".to_string(),
+            usage.clone(),
+            Some(0.9),
+            (),
+        );
+
+        let response = chunk.to_response();
+        assert_eq!(response.content, "Chunk content");
+        assert_eq!(response.model, "stream-model");
+        assert_eq!(response.usage, Some(usage));
+        assert_eq!(response.finish_reason, Some("complete".to_string()));
     }
 }

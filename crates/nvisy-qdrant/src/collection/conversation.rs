@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::client::QdrantClient;
-use crate::collections::SearchParams;
+use crate::collection::SearchParams;
 use crate::error::{QdrantError, QdrantResult};
 use crate::payload::{ConversationPoint, ConversationStatus, MessageType};
 use crate::types::{CollectionConfig, Distance, Point, PointId, Vector, VectorParams};
@@ -128,7 +128,7 @@ pub struct ConversationStats {
 }
 
 /// Conversation operations trait for QdrantClient.
-pub trait ConversationOperations {
+pub trait ConversationCollection {
     /// Default collection name for conversations
     const DEFAULT_COLLECTION: &'static str = "conversations";
 
@@ -230,7 +230,7 @@ pub trait ConversationOperations {
     ) -> QdrantResult<u64>;
 }
 
-impl ConversationOperations for QdrantClient {
+impl ConversationCollection for QdrantClient {
     async fn create_conversation_collection(
         &self,
         name: &str,

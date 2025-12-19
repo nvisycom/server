@@ -12,32 +12,13 @@
 //! - **Server Errors**: Service unavailable, internal errors, model inference failures
 //! - **Retryable Errors**: Network issues, timeouts, rate limits, service problems
 //! - **Non-retryable Errors**: Authentication, invalid prompts, unsupported features
-//!
-//! # Examples
-//!
-//! ```rust
-//! use nvisy_core::vlm::Error;
-//!
-//! // Create specific error types
-//! let auth_error = Error::authentication();
-//! let timeout_error = Error::timeout();
-//!
-//! // Check error classification
-//! assert!(auth_error.is_client_error());
-//! assert!(timeout_error.is_retryable());
-//!
-//! // Get retry delay for retryable errors
-//! if let Some(delay) = timeout_error.retry_delay() {
-//!     // Wait before retrying
-//! }
-//! ```
 
 use std::time::Duration;
 
 use crate::BoxedError;
 
 /// Result type alias for VLM operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Main error type for VLM operations.
 ///
@@ -45,10 +26,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// VLM processing, including the specific error kind and optional source error
 /// for better debugging and error handling.
 #[derive(Debug, thiserror::Error)]
-#[error("{kind}")]
+#[error("{}", .message.as_ref().map(|m| format!("{}: {}", .kind, m)).unwrap_or_else(|| .kind.to_string()))]
 pub struct Error {
     /// The specific kind of error that occurred.
     pub kind: ErrorKind,
+    /// Optional additional message providing more context.
+    pub message: Option<String>,
     /// Optional source error for additional context.
     #[source]
     pub source: Option<BoxedError>,
@@ -57,7 +40,27 @@ pub struct Error {
 impl Error {
     /// Creates a new error with the given kind.
     pub fn new(kind: ErrorKind) -> Self {
-        Self { kind, source: None }
+        Self {
+            kind,
+            message: None,
+            source: None,
+        }
+    }
+
+    /// Adds a message to this error.
+    ///
+    /// This method consumes the error and returns a new error with the message attached,
+    /// allowing for method chaining when constructing errors.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// Error::new(ErrorKind::InvalidInput)
+    ///     .with_message("Model does not support this input format")
+    /// ```
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
     }
 
     /// Adds a source error to this error.

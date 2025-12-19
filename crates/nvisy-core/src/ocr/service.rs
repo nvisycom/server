@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{BoxedOcr, BoxedStream, Ocr, Request, Response, Result};
-use crate::health::ServiceHealth;
+use crate::types::ServiceHealth;
 
 /// OCR service wrapper with observability.
 ///
@@ -61,9 +61,9 @@ where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + 'static,
 {
-    async fn process_with_ocr(&self, request: Request<Req>) -> Result<Response<Resp>> {
+    async fn process_ocr(&self, request: Request<Req>) -> Result<Response<Resp>> {
         tracing::debug!(
-            target: crate::TRACING_TARGET_OCR,
+            target: super::TRACING_TARGET,
             service = %self.inner.service_name,
             request_id = %request.request_id,
             "Processing OCR request"
@@ -71,12 +71,12 @@ where
 
         let start = std::time::Instant::now();
 
-        let result = self.inner.ocr.process_with_ocr(request).await;
+        let result = self.inner.ocr.process_ocr(request).await;
 
         match &result {
             Ok(response) => {
                 tracing::debug!(
-                    target: crate::TRACING_TARGET_OCR,
+                    target: super::TRACING_TARGET,
                     service = %self.inner.service_name,
                     response_id = %response.response_id,
                     elapsed = ?start.elapsed(),
@@ -85,7 +85,7 @@ where
             }
             Err(error) => {
                 tracing::error!(
-                    target: crate::TRACING_TARGET_OCR,
+                    target: super::TRACING_TARGET,
                     service = %self.inner.service_name,
                     error = %error,
                     elapsed = ?start.elapsed(),
@@ -97,20 +97,23 @@ where
         result
     }
 
-    async fn process_stream(&self, request: Request<Req>) -> Result<BoxedStream<Response<Resp>>> {
+    async fn process_ocr_stream(
+        &self,
+        request: Request<Req>,
+    ) -> Result<BoxedStream<Response<Resp>>> {
         tracing::debug!(
-            target: crate::TRACING_TARGET_OCR,
+            target: super::TRACING_TARGET,
             service = %self.inner.service_name,
             request_id = %request.request_id,
             "Starting OCR stream processing"
         );
 
-        self.inner.ocr.process_stream(request).await
+        self.inner.ocr.process_ocr_stream(request).await
     }
 
     async fn health_check(&self) -> Result<ServiceHealth> {
         tracing::trace!(
-            target: crate::TRACING_TARGET_OCR,
+            target: super::TRACING_TARGET,
             service = %self.inner.service_name,
             "Performing health check"
         );

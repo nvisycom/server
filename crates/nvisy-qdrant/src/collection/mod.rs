@@ -14,10 +14,10 @@ pub mod annotation;
 pub mod conversation;
 pub mod document;
 
-pub use annotation::{AnnotationConfig, AnnotationOperations};
-pub use conversation::{ConversationConfig, ConversationOperations, ConversationStats};
+pub use annotation::{AnnotationConfig, AnnotationCollection};
+pub use conversation::{ConversationConfig, ConversationCollection, ConversationStats};
 pub use document::{
-    AuthorStats, DocumentConfig, DocumentOperations, DocumentStats, DocumentTypeStats,
+    AuthorStats, DocumentConfig, DocumentCollection, DocumentStats, DocumentTypeStats,
 };
 use serde::{Deserialize, Serialize};
 

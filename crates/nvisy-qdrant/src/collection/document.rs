@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::client::QdrantClient;
-use crate::collections::SearchParams;
+use crate::collection::SearchParams;
 use crate::error::{QdrantError, QdrantResult};
 use crate::payload::{DocumentPoint, DocumentStatus, DocumentType};
 use crate::types::{CollectionConfig, Distance, Point, PointId, Vector, VectorParams};
@@ -182,7 +182,7 @@ pub struct DocumentTypeStats {
 }
 
 /// Document operations trait for QdrantClient.
-pub trait DocumentOperations {
+pub trait DocumentCollection {
     /// Default collection name for documents
     const DEFAULT_COLLECTION: &'static str = "documents";
 
@@ -305,7 +305,7 @@ pub trait DocumentOperations {
     ) -> QdrantResult<u64>;
 }
 
-impl DocumentOperations for QdrantClient {
+impl DocumentCollection for QdrantClient {
     async fn create_document_collection(
         &self,
         name: &str,

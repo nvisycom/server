@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::client::QdrantClient;
-use crate::collections::SearchParams;
+use crate::collection::SearchParams;
 use crate::error::{QdrantError, QdrantResult};
 use crate::payload::{AnnotationPoint, AnnotationType};
 use crate::types::{CollectionConfig, Distance, Point, PointId, Vector, VectorParams};
@@ -90,7 +90,7 @@ impl AnnotationConfig {
 }
 
 /// Annotation operations trait for QdrantClient.
-pub trait AnnotationOperations {
+pub trait AnnotationCollection {
     /// Default collection name for annotations
     const DEFAULT_COLLECTION: &'static str = "annotations";
 
@@ -171,7 +171,7 @@ pub trait AnnotationOperations {
     ) -> impl Future<Output = QdrantResult<u64>> + Send;
 }
 
-impl AnnotationOperations for QdrantClient {
+impl AnnotationCollection for QdrantClient {
     fn create_annotation_collection(
         &self,
         name: &str,

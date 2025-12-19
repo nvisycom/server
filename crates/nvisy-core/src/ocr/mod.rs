@@ -3,29 +3,6 @@
 //! This module provides traits and types for extracting structured text from images
 //! and documents. It supports various OCR capabilities including image text extraction,
 //! document processing, and structured output.
-//!
-//! # Generic Design
-//!
-//! The OCR trait is generic over request and response types, allowing different
-//! implementations to use their own specific formats while maintaining a consistent
-//! interface:
-//!
-//! ```rust,ignore
-//! use nvisy_core::ocr::{Ocr, Request, Response};
-//!
-//! // Generic OCR implementation
-//! struct MyOcr;
-//!
-//! impl Ocr<MyRequest, MyResponse> for MyOcr {
-//!     async fn process_with_ocr(&self, request: Request<MyRequest>) -> Result<Response<MyResponse>> {
-//!         // Implementation
-//!     }
-//!
-//!     async fn health_check(&self) -> Result<ServiceHealth> {
-//!         // Implementation
-//!     }
-//! }
-//! ```
 
 use std::sync::Arc;
 
@@ -40,17 +17,22 @@ pub mod service;
 
 pub use context::{Context, Document, ProcessingOptions};
 pub use error::{Error, Result};
-pub use request::Request;
-pub use response::Response;
+pub use request::{BoundingBox, DocumentOcrRequest, Request, RequestOptions};
+pub use response::{
+    BatchResponse, BatchStats, OcrResult, ProcessingInfo, Response, TextExtraction,
+};
 pub use service::OcrService;
 
-use crate::health::ServiceHealth;
+use crate::types::ServiceHealth;
 
 /// Type alias for a boxed OCR service with specific request and response types.
 pub type BoxedOcr<Req, Resp> = Arc<dyn Ocr<Req, Resp> + Send + Sync>;
 
 /// Type alias for boxed response stream.
 pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
+
+/// Tracing target for OCR operations.
+pub const TRACING_TARGET: &str = "nvisy_core::ocr";
 
 /// Core trait for OCR operations.
 ///
@@ -76,7 +58,7 @@ pub trait Ocr<Req, Resp>: Send + Sync {
     /// # Returns
     ///
     /// Returns a `Response<Resp>` containing the extracted text, regions, and metadata.
-    async fn process_with_ocr(&self, request: Request<Req>) -> Result<Response<Resp>>;
+    async fn process_ocr(&self, request: Request<Req>) -> Result<Response<Resp>>;
 
     /// Process an image or document with OCR using streaming responses.
     ///
@@ -90,7 +72,10 @@ pub trait Ocr<Req, Resp>: Send + Sync {
     /// # Returns
     ///
     /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
-    async fn process_stream(&self, request: Request<Req>) -> Result<BoxedStream<Response<Resp>>>;
+    async fn process_ocr_stream(
+        &self,
+        request: Request<Req>,
+    ) -> Result<BoxedStream<Response<Resp>>>;
 
     /// Perform a health check on the OCR service.
     ///
