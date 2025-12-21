@@ -1259,15 +1259,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ecow"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78e4f79b296fbaab6ce2e22d52cb4c7f010fe0ebe7a32e34fa25885fd797bd02"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2504,6 +2495,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bytes",
+ "derive_more",
  "futures-util",
  "jiff",
  "serde",
@@ -2607,7 +2599,6 @@ dependencies = [
  "async-stream",
  "bytes",
  "derive_more",
- "fastrand",
  "futures",
  "jiff",
  "qdrant-client",
@@ -2634,19 +2625,15 @@ dependencies = [
  "bigdecimal",
  "derive_builder",
  "derive_more",
- "ecow",
  "futures",
- "http-body-util",
  "ipnet",
  "jsonwebtoken",
- "lazy_static",
  "nvisy-core",
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-qdrant",
  "rand 0.10.0-rc.5",
  "regex",
- "scoped-futures",
  "serde",
  "serde_json",
  "sha2",

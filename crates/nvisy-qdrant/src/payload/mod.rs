@@ -86,36 +86,29 @@ pub mod fields {
 
 /// Validation utilities for payload data.
 pub mod validation {
-    use crate::error::{QdrantError, QdrantResult};
+    use crate::error::{Error, Result};
     use crate::types::Payload;
 
     /// Validate that required fields are present in payload
-    pub fn validate_required_fields(
-        payload: &Payload,
-        required_fields: &[&str],
-    ) -> QdrantResult<()> {
+    pub fn validate_required_fields(payload: &Payload, required_fields: &[&str]) -> Result<()> {
         for field in required_fields {
             if !payload.contains_key(field) {
-                return Err(QdrantError::PayloadError(format!(
-                    "Missing required field: {}",
-                    field
-                )));
+                return Err(Error::invalid_input()
+                    .with_message(format!("Missing required field: {}", field)));
             }
         }
         Ok(())
     }
 
     /// Validate that a string field is not empty
-    pub fn validate_non_empty_string(payload: &Payload, field_name: &str) -> QdrantResult<String> {
-        let value = payload
-            .get_string(field_name)
-            .ok_or_else(|| QdrantError::PayloadError(format!("Missing field: {}", field_name)))?;
+    pub fn validate_non_empty_string(payload: &Payload, field_name: &str) -> Result<String> {
+        let value = payload.get_string(field_name).ok_or_else(|| {
+            Error::serialization().with_message(format!("Missing field: {}", field_name))
+        })?;
 
         if value.trim().is_empty() {
-            return Err(QdrantError::PayloadError(format!(
-                "Field {} cannot be empty",
-                field_name
-            )));
+            return Err(Error::serialization()
+                .with_message(format!("Field {} cannot be empty", field_name)));
         }
 
         Ok(value.to_string())
@@ -127,28 +120,26 @@ pub mod validation {
         field_name: &str,
         min: Option<i64>,
         max: Option<i64>,
-    ) -> QdrantResult<i64> {
-        let value = payload
-            .get_i64(field_name)
-            .ok_or_else(|| QdrantError::PayloadError(format!("Missing field: {}", field_name)))?;
+    ) -> Result<i64> {
+        let value = payload.get_i64(field_name).ok_or_else(|| {
+            Error::serialization().with_message(format!("Missing field: {}", field_name))
+        })?;
 
-        if let Some(min_val) = min {
-            if value < min_val {
-                return Err(QdrantError::PayloadError(format!(
+        if let Some(min_val) = min
+            && value < min_val {
+                return Err(Error::invalid_input().with_message(format!(
                     "Field {} value {} is below minimum {}",
                     field_name, value, min_val
                 )));
             }
-        }
 
-        if let Some(max_val) = max {
-            if value > max_val {
-                return Err(QdrantError::PayloadError(format!(
+        if let Some(max_val) = max
+            && value > max_val {
+                return Err(Error::invalid_input().with_message(format!(
                     "Field {} value {} exceeds maximum {}",
                     field_name, value, max_val
                 )));
             }
-        }
 
         Ok(value)
     }
@@ -158,13 +149,13 @@ pub mod validation {
         payload: &Payload,
         field_name: &str,
         min_length: usize,
-    ) -> QdrantResult<Vec<serde_json::Value>> {
-        let array = payload
-            .get_array(field_name)
-            .ok_or_else(|| QdrantError::PayloadError(format!("Missing field: {}", field_name)))?;
+    ) -> Result<Vec<serde_json::Value>> {
+        let array = payload.get_array(field_name).ok_or_else(|| {
+            Error::serialization().with_message(format!("Missing field: {}", field_name))
+        })?;
 
         if array.len() < min_length {
-            return Err(QdrantError::PayloadError(format!(
+            return Err(Error::serialization().with_message(format!(
                 "Field {} must have at least {} elements, got {}",
                 field_name,
                 min_length,

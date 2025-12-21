@@ -1,7 +1,5 @@
 //! Vector-related types and utilities for Qdrant operations.
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
@@ -9,12 +7,15 @@ use utoipa::ToSchema;
 /// Vector distance metrics supported by Qdrant.
 ///
 /// These metrics determine how vector similarity is calculated during search operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[serde(rename_all = "PascalCase")]
+#[derive(Default)]
 pub enum Distance {
     /// Cosine distance - measures the cosine of the angle between two vectors.
     /// Best for normalized vectors and semantic similarity.
+    #[default]
     Cosine,
 
     /// Euclidean distance - measures the straight-line distance between two points.
@@ -50,12 +51,6 @@ impl Distance {
             qdrant_client::qdrant::Distance::Manhattan => Distance::Manhattan,
             qdrant_client::qdrant::Distance::UnknownDistance => Distance::Cosine, // Default fallback
         }
-    }
-}
-
-impl Default for Distance {
-    fn default() -> Self {
-        Distance::Cosine
     }
 }
 
@@ -114,10 +109,10 @@ impl VectorParams {
         qdrant_client::qdrant::VectorParams {
             size: self.size,
             distance: self.distance.to_qdrant_distance().into(),
-            hnsw_config: self.hnsw_config.map(|h| h.to_qdrant_hnsw_config()),
+            hnsw_config: self.hnsw_config.map(|h| h.into_qdrant_hnsw_config()),
             quantization_config: self
                 .quantization_config
-                .map(|q| q.to_qdrant_quantization_config()),
+                .map(|q| q.into_qdrant_quantization_config()),
             on_disk: self.on_disk,
             datatype: None,
             multivector_config: None,
@@ -176,7 +171,7 @@ impl HnswConfig {
     }
 
     /// Convert to Qdrant's internal HnswConfigDiff
-    pub fn to_qdrant_hnsw_config(self) -> qdrant_client::qdrant::HnswConfigDiff {
+    pub fn into_qdrant_hnsw_config(self) -> qdrant_client::qdrant::HnswConfigDiff {
         qdrant_client::qdrant::HnswConfigDiff {
             m: self.m,
             ef_construct: self.ef_construct,
@@ -238,28 +233,26 @@ impl QuantizationConfig {
     }
 
     /// Convert to Qdrant's internal QuantizationConfig
-    pub fn to_qdrant_quantization_config(self) -> qdrant_client::qdrant::QuantizationConfig {
+    pub fn into_qdrant_quantization_config(self) -> qdrant_client::qdrant::QuantizationConfig {
         qdrant_client::qdrant::QuantizationConfig {
             quantization: if let Some(scalar) = self.scalar {
                 Some(
                     qdrant_client::qdrant::quantization_config::Quantization::Scalar(
-                        scalar.to_qdrant_scalar_quantization(),
+                        scalar.into_qdrant_scalar_quantization(),
                     ),
                 )
             } else if let Some(product) = self.product {
                 Some(
                     qdrant_client::qdrant::quantization_config::Quantization::Product(
-                        product.to_qdrant_product_quantization(),
-                    ),
-                )
-            } else if let Some(binary) = self.binary {
-                Some(
-                    qdrant_client::qdrant::quantization_config::Quantization::Binary(
-                        binary.to_qdrant_binary_quantization(),
+                        product.into_qdrant_product_quantization(),
                     ),
                 )
             } else {
-                None
+                self.binary.map(|binary| {
+                    qdrant_client::qdrant::quantization_config::Quantization::Binary(
+                        binary.into_qdrant_binary_quantization(),
+                    )
+                })
             },
         }
     }
@@ -298,7 +291,7 @@ impl ScalarQuantization {
     }
 
     /// Convert to Qdrant's internal ScalarQuantization
-    pub fn to_qdrant_scalar_quantization(self) -> qdrant_client::qdrant::ScalarQuantization {
+    pub fn into_qdrant_scalar_quantization(self) -> qdrant_client::qdrant::ScalarQuantization {
         qdrant_client::qdrant::ScalarQuantization {
             r#type: match self.r#type {
                 ScalarType::Int8 => qdrant_client::qdrant::QuantizationType::Int8.into(),
@@ -346,7 +339,7 @@ impl ProductQuantization {
     }
 
     /// Convert to Qdrant's internal ProductQuantization
-    pub fn to_qdrant_product_quantization(self) -> qdrant_client::qdrant::ProductQuantization {
+    pub fn into_qdrant_product_quantization(self) -> qdrant_client::qdrant::ProductQuantization {
         qdrant_client::qdrant::ProductQuantization {
             compression: match self.compression {
                 CompressionRatio::X4 => qdrant_client::qdrant::CompressionRatio::X4 as i32,
@@ -375,7 +368,7 @@ impl BinaryQuantization {
     }
 
     /// Convert to Qdrant's internal BinaryQuantization
-    pub fn to_qdrant_binary_quantization(self) -> qdrant_client::qdrant::BinaryQuantization {
+    pub fn into_qdrant_binary_quantization(self) -> qdrant_client::qdrant::BinaryQuantization {
         qdrant_client::qdrant::BinaryQuantization {
             always_ram: self.always_ram,
             encoding: None,
@@ -391,7 +384,7 @@ impl Default for BinaryQuantization {
 }
 
 /// Represents a vector with its values and metadata.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 pub struct Vector {
     /// The vector values
@@ -452,10 +445,7 @@ impl Vector {
     pub fn to_qdrant_vector(self) -> qdrant_client::qdrant::Vector {
         qdrant_client::qdrant::Vector {
             vector: Some(qdrant_client::qdrant::vector::Vector::Dense(
-                qdrant_client::qdrant::DenseVector {
-                    data: self.values,
-                    ..Default::default()
-                },
+                qdrant_client::qdrant::DenseVector { data: self.values },
             )),
             data: vec![],
             indices: None,
@@ -518,54 +508,6 @@ impl From<qdrant_client::qdrant::Vector> for Vector {
                 Vector::new(vec![])
             }
         }
-    }
-}
-
-impl Default for Vector {
-    fn default() -> Self {
-        Self {
-            values: Vec::new(),
-            name: None,
-        }
-    }
-}
-
-/// Named vectors configuration for collections that support multiple vector fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct NamedVectors {
-    /// Map of vector names to their configurations
-    pub vectors: HashMap<String, VectorParams>,
-}
-
-impl NamedVectors {
-    /// Create new named vectors configuration
-    pub fn new() -> Self {
-        Self {
-            vectors: HashMap::new(),
-        }
-    }
-
-    /// Add a named vector field
-    pub fn add_vector(mut self, name: String, params: VectorParams) -> Self {
-        self.vectors.insert(name, params);
-        self
-    }
-
-    /// Convert to Qdrant's internal VectorParamsMap
-    pub fn to_qdrant_vector_params_map(
-        self,
-    ) -> HashMap<String, qdrant_client::qdrant::VectorParams> {
-        self.vectors
-            .into_iter()
-            .map(|(name, params)| (name, params.to_qdrant_vector_params()))
-            .collect()
-    }
-}
-
-impl Default for NamedVectors {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

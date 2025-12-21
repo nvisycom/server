@@ -30,14 +30,12 @@ nvisy-qdrant = { workspace = true, features = ["utoipa"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
-scoped-futures = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 
 # HTTP & Web server
 axum = { workspace = true, features = ["http2", "macros", "ws", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
 axum-extra = { workspace = true, features = ["typed-header", "attachment"] }
-http-body-util = { workspace = true, features = [] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
@@ -71,14 +69,12 @@ thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
 derive_builder = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
-lazy_static = "1.4"
 
 # Data types
 time = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
-ecow = { workspace = true, features = [] }
 zxcvbn = { workspace = true, features = [] }
 url = { workspace = true, features = [] }
 

@@ -4,350 +4,172 @@
 //! including document content, metadata, full-text search capabilities,
 //! author tracking, and document lifecycle management.
 
+use std::future::Future;
+
 use qdrant_client::qdrant::condition::ConditionOneOf;
 use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::with_payload_selector::SelectorOptions;
 use qdrant_client::qdrant::{FieldCondition, Filter, Match};
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 use crate::client::QdrantClient;
 use crate::collection::SearchParams;
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 use crate::payload::{DocumentPoint, DocumentStatus, DocumentType};
-use crate::types::{CollectionConfig, Distance, Point, PointId, Vector, VectorParams};
+use crate::types::{Distance, Point, PointId, Vector, VectorParams};
 use crate::{Condition, SearchResult, WithPayloadSelector};
-
-/// Configuration for document collections.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct DocumentConfig {
-    /// Vector parameters for the collection
-    pub vector_params: VectorParams,
-    /// Enable full-text search indexing
-    pub full_text_search: bool,
-    /// Maximum document chunk size for processing
-    pub max_chunk_size: Option<usize>,
-    /// Enable version tracking
-    pub version_tracking: bool,
-    /// Enable author indexing
-    pub author_indexing: bool,
-    /// Enable content type indexing
-    pub content_type_indexing: bool,
-}
-
-impl DocumentConfig {
-    /// Create a new document configuration
-    pub fn new(dimensions: u64, distance: Distance) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, distance),
-            full_text_search: true,
-            max_chunk_size: None,
-            version_tracking: false,
-            author_indexing: true,
-            content_type_indexing: true,
-        }
-    }
-
-    /// Create configuration optimized for text documents
-    pub fn for_text_documents(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine).on_disk(false),
-            full_text_search: true,
-            max_chunk_size: Some(1000), // 1000 tokens per chunk
-            version_tracking: true,
-            author_indexing: true,
-            content_type_indexing: true,
-        }
-    }
-
-    /// Create configuration optimized for large documents (PDFs, etc.)
-    pub fn for_large_documents(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine).on_disk(true),
-            full_text_search: true,
-            max_chunk_size: Some(500), // Smaller chunks for large docs
-            version_tracking: true,
-            author_indexing: true,
-            content_type_indexing: true,
-        }
-    }
-
-    /// Create configuration optimized for code documents
-    pub fn for_code_documents(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine).on_disk(false),
-            full_text_search: true,
-            max_chunk_size: Some(2000), // Larger chunks for code
-            version_tracking: true,
-            author_indexing: true,
-            content_type_indexing: true,
-        }
-    }
-
-    /// Create configuration for multimedia documents
-    pub fn for_multimedia_documents(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine).on_disk(true),
-            full_text_search: false, // No full-text for multimedia
-            max_chunk_size: None,
-            version_tracking: false,
-            author_indexing: true,
-            content_type_indexing: true,
-        }
-    }
-
-    /// Enable full-text search
-    pub fn with_full_text_search(mut self) -> Self {
-        self.full_text_search = true;
-        self
-    }
-
-    /// Set maximum chunk size
-    pub fn max_chunk_size(mut self, size: usize) -> Self {
-        self.max_chunk_size = Some(size);
-        self
-    }
-
-    /// Enable version tracking
-    pub fn with_version_tracking(mut self) -> Self {
-        self.version_tracking = true;
-        self
-    }
-
-    /// Enable author indexing
-    pub fn with_author_indexing(mut self) -> Self {
-        self.author_indexing = true;
-        self
-    }
-
-    /// Enable content type indexing
-    pub fn with_content_type_indexing(mut self) -> Self {
-        self.content_type_indexing = true;
-        self
-    }
-
-    /// Set vector parameters
-    pub fn with_vectors(mut self, vector_params: VectorParams) -> Self {
-        self.vector_params = vector_params;
-        self
-    }
-}
-
-/// Document statistics for analytics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct DocumentStats {
-    /// Total number of documents
-    pub total_documents: u64,
-    /// Published documents count
-    pub published_documents: u64,
-    /// Draft documents count
-    pub draft_documents: u64,
-    /// Archived documents count
-    pub archived_documents: u64,
-    /// Total unique authors
-    pub total_authors: u64,
-    /// Average document size in bytes
-    pub avg_document_size: f64,
-}
-
-/// Author statistics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct AuthorStats {
-    /// Author identifier
-    pub author_id: String,
-    /// Number of documents by this author
-    pub document_count: u64,
-    /// Total size of documents by this author
-    pub total_size: u64,
-    /// Most recent document timestamp
-    pub last_updated: Option<String>,
-}
-
-/// Document type statistics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct DocumentTypeStats {
-    /// Document type
-    pub document_type: DocumentType,
-    /// Number of documents of this type
-    pub count: u64,
-    /// Total size of documents of this type
-    pub total_size: u64,
-    /// Average size for this document type
-    pub avg_size: f64,
-}
 
 /// Document operations trait for QdrantClient.
 pub trait DocumentCollection {
-    /// Default collection name for documents
-    const DEFAULT_COLLECTION: &'static str = "documents";
+    /// Create the document collection with sensible defaults
+    fn create_collection(&self, vector_size: u64) -> impl Future<Output = Result<()>> + Send;
 
-    /// Create a document collection
-    async fn create_document_collection(
-        &self,
-        name: &str,
-        config: DocumentConfig,
-    ) -> QdrantResult<()>;
+    /// Delete the document collection
+    fn delete_collection(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Insert a document point
-    async fn insert_document(
-        &self,
-        collection_name: &str,
-        document: DocumentPoint,
-    ) -> QdrantResult<()>;
+    fn insert_document(&self, document: DocumentPoint) -> impl Future<Output = Result<()>> + Send;
 
     /// Insert multiple document points
-    async fn insert_documents(
+    fn insert_documents(
         &self,
-        collection_name: &str,
         documents: Vec<DocumentPoint>,
-    ) -> QdrantResult<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Search documents by vector
-    async fn search_documents(
+    fn search_documents(
         &self,
-        collection_name: &str,
         query_vector: Vector,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
     /// Search documents by type
-    async fn search_documents_by_type(
+    fn search_documents_by_type(
         &self,
-        collection_name: &str,
         doc_type: DocumentType,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
     /// Search documents by status
-    async fn search_documents_by_status(
+    fn search_documents_by_status(
         &self,
-        collection_name: &str,
         status: DocumentStatus,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
     /// Search documents by author
-    async fn search_documents_by_author(
+    fn search_documents_by_author(
         &self,
-        collection_name: &str,
         author_id: String,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
     /// Get document by ID
-    async fn get_document(&self, collection_name: &str, id: PointId)
-    -> QdrantResult<Option<Point>>;
+    fn get_document(&self, id: PointId) -> impl Future<Output = Result<Option<Point>>> + Send;
 
     /// Update document status
-    async fn update_document_status(
+    fn update_document_status(
         &self,
-        collection_name: &str,
         id: PointId,
         status: DocumentStatus,
-    ) -> QdrantResult<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Delete document by ID
-    async fn delete_document(&self, collection_name: &str, id: PointId) -> QdrantResult<()>;
+    fn delete_document(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
     /// Delete multiple documents by ID
-    async fn delete_documents(&self, collection_name: &str, ids: Vec<PointId>) -> QdrantResult<()>;
+    fn delete_documents(&self, ids: Vec<PointId>) -> impl Future<Output = Result<()>> + Send;
+
+    /// Delete a single point by ID
+    fn delete_point(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
     /// Archive document (set status to archived)
-    async fn archive_document(&self, collection_name: &str, id: PointId) -> QdrantResult<()>;
+    fn archive_document(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
     /// Publish document (set status to published)
-    async fn publish_document(&self, collection_name: &str, id: PointId) -> QdrantResult<()>;
-
-    /// Get document statistics
-    async fn get_document_stats(&self, collection_name: &str) -> QdrantResult<DocumentStats>;
-
-    /// Get author statistics
-    async fn get_author_stats(
-        &self,
-        collection_name: &str,
-        author_id: String,
-    ) -> QdrantResult<AuthorStats>;
-
-    /// Get document type statistics
-    async fn get_document_type_stats(
-        &self,
-        collection_name: &str,
-        doc_type: DocumentType,
-    ) -> QdrantResult<DocumentTypeStats>;
+    fn publish_document(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
     /// Count documents by type
-    async fn count_documents_by_type(
+    fn count_documents_by_type(
         &self,
-        collection_name: &str,
         doc_type: DocumentType,
-    ) -> QdrantResult<u64>;
+    ) -> impl Future<Output = Result<u64>> + Send;
 
     /// Count documents by status
-    async fn count_documents_by_status(
+    fn count_documents_by_status(
         &self,
-        collection_name: &str,
         status: DocumentStatus,
-    ) -> QdrantResult<u64>;
+    ) -> impl Future<Output = Result<u64>> + Send;
 
     /// Count documents by author
-    async fn count_documents_by_author(
+    fn count_documents_by_author(
         &self,
-        collection_name: &str,
         author_id: String,
-    ) -> QdrantResult<u64>;
+    ) -> impl Future<Output = Result<u64>> + Send;
+}
+
+impl QdrantClient {
+    const DOCUMENT_COLLECTION: &'static str = "documents";
 }
 
 impl DocumentCollection for QdrantClient {
-    async fn create_document_collection(
-        &self,
-        name: &str,
-        config: DocumentConfig,
-    ) -> QdrantResult<()> {
-        let collection_config = CollectionConfig::new(name)
-            .vectors(config.vector_params)
-            .replication_factor(1)
-            .on_disk_payload(config.full_text_search); // Use on-disk payload for full-text search
+    async fn create_collection(&self, vector_size: u64) -> Result<()> {
+        use qdrant_client::qdrant::vectors_config::Config;
+        use qdrant_client::qdrant::{CreateCollection, VectorsConfig};
 
-        self.create_collection(collection_config).await
+        let vector_params = VectorParams::new(vector_size, Distance::Cosine);
+        let create_collection = CreateCollection {
+            collection_name: Self::DOCUMENT_COLLECTION.to_string(),
+            vectors_config: Some(VectorsConfig {
+                config: Some(Config::Params(vector_params.to_qdrant_vector_params())),
+            }),
+            shard_number: None,
+            replication_factor: None,
+            write_consistency_factor: None,
+            on_disk_payload: Some(true),
+            hnsw_config: None,
+            wal_config: None,
+            optimizers_config: None,
+            timeout: None,
+            metadata: std::collections::HashMap::new(),
+            quantization_config: None,
+            sharding_method: None,
+            strict_mode_config: None,
+            sparse_vectors_config: None,
+        };
+
+        self.create_collection(create_collection).await
     }
 
-    async fn insert_document(
-        &self,
-        collection_name: &str,
-        document: DocumentPoint,
-    ) -> QdrantResult<()> {
+    async fn delete_collection(&self) -> Result<()> {
+        self.delete_collection(Self::DOCUMENT_COLLECTION, None)
+            .await
+    }
+
+    async fn insert_document(&self, document: DocumentPoint) -> Result<()> {
         let point: Point = document.into();
-        self.upsert_point(collection_name, point, true).await
+        self.upsert_point(Self::DOCUMENT_COLLECTION, point, true)
+            .await
     }
 
-    async fn insert_documents(
-        &self,
-        collection_name: &str,
-        documents: Vec<DocumentPoint>,
-    ) -> QdrantResult<()> {
+    async fn insert_documents(&self, documents: Vec<DocumentPoint>) -> Result<()> {
         let points: Vec<Point> = documents.into_iter().map(|d| d.into()).collect();
-        self.upsert_points(collection_name, points, true).await
+        self.upsert_points(Self::DOCUMENT_COLLECTION, points, true)
+            .await
     }
 
     async fn search_documents(
         &self,
-        collection_name: &str,
         query_vector: Vector,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
         let request = qdrant_client::qdrant::SearchPoints {
-            collection_name: collection_name.to_string(),
+            collection_name: Self::DOCUMENT_COLLECTION.to_string(),
             vector: query_vector.values,
             vector_name: None,
             limit,
@@ -375,29 +197,27 @@ impl DocumentCollection for QdrantClient {
             .raw_client()
             .search_points(request)
             .await
-            .map_err(QdrantError::Connection)?;
+            .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
         let results = response
             .result
             .into_iter()
-            .map(|scored_point| SearchResult::try_from(scored_point))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+            .map(SearchResult::try_from)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
         Ok(results)
     }
 
     async fn search_documents_by_type(
         &self,
-        collection_name: &str,
         doc_type: DocumentType,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
-        // Create filter for document type
         let type_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -423,7 +243,7 @@ impl DocumentCollection for QdrantClient {
         match query_vector {
             Some(vector) => {
                 let request = qdrant_client::qdrant::SearchPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::DOCUMENT_COLLECTION.to_string(),
                     vector: vector.values,
                     vector_name: None,
                     limit,
@@ -451,20 +271,20 @@ impl DocumentCollection for QdrantClient {
                     .raw_client()
                     .search_points(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
                 let results = response
                     .result
                     .into_iter()
-                    .map(|scored_point| SearchResult::try_from(scored_point))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .map(SearchResult::try_from)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
                 Ok(results)
             }
             None => {
                 let request = qdrant_client::qdrant::ScrollPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::DOCUMENT_COLLECTION.to_string(),
                     filter: Some(type_filter),
                     offset: None,
                     limit: Some(limit as u32),
@@ -488,14 +308,24 @@ impl DocumentCollection for QdrantClient {
                     .raw_client()
                     .scroll(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
-                let results = response
+                let results: Vec<SearchResult> = response
                     .result
                     .into_iter()
-                    .map(|point| Point::try_from(point).map(|p| SearchResult::from_point(p, 1.0)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .filter_map(|point| {
+                        let scored_point = qdrant_client::qdrant::ScoredPoint {
+                            id: point.id,
+                            payload: point.payload,
+                            score: 1.0,
+                            vectors: point.vectors,
+                            shard_key: None,
+                            order_value: None,
+                            version: 0,
+                        };
+                        SearchResult::try_from(scored_point).ok()
+                    })
+                    .collect();
 
                 Ok(results)
             }
@@ -504,15 +334,13 @@ impl DocumentCollection for QdrantClient {
 
     async fn search_documents_by_status(
         &self,
-        collection_name: &str,
         status: DocumentStatus,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
-        // Create filter for document status
         let status_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -538,7 +366,7 @@ impl DocumentCollection for QdrantClient {
         match query_vector {
             Some(vector) => {
                 let request = qdrant_client::qdrant::SearchPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::DOCUMENT_COLLECTION.to_string(),
                     vector: vector.values,
                     vector_name: None,
                     limit,
@@ -566,20 +394,20 @@ impl DocumentCollection for QdrantClient {
                     .raw_client()
                     .search_points(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
                 let results = response
                     .result
                     .into_iter()
-                    .map(|scored_point| SearchResult::try_from(scored_point))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .map(SearchResult::try_from)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
                 Ok(results)
             }
             None => {
                 let request = qdrant_client::qdrant::ScrollPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::DOCUMENT_COLLECTION.to_string(),
                     filter: Some(status_filter),
                     offset: None,
                     limit: Some(limit as u32),
@@ -603,14 +431,24 @@ impl DocumentCollection for QdrantClient {
                     .raw_client()
                     .scroll(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
-                let results = response
+                let results: Vec<SearchResult> = response
                     .result
                     .into_iter()
-                    .map(|point| Point::try_from(point).map(|p| SearchResult::from_point(p, 1.0)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .filter_map(|point| {
+                        let scored_point = qdrant_client::qdrant::ScoredPoint {
+                            id: point.id,
+                            payload: point.payload,
+                            score: 1.0,
+                            vectors: point.vectors,
+                            shard_key: None,
+                            order_value: None,
+                            version: 0,
+                        };
+                        SearchResult::try_from(scored_point).ok()
+                    })
+                    .collect();
 
                 Ok(results)
             }
@@ -619,15 +457,13 @@ impl DocumentCollection for QdrantClient {
 
     async fn search_documents_by_author(
         &self,
-        collection_name: &str,
         author_id: String,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
-        // Create filter for author
         let author_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -653,7 +489,7 @@ impl DocumentCollection for QdrantClient {
         match query_vector {
             Some(vector) => {
                 let request = qdrant_client::qdrant::SearchPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::DOCUMENT_COLLECTION.to_string(),
                     vector: vector.values,
                     vector_name: None,
                     limit,
@@ -681,20 +517,20 @@ impl DocumentCollection for QdrantClient {
                     .raw_client()
                     .search_points(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
                 let results = response
                     .result
                     .into_iter()
-                    .map(|scored_point| SearchResult::try_from(scored_point))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .map(SearchResult::try_from)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
                 Ok(results)
             }
             None => {
                 let request = qdrant_client::qdrant::ScrollPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::DOCUMENT_COLLECTION.to_string(),
                     filter: Some(author_filter),
                     offset: None,
                     limit: Some(limit as u32),
@@ -718,152 +554,76 @@ impl DocumentCollection for QdrantClient {
                     .raw_client()
                     .scroll(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
-                let results = response
+                let results: Vec<SearchResult> = response
                     .result
                     .into_iter()
-                    .map(|point| Point::try_from(point).map(|p| SearchResult::from_point(p, 1.0)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .filter_map(|point| {
+                        let scored_point = qdrant_client::qdrant::ScoredPoint {
+                            id: point.id,
+                            payload: point.payload,
+                            score: 1.0,
+                            vectors: point.vectors,
+                            shard_key: None,
+                            order_value: None,
+                            version: 0,
+                        };
+                        SearchResult::try_from(scored_point).ok()
+                    })
+                    .collect();
 
                 Ok(results)
             }
         }
     }
 
-    async fn get_document(
-        &self,
-        collection_name: &str,
-        id: PointId,
-    ) -> QdrantResult<Option<Point>> {
-        self.get_point(collection_name, id).await
+    async fn get_document(&self, id: PointId) -> Result<Option<Point>> {
+        self.get_point(Self::DOCUMENT_COLLECTION, id).await
     }
 
-    async fn update_document_status(
-        &self,
-        collection_name: &str,
-        id: PointId,
-        status: DocumentStatus,
-    ) -> QdrantResult<()> {
-        // Get the existing point
-        if let Some(mut point) = self.get_point(collection_name, id.clone()).await? {
-            // Update the status in the payload
-            point.payload.insert("status", status.as_str());
+    async fn update_document_status(&self, id: PointId, status: DocumentStatus) -> Result<()> {
+        if let Some(mut point) = self
+            .get_point(Self::DOCUMENT_COLLECTION, id.clone())
+            .await?
+        {
+            point.payload = point.payload.with("status", status.as_str());
 
-            // Upsert the updated point
-            self.upsert_point(collection_name, point, true).await
+            let now = jiff::Timestamp::now().to_string();
+            point.payload = point.payload.with("updated_at", now);
+
+            self.upsert_point(Self::DOCUMENT_COLLECTION, point, true)
+                .await
         } else {
-            Err(QdrantError::PointNotFound {
-                collection: collection_name.to_string(),
-                id: id.to_string(),
-            })
+            Err(Error::not_found().with_message(format!("Document with ID {:?} not found", id)))
         }
     }
 
-    async fn delete_document(&self, collection_name: &str, id: PointId) -> QdrantResult<()> {
-        self.delete_points(collection_name, vec![id], true).await
-    }
-
-    async fn delete_documents(&self, collection_name: &str, ids: Vec<PointId>) -> QdrantResult<()> {
-        self.delete_points(collection_name, ids, true).await
-    }
-
-    async fn archive_document(&self, collection_name: &str, id: PointId) -> QdrantResult<()> {
-        self.update_document_status(collection_name, id, DocumentStatus::Archived)
+    async fn delete_document(&self, id: PointId) -> Result<()> {
+        self.delete_points(Self::DOCUMENT_COLLECTION, vec![id], true)
             .await
     }
 
-    async fn publish_document(&self, collection_name: &str, id: PointId) -> QdrantResult<()> {
-        self.update_document_status(collection_name, id, DocumentStatus::Published)
+    async fn delete_documents(&self, ids: Vec<PointId>) -> Result<()> {
+        self.delete_points(Self::DOCUMENT_COLLECTION, ids, true)
             .await
     }
 
-    async fn get_document_stats(&self, collection_name: &str) -> QdrantResult<DocumentStats> {
-        // Get collection info for total count
-        let info = self.collection_info(collection_name).await?;
-        let total_documents = info.points_count;
-
-        // Count by status
-        let published_count = self
-            .count_documents_by_status(collection_name, DocumentStatus::Published)
-            .await
-            .unwrap_or(0);
-        let draft_count = self
-            .count_documents_by_status(collection_name, DocumentStatus::Draft)
-            .await
-            .unwrap_or(0);
-        let archived_count = self
-            .count_documents_by_status(collection_name, DocumentStatus::Archived)
-            .await
-            .unwrap_or(0);
-
-        // Placeholder values - in a real implementation, you might calculate these properly
-        let total_authors = total_documents.unwrap_or(0) / 2; // Rough estimate
-        let avg_document_size = 5000.0; // Placeholder
-
-        Ok(DocumentStats {
-            total_documents: total_documents.unwrap_or(0),
-            published_documents: published_count,
-            draft_documents: draft_count,
-            archived_documents: archived_count,
-            total_authors,
-            avg_document_size,
-        })
+    async fn delete_point(&self, id: PointId) -> Result<()> {
+        self.delete_point(Self::DOCUMENT_COLLECTION, id, true).await
     }
 
-    async fn get_author_stats(
-        &self,
-        collection_name: &str,
-        author_id: String,
-    ) -> QdrantResult<AuthorStats> {
-        let document_count = self
-            .count_documents_by_author(collection_name, author_id.clone())
-            .await?;
-
-        // Placeholder values - in a real implementation, you might calculate these properly
-        let total_size = document_count * 5000; // Rough estimate
-        let last_updated = Some("2024-01-01T00:00:00Z".to_string()); // Placeholder
-
-        Ok(AuthorStats {
-            author_id,
-            document_count,
-            total_size,
-            last_updated,
-        })
+    async fn archive_document(&self, id: PointId) -> Result<()> {
+        self.update_document_status(id, DocumentStatus::Archived)
+            .await
     }
 
-    async fn get_document_type_stats(
-        &self,
-        collection_name: &str,
-        doc_type: DocumentType,
-    ) -> QdrantResult<DocumentTypeStats> {
-        let count = self
-            .count_documents_by_type(collection_name, doc_type.clone())
-            .await?;
-
-        // Placeholder values - in a real implementation, you might calculate these properly
-        let total_size = count * 3000; // Rough estimate
-        let avg_size = if count > 0 {
-            total_size as f64 / count as f64
-        } else {
-            0.0
-        };
-
-        Ok(DocumentTypeStats {
-            document_type: doc_type,
-            count,
-            total_size,
-            avg_size,
-        })
+    async fn publish_document(&self, id: PointId) -> Result<()> {
+        self.update_document_status(id, DocumentStatus::Published)
+            .await
     }
 
-    async fn count_documents_by_type(
-        &self,
-        collection_name: &str,
-        doc_type: DocumentType,
-    ) -> QdrantResult<u64> {
-        // Create filter for document type
+    async fn count_documents_by_type(&self, doc_type: DocumentType) -> Result<u64> {
         let type_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -887,9 +647,9 @@ impl DocumentCollection for QdrantClient {
         };
 
         let request = qdrant_client::qdrant::CountPoints {
-            collection_name: collection_name.to_string(),
+            collection_name: Self::DOCUMENT_COLLECTION.to_string(),
             filter: Some(type_filter),
-            exact: Some(false), // Use approximate count for better performance
+            exact: Some(false),
             read_consistency: None,
             shard_key_selector: None,
             timeout: None,
@@ -899,17 +659,12 @@ impl DocumentCollection for QdrantClient {
             .raw_client()
             .count(request)
             .await
-            .map_err(QdrantError::Connection)?;
+            .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
         Ok(response.result.map(|r| r.count).unwrap_or(0))
     }
 
-    async fn count_documents_by_status(
-        &self,
-        collection_name: &str,
-        status: DocumentStatus,
-    ) -> QdrantResult<u64> {
-        // Create filter for document status
+    async fn count_documents_by_status(&self, status: DocumentStatus) -> Result<u64> {
         let status_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -933,9 +688,9 @@ impl DocumentCollection for QdrantClient {
         };
 
         let request = qdrant_client::qdrant::CountPoints {
-            collection_name: collection_name.to_string(),
+            collection_name: Self::DOCUMENT_COLLECTION.to_string(),
             filter: Some(status_filter),
-            exact: Some(false), // Use approximate count for better performance
+            exact: Some(false),
             read_consistency: None,
             shard_key_selector: None,
             timeout: None,
@@ -945,17 +700,12 @@ impl DocumentCollection for QdrantClient {
             .raw_client()
             .count(request)
             .await
-            .map_err(QdrantError::Connection)?;
+            .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
         Ok(response.result.map(|r| r.count).unwrap_or(0))
     }
 
-    async fn count_documents_by_author(
-        &self,
-        collection_name: &str,
-        author_id: String,
-    ) -> QdrantResult<u64> {
-        // Create filter for author
+    async fn count_documents_by_author(&self, author_id: String) -> Result<u64> {
         let author_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -979,7 +729,7 @@ impl DocumentCollection for QdrantClient {
         };
 
         let request = qdrant_client::qdrant::CountPoints {
-            collection_name: collection_name.to_string(),
+            collection_name: Self::DOCUMENT_COLLECTION.to_string(),
             filter: Some(author_filter),
             exact: Some(false),
             read_consistency: None,
@@ -991,7 +741,7 @@ impl DocumentCollection for QdrantClient {
             .raw_client()
             .count(request)
             .await
-            .map_err(QdrantError::Connection)?;
+            .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
         Ok(response.result.map(|r| r.count).unwrap_or(0))
     }
@@ -1000,68 +750,6 @@ impl DocumentCollection for QdrantClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Distance;
-
-    #[test]
-    fn test_document_config_creation() {
-        let config = DocumentConfig::new(384, Distance::Cosine);
-        assert_eq!(config.vector_params.size, 384);
-        assert_eq!(config.vector_params.distance, Distance::Cosine);
-        assert!(config.full_text_search);
-        assert!(!config.version_tracking);
-        assert!(config.author_indexing);
-        assert!(config.content_type_indexing);
-        assert_eq!(config.max_chunk_size, None);
-    }
-
-    #[test]
-    fn test_text_optimized_config() {
-        let config = DocumentConfig::for_text_documents(384);
-        assert_eq!(config.vector_params.size, 384);
-        assert_eq!(config.vector_params.distance, Distance::Cosine);
-        assert_eq!(config.vector_params.on_disk, Some(false));
-        assert_eq!(config.max_chunk_size, Some(1000));
-        assert!(config.full_text_search);
-        assert!(config.version_tracking);
-        assert!(config.author_indexing);
-        assert!(config.content_type_indexing);
-    }
-
-    #[test]
-    fn test_large_document_optimized_config() {
-        let config = DocumentConfig::for_large_documents(512);
-        assert_eq!(config.vector_params.size, 512);
-        assert_eq!(config.vector_params.distance, Distance::Cosine);
-        assert_eq!(config.vector_params.on_disk, Some(true));
-        assert_eq!(config.max_chunk_size, Some(500));
-        assert!(config.full_text_search);
-        assert!(config.version_tracking);
-        assert!(config.author_indexing);
-        assert!(config.content_type_indexing);
-    }
-
-    #[test]
-    fn test_code_optimized_config() {
-        let config = DocumentConfig::for_code_documents(256);
-        assert_eq!(config.vector_params.size, 256);
-        assert_eq!(config.max_chunk_size, Some(2000));
-        assert!(config.full_text_search);
-        assert!(config.version_tracking);
-        assert!(config.author_indexing);
-        assert!(config.content_type_indexing);
-    }
-
-    #[test]
-    fn test_multimedia_optimized_config() {
-        let config = DocumentConfig::for_multimedia_documents(768);
-        assert_eq!(config.vector_params.size, 768);
-        assert_eq!(config.vector_params.on_disk, Some(true));
-        assert_eq!(config.max_chunk_size, None);
-        assert!(!config.full_text_search);
-        assert!(!config.version_tracking);
-        assert!(config.author_indexing);
-        assert!(config.content_type_indexing);
-    }
 
     #[test]
     fn test_document_status_string_conversion() {
@@ -1078,61 +766,6 @@ mod tests {
         assert_eq!(DocumentType::Word.as_str(), "word");
         assert_eq!(DocumentType::Code("rust".to_string()).as_str(), "code");
         assert_eq!(DocumentType::Html.as_str(), "html");
-        assert_eq!(DocumentType::Custom("test".to_string()).as_str(), "custom");
-    }
-
-    #[test]
-    fn test_config_builder_methods() {
-        let config = DocumentConfig::new(128, Distance::Cosine)
-            .max_chunk_size(750)
-            .with_full_text_search()
-            .with_version_tracking()
-            .with_author_indexing()
-            .with_content_type_indexing();
-
-        assert_eq!(config.max_chunk_size, Some(750));
-        assert!(config.full_text_search);
-        assert!(config.version_tracking);
-        assert!(config.author_indexing);
-        assert!(config.content_type_indexing);
-    }
-
-    #[test]
-    fn test_stats_structures() {
-        let doc_stats = DocumentStats {
-            total_documents: 100,
-            published_documents: 80,
-            draft_documents: 15,
-            archived_documents: 5,
-            total_authors: 10,
-            avg_document_size: 5000.0,
-        };
-
-        assert_eq!(doc_stats.total_documents, 100);
-        assert_eq!(doc_stats.published_documents, 80);
-        assert_eq!(doc_stats.draft_documents, 15);
-        assert_eq!(doc_stats.archived_documents, 5);
-
-        let author_stats = AuthorStats {
-            author_id: "author-123".to_string(),
-            document_count: 25,
-            total_size: 125000,
-            last_updated: Some("2024-01-01T00:00:00Z".to_string()),
-        };
-
-        assert_eq!(author_stats.author_id, "author-123");
-        assert_eq!(author_stats.document_count, 25);
-        assert_eq!(author_stats.total_size, 125000);
-
-        let type_stats = DocumentTypeStats {
-            document_type: DocumentType::Text,
-            count: 50,
-            total_size: 250000,
-            avg_size: 5000.0,
-        };
-
-        assert_eq!(type_stats.count, 50);
-        assert_eq!(type_stats.total_size, 250000);
-        assert_eq!(type_stats.avg_size, 5000.0);
+        assert_eq!(DocumentType::Custom("test".to_string()).as_str(), "test");
     }
 }

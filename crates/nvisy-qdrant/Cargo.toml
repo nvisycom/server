@@ -45,13 +45,12 @@ serde_json = { workspace = true, features = [] }
 
 # Error handling
 thiserror = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into"] }
+derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into", "display"] }
 
 # Data types
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 bytes = { workspace = true, features = [] }
-fastrand = { workspace = true, features = [] }
 
 # OpenAPI documentation (optional)
 utoipa = { workspace = true, features = ["macros"], optional = true }

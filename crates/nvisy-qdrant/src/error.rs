@@ -1,371 +1,319 @@
 //! Error types and utilities for Qdrant operations.
-//!
-//! This module provides comprehensive error handling for all Qdrant operations,
-//! including connection errors, search errors, collection management errors, and timeout errors.
 
 use std::time::Duration;
 
-/// Result type for all Qdrant operations in this crate.
-///
-/// This is a convenience type alias that defaults to using [`QdrantError`] as the error type.
-/// Most functions in this crate return this type for consistent error handling.
-pub type QdrantResult<T, E = QdrantError> = std::result::Result<T, E>;
+use thiserror::Error;
 
-/// Unified error type for Qdrant operations
-#[derive(Debug, thiserror::Error)]
-pub enum QdrantError {
-    /// Qdrant client/connection errors
-    #[error("Qdrant connection error: {0}")]
-    Connection(#[from] qdrant_client::QdrantError),
+/// Type alias for boxed dynamic errors that can be sent across threads.
+pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
-    /// Serialization errors when sending or receiving data
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+/// Type alias for Results with our custom Error type.
+pub type Result<T> = std::result::Result<T, Error>;
 
-    /// Collection not found
-    #[error("Collection '{name}' not found")]
-    CollectionNotFound { name: String },
-
-    /// Collection already exists
-    #[error("Collection '{name}' already exists")]
-    CollectionAlreadyExists { name: String },
-
-    /// Point not found
-    #[error("Point '{id}' not found in collection '{collection}'")]
-    PointNotFound { collection: String, id: String },
-
-    /// Invalid vector dimensions
-    #[error("Invalid vector dimensions: expected {expected}, got {actual}")]
-    InvalidVectorDimensions { expected: usize, actual: usize },
-
-    /// Invalid vector format
-    #[error("Invalid vector format: {reason}")]
-    InvalidVector { reason: String },
-
-    /// Search operation failed
-    #[error("Search operation failed in collection '{collection}': {reason}")]
-    SearchError { collection: String, reason: String },
-
-    /// Batch operation failed
-    #[error("Batch operation failed: {failed_count}/{total_count} operations failed")]
-    BatchOperationFailed {
-        failed_count: usize,
-        total_count: usize,
-    },
-
-    /// Operation timeout
-    #[error("Operation timed out after {timeout:?}")]
-    Timeout { timeout: Duration },
-
-    /// Rate limit exceeded
-    #[error("Rate limit exceeded: {message}")]
-    RateLimited { message: String },
-
-    /// Authentication failed
-    #[error("Authentication failed: {reason}")]
-    Authentication { reason: String },
-
-    /// Server error from Qdrant
-    #[error("Qdrant server error: {status_code} - {message}")]
-    ServerError { status_code: u16, message: String },
-
-    /// Invalid configuration
-    #[error("Invalid configuration: {reason}")]
-    InvalidConfig { reason: String },
-
-    /// Collection operation failed
-    #[error("Collection operation failed on '{collection}': {operation} - {error}")]
-    CollectionError {
-        collection: String,
-        operation: String,
-        error: String,
-    },
-
-    /// Point operation failed
-    #[error("Point operation failed: {operation} - {details}")]
-    PointError { operation: String, details: String },
-
-    /// Index operation failed
-    #[error("Index operation failed on collection '{collection}': {reason}")]
-    IndexError { collection: String, reason: String },
-
-    /// Payload operation failed
-    #[error("Payload operation failed: {0}")]
-    PayloadError(String),
-
-    /// Filter operation failed
-    #[error("Filter operation failed: {reason}")]
-    FilterError { reason: String },
-
-    /// Generic operation error with context
-    #[error("Qdrant operation failed: {operation} - {details}")]
-    Operation { operation: String, details: String },
-
-    /// Invalid input provided
-    #[error("Invalid input: {0}")]
-    InvalidInput(String),
-
-    /// Repository operation error
-    #[error("Repository operation '{operation}' failed on collection '{collection}'")]
-    RepositoryError {
-        operation: String,
-        collection: String,
-        source: Box<QdrantError>,
-    },
-
-    /// Conversion error when transforming data types
-    #[error("Conversion error: {0}")]
-    Conversion(String),
-
-    /// Unexpected error occurred
-    #[error("Unexpected error: {message}")]
-    Unexpected { message: String },
+/// Categories of errors that can occur in nvisy-qdrant operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// Input validation failed.
+    InvalidInput,
+    /// Network-related error occurred.
+    NetworkError,
+    /// Resource not found.
+    NotFound,
+    /// Timeout occurred.
+    Timeout,
+    /// Serialization/deserialization error.
+    Serialization,
+    /// Configuration error.
+    Configuration,
+    /// Connection error.
+    Connection,
+    /// Collection operation error.
+    Collection,
+    /// Point operation error.
+    Point,
+    /// Search operation error.
+    Search,
+    /// Batch operation error.
+    Batch,
+    /// Rate limit exceeded.
+    RateLimited,
+    /// Authentication failed.
+    Authentication,
+    /// Server error.
+    ServerError,
+    /// Unknown error occurred.
+    Unknown,
 }
 
-impl QdrantError {
-    /// Create a collection not found error
-    pub fn collection_not_found(name: impl Into<String>) -> Self {
-        Self::CollectionNotFound { name: name.into() }
-    }
+/// A structured error type for nvisy-qdrant operations.
+#[derive(Debug, Error)]
+#[error("{kind:?}{}", message.as_ref().map(|m| format!(": {}", m)).unwrap_or_default())]
+pub struct Error {
+    /// The kind of error that occurred.
+    pub kind: ErrorKind,
+    /// Optional error message.
+    pub message: Option<String>,
+    /// Optional source error.
+    #[source]
+    pub source: Option<BoxedError>,
+}
 
-    /// Create a collection already exists error
-    pub fn collection_already_exists(name: impl Into<String>) -> Self {
-        Self::CollectionAlreadyExists { name: name.into() }
-    }
-
-    /// Create a point not found error
-    pub fn point_not_found(collection: impl Into<String>, id: impl Into<String>) -> Self {
-        Self::PointNotFound {
-            collection: collection.into(),
-            id: id.into(),
+impl Error {
+    /// Creates a new error with the given kind.
+    pub fn new(kind: ErrorKind) -> Self {
+        Self {
+            kind,
+            message: None,
+            source: None,
         }
     }
 
-    /// Create an invalid vector dimensions error
-    pub fn invalid_vector_dimensions(expected: usize, actual: usize) -> Self {
-        Self::InvalidVectorDimensions { expected, actual }
+    /// Adds a message to this error.
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
     }
 
-    /// Create an invalid vector error
-    pub fn invalid_vector(reason: impl Into<String>) -> Self {
-        Self::InvalidVector {
-            reason: reason.into(),
-        }
+    /// Adds a source error to this error.
+    pub fn with_source(mut self, source: BoxedError) -> Self {
+        self.source = Some(source);
+        self
     }
 
-    /// Create a search error
-    pub fn search_error(collection: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::SearchError {
-            collection: collection.into(),
-            reason: reason.into(),
-        }
+    /// Creates a new invalid input error.
+    pub fn invalid_input() -> Self {
+        Self::new(ErrorKind::InvalidInput)
     }
 
-    /// Create a batch operation failed error
-    pub fn batch_operation_failed(failed_count: usize, total_count: usize) -> Self {
-        Self::BatchOperationFailed {
-            failed_count,
-            total_count,
-        }
+    /// Creates a new network error.
+    pub fn network_error() -> Self {
+        Self::new(ErrorKind::NetworkError)
     }
 
-    /// Create a rate limited error
-    pub fn rate_limited(message: impl Into<String>) -> Self {
-        Self::RateLimited {
-            message: message.into(),
-        }
+    /// Creates a new not found error.
+    pub fn not_found() -> Self {
+        Self::new(ErrorKind::NotFound)
     }
 
-    /// Create an authentication error
-    pub fn authentication(reason: impl Into<String>) -> Self {
-        Self::Authentication {
-            reason: reason.into(),
-        }
+    /// Creates a new timeout error.
+    pub fn timeout() -> Self {
+        Self::new(ErrorKind::Timeout)
     }
 
-    /// Create a server error
-    pub fn server_error(status_code: u16, message: impl Into<String>) -> Self {
-        Self::ServerError {
-            status_code,
-            message: message.into(),
-        }
+    /// Creates a new serialization error.
+    pub fn serialization() -> Self {
+        Self::new(ErrorKind::Serialization)
     }
 
-    /// Create an invalid configuration error
-    pub fn invalid_config(reason: impl Into<String>) -> Self {
-        Self::InvalidConfig {
-            reason: reason.into(),
-        }
+    /// Creates a new configuration error.
+    pub fn configuration() -> Self {
+        Self::new(ErrorKind::Configuration)
     }
 
-    /// Create a collection error
-    pub fn collection_error(
-        collection: impl Into<String>,
-        operation: impl Into<String>,
-        error: impl Into<String>,
-    ) -> Self {
-        Self::CollectionError {
-            collection: collection.into(),
-            operation: operation.into(),
-            error: error.into(),
-        }
+    /// Creates a new connection error.
+    pub fn connection() -> Self {
+        Self::new(ErrorKind::Connection)
     }
 
-    /// Create a point error
-    pub fn point_error(operation: impl Into<String>, details: impl Into<String>) -> Self {
-        Self::PointError {
-            operation: operation.into(),
-            details: details.into(),
-        }
+    /// Creates a new collection error.
+    pub fn collection() -> Self {
+        Self::new(ErrorKind::Collection)
     }
 
-    /// Create an index error
-    pub fn index_error(collection: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::IndexError {
-            collection: collection.into(),
-            reason: reason.into(),
-        }
+    /// Creates a new point error.
+    pub fn point() -> Self {
+        Self::new(ErrorKind::Point)
     }
 
-    /// Create a payload error
-    pub fn payload_error(reason: impl Into<String>) -> Self {
-        Self::PayloadError(reason.into())
+    /// Creates a new search error.
+    pub fn search() -> Self {
+        Self::new(ErrorKind::Search)
     }
 
-    /// Create a filter error
-    pub fn filter_error(reason: impl Into<String>) -> Self {
-        Self::FilterError {
-            reason: reason.into(),
-        }
+    /// Creates a new batch error.
+    pub fn batch() -> Self {
+        Self::new(ErrorKind::Batch)
     }
 
-    /// Create an operation error with context
-    pub fn operation(op: impl Into<String>, details: impl Into<String>) -> Self {
-        Self::Operation {
-            operation: op.into(),
-            details: details.into(),
-        }
+    /// Creates a new rate limited error.
+    pub fn rate_limited() -> Self {
+        Self::new(ErrorKind::RateLimited)
     }
 
-    /// Create a timeout error with the given duration
-    pub fn timeout(duration: Duration) -> Self {
-        Self::Timeout { timeout: duration }
+    /// Creates a new authentication error.
+    pub fn authentication() -> Self {
+        Self::new(ErrorKind::Authentication)
     }
 
-    /// Create an unexpected error
-    pub fn unexpected(message: impl Into<String>) -> Self {
-        Self::Unexpected {
-            message: message.into(),
-        }
+    /// Creates a new server error.
+    pub fn server_error() -> Self {
+        Self::new(ErrorKind::ServerError)
     }
 
-    /// Returns whether this error indicates a transient failure that might succeed on retry.
-    ///
-    /// Transient errors include timeouts, rate limits, and certain server errors that may
-    /// be resolved by retrying the operation.
-    pub fn is_transient(&self) -> bool {
-        matches!(
-            self,
-            QdrantError::Timeout { .. }
-                | QdrantError::RateLimited { .. }
-                | QdrantError::Connection(_)
-                | QdrantError::ServerError {
-                    status_code: 500..=599,
-                    ..
-                }
-        )
+    /// Creates a new unknown error.
+    pub fn unknown() -> Self {
+        Self::new(ErrorKind::Unknown)
     }
 
-    /// Returns whether this error indicates a permanent failure that won't succeed on retry.
-    ///
-    /// Permanent errors include authentication failures, not found errors, invalid data,
-    /// and client errors that require changes to resolve.
-    pub fn is_permanent(&self) -> bool {
-        !self.is_transient()
-    }
-
-    /// Returns whether this error indicates a client-side error (4xx status codes or equivalent).
+    /// Returns true if this is a client error (4xx equivalent).
     pub fn is_client_error(&self) -> bool {
         matches!(
-            self,
-            QdrantError::CollectionNotFound { .. }
-                | QdrantError::PointNotFound { .. }
-                | QdrantError::InvalidVector { .. }
-                | QdrantError::InvalidVectorDimensions { .. }
-                | QdrantError::InvalidConfig { .. }
-                | QdrantError::Authentication { .. }
-                | QdrantError::ServerError {
-                    status_code: 400..=499,
-                    ..
-                }
+            self.kind,
+            ErrorKind::InvalidInput
+                | ErrorKind::Authentication
+                | ErrorKind::NotFound
+                | ErrorKind::RateLimited
         )
     }
 
-    /// Returns whether this error indicates a server-side error (5xx status codes or equivalent).
+    /// Returns true if this is a server error (5xx equivalent).
     pub fn is_server_error(&self) -> bool {
         matches!(
-            self,
-            QdrantError::ServerError {
-                status_code: 500..=599,
-                ..
-            }
+            self.kind,
+            ErrorKind::ServerError
+                | ErrorKind::Connection
+                | ErrorKind::Configuration
+                | ErrorKind::Timeout
+                | ErrorKind::Unknown
         )
     }
 
-    /// Get a user-friendly error message suitable for display
-    pub fn user_message(&self) -> String {
-        match self {
-            QdrantError::Connection(_) => {
-                "Connection to Qdrant server failed. Please check your connection.".to_string()
-            }
-            QdrantError::Timeout { timeout } => {
-                format!("Operation timed out after {:?}. Please try again.", timeout)
-            }
-            QdrantError::CollectionNotFound { name } => {
-                format!("Collection '{}' not found.", name)
-            }
-            QdrantError::PointNotFound { id, .. } => format!("Point '{}' not found.", id),
-            QdrantError::InvalidVectorDimensions { expected, actual } => format!(
-                "Vector has wrong dimensions. Expected {} dimensions, got {}.",
-                expected, actual
-            ),
-            QdrantError::RateLimited { .. } => {
-                "Rate limit exceeded. Please wait before trying again.".to_string()
-            }
-            QdrantError::Authentication { .. } => {
-                "Authentication failed. Please check your API key.".to_string()
-            }
-            QdrantError::Serialization(_) => {
-                "Data format error. Please check your input.".to_string()
-            }
-            QdrantError::InvalidConfig { reason } => format!("Configuration error: {}", reason),
-            QdrantError::InvalidInput(reason) => format!("Invalid input: {}", reason),
-            QdrantError::RepositoryError {
-                operation,
-                collection,
-                ..
-            } => {
-                format!(
-                    "Repository operation '{}' failed on collection '{}'",
-                    operation, collection
-                )
-            }
-            _ => "An unexpected error occurred. Please try again.".to_string(),
+    /// Returns true if this error is potentially retryable.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self.kind,
+            ErrorKind::NetworkError
+                | ErrorKind::RateLimited
+                | ErrorKind::Timeout
+                | ErrorKind::Connection
+        )
+    }
+
+    /// Returns the recommended retry delay for this error.
+    pub fn retry_delay(&self) -> Option<Duration> {
+        match self.kind {
+            ErrorKind::RateLimited => Some(Duration::from_secs(60)),
+            ErrorKind::NetworkError => Some(Duration::from_secs(5)),
+            ErrorKind::Timeout => Some(Duration::from_secs(10)),
+            ErrorKind::Connection => Some(Duration::from_secs(5)),
+            _ => None,
         }
     }
 
-    /// Get the HTTP status code if this error represents an HTTP error
-    pub fn status_code(&self) -> Option<u16> {
-        match self {
-            QdrantError::ServerError { status_code, .. } => Some(*status_code),
-            QdrantError::CollectionNotFound { .. } | QdrantError::PointNotFound { .. } => Some(404),
-            QdrantError::Authentication { .. } => Some(401),
-            QdrantError::RateLimited { .. } => Some(429),
-            QdrantError::InvalidVector { .. }
-            | QdrantError::InvalidVectorDimensions { .. }
-            | QdrantError::InvalidConfig { .. }
-            | QdrantError::InvalidInput(_) => Some(400),
-            _ => None,
-        }
+    /// Returns true if this is an authentication error.
+    pub fn is_auth_error(&self) -> bool {
+        matches!(self.kind, ErrorKind::Authentication)
+    }
+
+    /// Returns true if this is a rate limiting error.
+    pub fn is_rate_limit_error(&self) -> bool {
+        matches!(self.kind, ErrorKind::RateLimited)
+    }
+
+    /// Returns true if this is a timeout error.
+    pub fn is_timeout_error(&self) -> bool {
+        matches!(self.kind, ErrorKind::Timeout)
+    }
+
+    /// Returns true if this is a network error.
+    pub fn is_network_error(&self) -> bool {
+        matches!(self.kind, ErrorKind::NetworkError)
+    }
+
+    /// Returns true if this is a not found error.
+    pub fn is_not_found(&self) -> bool {
+        matches!(self.kind, ErrorKind::NotFound)
+    }
+
+    /// Returns true if this is a collection error.
+    pub fn is_collection(&self) -> bool {
+        matches!(self.kind, ErrorKind::Collection)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_creation() {
+        let error = Error::new(ErrorKind::InvalidInput);
+        assert_eq!(error.kind, ErrorKind::InvalidInput);
+        assert!(error.message.is_none());
+        assert!(error.source.is_none());
+    }
+
+    #[test]
+    fn test_error_with_message() {
+        let error = Error::invalid_input().with_message("Test message");
+        assert_eq!(error.kind, ErrorKind::InvalidInput);
+        assert_eq!(error.message.as_ref().unwrap(), "Test message");
+    }
+
+    #[test]
+    fn test_client_error_classification() {
+        assert!(Error::authentication().is_client_error());
+        assert!(Error::invalid_input().is_client_error());
+        assert!(Error::not_found().is_client_error());
+        assert!(Error::rate_limited().is_client_error());
+    }
+
+    #[test]
+    fn test_server_error_classification() {
+        assert!(Error::server_error().is_server_error());
+        assert!(Error::connection().is_server_error());
+        assert!(Error::configuration().is_server_error());
+        assert!(Error::timeout().is_server_error());
+        assert!(Error::unknown().is_server_error());
+    }
+
+    #[test]
+    fn test_retryable_classification() {
+        assert!(Error::rate_limited().is_retryable());
+        assert!(Error::network_error().is_retryable());
+        assert!(Error::timeout().is_retryable());
+        assert!(Error::connection().is_retryable());
+        assert!(!Error::authentication().is_retryable());
+        assert!(!Error::invalid_input().is_retryable());
+    }
+
+    #[test]
+    fn test_retry_delays() {
+        assert_eq!(
+            Error::rate_limited().retry_delay(),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            Error::network_error().retry_delay(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            Error::timeout().retry_delay(),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(
+            Error::connection().retry_delay(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(Error::invalid_input().retry_delay(), None);
+    }
+
+    #[test]
+    fn test_specialized_error_checks() {
+        assert!(Error::authentication().is_auth_error());
+        assert!(Error::rate_limited().is_rate_limit_error());
+        assert!(Error::timeout().is_timeout_error());
+        assert!(Error::network_error().is_network_error());
+        assert!(Error::not_found().is_not_found());
+        assert!(!Error::invalid_input().is_auth_error());
+        assert!(!Error::authentication().is_rate_limit_error());
+    }
+
+    #[test]
+    fn test_error_display() {
+        let error = Error::invalid_input().with_message("Test input validation failed");
+        let display_string = format!("{}", error);
+        assert!(display_string.contains("InvalidInput"));
+        assert!(display_string.contains("Test input validation failed"));
     }
 }

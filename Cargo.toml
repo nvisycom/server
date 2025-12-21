@@ -50,8 +50,6 @@ futures = { version = "0.3", features = [] }
 futures-util = { version = "0.3", features = [] }
 async-stream = { version = "0.3", features = [] }
 async-trait = { version = "0.1", features = [] }
-scoped-futures = { version = "0.1", features = [] }
-pin-project-lite = { version = "0.2", features = [] }
 
 # HTTP client & server
 reqwest = { version = "0.12", features = [] }
@@ -92,25 +90,17 @@ async-nats = { version = "0.45", features = [] }
 # Vector database (Qdrant)
 qdrant-client = { version = "1.11", features = [] }
 
-# AI/LLM Gateway & Services
-portkey-sdk = { version = "0.2", features = [] }
-runpod-sdk = { version = "0.2", features = [] }
-
 # Observability
 tracing = { version = "0.1", features = [] }
 tracing-subscriber = { version = "0.3", features = [] }
 
-# Rate limiting
-governor = { version = "0.10", features = [] }
+# Testing utilities
 tempfile = { version = "3.23", features = [] }
-fastrand = { version = "2.0", features = [] }
 
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
-serde_toon = { version = "0.2", features = [] }
 validator = { version = "0.20", features = ["derive"] }
-schemars = { version = "0.8", features = [] }
 
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }
@@ -129,8 +119,6 @@ bigdecimal = { version = "0.4", features = ["serde"] }
 bytes = { version = "1.10", features = ["serde"] }
 mime = { version = "0.3", features = [] }
 url = { version = "2.5", features = [] }
-semver = { version = "1.0", features = ["serde"] }
 
 # Text processing
-ecow = { version = "0.2", features = ["serde"] }
 regex = { version = "1.0", features = [] }

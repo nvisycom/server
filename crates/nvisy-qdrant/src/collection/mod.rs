@@ -14,27 +14,10 @@ pub mod annotation;
 pub mod conversation;
 pub mod document;
 
-pub use annotation::{AnnotationConfig, AnnotationCollection};
-pub use conversation::{ConversationConfig, ConversationCollection, ConversationStats};
-pub use document::{
-    AuthorStats, DocumentConfig, DocumentCollection, DocumentStats, DocumentTypeStats,
-};
+pub use annotation::AnnotationCollection;
+pub use conversation::ConversationCollection;
+pub use document::DocumentCollection;
 use serde::{Deserialize, Serialize};
-
-/// Common collection statistics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CollectionStats {
-    /// Total number of points in the collection
-    pub points_count: u64,
-    /// Number of indexed vectors
-    pub indexed_vectors_count: u64,
-    /// Collection status
-    pub status: crate::types::CollectionStatus,
-    /// Disk usage in bytes
-    pub disk_usage_bytes: Option<u64>,
-    /// Memory usage in bytes
-    pub memory_usage_bytes: Option<u64>,
-}
 
 /// Common search parameters used across all collection types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,7 +95,7 @@ impl Default for SearchParams {
 /// Utility functions for working with collections.
 pub mod utils {
 
-    use crate::error::{QdrantError, QdrantResult};
+    use crate::error::{Error, Result};
     use crate::types::{Distance, Vector, VectorParams};
 
     /// Create a standard vector configuration for text embeddings
@@ -131,9 +114,9 @@ pub mod utils {
     }
 
     /// Validate that a vector has the expected dimensions
-    pub fn validate_vector_dimensions(vector: &Vector, expected: usize) -> QdrantResult<()> {
+    pub fn validate_vector_dimensions(vector: &Vector, expected: usize) -> Result<()> {
         if vector.len() != expected {
-            return Err(QdrantError::InvalidInput(format!(
+            return Err(Error::invalid_input().with_message(format!(
                 "Expected vector with {} dimensions, got {}",
                 expected,
                 vector.len()
@@ -194,21 +177,5 @@ mod tests {
 
         // Invalid dimensions
         assert!(utils::validate_vector_dimensions(&vector, 4).is_err());
-    }
-
-    #[test]
-    fn test_collection_stats() {
-        let stats = CollectionStats {
-            points_count: 1000,
-            indexed_vectors_count: 950,
-            status: crate::types::CollectionStatus::Green,
-            disk_usage_bytes: Some(1024000),
-            memory_usage_bytes: Some(512000),
-        };
-
-        assert_eq!(stats.points_count, 1000);
-        assert_eq!(stats.indexed_vectors_count, 950);
-        assert_eq!(stats.disk_usage_bytes, Some(1024000));
-        assert_eq!(stats.memory_usage_bytes, Some(512000));
     }
 }

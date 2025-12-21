@@ -4,275 +4,160 @@
 //! including message embeddings, conversation context, participant tracking,
 //! and conversation state management.
 
+use std::future::Future;
+
 use qdrant_client::qdrant::condition::ConditionOneOf;
 use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::with_payload_selector::SelectorOptions;
 use qdrant_client::qdrant::{FieldCondition, Filter, Match};
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 use crate::client::QdrantClient;
 use crate::collection::SearchParams;
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 use crate::payload::{ConversationPoint, ConversationStatus, MessageType};
-use crate::types::{CollectionConfig, Distance, Point, PointId, Vector, VectorParams};
+use crate::types::{Distance, Point, PointId, Vector, VectorParams};
 use crate::{Condition, SearchResult, WithPayloadSelector};
-
-/// Configuration for conversation collections.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct ConversationConfig {
-    /// Vector parameters for the collection
-    pub vector_params: VectorParams,
-    /// Maximum conversation history to maintain
-    pub max_history: Option<usize>,
-    /// Enable semantic search on conversation content
-    pub semantic_search: bool,
-    /// Enable participant indexing
-    pub participant_indexing: bool,
-    /// Enable temporal indexing for conversation timeline
-    pub temporal_indexing: bool,
-}
-
-impl ConversationConfig {
-    /// Create a new conversation configuration
-    pub fn new(dimensions: u64, distance: Distance) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, distance),
-            max_history: None,
-            semantic_search: true,
-            participant_indexing: true,
-            temporal_indexing: false,
-        }
-    }
-
-    /// Create configuration optimized for chat conversations
-    pub fn for_chat_conversations(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine).on_disk(false),
-            max_history: Some(1000), // Keep last 1000 messages
-            semantic_search: true,
-            participant_indexing: true,
-            temporal_indexing: true,
-        }
-    }
-
-    /// Create configuration optimized for document conversations
-    pub fn for_document_conversations(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine).on_disk(true),
-            max_history: None, // Keep all history for documents
-            semantic_search: true,
-            participant_indexing: false,
-            temporal_indexing: true,
-        }
-    }
-
-    /// Create configuration for support conversations
-    pub fn for_support_conversations(dimensions: u64) -> Self {
-        Self {
-            vector_params: VectorParams::new(dimensions, Distance::Cosine),
-            max_history: Some(500),
-            semantic_search: true,
-            participant_indexing: true,
-            temporal_indexing: true,
-        }
-    }
-
-    /// Set maximum conversation history
-    pub fn max_history(mut self, max: usize) -> Self {
-        self.max_history = Some(max);
-        self
-    }
-
-    /// Enable semantic search
-    pub fn with_semantic_search(mut self) -> Self {
-        self.semantic_search = true;
-        self
-    }
-
-    /// Enable participant indexing
-    pub fn with_participant_indexing(mut self) -> Self {
-        self.participant_indexing = true;
-        self
-    }
-
-    /// Enable temporal indexing
-    pub fn with_temporal_indexing(mut self) -> Self {
-        self.temporal_indexing = true;
-        self
-    }
-
-    /// Set vector parameters
-    pub fn with_vectors(mut self, vector_params: VectorParams) -> Self {
-        self.vector_params = vector_params;
-        self
-    }
-}
-
-/// Conversation statistics for analytics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
-pub struct ConversationStats {
-    /// Total number of conversations
-    pub total_conversations: u64,
-    /// Active conversations count
-    pub active_conversations: u64,
-    /// Archived conversations count
-    pub archived_conversations: u64,
-    /// Average messages per conversation
-    pub avg_messages_per_conversation: f64,
-    /// Total participants across all conversations
-    pub total_participants: u64,
-}
 
 /// Conversation operations trait for QdrantClient.
 pub trait ConversationCollection {
-    /// Default collection name for conversations
-    const DEFAULT_COLLECTION: &'static str = "conversations";
+    /// Create the conversation collection with sensible defaults
+    fn create_collection(&self, vector_size: u64) -> impl Future<Output = Result<()>> + Send;
 
-    /// Create a conversation collection
-    async fn create_conversation_collection(
-        &self,
-        name: &str,
-        config: ConversationConfig,
-    ) -> QdrantResult<()>;
+    /// Delete the conversation collection
+    fn delete_collection(&self) -> impl Future<Output = Result<()>> + Send;
 
-    /// Insert a conversation point
-    async fn insert_conversation(
+    /// Insert a single conversation
+    fn insert_conversation(
         &self,
-        collection_name: &str,
         conversation: ConversationPoint,
-    ) -> QdrantResult<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Insert multiple conversation points
-    async fn insert_conversations(
+    /// Insert multiple conversations in a batch
+    fn insert_conversations(
         &self,
-        collection_name: &str,
         conversations: Vec<ConversationPoint>,
-    ) -> QdrantResult<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Search conversations by vector
-    async fn search_conversations(
+    fn search_conversations(
         &self,
-        collection_name: &str,
         query_vector: Vector,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
-    /// Search conversations by status
-    async fn search_conversations_by_status(
+    /// Search for conversations by status
+    fn search_conversations_by_status(
         &self,
-        collection_name: &str,
         status: ConversationStatus,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
-    /// Search conversations by participant
-    async fn search_conversations_by_participant(
+    /// Search for conversations by participant
+    fn search_conversations_by_participant(
         &self,
-        collection_name: &str,
-        participant_id: String,
+        participant_id: &str,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
-    /// Search conversations by message type
-    async fn search_conversations_by_message_type(
+    /// Search for conversations by message type
+    fn search_conversations_by_message_type(
         &self,
-        collection_name: &str,
         message_type: MessageType,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>>;
+    ) -> impl Future<Output = Result<Vec<SearchResult>>> + Send;
 
-    /// Get conversation by ID
-    async fn get_conversation(
-        &self,
-        collection_name: &str,
-        id: PointId,
-    ) -> QdrantResult<Option<Point>>;
+    /// Get a specific conversation by ID
+    fn get_conversation(&self, id: PointId) -> impl Future<Output = Result<Option<Point>>> + Send;
 
     /// Update conversation status
-    async fn update_conversation_status(
+    fn update_conversation_status(
         &self,
-        collection_name: &str,
         id: PointId,
         status: ConversationStatus,
-    ) -> QdrantResult<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Delete conversation by ID
-    async fn delete_conversation(&self, collection_name: &str, id: PointId) -> QdrantResult<()>;
+    fn delete_conversation(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
-    /// Delete multiple conversations by ID
-    async fn delete_conversations(
-        &self,
-        collection_name: &str,
-        ids: Vec<PointId>,
-    ) -> QdrantResult<()>;
+    /// Delete multiple conversations by IDs
+    fn delete_conversations(&self, ids: Vec<PointId>) -> impl Future<Output = Result<()>> + Send;
 
-    /// Archive conversation (set status to archived)
-    async fn archive_conversation(&self, collection_name: &str, id: PointId) -> QdrantResult<()>;
+    /// Delete a single point by ID
+    fn delete_point(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
-    /// Get conversation statistics
-    async fn get_conversation_stats(
-        &self,
-        collection_name: &str,
-    ) -> QdrantResult<ConversationStats>;
+    /// Archive a conversation (mark as archived)
+    fn archive_conversation(&self, id: PointId) -> impl Future<Output = Result<()>> + Send;
 
     /// Count conversations by status
-    async fn count_conversations_by_status(
+    fn count_conversations_by_status(
         &self,
-        collection_name: &str,
         status: ConversationStatus,
-    ) -> QdrantResult<u64>;
+    ) -> impl Future<Output = Result<u64>> + Send;
+}
+
+impl QdrantClient {
+    const CONVERSATION_COLLECTION: &'static str = "conversations";
 }
 
 impl ConversationCollection for QdrantClient {
-    async fn create_conversation_collection(
-        &self,
-        name: &str,
-        config: ConversationConfig,
-    ) -> QdrantResult<()> {
-        let collection_config = CollectionConfig::new(name)
-            .vectors(config.vector_params)
-            .replication_factor(1)
-            .on_disk_payload(true);
+    async fn create_collection(&self, vector_size: u64) -> Result<()> {
+        use qdrant_client::qdrant::vectors_config::Config;
+        use qdrant_client::qdrant::{CreateCollection, VectorsConfig};
 
-        self.create_collection(collection_config).await
+        let vector_params = VectorParams::new(vector_size, Distance::Cosine);
+        let create_collection = CreateCollection {
+            collection_name: Self::CONVERSATION_COLLECTION.to_string(),
+            vectors_config: Some(VectorsConfig {
+                config: Some(Config::Params(vector_params.to_qdrant_vector_params())),
+            }),
+            shard_number: None,
+            replication_factor: None,
+            write_consistency_factor: None,
+            on_disk_payload: Some(true),
+            hnsw_config: None,
+            wal_config: None,
+            optimizers_config: None,
+            timeout: None,
+            metadata: std::collections::HashMap::new(),
+            quantization_config: None,
+            sharding_method: None,
+            strict_mode_config: None,
+            sparse_vectors_config: None,
+        };
+
+        self.create_collection(create_collection).await
     }
 
-    async fn insert_conversation(
-        &self,
-        collection_name: &str,
-        conversation: ConversationPoint,
-    ) -> QdrantResult<()> {
+    async fn delete_collection(&self) -> Result<()> {
+        self.delete_collection(Self::CONVERSATION_COLLECTION, None)
+            .await
+    }
+
+    async fn insert_conversation(&self, conversation: ConversationPoint) -> Result<()> {
         let point: Point = conversation.into();
-        self.upsert_point(collection_name, point, true).await
+        self.upsert_point(Self::CONVERSATION_COLLECTION, point, true)
+            .await
     }
 
-    async fn insert_conversations(
-        &self,
-        collection_name: &str,
-        conversations: Vec<ConversationPoint>,
-    ) -> QdrantResult<()> {
+    async fn insert_conversations(&self, conversations: Vec<ConversationPoint>) -> Result<()> {
         let points: Vec<Point> = conversations.into_iter().map(|c| c.into()).collect();
-        self.upsert_points(collection_name, points, true).await
+        self.upsert_points(Self::CONVERSATION_COLLECTION, points, true)
+            .await
     }
 
     async fn search_conversations(
         &self,
-        collection_name: &str,
         query_vector: Vector,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
         let request = qdrant_client::qdrant::SearchPoints {
-            collection_name: collection_name.to_string(),
+            collection_name: Self::CONVERSATION_COLLECTION.to_string(),
             vector: query_vector.values,
             limit,
             score_threshold: search_params.score_threshold,
@@ -300,29 +185,27 @@ impl ConversationCollection for QdrantClient {
             .raw_client()
             .search_points(request)
             .await
-            .map_err(QdrantError::Connection)?;
+            .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
         let results = response
             .result
             .into_iter()
-            .map(|scored_point| SearchResult::try_from(scored_point))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+            .map(SearchResult::try_from)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
         Ok(results)
     }
 
     async fn search_conversations_by_status(
         &self,
-        collection_name: &str,
         status: ConversationStatus,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
-        // Create filter for conversation status
         let status_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -348,7 +231,7 @@ impl ConversationCollection for QdrantClient {
         match query_vector {
             Some(vector) => {
                 let request = qdrant_client::qdrant::SearchPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::CONVERSATION_COLLECTION.to_string(),
                     vector: vector.values,
                     limit,
                     score_threshold: search_params.score_threshold,
@@ -376,21 +259,20 @@ impl ConversationCollection for QdrantClient {
                     .raw_client()
                     .search_points(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
                 let results = response
                     .result
                     .into_iter()
-                    .map(|scored_point| SearchResult::try_from(scored_point))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .map(SearchResult::try_from)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
                 Ok(results)
             }
             None => {
-                // Scroll with filter only
                 let request = qdrant_client::qdrant::ScrollPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::CONVERSATION_COLLECTION.to_string(),
                     filter: Some(status_filter),
                     offset: None,
                     limit: Some(limit as u32),
@@ -414,14 +296,24 @@ impl ConversationCollection for QdrantClient {
                     .raw_client()
                     .scroll(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
-                let results = response
+                let results: Vec<SearchResult> = response
                     .result
                     .into_iter()
-                    .map(|point| Point::try_from(point).map(|p| SearchResult::from_point(p, 1.0)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .filter_map(|point| {
+                        let scored_point = qdrant_client::qdrant::ScoredPoint {
+                            id: point.id,
+                            payload: point.payload,
+                            score: 1.0,
+                            vectors: point.vectors,
+                            shard_key: None,
+                            order_value: None,
+                            version: 0,
+                        };
+                        SearchResult::try_from(scored_point).ok()
+                    })
+                    .collect();
 
                 Ok(results)
             }
@@ -430,19 +322,17 @@ impl ConversationCollection for QdrantClient {
 
     async fn search_conversations_by_participant(
         &self,
-        collection_name: &str,
-        participant_id: String,
+        participant_id: &str,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
-        // Create filter for participant
         let participant_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
-                    key: "conversation_id".to_string(),
+                    key: "participant_id".to_string(),
                     r#match: Some(Match {
                         match_value: Some(MatchValue::Text(participant_id.to_string())),
                     }),
@@ -464,7 +354,7 @@ impl ConversationCollection for QdrantClient {
         match query_vector {
             Some(vector) => {
                 let request = qdrant_client::qdrant::SearchPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::CONVERSATION_COLLECTION.to_string(),
                     vector: vector.values,
                     vector_name: None,
                     limit,
@@ -492,20 +382,20 @@ impl ConversationCollection for QdrantClient {
                     .raw_client()
                     .search_points(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
                 let results = response
                     .result
                     .into_iter()
-                    .map(|scored_point| SearchResult::try_from(scored_point))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .map(SearchResult::try_from)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
                 Ok(results)
             }
             None => {
                 let request = qdrant_client::qdrant::ScrollPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::CONVERSATION_COLLECTION.to_string(),
                     filter: Some(participant_filter),
                     offset: None,
                     limit: Some(limit as u32),
@@ -529,14 +419,24 @@ impl ConversationCollection for QdrantClient {
                     .raw_client()
                     .scroll(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
-                let results = response
+                let results: Vec<SearchResult> = response
                     .result
                     .into_iter()
-                    .map(|point| Point::try_from(point).map(|p| SearchResult::from_point(p, 1.0)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .filter_map(|point| {
+                        let scored_point = qdrant_client::qdrant::ScoredPoint {
+                            id: point.id,
+                            payload: point.payload,
+                            score: 1.0,
+                            vectors: point.vectors,
+                            shard_key: None,
+                            order_value: None,
+                            version: 0,
+                        };
+                        SearchResult::try_from(scored_point).ok()
+                    })
+                    .collect();
 
                 Ok(results)
             }
@@ -545,15 +445,13 @@ impl ConversationCollection for QdrantClient {
 
     async fn search_conversations_by_message_type(
         &self,
-        collection_name: &str,
         message_type: MessageType,
         query_vector: Option<Vector>,
         params: Option<SearchParams>,
-    ) -> QdrantResult<Vec<SearchResult>> {
+    ) -> Result<Vec<SearchResult>> {
         let search_params = params.unwrap_or_default();
         let limit = search_params.limit.unwrap_or(10);
 
-        // Create filter for message type
         let type_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -579,7 +477,7 @@ impl ConversationCollection for QdrantClient {
         match query_vector {
             Some(vector) => {
                 let request = qdrant_client::qdrant::SearchPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::CONVERSATION_COLLECTION.to_string(),
                     vector: vector.values,
                     vector_name: None,
                     limit,
@@ -607,21 +505,20 @@ impl ConversationCollection for QdrantClient {
                     .raw_client()
                     .search_points(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
                 let results = response
                     .result
                     .into_iter()
-                    .map(|scored_point| SearchResult::try_from(scored_point))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .map(SearchResult::try_from)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
                 Ok(results)
             }
             None => {
-                // Scroll with filter only
                 let request = qdrant_client::qdrant::ScrollPoints {
-                    collection_name: collection_name.to_string(),
+                    collection_name: Self::CONVERSATION_COLLECTION.to_string(),
                     filter: Some(type_filter),
                     offset: None,
                     limit: Some(limit as u32),
@@ -645,105 +542,76 @@ impl ConversationCollection for QdrantClient {
                     .raw_client()
                     .scroll(request)
                     .await
-                    .map_err(QdrantError::Connection)?;
+                    .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
-                let results = response
+                let results: Vec<SearchResult> = response
                     .result
                     .into_iter()
-                    .map(|point| Point::try_from(point).map(|p| SearchResult::from_point(p, 1.0)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| QdrantError::Conversion(e.to_string()))?;
+                    .filter_map(|point| {
+                        let scored_point = qdrant_client::qdrant::ScoredPoint {
+                            id: point.id,
+                            payload: point.payload,
+                            score: 1.0,
+                            vectors: point.vectors,
+                            shard_key: None,
+                            order_value: None,
+                            version: 0,
+                        };
+                        SearchResult::try_from(scored_point).ok()
+                    })
+                    .collect();
 
                 Ok(results)
             }
         }
     }
 
-    async fn get_conversation(
-        &self,
-        collection_name: &str,
-        id: PointId,
-    ) -> QdrantResult<Option<Point>> {
-        self.get_point(collection_name, id).await
+    async fn get_conversation(&self, id: PointId) -> Result<Option<Point>> {
+        self.get_point(Self::CONVERSATION_COLLECTION, id).await
     }
 
     async fn update_conversation_status(
         &self,
-        collection_name: &str,
         id: PointId,
         status: ConversationStatus,
-    ) -> QdrantResult<()> {
-        // Get the existing point
-        if let Some(mut point) = self.get_point(collection_name, id.clone()).await? {
-            // Update the status in the payload
-            point.payload.insert("status", status.as_str());
+    ) -> Result<()> {
+        if let Some(mut point) = self
+            .get_point(Self::CONVERSATION_COLLECTION, id.clone())
+            .await?
+        {
+            point.payload = point.payload.with("status", status.as_str());
 
-            // Upsert the updated point
-            self.upsert_point(collection_name, point, true).await
+            let now = jiff::Timestamp::now().to_string();
+            point.payload = point.payload.with("updated_at", now);
+
+            self.upsert_point(Self::CONVERSATION_COLLECTION, point, true)
+                .await
         } else {
-            Err(QdrantError::PointNotFound {
-                collection: collection_name.to_string(),
-                id: id.to_string(),
-            })
+            Err(Error::not_found().with_message(format!("Conversation with ID {:?} not found", id)))
         }
     }
 
-    async fn delete_conversation(&self, collection_name: &str, id: PointId) -> QdrantResult<()> {
-        self.delete_points(collection_name, vec![id], true).await
-    }
-
-    async fn delete_conversations(
-        &self,
-        collection_name: &str,
-        ids: Vec<PointId>,
-    ) -> QdrantResult<()> {
-        self.delete_points(collection_name, ids, true).await
-    }
-
-    async fn archive_conversation(&self, collection_name: &str, id: PointId) -> QdrantResult<()> {
-        self.update_conversation_status(collection_name, id, ConversationStatus::Archived)
+    async fn delete_conversation(&self, id: PointId) -> Result<()> {
+        self.delete_points(Self::CONVERSATION_COLLECTION, vec![id], true)
             .await
     }
 
-    async fn get_conversation_stats(
-        &self,
-        collection_name: &str,
-    ) -> QdrantResult<ConversationStats> {
-        // Get collection info for total count
-        let info = self.collection_info(collection_name).await?;
-        let total_conversations = info.points_count;
-
-        // Count by status
-        let active_count = self
-            .count_conversations_by_status(collection_name, ConversationStatus::Active)
+    async fn delete_conversations(&self, ids: Vec<PointId>) -> Result<()> {
+        self.delete_points(Self::CONVERSATION_COLLECTION, ids, true)
             .await
-            .unwrap_or(0);
-        let archived_count = self
-            .count_conversations_by_status(collection_name, ConversationStatus::Archived)
-            .await
-            .unwrap_or(0);
-
-        // For now, set defaults for other statistics
-        // In a real implementation, you might want to calculate these properly
-        let avg_messages_per_conversation = 5.0; // Placeholder
-        let total_participants = total_conversations; // Placeholder
-
-        Ok(ConversationStats {
-            total_conversations: total_conversations.unwrap_or(0),
-            active_conversations: active_count,
-            archived_conversations: archived_count,
-            avg_messages_per_conversation,
-            total_participants: total_participants.unwrap_or(0),
-        })
     }
 
-    async fn count_conversations_by_status(
-        &self,
-        collection_name: &str,
-        status: ConversationStatus,
-    ) -> QdrantResult<u64> {
-        // Create filter for conversation status
-        // Create filter for status
+    async fn delete_point(&self, id: PointId) -> Result<()> {
+        self.delete_point(Self::CONVERSATION_COLLECTION, id, true)
+            .await
+    }
+
+    async fn archive_conversation(&self, id: PointId) -> Result<()> {
+        self.update_conversation_status(id, ConversationStatus::Archived)
+            .await
+    }
+
+    async fn count_conversations_by_status(&self, status: ConversationStatus) -> Result<u64> {
         let status_filter = Filter {
             must: vec![Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
@@ -767,9 +635,9 @@ impl ConversationCollection for QdrantClient {
         };
 
         let request = qdrant_client::qdrant::CountPoints {
-            collection_name: collection_name.to_string(),
+            collection_name: Self::CONVERSATION_COLLECTION.to_string(),
             filter: Some(status_filter),
-            exact: Some(false), // Use approximate count for better performance
+            exact: Some(false),
             read_consistency: None,
             shard_key_selector: None,
             timeout: None,
@@ -779,60 +647,15 @@ impl ConversationCollection for QdrantClient {
             .raw_client()
             .count(request)
             .await
-            .map_err(QdrantError::Connection)?;
+            .map_err(|e| Error::connection().with_source(Box::new(e)))?;
 
         Ok(response.result.map(|r| r.count).unwrap_or(0))
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Distance;
-
-    #[test]
-    fn test_conversation_config_creation() {
-        let config = ConversationConfig::new(384, Distance::Cosine);
-        assert_eq!(config.vector_params.size, 384);
-        assert_eq!(config.vector_params.distance, Distance::Cosine);
-        assert!(config.semantic_search);
-        assert!(config.participant_indexing);
-        assert!(!config.temporal_indexing);
-        assert_eq!(config.max_history, None);
-    }
-
-    #[test]
-    fn test_chat_optimized_config() {
-        let config = ConversationConfig::for_chat_conversations(384);
-        assert_eq!(config.vector_params.size, 384);
-        assert_eq!(config.vector_params.distance, Distance::Cosine);
-        assert_eq!(config.vector_params.on_disk, Some(false));
-        assert_eq!(config.max_history, Some(1000));
-        assert!(config.semantic_search);
-        assert!(config.participant_indexing);
-        assert!(config.temporal_indexing);
-    }
-
-    #[test]
-    fn test_document_optimized_config() {
-        let config = ConversationConfig::for_document_conversations(512);
-        assert_eq!(config.vector_params.size, 512);
-        assert_eq!(config.vector_params.distance, Distance::Cosine);
-        assert_eq!(config.vector_params.on_disk, Some(true));
-        assert_eq!(config.max_history, None);
-        assert!(config.semantic_search);
-        assert!(!config.participant_indexing);
-        assert!(config.temporal_indexing);
-    }
-
-    #[test]
-    fn test_support_optimized_config() {
-        let config = ConversationConfig::for_support_conversations(256);
-        assert_eq!(config.vector_params.size, 256);
-        assert_eq!(config.max_history, Some(500));
-        assert!(config.semantic_search);
-        assert!(config.participant_indexing);
-        assert!(config.temporal_indexing);
-    }
 
     #[test]
     fn test_conversation_status_string_conversion() {
@@ -850,19 +673,5 @@ mod tests {
         assert_eq!(MessageType::Tool.as_str(), "tool");
         assert_eq!(MessageType::File.as_str(), "file");
         assert_eq!(MessageType::System.as_str(), "system");
-    }
-
-    #[test]
-    fn test_config_builder_methods() {
-        let config = ConversationConfig::new(128, Distance::Cosine)
-            .max_history(200)
-            .with_semantic_search()
-            .with_participant_indexing()
-            .with_temporal_indexing();
-
-        assert_eq!(config.max_history, Some(200));
-        assert!(config.semantic_search);
-        assert!(config.participant_indexing);
-        assert!(config.temporal_indexing);
     }
 }

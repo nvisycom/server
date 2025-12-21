@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::SearchResult;
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 use crate::types::{Payload, Point, PointId, Vector};
 
 /// Create a payload with standard metadata fields
@@ -283,12 +283,16 @@ impl ConversationPoint {
     }
 
     /// Create from a search result
-    pub fn from_search_result(result: SearchResult) -> QdrantResult<Self> {
+    pub fn from_search_result(result: SearchResult) -> Result<Self> {
+        let id = result.id.clone();
+        let embedding = result.vector().unwrap_or_default();
         let payload = result.payload;
 
         let conversation_id = payload
             .get_string("conversation_id")
-            .ok_or_else(|| QdrantError::PayloadError("Missing conversation_id".into()))?
+            .ok_or_else(|| {
+                Error::invalid_input().with_message("Missing conversation_id")
+            })?
             .to_string();
 
         let message_type = match payload.get_string("message_type") {
@@ -301,17 +305,23 @@ impl ConversationPoint {
                 "file" => MessageType::File,
                 custom => MessageType::Custom(custom.to_string()),
             },
-            None => return Err(QdrantError::PayloadError("Missing message_type".into())),
+            None => {
+                return Err(
+                    Error::invalid_input().with_message("Missing message_type")
+                );
+            }
         };
 
         let content = payload
             .get_string("content")
-            .ok_or_else(|| QdrantError::PayloadError("Missing content".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing content"))?
             .to_string();
 
         let participant_id = payload
             .get_string("participant_id")
-            .ok_or_else(|| QdrantError::PayloadError("Missing participant_id".into()))?
+            .ok_or_else(|| {
+                Error::invalid_input().with_message("Missing participant_id")
+            })?
             .to_string();
 
         let participant_role = payload
@@ -332,8 +342,8 @@ impl ConversationPoint {
         });
 
         Ok(Self {
-            id: result.id,
-            embedding: result.vector.unwrap_or_default(),
+            id,
+            embedding,
             conversation_id,
             message_type,
             content,

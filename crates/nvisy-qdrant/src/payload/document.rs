@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
 
-use crate::error::{QdrantError, QdrantResult};
+use crate::SearchResult;
+use crate::error::{Error, Result};
 use crate::types::{Payload, Point, PointId, Vector};
 
 /// Create a payload with standard metadata fields
@@ -308,6 +309,7 @@ impl DocumentPoint {
     }
 
     /// Create a document chunk
+    #[allow(clippy::too_many_arguments)]
     pub fn document_chunk(
         id: impl Into<PointId>,
         embedding: Vector,
@@ -452,7 +454,9 @@ impl DocumentPoint {
     }
 
     /// Create from a search result
-    pub fn from_search_result(result: SearchResult) -> QdrantResult<Self> {
+    pub fn from_search_result(result: SearchResult) -> Result<Self> {
+        let id = result.id.clone();
+        let embedding = result.vector().unwrap_or_default();
         let payload = result.payload;
 
         let document_type = match payload.get_string("document_type") {
@@ -478,7 +482,9 @@ impl DocumentPoint {
                     }
                 }
             }
-            None => return Err(QdrantError::PayloadError("Missing document_type".into())),
+            None => {
+                return Err(Error::invalid_input().with_message("Missing document_type"));
+            }
         };
 
         let status = match payload.get_string("status") {
@@ -498,17 +504,17 @@ impl DocumentPoint {
 
         let title = payload
             .get_string("title")
-            .ok_or_else(|| QdrantError::PayloadError("Missing title".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing title"))?
             .to_string();
 
         let content = payload
             .get_string("content")
-            .ok_or_else(|| QdrantError::PayloadError("Missing content".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing content"))?
             .to_string();
 
         let author_id = payload
             .get_string("author_id")
-            .ok_or_else(|| QdrantError::PayloadError("Missing author_id".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing author_id"))?
             .to_string();
 
         let tags = payload
@@ -537,8 +543,8 @@ impl DocumentPoint {
             .map(|s| s.to_string());
 
         Ok(Self {
-            id: result.id,
-            embedding: result.vector.unwrap_or_default(),
+            id,
+            embedding,
             document_type,
             status,
             title,

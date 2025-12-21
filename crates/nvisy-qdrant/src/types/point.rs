@@ -2,28 +2,42 @@
 
 use std::collections::HashMap;
 
+use derive_more::{Display, From};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 #[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use super::{Payload, Vector};
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 
-/// Represents a point ID that can be either a UUID string or a numeric ID.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Represents a point ID that can be a UUID, text string, or numeric ID.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Display, From)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[serde(untagged)]
 pub enum PointId {
-    /// String-based ID (typically UUID)
-    Uuid(String),
+    /// UUID-based ID
+    #[display("{_0}")]
+    Uuid(#[from] Uuid),
+    /// Text string ID
+    #[display("{_0}")]
+    Text(String),
     /// Numeric ID
+    #[display("{_0}")]
     Num(u64),
 }
 
 impl PointId {
     /// Create a new UUID-based point ID
-    pub fn uuid(id: impl Into<String>) -> Self {
-        Self::Uuid(id.into())
+    pub fn uuid(id: Uuid) -> Self {
+        Self::Uuid(id)
+    }
+
+    /// Create a new text-based point ID
+    pub fn text(id: impl Into<String>) -> Self {
+        Self::Text(id.into())
     }
 
     /// Create a new numeric point ID
@@ -35,64 +49,37 @@ impl PointId {
     pub fn to_qdrant_point_id(self) -> qdrant_client::qdrant::PointId {
         qdrant_client::qdrant::PointId {
             point_id_options: Some(match self {
-                PointId::Uuid(uuid) => qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid),
+                PointId::Uuid(uuid) => {
+                    qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid.to_string())
+                }
+                PointId::Text(text) => qdrant_client::qdrant::point_id::PointIdOptions::Uuid(text),
                 PointId::Num(num) => qdrant_client::qdrant::point_id::PointIdOptions::Num(num),
             }),
         }
     }
 
     /// Create from Qdrant's internal PointId
-    pub fn from_qdrant_point_id(point_id: qdrant_client::qdrant::PointId) -> QdrantResult<Self> {
+    pub fn from_qdrant_point_id(point_id: qdrant_client::qdrant::PointId) -> Result<Self> {
         match point_id.point_id_options {
-            Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid)) => {
-                Ok(PointId::Uuid(uuid))
+            Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(s)) => {
+                // Try to parse as UUID first, otherwise treat as text
+                if let Ok(uuid) = Uuid::parse_str(&s) {
+                    Ok(PointId::Uuid(uuid))
+                } else {
+                    Ok(PointId::Text(s))
+                }
             }
             Some(qdrant_client::qdrant::point_id::PointIdOptions::Num(num)) => {
                 Ok(PointId::Num(num))
             }
-            None => Err(QdrantError::invalid_vector("Missing point ID options")),
+            None => Err(Error::invalid_input().with_message("Missing point ID options")),
         }
-    }
-
-    /// Get the string representation of this point ID
-    pub fn to_string(&self) -> String {
-        match self {
-            PointId::Uuid(uuid) => uuid.clone(),
-            PointId::Num(num) => num.to_string(),
-        }
-    }
-}
-
-impl std::fmt::Display for PointId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PointId::Uuid(uuid) => write!(f, "{}", uuid),
-            PointId::Num(num) => write!(f, "{}", num),
-        }
-    }
-}
-
-impl From<uuid::Uuid> for PointId {
-    fn from(uuid: uuid::Uuid) -> Self {
-        PointId::Uuid(uuid.to_string())
-    }
-}
-
-impl From<u64> for PointId {
-    fn from(num: u64) -> Self {
-        PointId::Num(num)
-    }
-}
-
-impl From<String> for PointId {
-    fn from(s: String) -> Self {
-        PointId::Uuid(s)
     }
 }
 
 impl From<&str> for PointId {
     fn from(s: &str) -> Self {
-        PointId::Uuid(s.to_string())
+        s.to_owned().into()
     }
 }
 
@@ -165,17 +152,13 @@ impl Point {
     }
 
     /// Add or update a payload field
-    pub fn set_payload(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<serde_json::Value>,
-    ) -> Self {
+    pub fn set_payload(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
         self.payload.insert(key, value);
         self
     }
 
     /// Convert to Qdrant's internal PointStruct
-    pub fn to_qdrant_point_struct(self) -> QdrantResult<qdrant_client::qdrant::PointStruct> {
+    pub fn to_qdrant_point_struct(self) -> Result<qdrant_client::qdrant::PointStruct> {
         let vectors = match self.vectors {
             PointVectors::Single(vector) => Some(
                 qdrant_client::qdrant::vectors::VectorsOptions::Vector(vector.to_qdrant_vector()),
@@ -203,17 +186,15 @@ impl Point {
     }
 
     /// Convert to Qdrant's internal PointStruct (alias for compatibility)
-    pub fn to_qdrant_point(self) -> QdrantResult<qdrant_client::qdrant::PointStruct> {
+    pub fn to_qdrant_point(self) -> Result<qdrant_client::qdrant::PointStruct> {
         self.to_qdrant_point_struct()
     }
 
     /// Create from Qdrant's internal PointStruct
-    pub fn from_qdrant_point_struct(
-        point: qdrant_client::qdrant::PointStruct,
-    ) -> QdrantResult<Self> {
+    pub fn from_qdrant_point_struct(point: qdrant_client::qdrant::PointStruct) -> Result<Self> {
         let id = match point.id {
             Some(id) => PointId::from_qdrant_point_id(id)?,
-            None => return Err(QdrantError::invalid_vector("Missing point ID")),
+            None => return Err(Error::invalid_input().with_message("Missing point ID")),
         };
 
         let vectors = match point.vectors.and_then(|v| v.vectors_options) {
@@ -227,7 +208,7 @@ impl Point {
                 }
                 PointVectors::Named(vectors_map)
             }
-            None => return Err(QdrantError::invalid_vector("Missing vectors")),
+            None => return Err(Error::invalid_input().with_message("Missing vectors")),
         };
 
         let payload = Payload::from_qdrant_payload(point.payload);
@@ -311,17 +292,19 @@ impl From<HashMap<String, Vector>> for PointVectors {
 
 // Conversion implementations for Qdrant types
 impl TryFrom<Point> for qdrant_client::qdrant::PointStruct {
-    type Error = QdrantError;
+    type Error = Error;
 
-    fn try_from(point: Point) -> Result<Self, Self::Error> {
+    fn try_from(point: Point) -> std::result::Result<Self, Self::Error> {
         point.to_qdrant_point_struct()
     }
 }
 
 impl TryFrom<qdrant_client::qdrant::PointStruct> for Point {
-    type Error = QdrantError;
+    type Error = Error;
 
-    fn try_from(point: qdrant_client::qdrant::PointStruct) -> Result<Self, Self::Error> {
+    fn try_from(
+        point: qdrant_client::qdrant::PointStruct,
+    ) -> std::result::Result<Self, Self::Error> {
         Point::from_qdrant_point_struct(point)
     }
 }
@@ -335,19 +318,24 @@ impl From<PointId> for qdrant_client::qdrant::PointId {
 impl From<PointId> for qdrant_client::qdrant::point_id::PointIdOptions {
     fn from(point_id: PointId) -> Self {
         match point_id {
-            PointId::Uuid(uuid) => qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid),
+            PointId::Uuid(uuid) => {
+                qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid.to_string())
+            }
+            PointId::Text(text) => qdrant_client::qdrant::point_id::PointIdOptions::Uuid(text),
             PointId::Num(num) => qdrant_client::qdrant::point_id::PointIdOptions::Num(num),
         }
     }
 }
 
 impl TryFrom<qdrant_client::qdrant::RetrievedPoint> for Point {
-    type Error = QdrantError;
+    type Error = Error;
 
-    fn try_from(point: qdrant_client::qdrant::RetrievedPoint) -> Result<Self, Self::Error> {
+    fn try_from(
+        point: qdrant_client::qdrant::RetrievedPoint,
+    ) -> std::result::Result<Self, Self::Error> {
         let id = match point.id {
             Some(id) => PointId::from_qdrant_point_id(id)?,
-            None => return Err(QdrantError::invalid_vector("Missing point ID")),
+            None => return Err(Error::invalid_input().with_message("Missing point ID")),
         };
 
         let vectors = match point.vectors.and_then(|v| v.vectors_options) {
@@ -365,7 +353,7 @@ impl TryFrom<qdrant_client::qdrant::RetrievedPoint> for Point {
                 }
                 PointVectors::Named(vectors_map)
             }
-            None => return Err(QdrantError::invalid_vector("Missing vectors")),
+            None => return Err(Error::invalid_input().with_message("Missing vectors")),
         };
 
         let payload = Payload::from_qdrant_payload(point.payload);
@@ -396,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_point_id_display() {
-        let uuid_id = PointId::uuid("test-uuid");
+        let uuid_id = PointId::text("test-uuid");
         assert_eq!(uuid_id.to_string(), "test-uuid");
 
         let num_id = PointId::num(123);
@@ -405,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_point_creation() {
-        let id = PointId::uuid("test-point");
+        let id = PointId::text("test-point");
         let vector = Vector::new(vec![1.0, 2.0, 3.0]);
         let payload = Payload::new().with("type", "test");
 
@@ -441,12 +429,12 @@ mod tests {
         payload.insert("score", 0.95);
 
         let point = Point::new(
-            PointId::uuid("test-id"),
+            PointId::text("test-id"),
             Vector::new(vec![1.0, 2.0, 3.0]),
             payload,
         );
 
-        assert_eq!(point.id, PointId::uuid("test-id"));
+        assert_eq!(point.id, PointId::text("test-id"));
         if let PointVectors::Single(ref vector) = point.vectors {
             assert_eq!(vector.values, vec![1.0, 2.0, 3.0]);
         } else {
@@ -484,12 +472,12 @@ mod tests {
         payload.insert("key", "value");
 
         let point = Point::new(
-            PointId::uuid("test-id"),
+            PointId::text("test-id"),
             Vector::new(vec![1.0, 2.0]),
             payload,
         );
 
-        assert_eq!(point.id, PointId::uuid("test-id"));
+        assert_eq!(point.id, PointId::text("test-id"));
         assert_eq!(point.payload.get("key").unwrap().as_str(), Some("value"));
     }
 }

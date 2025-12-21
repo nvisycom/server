@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
 
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 
 /// Represents payload data associated with a point in Qdrant.
 ///
 /// Payload is a key-value map that stores metadata and attributes for vector points.
 /// Values can be strings, numbers, booleans, arrays, or nested objects.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 pub struct Payload {
     /// The internal payload data
@@ -116,17 +116,15 @@ impl Payload {
     }
 
     /// Get a typed value from the payload
-    pub fn get_typed<T>(&self, key: &str) -> QdrantResult<Option<T>>
+    pub fn get_typed<T>(&self, key: &str) -> Result<Option<T>>
     where
         T: for<'de> serde::Deserialize<'de>,
     {
         match self.get(key) {
             Some(value) => {
                 let typed_value = serde_json::from_value(value.clone()).map_err(|e| {
-                    QdrantError::payload_error(format!(
-                        "Failed to deserialize payload value: {}",
-                        e
-                    ))
+                    Error::serialization()
+                        .with_message(format!("Failed to deserialize payload value: {}", e))
                 })?;
                 Ok(Some(typed_value))
             }
@@ -175,9 +173,10 @@ impl Payload {
     }
 
     /// Insert a float value
-    pub fn insert_f64(&mut self, key: impl Into<String>, value: f64) -> QdrantResult<()> {
-        let number = serde_json::Number::from_f64(value)
-            .ok_or_else(|| QdrantError::payload_error(format!("Invalid f64 value: {}", value)))?;
+    pub fn insert_f64(&mut self, key: impl Into<String>, value: f64) -> Result<()> {
+        let number = serde_json::Number::from_f64(value).ok_or_else(|| {
+            Error::serialization().with_message(format!("Invalid f64 value: {}", value))
+        })?;
         self.insert(key, serde_json::Value::Number(number));
         Ok(())
     }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::SearchResult;
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 use crate::types::{Payload, Point, PointId, Vector};
 
 /// Create a payload with standard metadata fields
@@ -112,6 +112,100 @@ impl AnnotationCoordinates {
             height: None,
             points: Some(points),
         }
+    }
+}
+
+/// Payload structure for updating annotation data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct AnnotationPayload {
+    /// The annotation text or description
+    pub content: Option<String>,
+
+    /// Type of annotation
+    pub annotation_type: Option<AnnotationType>,
+
+    /// Spatial coordinates (for image/video annotations)
+    pub coordinates: Option<AnnotationCoordinates>,
+
+    /// Additional custom metadata
+    pub metadata: Option<Payload>,
+}
+
+impl AnnotationPayload {
+    /// Create a new empty annotation payload
+    pub fn new() -> Self {
+        Self {
+            content: None,
+            annotation_type: None,
+            coordinates: None,
+            metadata: None,
+        }
+    }
+
+    /// Set the content
+    pub fn with_content(mut self, content: String) -> Self {
+        self.content = Some(content);
+        self
+    }
+
+    /// Set the annotation type
+    pub fn with_annotation_type(mut self, annotation_type: AnnotationType) -> Self {
+        self.annotation_type = Some(annotation_type);
+        self
+    }
+
+    /// Set the coordinates
+    pub fn with_coordinates(mut self, coordinates: AnnotationCoordinates) -> Self {
+        self.coordinates = Some(coordinates);
+        self
+    }
+
+    /// Set custom metadata
+    pub fn with_metadata(mut self, metadata: Payload) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Convert to a Payload for database operations
+    pub fn to_payload(self) -> Payload {
+        let mut payload = Payload::new();
+
+        if let Some(content) = self.content {
+            payload = payload.with("content", content);
+        }
+
+        if let Some(annotation_type) = self.annotation_type {
+            payload = payload.with("annotation_type", annotation_type.as_str());
+        }
+
+        if let Some(coords) = self.coordinates {
+            payload = payload.with("x", coords.x).with("y", coords.y);
+
+            if let Some(width) = coords.width {
+                payload = payload.with("width", width);
+            }
+            if let Some(height) = coords.height {
+                payload = payload.with("height", height);
+            }
+            if let Some(points) = coords.points {
+                let serializable_points: Vec<[f64; 2]> =
+                    points.into_iter().map(|(x, y)| [x, y]).collect();
+                payload = payload.with("points", serializable_points);
+            }
+        }
+
+        if let Some(metadata) = self.metadata {
+            payload.merge(&metadata);
+        }
+
+        payload
+    }
+}
+
+impl Default for AnnotationPayload {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -252,7 +346,9 @@ impl AnnotationPoint {
     }
 
     /// Create from a search result
-    pub fn from_search_result(result: SearchResult) -> QdrantResult<Self> {
+    pub fn from_search_result(result: SearchResult) -> Result<Self> {
+        let id = result.id.clone();
+        let embedding = result.vector().unwrap_or_default();
         let payload = result.payload;
 
         let annotation_type = match payload.get_string("annotation_type") {
@@ -266,22 +362,24 @@ impl AnnotationPoint {
                 "data" => AnnotationType::Data,
                 custom => AnnotationType::Custom(custom.to_string()),
             },
-            None => return Err(QdrantError::PayloadError("Missing annotation_type".into())),
+            None => {
+                return Err(Error::invalid_input().with_message("Missing annotation_type"));
+            }
         };
 
         let content = payload
             .get_string("content")
-            .ok_or_else(|| QdrantError::PayloadError("Missing content".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing content"))?
             .to_string();
 
         let source_id = payload
             .get_string("source_id")
-            .ok_or_else(|| QdrantError::PayloadError("Missing source_id".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing source_id"))?
             .to_string();
 
         let user_id = payload
             .get_string("user_id")
-            .ok_or_else(|| QdrantError::PayloadError("Missing user_id".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing user_id"))?
             .to_string();
 
         let coordinates = if payload.contains_key("x") && payload.contains_key("y") {
@@ -295,13 +393,11 @@ impl AnnotationPoint {
                 if let serde_json::Value::Array(arr) = v {
                     let mut coords = Vec::new();
                     for item in arr {
-                        if let serde_json::Value::Array(pair) = item {
-                            if pair.len() == 2 {
-                                if let (Some(px), Some(py)) = (pair[0].as_f64(), pair[1].as_f64()) {
+                        if let serde_json::Value::Array(pair) = item
+                            && pair.len() == 2
+                                && let (Some(px), Some(py)) = (pair[0].as_f64(), pair[1].as_f64()) {
                                     coords.push((px, py));
                                 }
-                            }
-                        }
                     }
                     if coords.is_empty() {
                         None
@@ -325,8 +421,8 @@ impl AnnotationPoint {
         };
 
         Ok(Self {
-            id: result.id,
-            embedding: result.vector.unwrap_or_default(),
+            id,
+            embedding,
             annotation_type,
             content,
             source_id,
@@ -409,7 +505,7 @@ mod tests {
         );
         assert_eq!(
             point.payload.get_string("content"),
-            Some("This is a text annotation")
+            Some("Test image annotation")
         );
         assert_eq!(point.payload.get_f64("x"), Some(10.0));
         assert_eq!(point.payload.get_f64("width"), Some(100.0));

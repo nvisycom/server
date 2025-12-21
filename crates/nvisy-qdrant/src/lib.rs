@@ -35,18 +35,17 @@ pub mod payload;
 pub mod prelude;
 pub mod types;
 
-pub use client::{QdrantClient, QdrantConfig, QdrantConnection};
+pub use client::{QdrantClient, QdrantConfig};
 pub use collection::{
-    AnnotationCollection, AnnotationConfig, AuthorStats, ConversationCollection,
-    ConversationConfig, ConversationStats, DocumentCollection, DocumentConfig, DocumentStats,
-    DocumentTypeStats, SearchParams as CollectionSearchParams,
+    AnnotationCollection, ConversationCollection, DocumentCollection,
+    SearchParams as CollectionSearchParams,
 };
-pub use error::{QdrantError, QdrantResult};
+pub use error::{Error, Result};
 pub use payload::{
     AnnotationCoordinates, AnnotationPoint, AnnotationType, ConversationPoint, ConversationStatus,
     DocumentPoint, DocumentStatus, DocumentType, MessageType,
 };
 pub use types::{
-    CollectionConfig, CollectionInfo, CollectionStatus, Distance, Payload, Point, PointId, Vector,
-    VectorParams,
+    Condition, Distance, Payload, Point, PointId, SearchResult, Vector, VectorParams,
+    WithPayloadSelector,
 };
