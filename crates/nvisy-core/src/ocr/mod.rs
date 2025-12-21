@@ -6,27 +6,24 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures_util::Stream;
 
 pub mod context;
-pub mod error;
+
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use context::{Context, Document, ProcessingOptions};
-pub use error::{Error, Result};
+pub use context::{Context, ProcessingOptions};
 pub use request::{BoundingBox, DocumentOcrRequest, Request, RequestOptions};
-pub use response::{
-    BatchResponse, BatchStats, OcrResult, ProcessingInfo, Response, TextExtraction,
-};
+pub use response::{BatchResponse, BatchStats, OcrResult, Response, TextExtraction};
 pub use service::OcrService;
 
 use crate::types::ServiceHealth;
+pub use crate::{Error, ErrorKind, Result};
 
 /// Type alias for a boxed OCR service with specific request and response types.
-pub type BoxedOcr<Req, Resp> = Arc<dyn Ocr<Req, Resp> + Send + Sync>;
+pub type BoxedOcrProvider<Req, Resp> = Arc<dyn OcrProvider<Req, Resp> + Send + Sync>;
 
 /// Type alias for boxed response stream.
 pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
@@ -44,8 +41,8 @@ pub const TRACING_TARGET: &str = "nvisy_core::ocr";
 ///
 /// * `Req` - The request payload type specific to the OCR implementation
 /// * `Resp` - The response payload type specific to the OCR implementation
-#[async_trait]
-pub trait Ocr<Req, Resp>: Send + Sync {
+#[async_trait::async_trait]
+pub trait OcrProvider<Req, Resp>: Send + Sync {
     /// Process an image or document with OCR to extract text and structured data.
     ///
     /// This method takes ownership of the request to allow efficient processing

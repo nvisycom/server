@@ -1,488 +1,357 @@
 //! Context management for embedding operations.
 //!
-//! This module provides context types for managing embedding service configuration,
-//! model information, and request-specific settings.
+//! This module provides context types for managing embedding processing sessions,
+//! including input texts, generated embeddings, processing options, and quality metrics.
+//!
+//! The `Context` type serves as a stateful container that tracks the entire embedding
+//! processing lifecycle, from text input through embedding generation to quality assessment.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::request::EncodingFormat;
 
-/// Context for embedding operations.
-///
-/// This struct contains configuration and metadata for embedding services,
-/// including model settings, authentication information, and operational parameters.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// use nvisy_core::emb::EmbeddingContext;
-///
-/// let context = EmbeddingContext::builder()
-///     .model("text-embedding-ada-002")
-///     .max_retries(3)
-///     .timeout(Duration::from_secs(30))
-///     .build();
-/// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EmbeddingContext {
-    /// Unique identifier for this context.
+/// Context information for embedding operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Context {
+    /// Unique identifier for this context session.
     pub context_id: Uuid,
-
+    /// User identifier associated with this context.
+    pub user_id: Uuid,
+    /// Document identifier for tracking related embeddings.
+    pub document_id: Option<Uuid>,
     /// The embedding service provider name.
     pub provider: String,
-
-    /// The default model to use for embeddings.
+    /// The model used for embeddings.
     pub model: String,
-
-    /// Available models for this service.
-    pub available_models: Vec<ModelInfo>,
-
-    /// Service endpoint configuration.
-    pub endpoint: ServiceEndpoint,
-
-    /// Authentication configuration.
-    pub auth: AuthConfig,
-
-    /// Retry configuration.
-    pub retry_config: RetryConfig,
-
-    /// Timeout settings.
-    pub timeout_config: TimeoutConfig,
-
-    /// Rate limiting settings.
-    pub rate_limit_config: Option<RateLimitConfig>,
-
-    /// Default encoding format for embeddings.
-    pub default_encoding_format: EncodingFormat,
-
-    /// Maximum number of inputs per batch request.
-    pub max_batch_size: usize,
-
-    /// Maximum token length per input.
-    pub max_input_tokens: Option<u32>,
-
-    /// Additional provider-specific configuration.
-    pub provider_config: HashMap<String, serde_json::Value>,
-
-    /// Context metadata.
-    pub metadata: HashMap<String, serde_json::Value>,
+    /// Processing options and configuration.
+    pub processing_options: ProcessingOptions,
+    /// Generated embeddings from previous operations.
+    pub embeddings: Vec<EmbeddingResult>,
+    /// Processing quality metrics.
+    pub quality_metrics: QualityMetrics,
+    /// Usage statistics for this context.
+    pub usage: UsageStats,
+    /// Metadata about the context and processing.
+    pub metadata: ContextMetadata,
 }
 
-/// Information about an available embedding model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelInfo {
-    /// The model identifier.
-    pub id: String,
-
-    /// Human-readable name for the model.
-    pub name: String,
-
-    /// Description of the model's capabilities.
-    pub description: Option<String>,
-
-    /// Embedding dimensions produced by this model.
-    pub dimensions: u32,
-
-    /// Maximum input tokens for this model.
-    pub max_input_tokens: u32,
-
-    /// Supported input types for this model.
-    pub supported_input_types: Vec<InputType>,
-
-    /// Whether this model supports custom dimensions.
-    pub supports_custom_dimensions: bool,
-
-    /// Model-specific metadata.
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
-/// Supported input types for embedding models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum InputType {
-    /// Text input support.
-    Text,
-    /// Image input support.
-    Image,
-    /// Document input support.
-    Document,
-    /// Audio input support.
-    Audio,
-    /// Video input support.
-    Video,
-}
-
-/// Service endpoint configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServiceEndpoint {
-    /// Base URL for the embedding service.
-    pub base_url: String,
-
-    /// API version to use.
-    pub api_version: Option<String>,
-
-    /// Additional headers to include in requests.
-    pub headers: HashMap<String, String>,
-
-    /// Whether to use TLS for connections.
-    pub use_tls: bool,
-}
-
-/// Authentication configuration for embedding services.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthConfig {
-    /// Authentication method.
-    pub method: AuthMethod,
-
-    /// API key for key-based authentication.
-    pub api_key: Option<String>,
-
-    /// Bearer token for token-based authentication.
-    pub bearer_token: Option<String>,
-
-    /// Additional authentication parameters.
-    pub additional_params: HashMap<String, String>,
-}
-
-/// Authentication methods for embedding services.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthMethod {
-    /// No authentication required.
-    None,
-    /// API key in header.
-    ApiKey,
-    /// Bearer token in Authorization header.
-    BearerToken,
-    /// Custom authentication method.
-    Custom,
-}
-
-/// Retry configuration for embedding operations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RetryConfig {
-    /// Maximum number of retry attempts.
-    pub max_retries: u32,
-
-    /// Base delay between retry attempts.
-    pub base_delay: Duration,
-
-    /// Maximum delay between retry attempts.
-    pub max_delay: Duration,
-
-    /// Backoff multiplier for exponential backoff.
-    pub backoff_multiplier: f64,
-
-    /// Whether to add jitter to retry delays.
-    pub jitter: bool,
-}
-
-/// Timeout configuration for embedding operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TimeoutConfig {
-    /// Overall request timeout.
-    pub request_timeout: Duration,
-
-    /// Connection timeout.
-    pub connect_timeout: Duration,
-
-    /// Read timeout for response data.
-    pub read_timeout: Duration,
-}
-
-/// Rate limiting configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RateLimitConfig {
-    /// Maximum requests per minute.
-    pub requests_per_minute: u32,
-
-    /// Maximum tokens per minute.
-    pub tokens_per_minute: Option<u32>,
-
-    /// Maximum concurrent requests.
-    pub max_concurrent_requests: u32,
-}
-
-impl Default for EmbeddingContext {
-    fn default() -> Self {
+impl Context {
+    /// Create a new embedding context.
+    pub fn new(user_id: Uuid, provider: String, model: String) -> Self {
         Self {
             context_id: Uuid::new_v4(),
-            provider: "unknown".to_string(),
-            model: "default".to_string(),
-            available_models: Vec::new(),
-            endpoint: ServiceEndpoint::default(),
-            auth: AuthConfig::default(),
-            retry_config: RetryConfig::default(),
-            timeout_config: TimeoutConfig::default(),
-            rate_limit_config: None,
-            default_encoding_format: EncodingFormat::Float,
-            max_batch_size: 100,
-            max_input_tokens: None,
-            provider_config: HashMap::new(),
-            metadata: HashMap::new(),
+            user_id,
+            document_id: None,
+            provider,
+            model,
+            processing_options: ProcessingOptions::default(),
+            embeddings: Vec::new(),
+            quality_metrics: QualityMetrics::default(),
+            usage: UsageStats::default(),
+            metadata: ContextMetadata::default(),
         }
     }
-}
 
-impl Default for ServiceEndpoint {
-    fn default() -> Self {
-        Self {
-            base_url: "http://localhost:8080".to_string(),
-            api_version: None,
-            headers: HashMap::new(),
-            use_tls: true,
-        }
-    }
-}
-
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self {
-            method: AuthMethod::None,
-            api_key: None,
-            bearer_token: None,
-            additional_params: HashMap::new(),
-        }
-    }
-}
-
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self {
-            max_retries: 3,
-            base_delay: Duration::from_millis(500),
-            max_delay: Duration::from_secs(30),
-            backoff_multiplier: 2.0,
-            jitter: true,
-        }
-    }
-}
-
-impl Default for TimeoutConfig {
-    fn default() -> Self {
-        Self {
-            request_timeout: Duration::from_secs(30),
-            connect_timeout: Duration::from_secs(10),
-            read_timeout: Duration::from_secs(30),
-        }
-    }
-}
-
-impl EmbeddingContext {
-    /// Creates a new context builder.
-    pub fn builder() -> EmbeddingContextBuilder {
-        EmbeddingContextBuilder::new()
+    /// Set document identifier.
+    pub fn set_document_id(&mut self, document_id: Uuid) {
+        self.document_id = Some(document_id);
     }
 
-    /// Returns the model information for the default model.
-    pub fn default_model_info(&self) -> Option<&ModelInfo> {
-        self.available_models
+    /// Add embedding result to the context.
+    pub fn add_embedding_result(&mut self, mut result: EmbeddingResult) {
+        result.embedding_id = Uuid::new_v4();
+        result.processed_at = Timestamp::now();
+
+        // Update usage statistics
+        self.usage.total_tokens += result.token_count;
+        self.usage.total_inputs += 1;
+        self.usage.total_embeddings += result.embeddings.len() as u32;
+        self.usage.successful_requests += 1;
+
+        // Update quality metrics
+        self.quality_metrics.update_dimensions(result.dimensions);
+
+        self.embeddings.push(result);
+        self.metadata.last_updated = Timestamp::now();
+    }
+
+    /// Get all embedding vectors.
+    pub fn get_all_embeddings(&self) -> Vec<&Vec<f32>> {
+        self.embeddings
             .iter()
-            .find(|model| model.id == self.model)
-    }
-
-    /// Returns the model information for the specified model.
-    pub fn get_model_info(&self, model_id: &str) -> Option<&ModelInfo> {
-        self.available_models
-            .iter()
-            .find(|model| model.id == model_id)
-    }
-
-    /// Checks if a model is available in this context.
-    pub fn has_model(&self, model_id: &str) -> bool {
-        self.available_models
-            .iter()
-            .any(|model| model.id == model_id)
-    }
-
-    /// Returns all models that support the specified input type.
-    pub fn models_supporting_input_type(&self, input_type: InputType) -> Vec<&ModelInfo> {
-        self.available_models
-            .iter()
-            .filter(|model| model.supported_input_types.contains(&input_type))
+            .flat_map(|result| &result.embeddings)
             .collect()
     }
 
-    /// Validates the context configuration.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.provider.is_empty() {
-            return Err("Provider must be specified".to_string());
-        }
+    /// Get embeddings for specific input texts.
+    pub fn get_embeddings_for_texts(&self, texts: &[String]) -> Vec<&Vec<f32>> {
+        self.embeddings
+            .iter()
+            .filter(|result| result.input_texts.iter().any(|input| texts.contains(input)))
+            .flat_map(|result| &result.embeddings)
+            .collect()
+    }
 
-        if self.model.is_empty() {
-            return Err("Default model must be specified".to_string());
-        }
+    /// Get total number of embeddings generated.
+    pub fn embeddings_count(&self) -> u32 {
+        self.usage.total_embeddings
+    }
 
-        if self.endpoint.base_url.is_empty() {
-            return Err("Service endpoint base URL must be specified".to_string());
-        }
+    /// Get total tokens processed.
+    pub fn tokens_processed(&self) -> u32 {
+        self.usage.total_tokens
+    }
 
-        if self.max_batch_size == 0 {
-            return Err("Max batch size must be greater than 0".to_string());
-        }
+    /// Check if context has any embeddings.
+    pub fn has_embeddings(&self) -> bool {
+        !self.embeddings.is_empty()
+    }
 
-        if self.retry_config.max_retries > 10 {
-            return Err("Max retries should not exceed 10".to_string());
-        }
-
-        if self.retry_config.backoff_multiplier <= 1.0 {
-            return Err("Backoff multiplier must be greater than 1.0".to_string());
-        }
-
-        // Validate that default model exists in available models
-        if !self.available_models.is_empty() && !self.has_model(&self.model) {
-            return Err("Default model not found in available models".to_string());
-        }
-
-        Ok(())
+    /// Clear all embeddings.
+    pub fn clear_embeddings(&mut self) {
+        self.embeddings.clear();
+        self.usage = UsageStats::default();
+        self.quality_metrics = QualityMetrics::default();
     }
 }
 
-impl ModelInfo {
-    /// Creates a new model info entry.
-    pub fn new(
-        id: String,
-        name: String,
-        dimensions: u32,
-        max_input_tokens: u32,
-        supported_input_types: Vec<InputType>,
-    ) -> Self {
+/// Processing options for embedding operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessingOptions {
+    /// Encoding format for embeddings.
+    pub encoding_format: EncodingFormat,
+    /// Maximum number of inputs per batch request.
+    pub max_batch_size: usize,
+    /// Custom dimensions (if supported by model).
+    pub dimensions: Option<u32>,
+    /// Whether to normalize embeddings.
+    pub normalize: bool,
+}
+
+impl Default for ProcessingOptions {
+    fn default() -> Self {
         Self {
-            id,
-            name,
-            description: None,
+            encoding_format: EncodingFormat::Float,
+            max_batch_size: 100,
+            dimensions: None,
+            normalize: false,
+        }
+    }
+}
+
+/// Result of embedding generation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingResult {
+    /// Unique identifier for this embedding result.
+    pub embedding_id: Uuid,
+    /// Input texts that were embedded.
+    pub input_texts: Vec<String>,
+    /// Generated embedding vectors.
+    pub embeddings: Vec<Vec<f32>>,
+    /// Number of dimensions in each embedding.
+    pub dimensions: u32,
+    /// Total tokens processed for this request.
+    pub token_count: u32,
+    /// Processing time in milliseconds.
+    pub processing_time_ms: u32,
+    /// Timestamp when this was processed.
+    pub processed_at: Timestamp,
+    /// Additional metadata for this result.
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl EmbeddingResult {
+    /// Create new embedding result.
+    pub fn new(input_texts: Vec<String>, embeddings: Vec<Vec<f32>>) -> Self {
+        let dimensions = embeddings.first().map(|e| e.len() as u32).unwrap_or(0);
+
+        Self {
+            embedding_id: Uuid::new_v4(),
+            input_texts,
+            embeddings,
             dimensions,
-            max_input_tokens,
-            supported_input_types,
-            supports_custom_dimensions: false,
+            token_count: 0,
+            processing_time_ms: 0,
+            processed_at: Timestamp::now(),
             metadata: HashMap::new(),
         }
     }
 
-    /// Checks if this model supports the specified input type.
-    pub fn supports_input_type(&self, input_type: InputType) -> bool {
-        self.supported_input_types.contains(&input_type)
+    /// Set token count.
+    pub fn with_token_count(mut self, token_count: u32) -> Self {
+        self.token_count = token_count;
+        self
+    }
+
+    /// Set processing time.
+    pub fn with_processing_time(mut self, ms: u32) -> Self {
+        self.processing_time_ms = ms;
+        self
+    }
+
+    /// Add metadata entry.
+    pub fn with_metadata(mut self, key: String, value: serde_json::Value) -> Self {
+        self.metadata.insert(key, value);
+        self
+    }
+
+    /// Check if result is empty.
+    pub fn is_empty(&self) -> bool {
+        self.embeddings.is_empty()
+    }
+
+    /// Get number of embeddings.
+    pub fn count(&self) -> usize {
+        self.embeddings.len()
     }
 }
 
-/// Builder for creating embedding contexts.
-#[derive(Debug, Clone)]
-pub struct EmbeddingContextBuilder {
-    context: EmbeddingContext,
+/// Quality metrics for embedding processing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityMetrics {
+    /// Dimensions from all embeddings.
+    dimensions_seen: Vec<u32>,
+    /// Number of failed requests.
+    pub failed_requests: u32,
+    /// Overall quality score.
+    pub quality_score: f32,
+    /// Consistency metrics.
+    pub consistency_score: Option<f32>,
 }
 
-impl EmbeddingContextBuilder {
-    /// Creates a new builder.
-    pub fn new() -> Self {
+impl Default for QualityMetrics {
+    fn default() -> Self {
         Self {
-            context: EmbeddingContext::default(),
+            dimensions_seen: Vec::new(),
+            failed_requests: 0,
+            quality_score: 1.0,
+            consistency_score: None,
+        }
+    }
+}
+
+impl QualityMetrics {
+    /// Update dimension tracking.
+    pub fn update_dimensions(&mut self, dimensions: u32) {
+        self.dimensions_seen.push(dimensions);
+    }
+
+    /// Get most common dimensions.
+    pub fn common_dimensions(&self) -> Option<u32> {
+        if self.dimensions_seen.is_empty() {
+            None
+        } else {
+            // Find most frequent dimension
+            let mut counts = HashMap::new();
+            for &dim in &self.dimensions_seen {
+                *counts.entry(dim).or_insert(0) += 1;
+            }
+            counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(dim, _)| dim)
         }
     }
 
-    /// Sets the provider name.
-    pub fn provider(mut self, provider: impl Into<String>) -> Self {
-        self.context.provider = provider.into();
-        self
-    }
-
-    /// Sets the default model.
-    pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.context.model = model.into();
-        self
-    }
-
-    /// Adds an available model.
-    pub fn add_model(mut self, model: ModelInfo) -> Self {
-        self.context.available_models.push(model);
-        self
-    }
-
-    /// Sets the service endpoint.
-    pub fn endpoint(mut self, endpoint: ServiceEndpoint) -> Self {
-        self.context.endpoint = endpoint;
-        self
-    }
-
-    /// Sets the base URL.
-    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.context.endpoint.base_url = base_url.into();
-        self
-    }
-
-    /// Sets the authentication configuration.
-    pub fn auth(mut self, auth: AuthConfig) -> Self {
-        self.context.auth = auth;
-        self
-    }
-
-    /// Sets an API key for authentication.
-    pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
-        self.context.auth.method = AuthMethod::ApiKey;
-        self.context.auth.api_key = Some(api_key.into());
-        self
-    }
-
-    /// Sets retry configuration.
-    pub fn retry_config(mut self, retry_config: RetryConfig) -> Self {
-        self.context.retry_config = retry_config;
-        self
-    }
-
-    /// Sets maximum retry attempts.
-    pub fn max_retries(mut self, max_retries: u32) -> Self {
-        self.context.retry_config.max_retries = max_retries;
-        self
-    }
-
-    /// Sets timeout configuration.
-    pub fn timeout_config(mut self, timeout_config: TimeoutConfig) -> Self {
-        self.context.timeout_config = timeout_config;
-        self
-    }
-
-    /// Sets request timeout.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.context.timeout_config.request_timeout = timeout;
-        self
-    }
-
-    /// Sets rate limit configuration.
-    pub fn rate_limit_config(mut self, rate_limit_config: RateLimitConfig) -> Self {
-        self.context.rate_limit_config = Some(rate_limit_config);
-        self
-    }
-
-    /// Sets the maximum batch size.
-    pub fn max_batch_size(mut self, max_batch_size: usize) -> Self {
-        self.context.max_batch_size = max_batch_size;
-        self
-    }
-
-    /// Adds provider-specific configuration.
-    pub fn provider_config(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.context.provider_config.insert(key.into(), value);
-        self
-    }
-
-    /// Adds metadata.
-    pub fn metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.context.metadata.insert(key.into(), value);
-        self
-    }
-
-    /// Builds the embedding context.
-    pub fn build(self) -> Result<EmbeddingContext, String> {
-        self.context.validate()?;
-        Ok(self.context)
+    /// Check if dimensions are consistent.
+    pub fn has_consistent_dimensions(&self) -> bool {
+        if self.dimensions_seen.len() <= 1 {
+            true
+        } else {
+            let first = self.dimensions_seen[0];
+            self.dimensions_seen.iter().all(|&dim| dim == first)
+        }
     }
 }
 
-impl Default for EmbeddingContextBuilder {
+/// Usage statistics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
+pub struct UsageStats {
+    /// Total tokens processed.
+    pub total_tokens: u32,
+    /// Total input texts processed.
+    pub total_inputs: u32,
+    /// Total embeddings generated.
+    pub total_embeddings: u32,
+    /// Total processing time in milliseconds.
+    pub total_processing_time_ms: u32,
+    /// Number of successful requests.
+    pub successful_requests: u32,
+    /// Number of failed requests.
+    pub failed_requests: u32,
+    /// Estimated cost for processing.
+    pub estimated_cost: Option<f64>,
+}
+
+impl UsageStats {
+    /// Get total number of requests (successful + failed).
+    pub fn total_requests(&self) -> u32 {
+        self.successful_requests + self.failed_requests
+    }
+
+    /// Calculate success rate as a percentage.
+    pub fn success_rate(&self) -> f32 {
+        let total = self.total_requests();
+        if total == 0 {
+            0.0
+        } else {
+            (self.successful_requests as f32 / total as f32) * 100.0
+        }
+    }
+
+    /// Calculate average processing time per request.
+    pub fn average_processing_time_per_request(&self) -> Option<f32> {
+        if self.successful_requests == 0 {
+            None
+        } else {
+            Some(self.total_processing_time_ms as f32 / self.successful_requests as f32)
+        }
+    }
+
+    /// Calculate average tokens per input.
+    pub fn average_tokens_per_input(&self) -> Option<f32> {
+        if self.total_inputs == 0 {
+            None
+        } else {
+            Some(self.total_tokens as f32 / self.total_inputs as f32)
+        }
+    }
+
+    /// Check if there's any usage data.
+    pub fn has_usage(&self) -> bool {
+        self.total_requests() > 0
+    }
+}
+
+/// Context metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextMetadata {
+    /// Context creation timestamp.
+    pub created_at: Timestamp,
+    /// Last update timestamp.
+    pub last_updated: Timestamp,
+    /// Embedding service version.
+    pub service_version: Option<String>,
+    /// Processing mode used.
+    pub processing_mode: Option<String>,
+    /// Custom tags for categorization.
+    pub tags: Vec<String>,
+}
+
+impl Default for ContextMetadata {
     fn default() -> Self {
-        Self::new()
+        let now = Timestamp::now();
+        Self {
+            created_at: now,
+            last_updated: now,
+            service_version: None,
+            processing_mode: None,
+            tags: Vec::new(),
+        }
     }
 }

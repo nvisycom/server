@@ -24,7 +24,7 @@ use super::{Result, TypeError};
 /// # Examples
 ///
 /// Text entity annotation:
-/// ```rust,ignore
+/// ```rust
 /// use nvisy_core::types::{Annotation, AnnotationType, TextSpan};
 ///
 /// let annotation = Annotation::new(AnnotationType::Entity, "PERSON")
@@ -33,7 +33,7 @@ use super::{Result, TypeError};
 /// ```
 ///
 /// Image object detection:
-/// ```rust,ignore
+/// ```rust
 /// use nvisy_core::types::{Annotation, AnnotationType, BoundingBox};
 ///
 /// let annotation = Annotation::new(AnnotationType::Object, "car")

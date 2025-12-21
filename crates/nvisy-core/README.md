@@ -35,23 +35,21 @@ Nvisy Core serves as the foundation for building AI-powered applications by prov
 
 ### Document Processing
 ```rust
-use nvisy_core::types::Document;
+use nvisy_core::Document;
 use bytes::Bytes;
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
-let doc = Document::builder()
-    .text_content("Hello, world!")
-    .content_type("text/plain")
-    .filename("greeting.txt")
-    .attribute("source", "user_input")
-    .build()?;
+let doc = Document::new(Bytes::from("Hello, world!"))
+    .with_content_type("text/plain")
+    .with_filename("greeting.txt")
+    .with_attribute("source", "user_input");
 # Ok(())
 # }
 ```
 
 ### Service Health Monitoring
 ```rust
-use nvisy_core::types::{ServiceHealth, ServiceStatus};
+use nvisy_core::{ServiceHealth, ServiceStatus};
 use std::time::Duration;
 use serde_json::json;
 

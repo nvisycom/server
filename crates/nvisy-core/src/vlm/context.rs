@@ -18,12 +18,8 @@ use crate::types::{Annotation, Chat, Message, MessageRole};
 /// Context information for VLM operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
-    /// Unique identifier for this context session.
-    pub session_id: Uuid,
     /// User identifier associated with this context.
     pub user_id: Uuid,
-    /// Conversation identifier for tracking related interactions.
-    pub conversation_id: Uuid,
     /// Processing options and configuration.
     pub processing_options: ProcessingOptions,
     /// Chat conversation history.
@@ -32,22 +28,20 @@ pub struct Context {
     pub usage: UsageStats,
     /// Metadata about the context and processing.
     pub metadata: ContextMetadata,
-    /// Optional annotations associated with this context.
-    pub annotations: Option<Vec<Annotation>>,
+    /// Annotations associated with this context.
+    pub annotations: Vec<Annotation>,
 }
 
 impl Context {
     /// Create a new VLM context.
-    pub fn new(user_id: Uuid, conversation_id: Uuid) -> Self {
+    pub fn new(user_id: Uuid) -> Self {
         Self {
-            session_id: Uuid::new_v4(),
             user_id,
-            conversation_id,
             processing_options: ProcessingOptions::default(),
             chat: Chat::new(),
             usage: UsageStats::default(),
             metadata: ContextMetadata::default(),
-            annotations: None,
+            annotations: Vec::new(),
         }
     }
 
@@ -55,7 +49,7 @@ impl Context {
     pub fn add_message(&mut self, message: Message) {
         // Update usage statistics
         self.usage.total_messages += 1;
-        self.usage.total_tokens += message.token_count.unwrap_or(0);
+        // Token counting would need to be implemented based on message content
 
         if message.role == MessageRole::User {
             self.usage.user_messages += 1;
@@ -122,44 +116,29 @@ impl Context {
     pub fn clear_messages(&mut self) {
         self.chat = Chat::new();
         self.usage = UsageStats::default();
-        self.annotations = None;
+        self.annotations.clear();
     }
 
     /// Sets the annotations for this context.
     pub fn with_annotations(mut self, annotations: Vec<Annotation>) -> Self {
-        self.annotations = Some(annotations);
+        self.annotations = annotations;
         self
     }
 
     /// Adds an annotation to this context.
     pub fn with_annotation(mut self, annotation: Annotation) -> Self {
-        match self.annotations {
-            Some(mut annotations) => {
-                annotations.push(annotation);
-                self.annotations = Some(annotations);
-            }
-            None => {
-                self.annotations = Some(vec![annotation]);
-            }
-        }
+        self.annotations.push(annotation);
         self
     }
 
     /// Gets all annotations.
-    pub fn annotations(&self) -> Option<&[Annotation]> {
-        self.annotations.as_deref()
+    pub fn get_annotations(&self) -> &[Annotation] {
+        &self.annotations
     }
 
     /// Adds an annotation.
     pub fn add_annotation(&mut self, annotation: Annotation) {
-        match self.annotations {
-            Some(ref mut annotations) => {
-                annotations.push(annotation);
-            }
-            None => {
-                self.annotations = Some(vec![annotation]);
-            }
-        }
+        self.annotations.push(annotation);
     }
 }
 

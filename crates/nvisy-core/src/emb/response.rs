@@ -15,7 +15,7 @@ use uuid::Uuid;
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```rust
 /// use nvisy_core::emb::EmbeddingResponse;
 ///
 /// // Process embedding response
@@ -93,19 +93,38 @@ fn default_object_type() -> String {
 
 impl EmbeddingResponse {
     /// Creates a new embedding response.
-    pub fn new(request_id: Uuid, data: Vec<EmbeddingData>, model: String) -> Self {
+    pub fn new(request_id: Uuid, model: String) -> Self {
         Self {
             request_id,
-            data,
+            data: Vec::new(),
             model,
             usage: None,
             metadata: HashMap::new(),
         }
     }
 
-    /// Creates a new response builder.
-    pub fn builder() -> EmbeddingResponseBuilder {
-        EmbeddingResponseBuilder::new()
+    /// Sets the embedding data.
+    pub fn with_data(mut self, data: Vec<EmbeddingData>) -> Self {
+        self.data = data;
+        self
+    }
+
+    /// Adds a single embedding data entry.
+    pub fn with_embedding_data(mut self, embedding_data: EmbeddingData) -> Self {
+        self.data.push(embedding_data);
+        self
+    }
+
+    /// Sets the usage statistics.
+    pub fn with_usage(mut self, usage: EmbeddingUsage) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// Adds metadata.
+    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata.insert(key.into(), value);
+        self
     }
 
     /// Returns the number of embeddings in this response.
@@ -143,12 +162,6 @@ impl EmbeddingResponse {
             .iter()
             .map(|data| data.embedding.as_slice())
             .collect()
-    }
-
-    /// Adds metadata to the response.
-    pub fn with_metadata(mut self, key: String, value: serde_json::Value) -> Self {
-        self.metadata.insert(key, value);
-        self
     }
 
     /// Gets metadata value by key.
@@ -295,92 +308,5 @@ impl EmbeddingUsage {
     /// Gets an additional metric by key.
     pub fn get_metric(&self, key: &str) -> Option<&serde_json::Value> {
         self.additional_metrics.get(key)
-    }
-}
-
-/// Builder for creating embedding responses.
-///
-/// This builder provides a fluent interface for constructing embedding responses
-/// with proper validation and defaults.
-#[derive(Debug, Clone)]
-pub struct EmbeddingResponseBuilder {
-    request_id: Option<Uuid>,
-    data: Vec<EmbeddingData>,
-    model: Option<String>,
-    usage: Option<EmbeddingUsage>,
-    metadata: HashMap<String, serde_json::Value>,
-}
-
-impl EmbeddingResponseBuilder {
-    /// Creates a new builder.
-    pub fn new() -> Self {
-        Self {
-            request_id: None,
-            data: Vec::new(),
-            model: None,
-            usage: None,
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// Sets the request ID.
-    pub fn request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = Some(request_id);
-        self
-    }
-
-    /// Sets the embedding data.
-    pub fn data(mut self, data: Vec<EmbeddingData>) -> Self {
-        self.data = data;
-        self
-    }
-
-    /// Adds a single embedding to the response.
-    pub fn add_embedding(mut self, embedding: Vec<f32>) -> Self {
-        let index = self.data.len();
-        self.data.push(EmbeddingData::new(embedding, index));
-        self
-    }
-
-    /// Sets the model name.
-    pub fn model(mut self, model: String) -> Self {
-        self.model = Some(model);
-        self
-    }
-
-    /// Sets the usage statistics.
-    pub fn usage(mut self, usage: EmbeddingUsage) -> Self {
-        self.usage = Some(usage);
-        self
-    }
-
-    /// Adds metadata to the response.
-    pub fn metadata(mut self, key: String, value: serde_json::Value) -> Self {
-        self.metadata.insert(key, value);
-        self
-    }
-
-    /// Builds the embedding response.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if required fields are missing or if validation fails.
-    pub fn build(self) -> Result<EmbeddingResponse, String> {
-        let response = EmbeddingResponse {
-            request_id: self.request_id.unwrap_or_else(Uuid::new_v4),
-            data: self.data,
-            model: self.model.ok_or("Model must be specified")?,
-            usage: self.usage,
-            metadata: self.metadata,
-        };
-
-        response.validate()?;
-        Ok(response)
-    }
-}
-
-impl Default for EmbeddingResponseBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -8,11 +8,40 @@ use std::collections::HashMap;
 use std::fmt;
 
 use bytes::Bytes;
+use derive_more::{From, Into};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Annotation, Result, TypeError, content_types};
+use super::{Annotation, Result, TypeError};
+
+/// Unique identifier for documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, From, Into)]
+pub struct DocumentId(
+    #[from]
+    #[into]
+    pub Uuid,
+);
+
+impl DocumentId {
+    /// Creates a new random document ID.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for DocumentId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for DocumentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// A uniform document representation backed by efficient byte storage.
 ///
@@ -24,7 +53,7 @@ use super::{Annotation, Result, TypeError, content_types};
 ///
 /// Creating a simple text document:
 ///
-/// ```rust,ignore
+/// ```rust
 /// use nvisy_core::types::Document;
 /// use bytes::Bytes;
 ///
@@ -36,7 +65,7 @@ use super::{Annotation, Result, TypeError, content_types};
 ///
 /// Creating a document from binary data:
 ///
-/// ```rust,ignore
+/// ```rust
 /// let binary_data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
 /// let doc = Document::new(Bytes::from(binary_data))
 ///     .with_content_type("image/png")
@@ -45,7 +74,7 @@ use super::{Annotation, Result, TypeError, content_types};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     /// Unique identifier for this document.
-    pub id: Uuid,
+    pub id: DocumentId,
 
     /// The document content as bytes.
     pub content: Bytes,
@@ -102,7 +131,7 @@ impl Document {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// use bytes::Bytes;
     /// use nvisy_core::types::Document;
     ///
@@ -115,7 +144,7 @@ impl Document {
         let now = Timestamp::now();
         let size = content.len();
         Self {
-            id: Uuid::new_v4(),
+            id: DocumentId::new(),
             content,
             metadata: DocumentMetadata {
                 content_type: None,
@@ -135,7 +164,7 @@ impl Document {
 
     /// Sets the document ID.
     pub fn with_id(mut self, id: Uuid) -> Self {
-        self.id = id;
+        self.id = DocumentId(id);
         self
     }
 
@@ -153,7 +182,14 @@ impl Document {
 
     /// Sets the filename.
     pub fn with_filename(mut self, filename: impl Into<String>) -> Self {
-        self.metadata.filename = Some(filename.into());
+        let filename = filename.into();
+
+        // Extract extension from filename
+        if let Some(ext) = extract_extension(&filename) {
+            self.metadata.extension = Some(ext.to_string());
+        }
+
+        self.metadata.filename = Some(filename);
         self
     }
 
@@ -221,6 +257,17 @@ impl Document {
         self.content.is_empty()
     }
 
+    /// Estimates the size of the document metadata in bytes.
+    pub fn estimated_metadata_size(&self) -> usize {
+        self.metadata.content_type.as_ref().map(|s| s.len()).unwrap_or(0)
+            + self.metadata.filename.as_ref().map(|s| s.len()).unwrap_or(0)
+            + self.metadata.extension.as_ref().map(|s| s.len()).unwrap_or(0)
+            + self.metadata.language.as_ref().map(|s| s.len()).unwrap_or(0)
+            + self.metadata.attributes.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>()
+            + self.metadata.processing_hints.len() * 50 // Rough estimate for JSON values
+            + 100 // Base overhead for structure and timestamps
+    }
+
     /// Returns the content type of the document.
     pub fn content_type(&self) -> Option<&str> {
         self.metadata.content_type.as_deref()
@@ -254,15 +301,6 @@ impl Document {
             .unwrap_or(false)
     }
 
-    /// Returns true if this appears to be a PDF document.
-    pub fn is_pdf(&self) -> bool {
-        self.metadata
-            .content_type
-            .as_ref()
-            .map(|ct| ct == content_types::APPLICATION_PDF)
-            .unwrap_or(false)
-    }
-
     /// Attempts to decode the content as UTF-8 text.
     ///
     /// Returns `None` if the content is not valid UTF-8.
@@ -272,6 +310,11 @@ impl Document {
 
     /// Returns the content as a byte slice.
     pub fn as_bytes(&self) -> &[u8] {
+        &self.content
+    }
+
+    /// Returns a reference to the document data.
+    pub fn data(&self) -> &Bytes {
         &self.content
     }
 
@@ -361,36 +404,6 @@ fn extract_extension(filename: &str) -> Option<&str> {
     filename.rfind('.').map(|pos| &filename[pos + 1..])
 }
 
-/// Derives a file extension from a content type.
-fn derive_extension_from_content_type(content_type: &str) -> Option<String> {
-    match content_type {
-        content_types::TEXT_PLAIN => Some("txt".to_string()),
-        content_types::TEXT_HTML => Some("html".to_string()),
-        content_types::TEXT_MARKDOWN => Some("md".to_string()),
-        content_types::APPLICATION_JSON => Some("json".to_string()),
-        content_types::APPLICATION_PDF => Some("pdf".to_string()),
-        content_types::IMAGE_JPEG => Some("jpg".to_string()),
-        content_types::IMAGE_PNG => Some("png".to_string()),
-        content_types::IMAGE_WEBP => Some("webp".to_string()),
-        _ => None,
-    }
-}
-
-/// Derives a content type from a file extension.
-fn derive_content_type_from_extension(extension: &str) -> Option<String> {
-    match extension.to_lowercase().as_str() {
-        "txt" => Some(content_types::TEXT_PLAIN.to_string()),
-        "html" | "htm" => Some(content_types::TEXT_HTML.to_string()),
-        "md" | "markdown" => Some(content_types::TEXT_MARKDOWN.to_string()),
-        "json" => Some(content_types::APPLICATION_JSON.to_string()),
-        "pdf" => Some(content_types::APPLICATION_PDF.to_string()),
-        "jpg" | "jpeg" => Some(content_types::IMAGE_JPEG.to_string()),
-        "png" => Some(content_types::IMAGE_PNG.to_string()),
-        "webp" => Some(content_types::IMAGE_WEBP.to_string()),
-        _ => Some(content_types::APPLICATION_OCTET_STREAM.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,12 +434,10 @@ mod tests {
 
     #[test]
     fn test_document_builder() {
-        let doc = Document::builder()
-            .text_content("Hello, world!")
-            .filename("hello.txt")
-            .attribute("author", "nvisy")
-            .build()
-            .unwrap();
+        let doc = Document::new(Bytes::from("Hello, world!"))
+            .with_content_type("text/plain")
+            .with_filename("hello.txt")
+            .with_attribute("author", "nvisy");
 
         assert_eq!(doc.as_text(), Some("Hello, world!"));
         assert_eq!(doc.filename(), Some("hello.txt"));
@@ -439,17 +450,5 @@ mod tests {
         assert_eq!(extract_extension("test.txt"), Some("txt"));
         assert_eq!(extract_extension("test.tar.gz"), Some("gz"));
         assert_eq!(extract_extension("no_extension"), None);
-    }
-
-    #[test]
-    fn test_content_type_derivation() {
-        assert_eq!(
-            derive_content_type_from_extension("txt"),
-            Some("text/plain".to_string())
-        );
-        assert_eq!(
-            derive_content_type_from_extension("json"),
-            Some("application/json".to_string())
-        );
     }
 }

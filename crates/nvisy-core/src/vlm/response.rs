@@ -58,7 +58,6 @@ impl Usage {
 ///
 /// let response = Response {
 ///     content: "This image shows a beautiful sunset over the ocean.".to_string(),
-///     model: "gpt-4-vision".to_string(),
 ///     usage: None,
 ///     finish_reason: Some("complete".to_string()),
 ///     created: SystemTime::now(),
@@ -75,8 +74,6 @@ impl Usage {
 pub struct Response<Resp> {
     /// The generated text content describing or analyzing the visual input.
     pub content: String,
-    /// The model that generated this response.
-    pub model: String,
     /// Token usage information, if available.
     pub usage: Option<Usage>,
     /// Reason why generation finished.
@@ -108,15 +105,13 @@ impl<Resp> Response<Resp> {
     /// use nvisy_core::vlm::response::Response;
     ///
     /// let response = Response::new(
-    ///     "The image contains three cats sitting on a windowsill",
-    ///     "claude-3-vision",
+    ///     "I can see a beautiful landscape with mountains in the background.",
     ///     ()
     /// );
     /// ```
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
+    pub fn new<C: Into<String>>(content: C, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             usage: None,
             finish_reason: None,
             created: SystemTime::now(),
@@ -128,15 +123,9 @@ impl<Resp> Response<Resp> {
     }
 
     /// Create a new response with usage information.
-    pub fn with_usage<C: Into<String>, M: Into<String>>(
-        content: C,
-        model: M,
-        usage: Usage,
-        payload: Resp,
-    ) -> Self {
+    pub fn with_usage<C: Into<String>>(content: C, usage: Usage, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             usage: Some(usage),
             finish_reason: None,
             created: SystemTime::now(),
@@ -224,7 +213,6 @@ impl<Resp> Response<Resp> {
             content: self.content.clone(),
             finish_reason: self.finish_reason.clone(),
             usage: self.usage.clone(),
-            model: self.model.clone(),
             created: self.created,
             confidence: self.confidence,
             payload: self.payload.clone(),
@@ -235,12 +223,7 @@ impl<Resp> Response<Resp> {
     pub fn to_message(&self) -> Message {
         let mut message = Message::new(MessageRole::Assistant, &self.content);
 
-        message = message.with_model(self.model.clone());
-
         // Add token count if available
-        if let Some(usage) = &self.usage {
-            message = message.with_token_count(usage.total_tokens as u32);
-        }
 
         // Add processing time as metadata if available
         if let Some(processing_time) = self.metadata.processing_time_ms {
@@ -257,10 +240,10 @@ impl<Resp> Response<Resp> {
         }
 
         // Add visual analysis results as metadata if available
-        if let Some(analysis) = &self.visual_analysis {
-            if let Ok(analysis_json) = serde_json::to_value(analysis) {
-                message = message.with_metadata("visual_analysis".to_string(), analysis_json);
-            }
+        if let Some(analysis) = &self.visual_analysis
+            && let Ok(analysis_json) = serde_json::to_value(analysis)
+        {
+            message = message.with_metadata("visual_analysis".to_string(), analysis_json);
         }
 
         message
@@ -281,8 +264,7 @@ pub struct VlmResponseChunk<Resp> {
     pub finish_reason: Option<String>,
     /// Usage information, typically only in the final chunk.
     pub usage: Option<Usage>,
-    /// The model generating this chunk.
-    pub model: String,
+
     /// Timestamp when the chunk was created.
     pub created: SystemTime,
     /// Confidence score for this chunk.
@@ -293,10 +275,9 @@ pub struct VlmResponseChunk<Resp> {
 
 impl<Resp> VlmResponseChunk<Resp> {
     /// Create a new response chunk.
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
+    pub fn new<C: Into<String>>(content: C, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             finish_reason: None,
             usage: None,
             created: SystemTime::now(),
@@ -306,15 +287,13 @@ impl<Resp> VlmResponseChunk<Resp> {
     }
 
     /// Create a final chunk with finish reason.
-    pub fn final_chunk<C: Into<String>, M: Into<String>, R: Into<String>>(
+    pub fn final_chunk<C: Into<String>, R: Into<String>>(
         content: C,
-        model: M,
         finish_reason: R,
         payload: Resp,
     ) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             finish_reason: Some(finish_reason.into()),
             usage: None,
             created: SystemTime::now(),
@@ -324,9 +303,8 @@ impl<Resp> VlmResponseChunk<Resp> {
     }
 
     /// Create a final chunk with usage and confidence.
-    pub fn with_completion<C: Into<String>, M: Into<String>, R: Into<String>>(
+    pub fn with_completion<C: Into<String>, R: Into<String>>(
         content: C,
-        model: M,
         finish_reason: R,
         usage: Usage,
         confidence: Option<f64>,
@@ -334,7 +312,6 @@ impl<Resp> VlmResponseChunk<Resp> {
     ) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             finish_reason: Some(finish_reason.into()),
             usage: Some(usage),
             created: SystemTime::now(),
@@ -363,7 +340,6 @@ impl<Resp> VlmResponseChunk<Resp> {
     {
         Response {
             content: self.content.clone(),
-            model: self.model.clone(),
             usage: self.usage.clone(),
             finish_reason: self.finish_reason.clone(),
             created: self.created,
@@ -611,7 +587,6 @@ pub struct ResponseMetadata {
 /// Builder for creating comprehensive VLM responses.
 pub struct VlmResponseBuilder<Resp> {
     content: String,
-    model: String,
     usage: Option<Usage>,
     finish_reason: Option<String>,
     confidence: Option<f64>,
@@ -622,10 +597,9 @@ pub struct VlmResponseBuilder<Resp> {
 
 impl<Resp> VlmResponseBuilder<Resp> {
     /// Create a new response builder.
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
+    pub fn new<C: Into<String>>(content: C, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             usage: None,
             finish_reason: None,
             confidence: None,
@@ -683,7 +657,6 @@ impl<Resp> VlmResponseBuilder<Resp> {
     pub fn build(self) -> Response<Resp> {
         Response {
             content: self.content,
-            model: self.model,
             usage: self.usage,
             finish_reason: self.finish_reason,
             created: SystemTime::now(),
@@ -707,22 +680,15 @@ mod tests {
         let mut metadata = ResponseMetadata::default();
         metadata.processing_time_ms = Some(1500);
 
-        let response = Response::with_usage(
-            "This image shows a beautiful sunset.",
-            "gpt-4-vision",
-            usage,
-            (),
-        )
-        .with_confidence(0.95)
-        .with_finish_reason("complete")
-        .with_metadata(metadata);
+        let response = Response::with_usage("This image shows a beautiful sunset.", usage, ())
+            .with_confidence(0.95)
+            .with_finish_reason("complete")
+            .with_metadata(metadata);
 
         let message = response.to_message();
 
         assert_eq!(message.role, MessageRole::Assistant);
         assert_eq!(message.content, "This image shows a beautiful sunset.");
-        assert_eq!(message.model, Some("gpt-4-vision".to_string()));
-        assert_eq!(message.token_count, Some(150)); // 50 + 100 tokens
 
         // Check metadata
         assert!(message.metadata.contains_key("confidence"));
@@ -734,7 +700,7 @@ mod tests {
         let mut metadata = ResponseMetadata::default();
         metadata.processing_time_ms = Some(800);
 
-        let response = Response::new("Simple response without usage.", "claude-vision", ())
+        let response = Response::new("Simple response without usage.", ())
             .with_confidence(0.85)
             .with_finish_reason("stop")
             .with_metadata(metadata);
@@ -743,8 +709,6 @@ mod tests {
 
         assert_eq!(message.role, MessageRole::Assistant);
         assert_eq!(message.content, "Simple response without usage.");
-        assert_eq!(message.model, Some("claude-vision".to_string()));
-        assert_eq!(message.token_count, None); // No usage was set
 
         // Check metadata
         assert!(message.metadata.contains_key("confidence"));
@@ -766,7 +730,7 @@ mod tests {
             attributes: HashMap::new(),
         }]);
 
-        let response = Response::new("I can see a cat in the image.", "claude-3-vision", ())
+        let response = Response::new("I can see a cat in the image.", ())
             .with_visual_analysis(visual_analysis);
 
         let message = response.to_message();
@@ -791,19 +755,17 @@ mod tests {
     #[test]
     fn test_response_status_methods() {
         let complete_response =
-            Response::new("Complete response", "model", ()).with_finish_reason("complete");
+            Response::new("Complete response", ()).with_finish_reason("complete");
         assert!(complete_response.is_complete());
         assert!(!complete_response.is_truncated());
         assert!(!complete_response.is_filtered());
 
-        let truncated_response =
-            Response::new("Truncated", "model", ()).with_finish_reason("length");
+        let truncated_response = Response::new("Truncated", ()).with_finish_reason("length");
         assert!(!truncated_response.is_complete());
         assert!(truncated_response.is_truncated());
         assert!(!truncated_response.is_filtered());
 
-        let filtered_response =
-            Response::new("Filtered", "model", ()).with_finish_reason("content_filter");
+        let filtered_response = Response::new("Filtered", ()).with_finish_reason("content_filter");
         assert!(!filtered_response.is_complete());
         assert!(!filtered_response.is_truncated());
         assert!(filtered_response.is_filtered());
@@ -849,14 +811,13 @@ mod tests {
     #[test]
     fn test_response_builder() {
         let usage = Usage::new(30, 70);
-        let response = VlmResponseBuilder::new("Built response", "test-model", ())
+        let response = VlmResponseBuilder::new("Built response", ())
             .usage(usage.clone())
             .confidence(0.88)
             .finish_reason("stop")
             .build();
 
         assert_eq!(response.content, "Built response");
-        assert_eq!(response.model, "test-model");
         assert_eq!(response.confidence, Some(0.88));
         assert_eq!(response.finish_reason, Some("stop".to_string()));
         assert_eq!(response.usage, Some(usage));
@@ -867,7 +828,6 @@ mod tests {
         let usage = Usage::new(10, 20);
         let chunk = VlmResponseChunk::with_completion(
             "Chunk content",
-            "stream-model",
             "complete".to_string(),
             usage.clone(),
             Some(0.9),
@@ -876,7 +836,6 @@ mod tests {
 
         let response = chunk.to_response();
         assert_eq!(response.content, "Chunk content");
-        assert_eq!(response.model, "stream-model");
         assert_eq!(response.usage, Some(usage));
         assert_eq!(response.finish_reason, Some("complete".to_string()));
     }

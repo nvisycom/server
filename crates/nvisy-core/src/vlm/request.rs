@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use super::error::{Error, Result};
 use crate::types::{Document, Message};
+use crate::{Error, Result};
 
 /// Request for VLM operations.
 ///
@@ -279,7 +279,7 @@ impl<Req> Request<Req> {
             ];
 
             if !supported_formats.contains(&image.mime_type.as_str()) {
-                return Err(Error::unsupported_format());
+                return Err(Error::invalid_input().with_message("Unsupported image format"));
             }
 
             // Check image size (rough estimate from base64)
@@ -414,17 +414,9 @@ mod tests {
 
     #[test]
     fn test_vlm_request_with_messages() {
-        let message1 = Message::builder()
-            .role(MessageRole::User)
-            .content("Previous question")
-            .build()
-            .unwrap();
+        let message1 = Message::new(MessageRole::User, "Previous question");
 
-        let message2 = Message::builder()
-            .role(MessageRole::Assistant)
-            .content("Previous response")
-            .build()
-            .unwrap();
+        let message2 = Message::new(MessageRole::Assistant, "Previous response");
 
         let request = Request::new("Continue conversation".to_string(), ())
             .add_message(message1)
@@ -539,11 +531,7 @@ mod tests {
     fn test_vlm_request_total_content_size() {
         let document =
             Document::new(Bytes::from("Document content")).with_content_type("text/plain");
-        let message = Message::builder()
-            .role(MessageRole::User)
-            .content("Message content")
-            .build()
-            .unwrap();
+        let message = Message::new(MessageRole::User, "Message content");
 
         let request = Request::new("Prompt content".to_string(), ())
             .add_document(document)
@@ -557,11 +545,7 @@ mod tests {
     fn test_vlm_request_mixed_content() {
         let document = Document::new(Bytes::from("Text document")).with_content_type("text/plain");
         let image = ImageInput::from_bytes(vec![1, 2, 3, 4], "image/png".to_string()).unwrap();
-        let message = Message::builder()
-            .role(MessageRole::User)
-            .content("Context message")
-            .build()
-            .unwrap();
+        let message = Message::new(MessageRole::User, "Context message");
 
         let request = Request::new("Analyze all content".to_string(), ())
             .add_document(document)
@@ -585,13 +569,7 @@ mod tests {
         let image_input = VlmInput::Image(
             ImageInput::from_bytes(vec![1, 2, 3], "image/jpg".to_string()).unwrap(),
         );
-        let message_input = VlmInput::Message(
-            Message::builder()
-                .role(MessageRole::User)
-                .content("Test")
-                .build()
-                .unwrap(),
-        );
+        let message_input = VlmInput::Message(Message::new(MessageRole::User, "Test"));
 
         // Test that all variants are created correctly
         match text_input {

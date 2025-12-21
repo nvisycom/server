@@ -13,7 +13,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::BoundingBox;
+use crate::types::{BoundingBox, Document};
 
 /// Context information for OCR operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,21 +120,6 @@ impl Context {
         self.usage = UsageStats::default();
         self.quality_metrics = QualityMetrics::default();
     }
-}
-
-/// Document information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Document {
-    /// Original filename, if available.
-    pub filename: Option<String>,
-    /// MIME type of the document.
-    pub mime_type: String,
-    /// Number of pages in the document.
-    pub page_count: Option<u32>,
-    /// Document size in bytes.
-    pub size_bytes: u64,
-    /// Document creation timestamp.
-    pub created_at: Option<Timestamp>,
 }
 
 /// Processing options for OCR operations.

@@ -20,7 +20,7 @@ use crate::types::Document;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// #[derive(Debug, Clone)]
 /// struct MyOcrRequest {
 ///     image_data: Vec<u8>,
@@ -204,9 +204,11 @@ impl DocumentOcrRequest {
             return Err("Document cannot be empty".to_string());
         }
 
-        // Validate that the document contains processable content
-        if !self.document.is_image() && !self.document.is_pdf() {
-            return Err("Document must be an image or PDF for OCR processing".to_string());
+        // Validate content type
+        if let Some(content_type) = self.document.content_type() {
+            if !content_type.starts_with("image/") && content_type != "application/pdf" {
+                return Err("Document content type must be an image or PDF".to_string());
+            }
         }
 
         // Validate region if specified

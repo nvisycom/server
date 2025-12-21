@@ -24,7 +24,7 @@ use crate::types::{Annotation, AnnotationType, BoundingBox, Document, TextSpan};
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// #[derive(Debug, Clone)]
 /// struct MyOcrResponse {
 ///     text: String,
@@ -154,8 +154,6 @@ pub struct OcrResult {
     pub text_extractions: Vec<TextExtraction>,
     /// Overall confidence score for the extraction.
     pub confidence: f32,
-    /// Processing metadata and statistics.
-    pub processing_info: ProcessingInfo,
 }
 
 /// Text extraction with annotation-based positional information.
@@ -175,23 +173,6 @@ pub struct TextExtraction {
     pub annotations: Vec<Annotation>,
 }
 
-/// Processing information and metadata for OCR operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessingInfo {
-    /// Model or engine used for OCR processing.
-    pub model: Option<String>,
-    /// Processing time in milliseconds.
-    pub processing_time_ms: u64,
-    /// DPI used for processing.
-    pub dpi: Option<u32>,
-    /// Languages detected in the document.
-    pub detected_languages: Vec<String>,
-    /// Number of pages processed (for multi-page documents).
-    pub pages_processed: u32,
-    /// Additional metadata about the processing.
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
 impl OcrResult {
     /// Create a new OCR result.
     pub fn new(document: Document, text_extractions: Vec<TextExtraction>, confidence: f32) -> Self {
@@ -199,7 +180,6 @@ impl OcrResult {
             document,
             text_extractions,
             confidence,
-            processing_info: ProcessingInfo::default(),
         }
     }
 
@@ -305,19 +285,6 @@ impl TextExtraction {
     /// Check if this extraction has high confidence.
     pub fn is_high_confidence(&self, threshold: f32) -> bool {
         self.confidence >= threshold
-    }
-}
-
-impl Default for ProcessingInfo {
-    fn default() -> Self {
-        Self {
-            model: None,
-            processing_time_ms: 0,
-            dpi: Some(300),
-            detected_languages: Vec::new(),
-            pages_processed: 1,
-            metadata: HashMap::new(),
-        }
     }
 }
 
@@ -433,9 +400,7 @@ mod tests {
             .with_text_span(text_span.clone())
             .with_bounding_box(bbox.clone());
 
-        let mut result = OcrResult::new(document, vec![extraction], 0.95);
-        result.processing_info.model = Some("test-ocr-model".to_string());
-
+        let result = OcrResult::new(document, vec![extraction], 0.95);
         let annotations = result.to_annotations();
 
         assert_eq!(annotations.len(), 1);
@@ -448,7 +413,7 @@ mod tests {
         assert_eq!(annotation.text_span, Some(text_span));
         assert_eq!(annotation.bounding_box, Some(bbox));
         assert_eq!(annotation.source, Some("ocr".to_string()));
-        assert_eq!(annotation.model, Some("test-ocr-model".to_string()));
+        assert_eq!(annotation.model, None);
     }
 
     #[test]
@@ -471,27 +436,8 @@ mod tests {
     }
 
     #[test]
-    fn test_processing_info_default() {
-        let info = ProcessingInfo::default();
-
-        assert_eq!(info.model, None);
-        assert_eq!(info.processing_time_ms, 0);
-        assert_eq!(info.dpi, Some(300));
-        assert!(info.detected_languages.is_empty());
-        assert_eq!(info.pages_processed, 1);
-        assert!(info.metadata.is_empty());
-    }
-
-    #[test]
     fn test_text_extraction_with_annotation() {
-        let annotation = Annotation::builder()
-            .annotation_type(AnnotationType::Entity)
-            .label("PERSON")
-            .confidence(0.9)
-            .content("John Doe")
-            .source("ner")
-            .build()
-            .unwrap();
+        let annotation = Annotation::new(AnnotationType::Entity, "PERSON").with_confidence(0.9);
 
         let extraction =
             TextExtraction::new("John Doe".to_string(), 0.95).with_annotation(annotation.clone());
@@ -509,21 +455,9 @@ mod tests {
         let extraction2 =
             TextExtraction::new("Second line".to_string(), 0.85).with_language("en".to_string());
 
-        let mut processing_info = ProcessingInfo::default();
-        processing_info.model = Some("test-model".to_string());
-        processing_info.processing_time_ms = 1500;
-        processing_info.detected_languages = vec!["en".to_string()];
-        processing_info.pages_processed = 2;
-
-        let mut result = OcrResult::new(document, vec![extraction1, extraction2], 0.875);
-        result.processing_info = processing_info;
-
+        let result = OcrResult::new(document, vec![extraction1, extraction2], 0.875);
         assert_eq!(result.extraction_count(), 2);
         assert_eq!(result.confidence, 0.875);
-        assert_eq!(result.processing_info.model, Some("test-model".to_string()));
-        assert_eq!(result.processing_info.processing_time_ms, 1500);
-        assert_eq!(result.processing_info.detected_languages, vec!["en"]);
-        assert_eq!(result.processing_info.pages_processed, 2);
         assert_eq!(result.full_text(), "First line Second line");
     }
 }

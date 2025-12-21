@@ -1,76 +1,96 @@
-//! Embedding service implementation.
+//! Embedding service wrapper with observability.
 //!
-//! This module provides concrete implementation of embedding services
-//! that implement the [`EmbeddingProvider`] trait defined in the parent module.
+//! This module provides a wrapper around embedding implementations that adds
+//! production-ready logging and service naming.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, Result};
+use super::{BoxedEmbedding, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, Result};
 use crate::types::ServiceHealth;
 
-/// Concrete embedding service implementation.
+/// Embedding service wrapper with observability.
 ///
-/// This service provides a standard implementation of the [`EmbeddingProvider`] trait
-/// that can be used as a base for specific embedding service implementations.
+/// This wrapper adds logging and service naming to any embedding implementation.
+/// The inner service is wrapped in Arc for cheap cloning.
 ///
 /// # Type Parameters
 ///
-/// * `Req` - The request payload type specific to the embedding implementation
-/// * `Resp` - The response payload type specific to the embedding implementation
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use nvisy_core::emb::{Service, EmbeddingRequest, EmbeddingResponse};
-///
-/// let service = Service::new(config);
-/// let request = EmbeddingRequest::builder()
-///     .input("Hello, world!")
-///     .model("text-embedding-ada-002")
-///     .build()?;
-///
-/// let response = service.embed(&request).await?;
-/// ```
-pub struct Service<Req, Resp> {
-    _phantom_req: std::marker::PhantomData<Req>,
-    _phantom_resp: std::marker::PhantomData<Resp>,
+/// * `Req` - The request payload type
+/// * `Resp` - The response payload type
+#[derive(Clone)]
+pub struct EmbeddingService<Req = (), Resp = ()> {
+    inner: Arc<ServiceInner<Req, Resp>>,
 }
 
-impl<Req, Resp> Service<Req, Resp> {
-    /// Creates a new embedding service instance.
-    ///
-    /// # Returns
-    ///
-    /// A new [`Service`] instance ready to process embedding requests.
-    pub fn new() -> Self {
-        Self {
-            _phantom_req: std::marker::PhantomData,
-            _phantom_resp: std::marker::PhantomData,
-        }
-    }
+struct ServiceInner<Req, Resp> {
+    embedding: BoxedEmbedding<Req, Resp>,
 }
 
-impl<Req, Resp> Default for Service<Req, Resp> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl<Req, Resp> EmbeddingProvider<Req, Resp> for Service<Req, Resp>
+impl<Req, Resp> EmbeddingService<Req, Resp>
 where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + 'static,
 {
-    async fn embed(&self, _request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
-        // This is a placeholder implementation.
-        // Concrete implementations should override this method.
-        todo!("Implement embedding generation for specific provider")
+    /// Create a new embedding service wrapper.
+    ///
+    /// # Parameters
+    ///
+    /// * `embedding` - Embedding implementation
+    pub fn new(embedding: BoxedEmbedding<Req, Resp>) -> Self {
+        Self {
+            inner: Arc::new(ServiceInner { embedding }),
+        }
+    }
+}
+
+#[async_trait]
+impl<Req, Resp> EmbeddingProvider<Req, Resp> for EmbeddingService<Req, Resp>
+where
+    Req: Send + Sync + 'static,
+    Resp: Send + Sync + 'static,
+{
+    async fn generate_embedding(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
+        tracing::debug!(
+            target: super::TRACING_TARGET,
+            input_count = request.inputs.len(),
+            model = %request.model,
+            "Processing embedding request"
+        );
+
+        let start = std::time::Instant::now();
+
+        let result = self.inner.embedding.generate_embedding(request).await;
+
+        match &result {
+            Ok(response) => {
+                tracing::debug!(
+                    target: super::TRACING_TARGET,
+                    embedding_count = response.embedding_count(),
+                    elapsed = ?start.elapsed(),
+                    "Embedding generation successful"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: super::TRACING_TARGET,
+                    error = %error,
+                    elapsed = ?start.elapsed(),
+                    "Embedding generation failed"
+                );
+            }
+        }
+
+        result
     }
 
     async fn health_check(&self) -> Result<ServiceHealth> {
-        // This is a placeholder implementation.
-        // Concrete implementations should override this method.
-        todo!("Implement health check for specific provider")
+        tracing::trace!(
+            target: super::TRACING_TARGET,
+            "Performing health check"
+        );
+
+        self.inner.embedding.health_check().await
     }
 }
