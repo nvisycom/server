@@ -636,11 +636,13 @@ async fn create_file_comment(
     };
 
     // Verify user has access to the document
-    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", file.document_id))
-            .with_resource("document"));
-    };
+    if let Some(document_id) = file.document_id {
+        let Some(_document) = pg_client.find_document_by_id(document_id).await? else {
+            return Err(ErrorKind::NotFound
+                .with_message(format!("Document not found: {}", document_id))
+                .with_resource("document"));
+        };
+    }
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
@@ -698,11 +700,13 @@ async fn list_file_comments(
     };
 
     // Verify user has access to the document
-    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", file.document_id))
-            .with_resource("document"));
-    };
+    if let Some(document_id) = file.document_id {
+        let Some(_document) = pg_client.find_document_by_id(document_id).await? else {
+            return Err(ErrorKind::NotFound
+                .with_message(format!("Document not found: {}", document_id))
+                .with_resource("document"));
+        };
+    }
 
     let comments = pg_client
         .find_comments_by_file(path_params.file_id, pagination.into())
@@ -759,11 +763,13 @@ async fn create_version_comment(
     };
 
     // Verify user has access to the document
-    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", file.document_id))
-            .with_resource("document"));
-    };
+    if let Some(document_id) = file.document_id {
+        let Some(_document) = pg_client.find_document_by_id(document_id).await? else {
+            return Err(ErrorKind::NotFound
+                .with_message(format!("Document not found: {}", document_id))
+                .with_resource("document"));
+        };
+    }
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
@@ -821,11 +827,13 @@ async fn list_version_comments(
     };
 
     // Verify user has access to the document
-    let Some(_document) = pg_client.find_document_by_id(file.document_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Document not found: {}", file.document_id))
-            .with_resource("document"));
-    };
+    if let Some(document_id) = file.document_id {
+        let Some(_document) = pg_client.find_document_by_id(document_id).await? else {
+            return Err(ErrorKind::NotFound
+                .with_message(format!("Document not found: {}", document_id))
+                .with_resource("document"));
+        };
+    }
 
     let comments = pg_client
         .find_comments_by_file(path_params.version_id, pagination.into())

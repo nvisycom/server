@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 
-use super::validation::is_alphanumeric;
+use super::validations::is_alphanumeric;
 
 /// Request payload for creating a new document.
 #[must_use]

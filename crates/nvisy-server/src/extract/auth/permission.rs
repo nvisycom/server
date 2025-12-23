@@ -38,6 +38,10 @@ pub enum Permission {
     ViewFiles,
     /// Can upload new files to the project.
     UploadFiles,
+    /// Can update file metadata and properties.
+    UpdateFiles,
+    /// Can download files from the project.
+    DownloadFiles,
     /// Can delete files from the project.
     DeleteFiles,
 
@@ -105,6 +109,8 @@ impl Permission {
             | Self::UpdateDocuments
             | Self::DeleteDocuments
             | Self::UploadFiles
+            | Self::UpdateFiles
+            | Self::DownloadFiles
             | Self::DeleteFiles => ProjectRole::Editor,
 
             // Admin-level permissions

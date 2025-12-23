@@ -1,8 +1,8 @@
 //! Document-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    DocumentCommentConstraints, DocumentConstraints, DocumentFileConstraints,
-    DocumentVersionConstraints,
+    DocumentAnnotationConstraints, DocumentCommentConstraints, DocumentConstraints,
+    DocumentFileConstraints, DocumentVersionConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -63,6 +63,9 @@ impl From<DocumentFileConstraints> for Error<'static> {
                 }
                 DocumentFileConstraints::RetentionPeriod => ErrorKind::BadRequest
                     .with_message("File retention period must be between 1 hour and 5 years"),
+                DocumentFileConstraints::TagsCountMax => {
+                    ErrorKind::BadRequest.with_message("Maximum number of tags exceeded")
+                }
                 DocumentFileConstraints::UpdatedAfterCreated
                 | DocumentFileConstraints::DeletedAfterCreated
                 | DocumentFileConstraints::DeletedAfterUpdated
@@ -144,5 +147,16 @@ impl From<DocumentCommentConstraints> for Error<'static> {
         };
 
         error.with_resource("document_comment")
+    }
+}
+
+impl From<DocumentAnnotationConstraints> for Error<'static> {
+    fn from(c: DocumentAnnotationConstraints) -> Self {
+        // For now, return a generic error for document annotations
+        // TODO: Add specific error messages for each constraint variant
+        let _ = c;
+        ErrorKind::BadRequest
+            .with_message("Document annotation constraint violation")
+            .with_resource("document_annotation")
     }
 }

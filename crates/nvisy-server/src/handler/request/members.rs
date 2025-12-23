@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
-use super::validation::validation_error;
+use super::validations::validation_error;
 
 /// Request to update a member's role.
 #[must_use]

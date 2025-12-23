@@ -17,10 +17,14 @@ pub mod project_members;
 pub mod projects;
 
 // Document-related constraint modules
+pub mod document_annotations;
 pub mod document_comments;
 pub mod document_files;
 pub mod document_versions;
 pub mod documents;
+
+// Project run constraint modules
+pub mod project_runs;
 
 use std::fmt;
 
@@ -29,6 +33,7 @@ pub use account_api_tokens::AccountApiTokenConstraints;
 // Re-export all constraint types for convenience
 pub use account_notifications::AccountNotificationConstraints;
 pub use accounts::AccountConstraints;
+pub use document_annotations::DocumentAnnotationConstraints;
 pub use document_comments::DocumentCommentConstraints;
 pub use document_files::DocumentFileConstraints;
 pub use document_versions::DocumentVersionConstraints;
@@ -37,6 +42,7 @@ pub use project_activities::ProjectActivitiesConstraints;
 pub use project_integrations::ProjectIntegrationConstraints;
 pub use project_invites::ProjectInviteConstraints;
 pub use project_members::ProjectMemberConstraints;
+pub use project_runs::ProjectRunConstraints;
 pub use projects::ProjectConstraints;
 use serde::{Deserialize, Serialize};
 
@@ -60,9 +66,11 @@ pub enum ConstraintViolation {
     ProjectInvite(ProjectInviteConstraints),
     ProjectActivityLog(ProjectActivitiesConstraints),
     ProjectIntegration(ProjectIntegrationConstraints),
+    ProjectRun(ProjectRunConstraints),
 
     // Document-related constraints
     Document(DocumentConstraints),
+    DocumentAnnotation(DocumentAnnotationConstraints),
     DocumentComment(DocumentCommentConstraints),
     DocumentFile(DocumentFileConstraints),
     DocumentVersion(DocumentVersionConstraints),
@@ -150,9 +158,17 @@ impl ConstraintViolation {
             if let Some(c) = ProjectIntegrationConstraints::new(constraint) {
                 return Some(ConstraintViolation::ProjectIntegration(c));
             }
+        } else if constraint.starts_with("project_runs_") {
+            if let Some(c) = ProjectRunConstraints::new(constraint) {
+                return Some(ConstraintViolation::ProjectRun(c));
+            }
         } else if constraint.starts_with("documents_") {
             if let Some(c) = DocumentConstraints::new(constraint) {
                 return Some(ConstraintViolation::Document(c));
+            }
+        } else if constraint.starts_with("document_annotations_") {
+            if let Some(c) = DocumentAnnotationConstraints::new(constraint) {
+                return Some(ConstraintViolation::DocumentAnnotation(c));
             }
         } else if constraint.starts_with("document_comments_") {
             if let Some(c) = DocumentCommentConstraints::new(constraint) {
@@ -188,9 +204,11 @@ impl ConstraintViolation {
             ConstraintViolation::ProjectInvite(_) => "project_invites",
             ConstraintViolation::ProjectActivityLog(_) => "project_activities",
             ConstraintViolation::ProjectIntegration(_) => "project_integrations",
+            ConstraintViolation::ProjectRun(_) => "project_runs",
 
             // Document-related tables
             ConstraintViolation::Document(_) => "documents",
+            ConstraintViolation::DocumentAnnotation(_) => "document_annotations",
             ConstraintViolation::DocumentComment(_) => "document_comments",
             ConstraintViolation::DocumentFile(_) => "document_files",
             ConstraintViolation::DocumentVersion(_) => "document_versions",
@@ -212,9 +230,11 @@ impl ConstraintViolation {
             | ConstraintViolation::ProjectMember(_)
             | ConstraintViolation::ProjectInvite(_)
             | ConstraintViolation::ProjectActivityLog(_)
-            | ConstraintViolation::ProjectIntegration(_) => "projects",
+            | ConstraintViolation::ProjectIntegration(_)
+            | ConstraintViolation::ProjectRun(_) => "projects",
 
             ConstraintViolation::Document(_)
+            | ConstraintViolation::DocumentAnnotation(_)
             | ConstraintViolation::DocumentComment(_)
             | ConstraintViolation::DocumentFile(_)
             | ConstraintViolation::DocumentVersion(_) => "documents",
@@ -236,8 +256,10 @@ impl ConstraintViolation {
             ConstraintViolation::ProjectInvite(c) => c.categorize(),
             ConstraintViolation::ProjectActivityLog(c) => c.categorize(),
             ConstraintViolation::ProjectIntegration(c) => c.categorize(),
+            ConstraintViolation::ProjectRun(c) => c.categorize(),
 
             ConstraintViolation::Document(c) => c.categorize(),
+            ConstraintViolation::DocumentAnnotation(c) => c.categorize(),
             ConstraintViolation::DocumentComment(c) => c.categorize(),
             ConstraintViolation::DocumentFile(c) => c.categorize(),
             ConstraintViolation::DocumentVersion(c) => c.categorize(),
@@ -264,8 +286,10 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::ProjectInvite(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectActivityLog(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectIntegration(c) => write!(f, "{}", c),
+            ConstraintViolation::ProjectRun(c) => write!(f, "{}", c),
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),
+            ConstraintViolation::DocumentAnnotation(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentComment(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentFile(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentVersion(c) => write!(f, "{}", c),

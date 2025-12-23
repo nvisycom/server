@@ -1,6 +1,6 @@
 //! Document file response types.
 
-use nvisy_postgres::types::ProcessingStatus;
+use nvisy_postgres::types::{ContentSegmentation, ProcessingStatus};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -29,3 +29,17 @@ pub struct File {
 
 /// Response for file uploads.
 pub type Files = Vec<File>;
+
+/// Knowledge-related fields for document file responses.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentKnowledge {
+    /// Whether the file is indexed for knowledge extraction.
+    pub is_indexed: bool,
+
+    /// Content segmentation strategy.
+    pub content_segmentation: ContentSegmentation,
+
+    /// Whether visual elements are supported.
+    pub visual_support: bool,
+}

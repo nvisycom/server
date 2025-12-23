@@ -480,7 +480,7 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod test {
-    use crate::handler::api_tokens::routes;
+    use crate::handler::tokens::routes;
     use crate::handler::test::create_test_server_with_router;
 
     #[tokio::test]

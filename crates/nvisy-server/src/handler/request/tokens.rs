@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
-use super::validation::validation_error;
+use super::validations::validation_error;
 
 /// Request to create a new API token.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema, Default)]

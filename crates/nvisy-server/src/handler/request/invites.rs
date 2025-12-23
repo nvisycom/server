@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
-use super::validation::validation_error;
+use super::validations::validation_error;
 
 /// Request payload for creating a new project invite.
 #[must_use]

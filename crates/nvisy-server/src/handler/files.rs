@@ -1,8 +1,8 @@
-//! Document file upload and management handlers.
+//! Project file upload and management handlers.
 //!
-//! This module provides comprehensive file management functionality for documents,
+//! This module provides comprehensive file management functionality for projects,
 //! including upload, download, metadata management, and file operations. All
-//! operations are secured with document-level authorization and include virus
+//! operations are secured with project-level authorization and include virus
 //! scanning and content validation.
 
 use std::str::FromStr;
@@ -13,7 +13,7 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewDocumentFile, UpdateDocumentFile};
-use nvisy_postgres::query::DocumentFileRepository;
+use nvisy_postgres::query::{DocumentFileRepository, ProjectRepository};
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -21,51 +21,53 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
-use crate::handler::documents::DocumentPathParams;
-use crate::handler::request::UpdateFile;
+use crate::handler::projects::ProjectPathParams;
+use crate::handler::request::{
+    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, UpdateDocumentKnowledge,
+};
 use crate::handler::response::{File, Files};
 use crate::handler::{ErrorKind, ErrorResponse, Result};
-use crate::service::ServiceState;
+use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
 
-/// Tracing target for document file operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::document_files";
+/// Tracing target for project file operations.
+const TRACING_TARGET: &str = "nvisy_server::handler::project_files";
 
 /// Maximum file size: 100MB
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
-/// Combined path params for document file operations.
+/// Combined path params for project file operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
-pub struct DocFileIdPathParams {
-    /// Unique identifier of the document.
-    pub document_id: Uuid,
-    /// Unique identifier of the document file.
+pub struct ProjectFilePathParams {
+    /// Unique identifier of the project.
+    pub project_id: Uuid,
+    /// Unique identifier of the file.
     pub file_id: Uuid,
 }
 
-/// Uploads input files to a document for processing.
+/// Uploads input files to a project for processing.
 ///
 /// Form data:
 /// - `file`: One or more files to upload
-#[tracing::instrument(skip(pg_client, multipart))]
+#[tracing::instrument(skip(pg_client, nats_client, multipart), fields(project_id = %path_params.project_id))]
 #[utoipa::path(
-    post, path = "/documents/{documentId}/files/", tag = "documents",
-    params(DocumentPathParams),
+    post, path = "/projects/{projectId}/files/", tag = "Project Files",
+    params(ProjectPathParams),
     request_body(
         content = inline(String),
-        description = "Multipart form data with 'mode' field and files",
+        description = "Multipart form data with files",
         content_type = "multipart/form-data",
     ),
     responses(
         (
             status = BAD_REQUEST,
-            description = "Bad request - invalid file or too many files",
+            description = "Bad request: invalid file or too many files",
             body = ErrorResponse,
         ),
         (
             status = UNAUTHORIZED,
-            description = "Unauthorized - insufficient permissions",
+            description = "Unauthorized: insufficient permissions",
             body = ErrorResponse,
         ),
         (
@@ -83,15 +85,21 @@ pub struct DocFileIdPathParams {
 async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
-    Path(path_params): Path<DocumentPathParams>,
+    Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_document(&pg_client, path_params.document_id, Permission::UploadFiles)
+        .authorize_project(&pg_client, path_params.project_id, Permission::UploadFiles)
         .await?;
+
+    // Load project keep_for_sec setting
+    let project_keep_for_sec = pg_client
+        .find_project_by_id(path_params.project_id)
+        .await?
+        .and_then(|p| p.keep_for_sec);
 
     let mut uploaded_files = Vec::new();
 
@@ -136,14 +144,14 @@ async fn upload_file(
             tracing::error!(target: TRACING_TARGET, error = %err, filename = %filename, "Failed to read file chunk");
             ErrorKind::BadRequest
                 .with_message("Failed to read file data")
-                .with_context(format!("could not read file '{}': {}", filename, err))
+                .with_context(format!("Could not read file '{}': {}", filename, err))
         })? {
             // Check size before adding chunk to prevent memory exhaustion
             if data.len() + chunk.len() > MAX_FILE_SIZE {
                 return Err(ErrorKind::BadRequest
                     .with_message("File too large")
                     .with_context(format!(
-                        "file '{}' exceeds maximum size of {} MB",
+                        "File '{}' exceeds maximum size of {} MB",
                         filename,
                         MAX_FILE_SIZE / (1024 * 1024)
                     )));
@@ -158,33 +166,63 @@ async fn upload_file(
             .unwrap_or("")
             .to_lowercase();
 
-        // Generate unique file ID for storage
-        let file_id = Uuid::now_v7();
-        let storage_path = format!("documents/{}/files/{}", path_params.document_id, file_id);
-
-        // Upload to NATS document store
-        tracing::debug!(
-            target: TRACING_TARGET,
-            file_id = %file_id,
-            path = %storage_path,
-            size = data.len(),
-            "uploading file to NATS document store"
-        );
-
-        // Store file size before moving data
         let file_size_bytes = data.len() as i64;
 
         // Create content data with metadata
         let content_data =
             DocumentFileStore::<InputFiles>::create_content_data_with_metadata(data.into());
 
-        // Create object key for the file
-        let object_key = input_fs.create_key(
-            auth_claims.account_id, // Using account_id as project_uuid
-            file_id,
+        // Extract SHA-256 hash from content data
+        let sha256_bytes = content_data.compute_sha256().to_vec();
+
+        // Generate a temporary ID to create the storage path
+        // Note: We'll use Uuid::now_v7() temporarily, then postgres will assign the real ID
+        let temp_file_id = Uuid::now_v7();
+        let object_key = input_fs.create_key(path_params.project_id, temp_file_id);
+
+        // Create file record in database with storage path
+        let file_record = NewDocumentFile {
+            project_id: path_params.project_id,
+            document_id: None,
+            account_id: auth_claims.account_id,
+            display_name: Some(filename.clone()),
+            original_filename: Some(filename.clone()),
+            file_extension: Some(file_extension.clone()),
+            file_size_bytes: Some(file_size_bytes),
+            storage_path: object_key.as_str().to_string(),
+            storage_bucket: Some(InputFiles::bucket_name().to_string()),
+            file_hash_sha256: sha256_bytes,
+            keep_for_sec: project_keep_for_sec,
+            auto_delete_at: None,
+            ..Default::default()
+        };
+
+        // Insert file record into database
+        let created_file = pg_client
+            .create_document_file(file_record)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    "failed to create file record in database"
+                );
+                ErrorKind::InternalServerError
+                    .with_message("Failed to save file metadata")
+                    .with_context(format!("Database error: {}", err))
+            })?;
+
+        let file_id = created_file.id;
+
+        // Upload to NATS document store
+        tracing::debug!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            project_id = %path_params.project_id,
+            size = file_size_bytes,
+            "uploading file to NATS document store"
         );
 
-        // Upload to InputFiles document store
         let put_result = input_fs
             .put(&object_key, &content_data)
             .await
@@ -208,42 +246,6 @@ async fn upload_file(
             "file uploaded successfully to NATS document store"
         );
 
-        // Extract SHA-256 hash from content data
-        let sha256_bytes = content_data.compute_sha256().to_vec();
-
-        // Create file record in database
-        let file_record = NewDocumentFile {
-            document_id: None,
-            account_id: auth_claims.account_id,
-            display_name: Some(filename.clone()),
-            original_filename: Some(filename.clone()),
-            file_extension: Some(file_extension.clone()),
-            // require_mode: RequireMode::Text,
-            file_size_bytes: Some(file_size_bytes),
-            storage_path: object_key.as_str().to_string(),
-            storage_bucket: Some(InputFiles::bucket_name().to_string()),
-            file_hash_sha256: sha256_bytes,
-            keep_for_sec: 30 * 24 * 60 * 60, // TODO: Load from project settings
-            auto_delete_at: None,
-            ..Default::default()
-        };
-
-        // Insert file record into database
-        let created_file = pg_client
-            .create_document_file(file_record)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    file_id = %file_id,
-                    "failed to create file record in database"
-                );
-                ErrorKind::InternalServerError
-                    .with_message("Failed to save file metadata")
-                    .with_context(format!("Database error: {}", err))
-            })?;
-
         tracing::debug!(
             target: TRACING_TARGET,
             file_id = %file_id,
@@ -264,14 +266,14 @@ async fn upload_file(
         // Publish file processing job to queue
         let job = nvisy_nats::stream::DocumentJob::new_file_processing(
             created_file.id,
-            path_params.document_id,
+            path_params.project_id,
             auth_claims.account_id,
             object_key.as_str().to_string(),
             file_extension.clone(),
             file_size_bytes,
         );
 
-        // Publish to document job queue
+        // Publish to document job queue using NATS helper methods
         let jetstream = nats_client.jetstream();
         let publisher = nvisy_nats::stream::DocumentJobPublisher::new(jetstream)
             .await
@@ -303,8 +305,6 @@ async fn upload_file(
         );
 
         uploaded_files.push(uploaded_file);
-
-        // Continue processing all files
     }
 
     // Check if any files were uploaded
@@ -315,7 +315,7 @@ async fn upload_file(
     let count = uploaded_files.len();
     tracing::debug!(
         target: TRACING_TARGET,
-        document_id = %path_params.document_id,
+        project_id = %path_params.project_id,
         file_count = count,
         "file upload completed"
     );
@@ -324,11 +324,11 @@ async fn upload_file(
 }
 
 /// Updates file metadata.
-#[tracing::instrument(skip(pg_client))]
+#[tracing::instrument(skip(pg_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
 #[utoipa::path(
-    patch, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
-    params(DocFileIdPathParams),
-    request_body = UpdateFile,
+    patch, path = "/projects/{projectId}/files/{fileId}", tag = "Project Files",
+    params(ProjectFilePathParams),
+    request_body = UpdateDocumentKnowledge,
     responses(
         (
             status = BAD_REQUEST,
@@ -359,22 +359,14 @@ async fn upload_file(
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
-    State(nats_client): State<NatsClient>,
-    Path(path_params): Path<DocFileIdPathParams>,
+    Path(path_params): Path<ProjectFilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
-    ValidateJson(request): ValidateJson<UpdateFile>,
+    ValidateJson(request): ValidateJson<UpdateDocumentKnowledge>,
 ) -> Result<(StatusCode, Json<File>)> {
-    let _input_fs = nats_client.document_store::<InputFiles>().await?;
-
-    // Verify permissions
-    // Verify document write permissions
+    // Verify project write permissions
     auth_claims
-        .authorize_document(
-            &pg_client,
-            path_params.document_id,
-            Permission::UpdateDocuments,
-        )
+        .authorize_project(&pg_client, path_params.project_id, Permission::UpdateFiles)
         .await?;
 
     // Get existing file
@@ -385,18 +377,16 @@ async fn update_file(
         return Err(ErrorKind::NotFound.with_message("File not found"));
     };
 
-    // Verify file belongs to document (if it has one assigned)
-    if let Some(existing_doc_id) = file.document_id {
-        if existing_doc_id != path_params.document_id {
-            return Err(ErrorKind::NotFound.with_message("File not found in document"));
-        }
+    // Verify file belongs to project
+    if file.project_id != path_params.project_id {
+        return Err(ErrorKind::NotFound.with_message("File not found in project"));
     }
 
     // Create update struct
     let updates = UpdateDocumentFile {
-        document_id: request.document_id.map(Some),
-        display_name: request.display_name,
-        processing_priority: request.processing_priority,
+        is_indexed: request.is_indexed,
+        content_segmentation: request.content_segmentation,
+        visual_support: request.visual_support,
         ..Default::default()
     };
 
@@ -427,11 +417,11 @@ async fn update_file(
     Ok((StatusCode::OK, Json(response)))
 }
 
-/// Downloads a document file.
-#[tracing::instrument(skip(pg_client))]
+/// Downloads a project file.
+#[tracing::instrument(skip(pg_client, nats_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
 #[utoipa::path(
-    get, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
-    params(DocFileIdPathParams),
+    get, path = "/projects/{projectId}/files/{fileId}", tag = "Project Files",
+    params(ProjectFilePathParams),
     responses(
         (
             status = NOT_FOUND,
@@ -458,10 +448,18 @@ async fn update_file(
 async fn download_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
-    Path(path_params): Path<DocFileIdPathParams>,
+    Path(path_params): Path<ProjectFilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     let input_fs = nats_client.document_store::<InputFiles>().await?;
+
+    auth_claims
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::DownloadFiles,
+        )
+        .await?;
 
     // Get file metadata from database
     let file = pg_client
@@ -486,6 +484,16 @@ async fn download_file(
             );
             ErrorKind::NotFound.with_message("File not found")
         })?;
+
+    // Verify file belongs to project
+    if file.project_id != path_params.project_id {
+        return Err(ErrorKind::NotFound.with_message("File not found in project"));
+    }
+
+    // Verify file is not soft-deleted
+    if file.deleted_at.is_some() {
+        return Err(ErrorKind::NotFound.with_message("File not found"));
+    }
 
     // Create object key from storage path
     let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
@@ -549,11 +557,11 @@ async fn download_file(
     Ok((StatusCode::OK, headers, content_data.into_bytes().to_vec()))
 }
 
-/// Deletes a document file.
-#[tracing::instrument(skip(pg_client))]
+/// Deletes a project file (soft delete).
+#[tracing::instrument(skip(pg_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
 #[utoipa::path(
-    delete, path = "/documents/{documentId}/files/{fileId}", tag = "documents",
-    params(DocFileIdPathParams),
+    delete, path = "/projects/{projectId}/files/{fileId}", tag = "Project Files",
+    params(ProjectFilePathParams),
     responses(
         (
             status = NOT_FOUND,
@@ -578,15 +586,12 @@ async fn download_file(
 )]
 async fn delete_file(
     State(pg_client): State<PgClient>,
-    State(nats_client): State<NatsClient>,
-    Path(path_params): Path<DocFileIdPathParams>,
+    Path(path_params): Path<ProjectFilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
-    let input_fs = nats_client.document_store::<InputFiles>().await?;
-
     auth_claims
-        .authorize_document(&pg_client, path_params.document_id, Permission::DeleteFiles)
+        .authorize_project(&pg_client, path_params.project_id, Permission::DeleteFiles)
         .await?;
 
     // Get file metadata
@@ -597,75 +602,304 @@ async fn delete_file(
         return Err(ErrorKind::NotFound.with_message("File not found"));
     };
 
-    // Verify file belongs to document
-    if file.document_id != Some(path_params.document_id) {
-        return Err(ErrorKind::NotFound.with_message("File not found in document"));
+    // Verify file belongs to project
+    if file.project_id != path_params.project_id {
+        return Err(ErrorKind::NotFound.with_message("File not found in project"));
     }
 
-    // TODO: Replace with NATS object store implementation
-    // Get file metadata from database
-    let file = pg_client
-        .find_document_file_by_id(path_params.file_id)
+    // Soft delete by setting deleted_at timestamp
+    let updates = UpdateDocumentFile {
+        deleted_at: Some(Some(time::OffsetDateTime::now_utc())),
+        ..Default::default()
+    };
+
+    pg_client
+        .update_document_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
             tracing::error!(
                 target: TRACING_TARGET,
                 error = %err,
                 file_id = %path_params.file_id,
-                "failed to find file in database"
+                "failed to soft delete file"
             );
             ErrorKind::InternalServerError
-                .with_message("Failed to find file")
+                .with_message("Failed to delete file")
                 .with_context(format!("Database error: {}", err))
-        })?
-        .ok_or_else(|| {
-            tracing::warn!(
-                target: TRACING_TARGET,
-                file_id = %path_params.file_id,
-                "file not found"
-            );
-            ErrorKind::NotFound.with_message("File not found")
         })?;
-
-    // Create object key from storage path
-    let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %err,
-            storage_path = %file.storage_path,
-            "invalid storage path format"
-        );
-        ErrorKind::InternalServerError
-            .with_message("Invalid file storage path")
-            .with_context(format!("Parse error: {}", err))
-    })?;
-
-    // Delete from NATS document store
-    input_fs.delete(&object_key).await.map_err(|err| {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %err,
-            file_id = %path_params.file_id,
-            "failed to delete file from NATS document store"
-        );
-        ErrorKind::InternalServerError
-            .with_message("Failed to delete file from storage")
-            .with_context(format!("NATS deletion failed: {}", err))
-    })?;
-
-    // Soft delete in database by updating the record
-    // Note: deleted_at field may need to be handled differently based on the actual schema
-
-    // For now, we'll just delete from storage. Database soft delete can be implemented
-    // when the update method and deleted_at field are properly available
 
     tracing::debug!(
         target: TRACING_TARGET,
         file_id = %path_params.file_id,
-        "file deleted successfully"
+        "file soft deleted successfully"
     );
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Downloads multiple files as a zip archive.
+#[tracing::instrument(skip(pg_client, nats_client, archive), fields(project_id = %path_params.project_id))]
+#[utoipa::path(
+    post, path = "/projects/{projectId}/files/download-multiple", tag = "Project Files",
+    params(ProjectPathParams),
+    request_body = DownloadMultipleFilesRequest,
+    responses(
+        (
+            status = BAD_REQUEST,
+            description = "Bad request: invalid file IDs",
+            body = ErrorResponse,
+        ),
+        (
+            status = NOT_FOUND,
+            description = "One or more files not found",
+            body = ErrorResponse,
+        ),
+        (
+            status = UNAUTHORIZED,
+            description = "Unauthorized",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
+            status = OK,
+            description = "Files archive download",
+            content_type = "application/zip",
+        ),
+    )
+)]
+async fn download_multiple_files(
+    State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
+    State(archive): State<ArchiveService>,
+    Path(path_params): Path<ProjectPathParams>,
+    AuthState(auth_claims): AuthState,
+    ValidateJson(request): ValidateJson<DownloadMultipleFilesRequest>,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
+    auth_claims
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::DownloadFiles,
+        )
+        .await?;
+
+    let input_fs = nats_client.document_store::<InputFiles>().await?;
+
+    // Fetch all requested files
+    let mut files_data = Vec::new();
+
+    for file_id in &request.file_ids {
+        let file = pg_client
+            .find_document_file_by_id(*file_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::NotFound.with_message(format!("File {} not found", file_id))
+            })?;
+
+        // Verify file belongs to project and is not deleted
+        if file.project_id != path_params.project_id {
+            return Err(
+                ErrorKind::NotFound.with_message(format!("File {} not found in project", file_id))
+            );
+        }
+
+        if file.deleted_at.is_some() {
+            return Err(ErrorKind::NotFound.with_message(format!("File {} not found", file_id)));
+        }
+
+        // Get file content from NATS
+        let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Invalid file storage path")
+                .with_context(format!("Parse error: {}", err))
+        })?;
+
+        let content_data = input_fs.get(&object_key).await?.ok_or_else(|| {
+            ErrorKind::NotFound.with_message(format!("File {} content not found", file_id))
+        })?;
+
+        files_data.push((
+            file.display_name.clone(),
+            content_data.into_bytes().to_vec(),
+        ));
+    }
+
+    // Create zip archive
+    let archive_bytes = archive
+        .create_archive(files_data, ArchiveFormat::Zip)
+        .await?;
+
+    // Set up response headers
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "content-disposition",
+        format!(
+            "attachment; filename=\"project_{}_files.zip\"",
+            path_params.project_id
+        )
+        .parse()
+        .unwrap(),
+    );
+    headers.insert("content-type", "application/zip".parse().unwrap());
+    headers.insert(
+        "content-length",
+        archive_bytes.len().to_string().parse().unwrap(),
+    );
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        project_id = %path_params.project_id,
+        file_count = request.file_ids.len(),
+        archive_size = archive_bytes.len(),
+        "multiple files downloaded as archive"
+    );
+
+    Ok((StatusCode::OK, headers, archive_bytes))
+}
+
+/// Downloads all or specific project files as an archive.
+#[tracing::instrument(skip(pg_client, nats_client, archive), fields(project_id = %path_params.project_id))]
+#[utoipa::path(
+    post, path = "/projects/{projectId}/files/download-archive", tag = "Project Files",
+    params(ProjectPathParams),
+    request_body = DownloadArchivedFilesRequest,
+    responses(
+        (
+            status = NOT_FOUND,
+            description = "Project or files not found",
+            body = ErrorResponse,
+        ),
+        (
+            status = UNAUTHORIZED,
+            description = "Unauthorized",
+            body = ErrorResponse,
+        ),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "Internal server error",
+            body = ErrorResponse,
+        ),
+        (
+            status = OK,
+            description = "Files archive download",
+            content_type = "application/octet-stream",
+        ),
+    )
+)]
+async fn download_archived_files(
+    Path(path_params): Path<ProjectPathParams>,
+    AuthState(auth_claims): AuthState,
+    State(pg_client): State<PgClient>,
+    State(nats_client): State<NatsClient>,
+    State(archive): State<ArchiveService>,
+    Json(request): Json<DownloadArchivedFilesRequest>,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
+    auth_claims
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::DownloadFiles,
+        )
+        .await?;
+
+    let input_fs = nats_client.document_store::<InputFiles>().await?;
+
+    // Determine which files to download
+    let file_ids = if let Some(specific_ids) = request.file_ids {
+        specific_ids
+    } else {
+        // Get all project files - use list_account_files and filter by project
+        pg_client
+            .list_account_files(
+                auth_claims.account_id,
+                nvisy_postgres::query::Pagination::default(),
+            )
+            .await
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to fetch project files")
+                    .with_context(format!("Database error: {}", err))
+            })?
+            .into_iter()
+            .filter(|f| f.project_id == path_params.project_id && f.deleted_at.is_none())
+            .map(|f| f.id)
+            .collect()
+    };
+
+    // Fetch all files
+    let mut files_data = Vec::new();
+
+    for file_id in &file_ids {
+        let file = pg_client
+            .find_document_file_by_id(*file_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::NotFound.with_message(format!("File {} not found", file_id))
+            })?;
+
+        if file.project_id != path_params.project_id || file.deleted_at.is_some() {
+            continue; // Skip files that don't belong or are deleted
+        }
+
+        // Get file content
+        let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Invalid file storage path")
+                .with_context(format!("Parse error: {}", err))
+        })?;
+
+        if let Ok(Some(content_data)) = input_fs.get(&object_key).await {
+            files_data.push((
+                file.display_name.clone(),
+                content_data.into_bytes().to_vec(),
+            ));
+        }
+    }
+
+    if files_data.is_empty() {
+        return Err(ErrorKind::NotFound.with_message("No files found for archive"));
+    }
+
+    // Create archive
+    let archive_bytes = archive.create_archive(files_data, request.format).await?;
+
+    // Determine content type and file extension based on format
+    let (content_type, extension) = match request.format {
+        ArchiveFormat::Tar => ("application/x-tar", "tar.gz"),
+        ArchiveFormat::Zip => ("application/zip", "zip"),
+    };
+
+    // Set up response headers
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "content-disposition",
+        format!(
+            "attachment; filename=\"project_{}_archive.{}\"",
+            path_params.project_id, extension
+        )
+        .parse()
+        .unwrap(),
+    );
+    headers.insert("content-type", content_type.parse().unwrap());
+    headers.insert(
+        "content-length",
+        archive_bytes.len().to_string().parse().unwrap(),
+    );
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        project_id = %path_params.project_id,
+        file_count = file_ids.len(),
+        format = ?request.format,
+        archive_size = archive_bytes.len(),
+        "project files downloaded as archive"
+    );
+
+    Ok((StatusCode::OK, headers, archive_bytes))
 }
 
 /// Validates that the file MIME type is allowed for upload.
@@ -781,13 +1015,15 @@ pub fn routes() -> OpenApiRouter<ServiceState> {
         upload_file,
         update_file,
         download_file,
-        delete_file
+        delete_file,
+        download_multiple_files,
+        download_archived_files,
     ))
 }
 
 #[cfg(test)]
 mod test {
-    use crate::handler::document_files::routes;
+    use crate::handler::project_files::routes;
     use crate::handler::test::create_test_server_with_router;
 
     #[tokio::test]

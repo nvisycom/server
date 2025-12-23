@@ -18,8 +18,8 @@ pub struct Project {
     pub display_name: String,
     /// Description of the project.
     pub description: Option<String>,
-    /// Duration in seconds to keep the original files.
-    pub keep_for_sec: i32,
+    /// Duration in seconds to keep the original files (optional).
+    pub keep_for_sec: Option<i32>,
     /// Whether to automatically delete processed files after expiration.
     pub auto_cleanup: bool,
     /// Whether approval is required to processed files to be visible.

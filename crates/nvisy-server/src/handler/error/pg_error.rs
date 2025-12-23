@@ -26,8 +26,10 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::ProjectInvite(c) => c.into(),
             ConstraintViolation::ProjectActivityLog(c) => c.into(),
             ConstraintViolation::ProjectIntegration(c) => c.into(),
+            ConstraintViolation::ProjectRun(c) => c.into(),
             ConstraintViolation::Document(c) => c.into(),
             ConstraintViolation::DocumentComment(c) => c.into(),
+            ConstraintViolation::DocumentAnnotation(c) => c.into(),
             ConstraintViolation::DocumentFile(c) => c.into(),
             ConstraintViolation::DocumentVersion(c) => c.into(),
         }

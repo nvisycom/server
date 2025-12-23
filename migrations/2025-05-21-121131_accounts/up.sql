@@ -11,24 +11,6 @@ CREATE TYPE API_TOKEN_TYPE AS ENUM (
 COMMENT ON TYPE API_TOKEN_TYPE IS
     'Enumeration of supported API token types for authentication and tracking purposes.';
 
--- Create comprehensive action token type enum
-CREATE TYPE ACTION_TOKEN_TYPE AS ENUM (
-    'activate_account',     -- Email verification for new accounts
-    'deactivate_account',   -- Account suspension/deactivation
-    'update_email',         -- Email address change verification
-    'reset_password',       -- Password reset via email
-    'change_password',      -- Password change verification
-    'enable_2fa',           -- Two-factor authentication setup
-    'disable_2fa',          -- Two-factor authentication removal
-    'login_verification',   -- Additional login verification
-    'api_access',           -- API access tokens
-    'import_data',          -- Data import authorization
-    'export_data'           -- Data export authorization
-);
-
-COMMENT ON TYPE ACTION_TOKEN_TYPE IS
-    'Comprehensive enumeration of all token-based action operations and verifications.';
-
 -- Create accounts table with security and validation
 CREATE TABLE accounts (
     -- Primary identifiers
@@ -225,6 +207,24 @@ COMMENT ON COLUMN account_api_tokens.expired_at IS 'Timestamp when the session e
 COMMENT ON COLUMN account_api_tokens.last_used_at IS 'Timestamp of most recent session activity';
 COMMENT ON COLUMN account_api_tokens.deleted_at IS 'Timestamp when the session was soft-deleted (NULL if active)';
 
+-- Create comprehensive action token type enum
+CREATE TYPE ACTION_TOKEN_TYPE AS ENUM (
+    'activate_account',     -- Email verification for new accounts
+    'deactivate_account',   -- Account suspension/deactivation
+    'update_email',         -- Email address change verification
+    'reset_password',       -- Password reset via email
+    'change_password',      -- Password change verification
+    'enable_2fa',           -- Two-factor authentication setup
+    'disable_2fa',          -- Two-factor authentication removal
+    'login_verification',   -- Additional login verification
+    'api_access',           -- API access tokens
+    'import_data',          -- Data import authorization
+    'export_data'           -- Data export authorization
+);
+
+COMMENT ON TYPE ACTION_TOKEN_TYPE IS
+    'Comprehensive enumeration of all token-based action operations and verifications.';
+
 -- Create account action tokens table
 CREATE TABLE account_action_tokens (
     -- Token identifiers
@@ -297,6 +297,102 @@ COMMENT ON COLUMN account_action_tokens.issued_at IS 'Timestamp when the token w
 COMMENT ON COLUMN account_action_tokens.expired_at IS 'Timestamp after which the token becomes invalid';
 COMMENT ON COLUMN account_action_tokens.used_at IS 'Timestamp when the token was successfully used (NULL if unused)';
 
+-- Create notification type enum
+CREATE TYPE NOTIFICATION_TYPE AS ENUM (
+    'comment_mention',      -- User was mentioned in a comment
+    'comment_reply',        -- Someone replied to user's comment
+    'document_upload',      -- Document was uploaded
+    'document_download',    -- Document was downloaded
+    'document_verify',      -- Document verification completed
+    'project_invite',       -- User was invited to a project
+    'system_announcement'   -- System-wide announcement
+);
+
+COMMENT ON TYPE NOTIFICATION_TYPE IS
+    'Types of notifications that can be sent to users.';
+
+-- Create account notifications table
+CREATE TABLE account_notifications (
+    -- Primary identifiers
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Notification details
+    notify_type     NOTIFICATION_TYPE NOT NULL,
+    title           TEXT             NOT NULL,
+    message         TEXT             NOT NULL,
+
+    CONSTRAINT account_notifications_title_length CHECK (length(trim(title)) BETWEEN 1 AND 200),
+    CONSTRAINT account_notifications_message_length CHECK (length(trim(message)) BETWEEN 1 AND 1000),
+
+    -- Status tracking
+    is_read         BOOLEAN          NOT NULL DEFAULT FALSE,
+    read_at         TIMESTAMPTZ      DEFAULT NULL,
+
+    -- Optional related entities
+    related_id      UUID             DEFAULT NULL,
+    related_type    TEXT             DEFAULT NULL,
+
+    CONSTRAINT account_notifications_related_type_length CHECK (
+        related_type IS NULL OR length(trim(related_type)) BETWEEN 1 AND 50
+    ),
+
+    -- Additional data
+    metadata        JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT account_notifications_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+
+    -- Lifecycle timestamps
+    created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    expires_at      TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT account_notifications_expires_after_created CHECK (
+        expires_at IS NULL OR expires_at > created_at
+    ),
+    CONSTRAINT account_notifications_read_after_created CHECK (
+        read_at IS NULL OR read_at >= created_at
+    )
+);
+
+-- Create indexes for account notifications
+CREATE INDEX account_notifications_account_unread_idx
+    ON account_notifications (account_id, created_at DESC)
+    WHERE is_read = FALSE;
+
+CREATE INDEX account_notifications_account_all_idx
+    ON account_notifications (account_id, created_at DESC);
+
+CREATE INDEX account_notifications_type_idx
+    ON account_notifications (account_id, notify_type, created_at DESC)
+    WHERE is_read = FALSE;
+
+CREATE INDEX account_notifications_related_idx
+    ON account_notifications (related_type, related_id)
+    WHERE related_type IS NOT NULL AND related_id IS NOT NULL;
+
+CREATE INDEX account_notifications_cleanup_idx
+    ON account_notifications (expires_at)
+    WHERE expires_at IS NOT NULL;
+
+-- Add table and column comments
+COMMENT ON TABLE account_notifications IS
+    'User notifications for mentions, replies, invites, and system announcements.';
+
+COMMENT ON COLUMN account_notifications.id IS 'Unique notification identifier';
+COMMENT ON COLUMN account_notifications.account_id IS 'Account receiving the notification';
+COMMENT ON COLUMN account_notifications.notify_type IS 'Type of notification';
+COMMENT ON COLUMN account_notifications.title IS 'Notification title (1-200 chars)';
+COMMENT ON COLUMN account_notifications.message IS 'Notification message (1-1000 chars)';
+COMMENT ON COLUMN account_notifications.is_read IS 'Whether notification has been read';
+COMMENT ON COLUMN account_notifications.read_at IS 'Timestamp when notification was read';
+COMMENT ON COLUMN account_notifications.related_id IS 'ID of related entity (comment, document, etc.)';
+COMMENT ON COLUMN account_notifications.related_type IS 'Type of related entity';
+COMMENT ON COLUMN account_notifications.metadata IS 'Additional notification data (JSON, 2B-4KB)';
+COMMENT ON COLUMN account_notifications.created_at IS 'Notification creation timestamp';
+COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration timestamp';
+
 -- Create a view for active user sessions
 CREATE VIEW active_user_sessions AS
 SELECT
@@ -362,105 +458,6 @@ $$;
 
 COMMENT ON FUNCTION cleanup_expired_auth_data() IS
     'Cleans up expired sessions and tokens. Returns count of cleaned records.';
-
--- Create notification type enum
-CREATE TYPE NOTIFICATION_TYPE AS ENUM (
-    'comment_mention',      -- User was mentioned in a comment
-    'comment_reply',        -- Someone replied to user's comment
-    'document_upload',      -- Document was uploaded
-    'document_download',    -- Document was downloaded
-    'document_verify',      -- Document verification completed
-    'project_invite',       -- User was invited to a project
-    'system_announcement'   -- System-wide announcement
-);
-
-COMMENT ON TYPE NOTIFICATION_TYPE IS
-    'Types of notifications that can be sent to users.';
-
--- Create account notifications table
-CREATE TABLE account_notifications (
-    -- Primary identifiers
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- Notification details
-    notify_type     NOTIFICATION_TYPE NOT NULL,
-    title           TEXT             NOT NULL,
-    message         TEXT             NOT NULL,
-
-    CONSTRAINT account_notifications_title_length CHECK (length(trim(title)) BETWEEN 1 AND 200),
-    CONSTRAINT account_notifications_message_length CHECK (length(trim(message)) BETWEEN 1 AND 1000),
-
-    -- Status tracking
-    is_read         BOOLEAN          NOT NULL DEFAULT FALSE,
-    read_at         TIMESTAMPTZ      DEFAULT NULL,
-
-    -- Optional related entities
-    related_id      UUID             DEFAULT NULL,
-    related_type    TEXT             DEFAULT NULL,
-
-    CONSTRAINT account_notifications_related_type_length CHECK (
-        related_type IS NULL OR length(trim(related_type)) BETWEEN 1 AND 50
-    ),
-
-    -- Additional data
-    metadata        JSONB            NOT NULL DEFAULT '{}',
-
-    CONSTRAINT account_notifications_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
-
-    -- Lifecycle timestamps
-    created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    expires_at      TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT account_notifications_expires_after_created CHECK (
-        expires_at IS NULL OR expires_at > created_at
-    ),
-    CONSTRAINT account_notifications_read_after_created CHECK (
-        read_at IS NULL OR read_at >= created_at
-    )
-);
-
--- Set up automatic updated_at trigger (if needed)
--- Note: Notifications typically don't need updated_at since they're read-only after creation
-
--- Create indexes for account notifications
-CREATE INDEX account_notifications_account_unread_idx
-    ON account_notifications (account_id, created_at DESC)
-    WHERE is_read = FALSE;
-
-CREATE INDEX account_notifications_account_all_idx
-    ON account_notifications (account_id, created_at DESC);
-
-CREATE INDEX account_notifications_type_idx
-    ON account_notifications (account_id, notify_type, created_at DESC)
-    WHERE is_read = FALSE;
-
-CREATE INDEX account_notifications_related_idx
-    ON account_notifications (related_type, related_id)
-    WHERE related_type IS NOT NULL AND related_id IS NOT NULL;
-
-CREATE INDEX account_notifications_cleanup_idx
-    ON account_notifications (expires_at)
-    WHERE expires_at IS NOT NULL;
-
--- Add table and column comments
-COMMENT ON TABLE account_notifications IS
-    'User notifications for mentions, replies, invites, and system announcements.';
-
-COMMENT ON COLUMN account_notifications.id IS 'Unique notification identifier';
-COMMENT ON COLUMN account_notifications.account_id IS 'Account receiving the notification';
-COMMENT ON COLUMN account_notifications.notify_type IS 'Type of notification';
-COMMENT ON COLUMN account_notifications.title IS 'Notification title (1-200 chars)';
-COMMENT ON COLUMN account_notifications.message IS 'Notification message (1-1000 chars)';
-COMMENT ON COLUMN account_notifications.is_read IS 'Whether notification has been read';
-COMMENT ON COLUMN account_notifications.read_at IS 'Timestamp when notification was read';
-COMMENT ON COLUMN account_notifications.related_id IS 'ID of related entity (comment, document, etc.)';
-COMMENT ON COLUMN account_notifications.related_type IS 'Type of related entity';
-COMMENT ON COLUMN account_notifications.metadata IS 'Additional notification data (JSON, 2B-4KB)';
-COMMENT ON COLUMN account_notifications.created_at IS 'Notification creation timestamp';
-COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration timestamp';
 
 -- Create cleanup function for expired notifications
 CREATE OR REPLACE FUNCTION cleanup_expired_notifications()
