@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{BoxedEmbedding, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, Result};
+use super::{
+    BoxedEmbeddingProvider, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, Result,
+};
 use crate::types::ServiceHealth;
 
 /// Embedding service wrapper with observability.
@@ -25,7 +27,7 @@ pub struct EmbeddingService<Req = (), Resp = ()> {
 }
 
 struct ServiceInner<Req, Resp> {
-    embedding: BoxedEmbedding<Req, Resp>,
+    embedding: BoxedEmbeddingProvider<Req, Resp>,
 }
 
 impl<Req, Resp> EmbeddingService<Req, Resp>
@@ -38,7 +40,7 @@ where
     /// # Parameters
     ///
     /// * `embedding` - Embedding implementation
-    pub fn new(embedding: BoxedEmbedding<Req, Resp>) -> Self {
+    pub fn new(embedding: BoxedEmbeddingProvider<Req, Resp>) -> Self {
         Self {
             inner: Arc::new(ServiceInner { embedding }),
         }

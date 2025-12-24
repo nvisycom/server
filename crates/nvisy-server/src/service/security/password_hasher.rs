@@ -5,9 +5,8 @@
 //! methods are designed for use in HTTP handlers and return appropriate HTTP error
 //! responses for client consumption.
 
-use argon2::password_hash::{Error as ArgonError, SaltString};
-use argon2::{Argon2, PasswordHash, PasswordHasher as _, PasswordVerifier};
-use rand::rngs::OsRng;
+use argon2::password_hash::{Error as ArgonError, PasswordHasher as _, PasswordVerifier};
+use argon2::{Argon2, PasswordHash};
 
 use crate::handler::{ErrorKind, Result};
 
@@ -60,24 +59,9 @@ impl PasswordHasher {
     /// - The function has consistent timing regardless of password content
     /// - All sensitive data is cleared from memory as soon as possible
     pub fn hash_password(&self, password: &str) -> Result<String> {
-        // Generate cryptographically secure salt.
-        let salt = SaltString::try_from_rng(&mut OsRng).map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGER_AUTH_HASHER,
-                error = %e,
-                "failed to generate cryptographically secure salt"
-            );
-
-            ErrorKind::InternalServerError
-                .with_message("Password processing failed")
-                .with_context("Salt generation error")
-                .with_resource("authentication")
-        })?;
-
-        // Hash the password
         let password_hash = self
             .argon2
-            .hash_password(password.as_bytes(), &salt)
+            .hash_password(password.as_bytes())
             .map_err(|e| {
                 tracing::error!(
                     target: TRACING_TARGER_AUTH_HASHER,
@@ -147,7 +131,7 @@ impl PasswordHasher {
 
                 Ok(())
             }
-            Err(ArgonError::Password) => {
+            Err(ArgonError::PasswordInvalid) => {
                 // TODO: Log account id.
                 tracing::debug!(
                     target: TRACING_TARGER_AUTH_HASHER,

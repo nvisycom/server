@@ -1,24 +1,20 @@
 //! File archival service for creating tar and zip archives.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 
 use crate::handler::{ErrorKind, Result};
 
 /// Archive format options for file downloads.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ArchiveFormat {
     /// TAR archive format (with gzip compression)
+    #[default]
     Tar,
     /// ZIP archive format
     Zip,
-}
-
-impl Default for ArchiveFormat {
-    fn default() -> Self {
-        Self::Tar
-    }
 }
 
 /// Service for creating file archives in various formats.

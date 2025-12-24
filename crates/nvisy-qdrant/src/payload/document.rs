@@ -4,8 +4,8 @@
 //! including point definitions, document types, status tracking, and document-specific metadata.
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::SearchResult;
 use crate::error::{Error, Result};
@@ -22,7 +22,7 @@ fn create_metadata_payload() -> Payload {
 
 /// Types of documents supported by the system.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum DocumentType {
     /// Plain text document
     Text,
@@ -117,7 +117,7 @@ impl std::fmt::Display for DocumentType {
 
 /// Document processing and publication status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum DocumentStatus {
     /// Draft document, not yet finalized
     Draft,
@@ -174,7 +174,7 @@ impl std::fmt::Display for DocumentStatus {
 
 /// A point representing a document in the vector database.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct DocumentPoint {
     /// Unique identifier for the document
     pub id: PointId,

@@ -5,18 +5,17 @@
 //! with external services. All operations are secured with proper authorization
 //! and follow role-based access control principles.
 
-use axum::extract::{Path, State};
+use aide::axum::ApiRouter;
+use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewProjectIntegration, UpdateProjectIntegration};
 use nvisy_postgres::query::ProjectIntegrationRepository;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{
     CreateProjectIntegration, UpdateIntegrationCredentials, UpdateIntegrationMetadata,
@@ -25,7 +24,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ProjectIntegration, ProjectIntegrationSummaries, ProjectIntegrationWithCredentials,
 };
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project integration operations.
@@ -33,7 +32,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::project_integration";
 
 /// Combined path parameters for integration-specific endpoints.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IntegrationPathParams {
     /// Unique identifier of the project.
@@ -44,47 +43,6 @@ pub struct IntegrationPathParams {
 
 /// Creates a new project integration.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/projects/{projectId}/integrations/", tag = "integrations",
-    params(ProjectPathParams),
-    request_body(
-        content = CreateProjectIntegration,
-        description = "New project integration",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = CONFLICT,
-            description = "Integration name already exists in project",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Integration created successfully",
-            body = ProjectIntegration,
-        ),
-    ),
-)]
 async fn create_integration(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -145,37 +103,6 @@ async fn create_integration(
 
 /// Lists all integrations for a project.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/integrations/", tag = "integrations",
-    params(ProjectPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integrations listed successfully",
-            body = ProjectIntegrationSummaries,
-        ),
-    ),
-)]
 async fn list_integrations(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -212,37 +139,6 @@ async fn list_integrations(
 
 /// Retrieves a specific project integration.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/integrations/{integrationId}/", tag = "integrations",
-    params(IntegrationPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integration retrieved successfully",
-            body = ProjectIntegration,
-        ),
-    ),
-)]
 async fn read_integration(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -292,37 +188,6 @@ async fn read_integration(
 
 /// Retrieves a project integration with credentials.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/integrations/{integrationId}/credentials/", tag = "integrations",
-    params(IntegrationPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integration with credentials retrieved successfully",
-            body = ProjectIntegrationWithCredentials,
-        ),
-    ),
-)]
 async fn read_integration_with_credentials(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -372,47 +237,6 @@ async fn read_integration_with_credentials(
 
 /// Updates a project integration.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    put, path = "/projects/{projectId}/integrations/{integrationId}/", tag = "integrations",
-    params(IntegrationPathParams),
-    request_body(
-        content = UpdateProjectIntegrationRequest,
-        description = "Updated integration data",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = CONFLICT,
-            description = "Integration name already exists in project",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integration updated successfully",
-            body = ProjectIntegration,
-        ),
-    ),
-)]
 async fn update_integration(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -505,42 +329,6 @@ async fn update_integration(
 
 /// Updates integration status.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/integrations/{integrationId}/status/", tag = "integrations",
-    params(IntegrationPathParams),
-    request_body(
-        content = UpdateIntegrationStatus,
-        description = "Updated status data",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integration status updated successfully",
-            body = ProjectIntegration,
-        ),
-    ),
-)]
 async fn update_integration_status(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -599,42 +387,6 @@ async fn update_integration_status(
 
 /// Updates integration credentials.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/integrations/{integrationId}/credentials/", tag = "integrations",
-    params(IntegrationPathParams),
-    request_body(
-        content = UpdateIntegrationCredentials,
-        description = "Updated credentials data",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integration credentials updated successfully",
-            body = ProjectIntegration,
-        ),
-    ),
-)]
 async fn update_integration_credentials(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -693,42 +445,6 @@ async fn update_integration_credentials(
 
 /// Updates integration metadata.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/integrations/{integrationId}/metadata/", tag = "integrations",
-    params(IntegrationPathParams),
-    request_body(
-        content = UpdateIntegrationMetadata,
-        description = "Updated metadata",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Integration metadata updated successfully",
-            body = ProjectIntegration,
-        ),
-    ),
-)]
 async fn update_integration_metadata(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -787,36 +503,6 @@ async fn update_integration_metadata(
 
 /// Deletes a project integration.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/projects/{projectId}/integrations/{integrationId}/", tag = "integrations",
-    params(IntegrationPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Integration not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = NO_CONTENT,
-            description = "Integration deleted successfully",
-        ),
-    ),
-)]
 async fn delete_integration(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -876,16 +562,46 @@ async fn delete_integration(
 }
 
 /// Returns routes for project integration management.
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
-        .routes(routes!(create_integration, list_integrations))
-        .routes(routes!(read_integration, read_integration_with_credentials))
-        .routes(routes!(update_integration, delete_integration))
-        .routes(routes!(
-            update_integration_status,
-            update_integration_credentials,
-            update_integration_metadata
-        ))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route(
+            "/projects/:project_id/integrations/",
+            post(create_integration),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/",
+            get(list_integrations),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/",
+            get(read_integration),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/credentials/",
+            get(read_integration_with_credentials),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/",
+            put(update_integration),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/status/",
+            patch(update_integration_status),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/credentials/",
+            patch(update_integration_credentials),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/metadata/",
+            patch(update_integration_metadata),
+        )
+        .api_route(
+            "/projects/:project_id/integrations/:integration_id/",
+            delete(delete_integration),
+        )
 }
 
 #[cfg(test)]

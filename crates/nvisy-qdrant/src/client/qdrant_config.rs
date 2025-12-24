@@ -3,11 +3,14 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::error::{Error, Result};
 
 /// Configuration for Qdrant client connections.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct QdrantConfig {
     /// Qdrant server URL (e.g., "http://localhost:6334")
     pub url: String,
@@ -186,6 +189,7 @@ impl Default for QdrantConfig {
 
 /// TLS configuration for Qdrant connections.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct QdrantTlsConfig {
     /// Accept invalid certificates (for development only)
     pub accept_invalid_certs: bool,

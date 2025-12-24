@@ -4,11 +4,14 @@
 //! enabling distributed real-time communication across multiple server instances.
 
 use jiff::Timestamp;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Member joined the project event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct JoinEvent {
     pub account_id: Uuid,
@@ -18,6 +21,7 @@ pub struct JoinEvent {
 
 /// Member left the project event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct LeaveEvent {
     pub account_id: Uuid,
@@ -26,6 +30,7 @@ pub struct LeaveEvent {
 
 /// Document content update event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentUpdateEvent {
     pub document_id: Uuid,
@@ -36,6 +41,7 @@ pub struct DocumentUpdateEvent {
 
 /// Document created event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentCreatedEvent {
     pub document_id: Uuid,
@@ -46,6 +52,7 @@ pub struct DocumentCreatedEvent {
 
 /// Document deleted event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentDeletedEvent {
     pub document_id: Uuid,
@@ -55,6 +62,7 @@ pub struct DocumentDeletedEvent {
 
 /// File processed event (OCR, text extraction, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FileProcessedEvent {
     pub file_id: Uuid,
@@ -66,6 +74,7 @@ pub struct FileProcessedEvent {
 
 /// File redacted event (sensitive content removed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FileRedactedEvent {
     pub file_id: Uuid,
@@ -77,6 +86,7 @@ pub struct FileRedactedEvent {
 
 /// File verified event (authenticity check, virus scan, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FileVerifiedEvent {
     pub file_id: Uuid,
@@ -89,6 +99,7 @@ pub struct FileVerifiedEvent {
 
 /// Member presence update event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberPresenceEvent {
     pub account_id: Uuid,
@@ -98,6 +109,7 @@ pub struct MemberPresenceEvent {
 
 /// Member added to project event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberAddedEvent {
     pub account_id: Uuid,
@@ -109,6 +121,7 @@ pub struct MemberAddedEvent {
 
 /// Member removed from project event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberRemovedEvent {
     pub account_id: Uuid,
@@ -118,6 +131,7 @@ pub struct MemberRemovedEvent {
 
 /// Project settings updated event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectUpdatedEvent {
     pub display_name: Option<String>,
@@ -127,6 +141,7 @@ pub struct ProjectUpdatedEvent {
 
 /// Typing indicator event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TypingEvent {
     pub account_id: Uuid,
@@ -136,6 +151,7 @@ pub struct TypingEvent {
 
 /// Error event from server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorEvent {
     pub code: String,
@@ -150,6 +166,7 @@ pub struct ErrorEvent {
 /// the message variant. This enables type-safe message handling on both
 /// client and server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ProjectWsMessage {
     /// Client announces presence in the project.
@@ -417,6 +434,7 @@ impl ProjectWsMessage {
 ///
 /// Wraps the WebSocket message with metadata for routing and filtering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ProjectEvent {
     /// The project this event belongs to.
     pub project_id: Uuid,

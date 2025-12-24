@@ -10,17 +10,14 @@ pub fn validation_error(code: &'static str, message: &str) -> ValidationError {
 
 pub fn is_alphanumeric(tags: &[String]) -> Result<(), ValidationError> {
     for (index, tag) in tags.iter().enumerate() {
-        let normalized = tag.normalized_string();
-        let fun = |c: char| c.is_alphanumeric() || "-_".contains(c);
-
-        if !normalized.chars().all(fun) {
-            return Err(validation_error(
-                "tag_invalid_chars",
-                &format!(
-                    "Tag #{} can only contain letters, numbers, hyphens, and underscores",
-                    index + 1
-                ),
-            ));
+        if !tag
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            let mut error = ValidationError::new("alphanumeric");
+            error.message =
+                Some(format!("Tag at index {} contains invalid characters", index).into());
+            return Err(error);
         }
     }
 
@@ -53,17 +50,5 @@ impl Normalized for String {
 impl OptionNormalized for Option<String> {
     fn normalized_option(&self) -> Option<String> {
         self.as_ref().map(|s| normalize_string(s))
-    }
-}
-
-impl<T> Normalized for Vec<T>
-where
-    T: AsRef<str>,
-{
-    fn normalized_string(&self) -> String {
-        self.iter()
-            .map(|s| normalize_string(s.as_ref()))
-            .collect::<Vec<_>>()
-            .join(", ")
     }
 }

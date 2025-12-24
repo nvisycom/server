@@ -1,15 +1,15 @@
 //! Project response types.
 
+use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::ProjectRole;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Project response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     /// ID of the project.
@@ -33,9 +33,9 @@ pub struct Project {
     /// Role of the member in the project.
     pub member_role: ProjectRole,
     /// Timestamp when the project was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the project was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 impl Project {
@@ -52,8 +52,8 @@ impl Project {
             max_storage: project.max_storage,
             enable_comments: project.enable_comments,
             member_role: ProjectRole::Owner,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
+            created_at: project.created_at.into(),
+            updated_at: project.updated_at.into(),
         }
     }
 
@@ -73,8 +73,8 @@ impl Project {
             max_storage: project.max_storage,
             enable_comments: project.enable_comments,
             member_role: member.member_role,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
+            created_at: project.created_at.into(),
+            updated_at: project.updated_at.into(),
         }
     }
 }

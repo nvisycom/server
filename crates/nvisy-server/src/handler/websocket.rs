@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
@@ -28,13 +29,11 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{ProjectEventPublisher, ProjectEventSubscriber, ProjectWsMessage};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{AccountRepository, ProjectRepository};
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Path, Permission};
 use crate::handler::projects::ProjectPathParams;
-use crate::handler::{ErrorKind, ErrorResponse, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project websocket operations.
@@ -752,31 +751,6 @@ async fn handle_project_websocket(
     account_id = %auth_claims.account_id,
     project_id = %path_params.project_id
 ))]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/ws/", tag = "projects",
-    params(ProjectPathParams),
-    responses(
-        (
-            status = SWITCHING_PROTOCOLS,
-            description = "WebSocket connection established",
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Authentication required",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-    ),
-)]
 async fn project_websocket_handler(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
@@ -822,8 +796,10 @@ async fn project_websocket_handler(
 /// Returns a [`Router`] with WebSocket routes for projects.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new().routes(routes!(project_websocket_handler))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new().api_route("/projects/:project_id/ws/", get(project_websocket_handler))
 }
 
 #[cfg(test)]

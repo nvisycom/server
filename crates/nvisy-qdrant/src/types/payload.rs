@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::error::{Error, Result};
 
@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 /// Payload is a key-value map that stores metadata and attributes for vector points.
 /// Values can be strings, numbers, booleans, arrays, or nested objects.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Payload {
     /// The internal payload data
     #[serde(flatten)]

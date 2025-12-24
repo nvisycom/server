@@ -1,24 +1,14 @@
 //! Project integration request types.
 
 use nvisy_postgres::types::{IntegrationStatus, IntegrationType};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use validator::Validate;
 
 /// Request payload for creating a new project integration.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "integrationName": "GitHub Repository",
-    "description": "Integration with our main GitHub repository for CI/CD",
-    "integrationType": "webhook",
-    "metadata": {
-        "repository": "owner/repo",
-        "branch": "main"
-    },
-    "isActive": true
-}))]
 pub struct CreateProjectIntegration {
     /// Human-readable name for the integration.
     #[validate(length(min = 1, max = 100))]
@@ -43,17 +33,8 @@ pub struct CreateProjectIntegration {
 
 /// Request payload for updating an existing project integration.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "integrationName": "Updated Integration Name",
-    "description": "Updated description",
-    "isActive": false,
-    "metadata": {
-        "repository": "owner/new-repo",
-        "branch": "develop"
-    }
-}))]
 pub struct UpdateProjectIntegration {
     /// Updated human-readable name for the integration.
     #[validate(length(min = 1, max = 100))]
@@ -78,11 +59,8 @@ pub struct UpdateProjectIntegration {
 
 /// Request payload for updating integration status.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "syncStatus": "executing"
-}))]
 pub struct UpdateIntegrationStatus {
     /// New synchronization status for the integration.
     pub sync_status: IntegrationStatus,
@@ -90,14 +68,8 @@ pub struct UpdateIntegrationStatus {
 
 /// Request payload for updating integration credentials only.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "credentials": {
-        "apiKey": "new-api-key",
-        "secret": "new-secret"
-    }
-}))]
 pub struct UpdateIntegrationCredentials {
     /// Updated authentication credentials for the external service.
     pub credentials: serde_json::Value,
@@ -105,14 +77,8 @@ pub struct UpdateIntegrationCredentials {
 
 /// Request payload for updating integration metadata only.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "metadata": {
-        "repository": "owner/repo",
-        "webhookUrl": "https://api.example.com/webhook"
-    }
-}))]
 pub struct UpdateIntegrationMetadata {
     /// Updated configuration and service-specific metadata.
     pub metadata: serde_json::Value,

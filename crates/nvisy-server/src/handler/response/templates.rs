@@ -1,13 +1,13 @@
 //! Project template response types.
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Represents a project template.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectTemplate {
     /// Unique template identifier.
@@ -31,13 +31,12 @@ pub struct ProjectTemplate {
     /// Number of times this template has been used.
     pub usage_count: i64,
     /// Timestamp when the template was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the template was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the template was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Response for listing project templates.
 pub type ProjectTemplates = Vec<ProjectTemplate>;
-

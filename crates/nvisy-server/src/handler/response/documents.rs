@@ -1,15 +1,15 @@
 //! Document response types.
 
+use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::DocumentStatus;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Represents a document with full details.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     /// ID of the document.
@@ -31,9 +31,9 @@ pub struct Document {
     /// MIME type of the document.
     pub mime_type: Option<String>,
     /// Timestamp when the document was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the document was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 impl From<model::Document> for Document {
@@ -49,8 +49,8 @@ impl From<model::Document> for Document {
             status: document.status,
             file_size: None,
             mime_type: None,
-            created_at: document.created_at,
-            updated_at: document.updated_at,
+            created_at: document.created_at.into(),
+            updated_at: document.updated_at.into(),
         }
     }
 }
@@ -60,7 +60,7 @@ pub type Documents = Vec<Document>;
 
 /// Document search results with relevance scoring.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSearchResult {
     /// The matching document.
@@ -73,7 +73,7 @@ pub struct DocumentSearchResult {
 
 /// Response for document search operations.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSearchResults {
     /// Search results with scoring.

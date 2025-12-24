@@ -1,13 +1,13 @@
 //! Custom routes utilities for extending the API router.
 
-use utoipa_axum::router::OpenApiRouter;
+use aide::axum::ApiRouter;
 
 use crate::service::ServiceState;
 
-/// Type alias for a function that maps/transforms an OpenApiRouter.
+/// Type alias for a function that maps/transforms an ApiRouter.
 ///
 /// This is used for applying transformations to routers before or after middlewares.
-pub type RouterMapFn = fn(OpenApiRouter<ServiceState>) -> OpenApiRouter<ServiceState>;
+pub type RouterMapFn = fn(ApiRouter<ServiceState>) -> ApiRouter<ServiceState>;
 
 /// Configuration for custom routes that can be merged into the main API router.
 ///
@@ -18,7 +18,7 @@ pub type RouterMapFn = fn(OpenApiRouter<ServiceState>) -> OpenApiRouter<ServiceS
 ///
 /// ```rust
 /// use nvisy_server::handler::utils::CustomRoutes;
-/// use utoipa_axum::router::OpenApiRouter;
+///
 ///
 /// let custom = CustomRoutes::new()
 ///     .with_private_routes(some_private_router)
@@ -27,9 +27,9 @@ pub type RouterMapFn = fn(OpenApiRouter<ServiceState>) -> OpenApiRouter<ServiceS
 #[derive(Default, Clone)]
 pub struct CustomRoutes {
     /// Custom private routes that require authentication.
-    pub private_routes: Option<OpenApiRouter<ServiceState>>,
+    pub private_routes: Option<ApiRouter<ServiceState>>,
     /// Custom public routes that don't require authentication.
-    pub public_routes: Option<OpenApiRouter<ServiceState>>,
+    pub public_routes: Option<ApiRouter<ServiceState>>,
     /// Function to map private routes before middlewares are applied.
     pub private_before_middleware: Option<RouterMapFn>,
     /// Function to map private routes after middlewares are applied.
@@ -52,7 +52,7 @@ impl CustomRoutes {
     /// Sets the private routes.
     ///
     /// Private routes will be protected by authentication middleware.
-    pub fn with_private_routes(mut self, routes: OpenApiRouter<ServiceState>) -> Self {
+    pub fn with_private_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
         self.private_routes = Some(routes);
         self
     }
@@ -60,13 +60,13 @@ impl CustomRoutes {
     /// Sets the public routes.
     ///
     /// Public routes will be accessible without authentication.
-    pub fn with_public_routes(mut self, routes: OpenApiRouter<ServiceState>) -> Self {
+    pub fn with_public_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
         self.public_routes = Some(routes);
         self
     }
 
     /// Adds custom private routes, merging with existing private routes if any.
-    pub fn add_private_routes(mut self, routes: OpenApiRouter<ServiceState>) -> Self {
+    pub fn add_private_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
         self.private_routes = match self.private_routes {
             Some(existing) => Some(existing.merge(routes)),
             None => Some(routes),
@@ -75,7 +75,7 @@ impl CustomRoutes {
     }
 
     /// Adds custom public routes, merging with existing public routes if any.
-    pub fn add_public_routes(mut self, routes: OpenApiRouter<ServiceState>) -> Self {
+    pub fn add_public_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
         match self.public_routes {
             Some(existing) => self.public_routes = Some(existing.merge(routes)),
             None => self.public_routes = Some(routes),
@@ -107,12 +107,12 @@ impl CustomRoutes {
     }
 
     /// Takes the private routes, leaving `None` in their place.
-    pub fn take_private_routes(&mut self) -> Option<OpenApiRouter<ServiceState>> {
+    pub fn take_private_routes(&mut self) -> Option<ApiRouter<ServiceState>> {
         self.private_routes.take()
     }
 
     /// Takes the public routes, leaving `None` in their place.
-    pub fn take_public_routes(&mut self) -> Option<OpenApiRouter<ServiceState>> {
+    pub fn take_public_routes(&mut self) -> Option<ApiRouter<ServiceState>> {
         self.public_routes.take()
     }
 
@@ -152,8 +152,8 @@ impl CustomRoutes {
     /// This applies to ALL private routes (built-in + custom).
     pub(crate) fn map_private_before_middleware(
         &self,
-        routes: OpenApiRouter<ServiceState>,
-    ) -> OpenApiRouter<ServiceState> {
+        routes: ApiRouter<ServiceState>,
+    ) -> ApiRouter<ServiceState> {
         if let Some(f) = self.private_before_middleware {
             f(routes)
         } else {
@@ -165,8 +165,8 @@ impl CustomRoutes {
     /// This applies to ALL private routes (built-in + custom).
     pub(crate) fn map_private_after_middleware(
         &self,
-        routes: OpenApiRouter<ServiceState>,
-    ) -> OpenApiRouter<ServiceState> {
+        routes: ApiRouter<ServiceState>,
+    ) -> ApiRouter<ServiceState> {
         if let Some(f) = self.private_after_middleware {
             f(routes)
         } else {
@@ -178,8 +178,8 @@ impl CustomRoutes {
     /// This applies to ALL public routes (built-in + custom).
     pub(crate) fn map_public_before_middleware(
         &self,
-        routes: OpenApiRouter<ServiceState>,
-    ) -> OpenApiRouter<ServiceState> {
+        routes: ApiRouter<ServiceState>,
+    ) -> ApiRouter<ServiceState> {
         if let Some(f) = self.public_before_middleware {
             f(routes)
         } else {
@@ -191,8 +191,8 @@ impl CustomRoutes {
     /// This applies to ALL public routes (built-in + custom).
     pub(crate) fn map_public_after_middleware(
         &self,
-        routes: OpenApiRouter<ServiceState>,
-    ) -> OpenApiRouter<ServiceState> {
+        routes: ApiRouter<ServiceState>,
+    ) -> ApiRouter<ServiceState> {
         if let Some(f) = self.public_after_middleware {
             f(routes)
         } else {

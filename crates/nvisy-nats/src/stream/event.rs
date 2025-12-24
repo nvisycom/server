@@ -3,6 +3,8 @@
 //! This module contains priority levels and status types used across all event streams.
 
 use jiff::Timestamp;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Event execution priority levels.
@@ -11,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// events are queued. Higher priority events are processed before lower priority ones.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[repr(u8)]
 pub enum EventPriority {
     /// Low priority - processed when system resources are available.
@@ -49,6 +52,7 @@ impl EventPriority {
 
 /// Event is currently being processed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ProcessingStatus {
     /// When processing started.
     pub started_at: Timestamp,
@@ -76,6 +80,7 @@ impl ProcessingStatus {
 
 /// Event completed successfully.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct CompletedStatus {
     /// When the event completed.
     pub completed_at: Timestamp,
@@ -110,6 +115,7 @@ impl CompletedStatus {
 
 /// Event failed with an error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FailedStatus {
     /// When the event failed.
     pub failed_at: Timestamp,
@@ -143,6 +149,7 @@ impl FailedStatus {
 
 /// Event was cancelled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct CancelledStatus {
     /// When the event was cancelled.
     pub cancelled_at: Timestamp,
@@ -166,6 +173,7 @@ impl CancelledStatus {
 /// Tracks the current state of an event as it progresses through the processing pipeline.
 /// Each status variant has an associated struct containing relevant metadata.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "status", content = "data")]
 pub enum EventStatus {
     /// Event is queued and waiting to be processed.

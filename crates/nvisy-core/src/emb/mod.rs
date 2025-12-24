@@ -4,8 +4,6 @@
 //! It defines core traits and types for text and multimodal embedding operations without depending
 //! on any concrete implementations.
 
-use std::sync::Arc;
-
 pub mod context;
 pub mod request;
 pub mod response;
@@ -20,7 +18,7 @@ use crate::types::ServiceHealth;
 pub use crate::{Error, ErrorKind, Result};
 
 /// Type alias for a boxed embedding service with specific request and response types.
-pub type BoxedEmbedding<Req, Resp> = Arc<dyn EmbeddingProvider<Req, Resp> + Send + Sync>;
+pub type BoxedEmbeddingProvider<Req, Resp> = Box<dyn EmbeddingProvider<Req, Resp> + Send + Sync>;
 
 /// Tracing target for embedding operations.
 pub const TRACING_TARGET: &str = "nvisy_core::emb";

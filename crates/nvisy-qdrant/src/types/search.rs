@@ -1,15 +1,15 @@
 //! Search-related types and utilities for Qdrant operations.
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::error::{Error, Result};
 use crate::types::{Payload, Point, PointId, PointVectors};
 
 /// A search result containing a point and its similarity score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct SearchResult {
     /// The point ID
     pub id: PointId,

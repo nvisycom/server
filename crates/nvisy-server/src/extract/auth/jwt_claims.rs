@@ -3,10 +3,10 @@ use std::borrow::Cow;
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
+use jiff::{Span, Timestamp};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use nvisy_postgres::model::{Account, AccountApiToken};
 use serde::{Deserialize, Serialize};
-use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::extract::auth::TRACING_TARGET_AUTHENTICATION;
@@ -36,12 +36,10 @@ pub struct AuthClaims<T = ()> {
 
     /// Issued at (as UTC timestamp).
     #[serde(rename = "iat")]
-    #[serde(with = "time::serde::rfc3339")]
-    pub issued_at: OffsetDateTime,
+    pub issued_at: Timestamp,
     /// Expiration time (as UTC timestamp).
     #[serde(rename = "exp")]
-    #[serde(with = "time::serde::rfc3339")]
-    pub expires_at: OffsetDateTime,
+    pub expires_at: Timestamp,
 
     // Private (or custom) claims
     #[serde(flatten)]
@@ -75,8 +73,8 @@ impl<T> AuthClaims<T> {
     const JWT_AUDIENCE: &str = "nvisy:server";
     /// Default JWT issuer identifier for authentication tokens.
     const JWT_ISSUER: &str = "nvisy";
-    /// Default threshold for token expiration.
-    const SOON_THRESHOLD: Duration = Duration::minutes(5);
+    /// Default threshold for token expiration (5 minutes).
+    const SOON_THRESHOLD_MINUTES: i64 = 5;
 
     /// Creates a new JWT claims structure from account, session data and custom claims.
     ///
@@ -102,8 +100,8 @@ impl<T> AuthClaims<T> {
             audience: Cow::Borrowed(Self::JWT_AUDIENCE),
             token_id: account_api_token.access_seq,
             account_id: account_model.id,
-            issued_at: account_api_token.issued_at,
-            expires_at: account_api_token.expired_at,
+            issued_at: account_api_token.issued_at.into(),
+            expires_at: account_api_token.expired_at.into(),
             custom_claims,
             is_administrator: account_model.is_admin,
         }
@@ -117,7 +115,7 @@ impl<T> AuthClaims<T> {
     #[inline]
     #[must_use]
     pub fn is_expired(&self) -> bool {
-        self.expires_at <= OffsetDateTime::now_utc()
+        self.expires_at <= Timestamp::now()
     }
 
     /// Checks if the token will expire soon and should be refreshed.
@@ -128,7 +126,8 @@ impl<T> AuthClaims<T> {
     #[inline]
     #[must_use]
     pub fn expires_soon(&self) -> bool {
-        self.expires_at - OffsetDateTime::now_utc() < Self::SOON_THRESHOLD
+        let remaining = self.expires_at - Timestamp::now();
+        remaining.get_minutes() < Self::SOON_THRESHOLD_MINUTES
     }
 
     /// Returns the remaining lifetime of this token.
@@ -138,12 +137,12 @@ impl<T> AuthClaims<T> {
     /// The duration until expiration, or zero if already expired.
     #[inline]
     #[must_use]
-    pub fn remaining_lifetime(&self) -> Duration {
-        let remaining = self.expires_at - OffsetDateTime::now_utc();
-        if remaining.is_positive() {
+    pub fn remaining_lifetime(&self) -> Span {
+        let remaining = self.expires_at - Timestamp::now();
+        if remaining.get_seconds() > 0 {
             remaining
         } else {
-            Duration::ZERO
+            Span::new()
         }
     }
 }

@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use derive_more::{Display, From};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde_json::Value;
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::{Payload, Vector};
@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 /// Represents a point ID that can be a UUID, text string, or numeric ID.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize, Display, From)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(untagged)]
 pub enum PointId {
     /// UUID-based ID
@@ -85,7 +85,7 @@ impl From<&str> for PointId {
 
 /// Represents a point in Qdrant with an ID, vector data, and optional payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Point {
     /// The unique identifier for this point
     pub id: PointId,
@@ -223,7 +223,7 @@ impl Point {
 
 /// Represents either a single vector or named vectors for a point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(untagged)]
 pub enum PointVectors {
     /// A single vector

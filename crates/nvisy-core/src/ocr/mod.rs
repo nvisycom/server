@@ -4,12 +4,9 @@
 //! and documents. It supports various OCR capabilities including image text extraction,
 //! document processing, and structured output.
 
-use std::sync::Arc;
-
 use futures_util::Stream;
 
 pub mod context;
-
 pub mod request;
 pub mod response;
 pub mod service;
@@ -23,7 +20,7 @@ use crate::types::ServiceHealth;
 pub use crate::{Error, ErrorKind, Result};
 
 /// Type alias for a boxed OCR service with specific request and response types.
-pub type BoxedOcrProvider<Req, Resp> = Arc<dyn OcrProvider<Req, Resp> + Send + Sync>;
+pub type BoxedOcrProvider<Req, Resp> = Box<dyn OcrProvider<Req, Resp> + Send + Sync>;
 
 /// Type alias for boxed response stream.
 pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;

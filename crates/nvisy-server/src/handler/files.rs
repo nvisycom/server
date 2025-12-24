@@ -7,6 +7,7 @@
 
 use std::str::FromStr;
 
+use aide::axum::ApiRouter;
 use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
@@ -14,10 +15,8 @@ use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::{DocumentFileRepository, ProjectRepository};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
@@ -26,7 +25,7 @@ use crate::handler::request::{
     DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, UpdateDocumentKnowledge,
 };
 use crate::handler::response::{File, Files};
-use crate::handler::{ErrorKind, ErrorResponse, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
 
 /// Tracing target for project file operations.
@@ -37,7 +36,7 @@ const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
 /// Combined path params for project file operations.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectFilePathParams {
     /// Unique identifier of the project.
@@ -51,37 +50,6 @@ pub struct ProjectFilePathParams {
 /// Form data:
 /// - `file`: One or more files to upload
 #[tracing::instrument(skip(pg_client, nats_client, multipart), fields(project_id = %path_params.project_id))]
-#[utoipa::path(
-    post, path = "/projects/{projectId}/files/", tag = "Project Files",
-    params(ProjectPathParams),
-    request_body(
-        content = inline(String),
-        description = "Multipart form data with files",
-        content_type = "multipart/form-data",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request: invalid file or too many files",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Files uploaded successfully",
-            body = Files,
-        ),
-    )
-)]
 async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
@@ -260,7 +228,7 @@ async fn upload_file(
             file_size: created_file.file_size_bytes,
             status: created_file.processing_status,
             processing_priority: Some(created_file.processing_priority),
-            updated_at: Some(created_file.updated_at),
+            updated_at: Some(created_file.updated_at.into()),
         };
 
         // Publish file processing job to queue
@@ -325,38 +293,6 @@ async fn upload_file(
 
 /// Updates file metadata.
 #[tracing::instrument(skip(pg_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/files/{fileId}", tag = "Project Files",
-    params(ProjectFilePathParams),
-    request_body = UpdateDocumentKnowledge,
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "File not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "File updated successfully",
-            body = File,
-        ),
-    )
-)]
 async fn update_file(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<ProjectFilePathParams>,
@@ -411,7 +347,7 @@ async fn update_file(
         file_size: updated_file.file_size_bytes,
         status: updated_file.processing_status,
         processing_priority: Some(updated_file.processing_priority),
-        updated_at: Some(updated_file.updated_at),
+        updated_at: Some(updated_file.updated_at.into()),
     };
 
     Ok((StatusCode::OK, Json(response)))
@@ -419,32 +355,6 @@ async fn update_file(
 
 /// Downloads a project file.
 #[tracing::instrument(skip(pg_client, nats_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/files/{fileId}", tag = "Project Files",
-    params(ProjectFilePathParams),
-    responses(
-        (
-            status = NOT_FOUND,
-            description = "File not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "File download",
-            content_type = "application/octet-stream",
-        ),
-    )
-)]
 async fn download_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
@@ -559,31 +469,6 @@ async fn download_file(
 
 /// Deletes a project file (soft delete).
 #[tracing::instrument(skip(pg_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
-#[utoipa::path(
-    delete, path = "/projects/{projectId}/files/{fileId}", tag = "Project Files",
-    params(ProjectFilePathParams),
-    responses(
-        (
-            status = NOT_FOUND,
-            description = "File not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = NO_CONTENT,
-            description = "File deleted successfully",
-        ),
-    )
-)]
 async fn delete_file(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<ProjectFilePathParams>,
@@ -609,7 +494,7 @@ async fn delete_file(
 
     // Soft delete by setting deleted_at timestamp
     let updates = UpdateDocumentFile {
-        deleted_at: Some(Some(time::OffsetDateTime::now_utc())),
+        deleted_at: Some(Some(jiff::Timestamp::now().into())),
         ..Default::default()
     };
 
@@ -639,38 +524,6 @@ async fn delete_file(
 
 /// Downloads multiple files as a zip archive.
 #[tracing::instrument(skip(pg_client, nats_client, archive), fields(project_id = %path_params.project_id))]
-#[utoipa::path(
-    post, path = "/projects/{projectId}/files/download-multiple", tag = "Project Files",
-    params(ProjectPathParams),
-    request_body = DownloadMultipleFilesRequest,
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request: invalid file IDs",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "One or more files not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Files archive download",
-            content_type = "application/zip",
-        ),
-    )
-)]
 async fn download_multiple_files(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
@@ -763,33 +616,6 @@ async fn download_multiple_files(
 
 /// Downloads all or specific project files as an archive.
 #[tracing::instrument(skip(pg_client, nats_client, archive), fields(project_id = %path_params.project_id))]
-#[utoipa::path(
-    post, path = "/projects/{projectId}/files/download-archive", tag = "Project Files",
-    params(ProjectPathParams),
-    request_body = DownloadArchivedFilesRequest,
-    responses(
-        (
-            status = NOT_FOUND,
-            description = "Project or files not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Files archive download",
-            content_type = "application/octet-stream",
-        ),
-    )
-)]
 async fn download_archived_files(
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
@@ -1010,15 +836,25 @@ fn validate_filename(filename: &str) -> Result<String> {
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new().routes(routes!(
-        upload_file,
-        update_file,
-        download_file,
-        delete_file,
-        download_multiple_files,
-        download_archived_files,
-    ))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/documents/:document_id/files/", post(upload_file))
+        .api_route("/documents/:document_id/files/:file_id", patch(update_file))
+        .api_route("/documents/:document_id/files/:file_id", get(download_file))
+        .api_route(
+            "/documents/:document_id/files/:file_id",
+            delete(delete_file),
+        )
+        .api_route(
+            "/projects/:project_id/files/download",
+            post(download_multiple_files),
+        )
+        .api_route(
+            "/projects/:project_id/files/archive",
+            post(download_archived_files),
+        )
 }
 
 #[cfg(test)]

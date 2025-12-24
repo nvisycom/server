@@ -22,10 +22,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
-# OpenAPI documentation support: enables ToSchema derives on Qdrant types
+# JSON Schema support: enables JsonSchema derives on Qdrant types
 # This allows Qdrant types to be used directly in API documentation without
 # manual schema implementations, while keeping the dependency optional
-utoipa = ["dep:utoipa"]
+schema = ["dep:schemars"]
 
 [dependencies]
 # Vector database client
@@ -53,4 +53,4 @@ jiff = { workspace = true, features = ["serde"] }
 bytes = { workspace = true, features = [] }
 
 # OpenAPI documentation (optional)
-utoipa = { workspace = true, features = ["macros"], optional = true }
+schemars = { workspace = true, features = [], optional = true }

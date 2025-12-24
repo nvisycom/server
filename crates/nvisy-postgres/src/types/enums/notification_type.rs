@@ -1,18 +1,18 @@
 //! Notification type enumeration for user notifications.
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the type of notification sent to a user.
 ///
 /// This enumeration corresponds to the `NOTIFICATION_TYPE` PostgreSQL enum and is used
 /// for various user notifications including mentions, replies, and system announcements.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::NotificationType"]
 pub enum NotificationType {
     /// User was mentioned in a comment

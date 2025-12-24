@@ -1,20 +1,13 @@
 //! Project request types.
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use validator::Validate;
 
 /// Request payload for creating a new project.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "My Project",
-    "description": "A project for document processing",
-    "keepForSec": 86400,
-    "autoCleanup": true,
-    "requireApproval": false
-}))]
 pub struct CreateProject {
     /// Display name of the project.
     #[validate(length(min = 3, max = 100))]
@@ -48,12 +41,8 @@ pub struct CreateProject {
 
 /// Request payload for project archival or restoration.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "reason": "Project completed",
-    "notifyMembers": true
-}))]
 pub struct ArchiveProject {
     /// Reason for archiving.
     #[validate(length(min = 1, max = 200))]
@@ -62,12 +51,8 @@ pub struct ArchiveProject {
 
 /// Request payload to update project.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "Updated Project Name",
-    "description": "Updated description"
-}))]
 pub struct UpdateProject {
     /// Display name of the project.
     #[validate(length(min = 3, max = 100))]

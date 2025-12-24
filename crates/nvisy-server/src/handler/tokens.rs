@@ -4,27 +4,24 @@
 //! creation, listing, updating, revoking, and statistics. All operations follow
 //! security best practices with proper authorization, input validation, and audit logging.
 
+use aide::axum::ApiRouter;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum_client_ip::ClientIp;
-use axum_extra::TypedHeader;
 use axum_extra::headers::UserAgent;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use jiff::{Span, Timestamp};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewAccountApiToken, UpdateAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, Pagination as QueryPagination};
 use nvisy_postgres::types::ApiTokenType;
-use time::{Duration, OffsetDateTime};
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use super::request::{
     CreateApiToken, ListApiTokensQuery, Pagination, RevokeApiToken, UpdateApiToken,
 };
 use super::response::{ApiToken, ApiTokenCreated, ApiTokenList, ApiTokenOperation};
-use crate::extract::{AuthState, Json, ValidateJson};
-use crate::handler::{ErrorKind, ErrorResponse, Result};
+use crate::extract::{AuthState, ClientIp, Json, TypedHeader, ValidateJson};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for API token operations.
@@ -32,27 +29,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::api_tokens";
 
 /// Creates a new API token for the authenticated account.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/api-tokens/", tag = "api-tokens",
-    request_body = CreateApiToken,
-    responses(
-        (
-            status = CREATED,
-            description = "API token created successfully",
-            body = ApiTokenCreated,
-        ),
-        (
-            status = BAD_REQUEST,
-            description = "Invalid request data",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-    ),
-)]
 async fn create_api_token(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -86,7 +62,7 @@ async fn create_api_token(
     // Validate and set expiration date
     let expires_at = match request.expires_at {
         Some(expiry) => {
-            let now = OffsetDateTime::now_utc();
+            let now = Timestamp::now();
 
             if expiry <= now {
                 return Err(ErrorKind::BadRequest
@@ -94,7 +70,7 @@ async fn create_api_token(
                     .with_message("Expiration date must be in the future"));
             }
 
-            if expiry > now + Duration::days(365) {
+            if expiry > now + Span::new().days(365) {
                 return Err(ErrorKind::BadRequest
                     .with_resource("api_token")
                     .with_message("Expiration date cannot exceed 1 year from now"));
@@ -129,7 +105,7 @@ async fn create_api_token(
         device_id: None,
         session_type: Some(ApiTokenType::Api),
         is_remembered: Some(true),
-        expired_at: expires_at,
+        expired_at: expires_at.map(Into::into),
     };
 
     let token = pg_client.create_token(new_token).await?;
@@ -151,31 +127,6 @@ async fn create_api_token(
 
 /// Lists API tokens for the authenticated account.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/api-tokens/", tag = "api-tokens",
-    params(
-        ("include_expired" = Option<bool>, Query, description = "Include expired tokens"),
-        ("token_type" = Option<ApiTokenType>, Query, description = "Filter by token type"),
-        ("is_suspicious" = Option<bool>, Query, description = "Filter by suspicious status"),
-        ("created_after" = Option<OffsetDateTime>, Query, description = "Filter tokens created after date"),
-        ("created_before" = Option<OffsetDateTime>, Query, description = "Filter tokens created before date"),
-        ("search" = Option<String>, Query, description = "Search in token names and descriptions"),
-        ("page" = Option<i64>, Query, description = "Page number (0-based)"),
-        ("limit" = Option<i64>, Query, description = "Items per page"),
-    ),
-    responses(
-        (
-            status = OK,
-            description = "List of API tokens",
-            body = ApiTokenList,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-    ),
-)]
 async fn list_api_tokens(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -226,11 +177,11 @@ async fn list_api_tokens(
     }
 
     if let Some(created_after) = query_params.created_after {
-        filtered_tokens.retain(|token| token.issued_at >= created_after);
+        filtered_tokens.retain(|token| token.issued_at >= created_after.into());
     }
 
     if let Some(created_before) = query_params.created_before {
-        filtered_tokens.retain(|token| token.issued_at <= created_before);
+        filtered_tokens.retain(|token| token.issued_at <= created_before.into());
     }
 
     let api_tokens: Vec<ApiToken> = filtered_tokens.into_iter().map(ApiToken::from).collect();
@@ -256,29 +207,6 @@ async fn list_api_tokens(
 
 /// Gets a specific API token by access token.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/api-tokens/{access_token}", tag = "api-tokens",
-    params(
-        ("access_token" = Uuid, Path, description = "Access token UUID")
-    ),
-    responses(
-        (
-            status = OK,
-            description = "API token details",
-            body = ApiToken,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "API token not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-    ),
-)]
 async fn get_api_token(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -317,35 +245,6 @@ async fn get_api_token(
 
 /// Updates an existing API token.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/api-tokens/{access_token}", tag = "api-tokens",
-    params(
-        ("access_token" = Uuid, Path, description = "Access token UUID")
-    ),
-    request_body = UpdateApiToken,
-    responses(
-        (
-            status = OK,
-            description = "API token updated successfully",
-            body = ApiTokenOperation,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "API token not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = BAD_REQUEST,
-            description = "Invalid request data",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-    ),
-)]
 async fn update_api_token(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -374,7 +273,7 @@ async fn update_api_token(
     }
 
     let update_token = UpdateAccountApiToken {
-        last_used_at: Some(OffsetDateTime::now_utc()),
+        last_used_at: Some(Timestamp::now().into()),
         name: request.name,
         description: request.description,
         ..Default::default()
@@ -394,30 +293,6 @@ async fn update_api_token(
 
 /// Revokes (soft deletes) an API token.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/api-tokens/{access_token}", tag = "api-tokens",
-    params(
-        ("access_token" = Uuid, Path, description = "Access token UUID")
-    ),
-    request_body = Option<RevokeApiToken>,
-    responses(
-        (
-            status = OK,
-            description = "API token revoked successfully",
-            body = ApiTokenOperation,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "API token not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-    ),
-)]
 async fn revoke_api_token(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -468,20 +343,21 @@ async fn revoke_api_token(
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new().routes(routes!(
-        create_api_token,
-        list_api_tokens,
-        get_api_token,
-        update_api_token,
-        revoke_api_token
-    ))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/api-tokens/", post(create_api_token))
+        .api_route("/api-tokens/", get(list_api_tokens))
+        .api_route("/api-tokens/:access_token", get(get_api_token))
+        .api_route("/api-tokens/:access_token", patch(update_api_token))
+        .api_route("/api-tokens/:access_token", delete(revoke_api_token))
 }
 
 #[cfg(test)]
 mod test {
-    use crate::handler::tokens::routes;
     use crate::handler::test::create_test_server_with_router;
+    use crate::handler::tokens::routes;
 
     #[tokio::test]
     async fn handlers_startup() -> anyhow::Result<()> {

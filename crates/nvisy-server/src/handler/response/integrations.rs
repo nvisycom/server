@@ -1,15 +1,15 @@
 //! Project integration response types.
 
+use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::{IntegrationStatus, IntegrationType};
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Project integration response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectIntegration {
     /// Unique integration identifier.
@@ -34,7 +34,7 @@ pub struct ProjectIntegration {
     pub is_active: bool,
 
     /// Timestamp of the most recent successful synchronization.
-    pub last_sync_at: Option<OffsetDateTime>,
+    pub last_sync_at: Option<Timestamp>,
 
     /// Current status of synchronization operations.
     pub sync_status: Option<IntegrationStatus>,
@@ -43,15 +43,15 @@ pub struct ProjectIntegration {
     pub created_by: Uuid,
 
     /// Timestamp when this integration was first created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
 
     /// Timestamp when this integration was last modified.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 /// Project integration response with credentials (for sensitive operations).
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectIntegrationWithCredentials {
     /// Unique integration identifier.
@@ -79,7 +79,7 @@ pub struct ProjectIntegrationWithCredentials {
     pub is_active: bool,
 
     /// Timestamp of the most recent successful synchronization.
-    pub last_sync_at: Option<OffsetDateTime>,
+    pub last_sync_at: Option<Timestamp>,
 
     /// Current status of synchronization operations.
     pub sync_status: Option<IntegrationStatus>,
@@ -88,15 +88,15 @@ pub struct ProjectIntegrationWithCredentials {
     pub created_by: Uuid,
 
     /// Timestamp when this integration was first created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
 
     /// Timestamp when this integration was last modified.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 /// Summary information about a project integration for list views.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectIntegrationSummary {
     /// Unique integration identifier.
@@ -118,10 +118,10 @@ pub struct ProjectIntegrationSummary {
     pub sync_status: Option<IntegrationStatus>,
 
     /// Timestamp of the most recent successful synchronization.
-    pub last_sync_at: Option<OffsetDateTime>,
+    pub last_sync_at: Option<Timestamp>,
 
     /// Timestamp when this integration was first created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
 }
 
 impl ProjectIntegration {
@@ -135,11 +135,11 @@ impl ProjectIntegration {
             integration_type: integration.integration_type,
             metadata: integration.metadata,
             is_active: integration.is_active,
-            last_sync_at: integration.last_sync_at,
+            last_sync_at: integration.last_sync_at.map(Into::into),
             sync_status: integration.sync_status,
             created_by: integration.created_by,
-            created_at: integration.created_at,
-            updated_at: integration.updated_at,
+            created_at: integration.created_at.into(),
+            updated_at: integration.updated_at.into(),
         }
     }
 }
@@ -156,11 +156,11 @@ impl ProjectIntegrationWithCredentials {
             metadata: integration.metadata,
             credentials: integration.credentials,
             is_active: integration.is_active,
-            last_sync_at: integration.last_sync_at,
+            last_sync_at: integration.last_sync_at.map(Into::into),
             sync_status: integration.sync_status,
             created_by: integration.created_by,
-            created_at: integration.created_at,
-            updated_at: integration.updated_at,
+            created_at: integration.created_at.into(),
+            updated_at: integration.updated_at.into(),
         }
     }
 }
@@ -175,8 +175,8 @@ impl ProjectIntegrationSummary {
             integration_type: integration.integration_type,
             is_active: integration.is_active,
             sync_status: integration.sync_status,
-            last_sync_at: integration.last_sync_at,
-            created_at: integration.created_at,
+            last_sync_at: integration.last_sync_at.map(Into::into),
+            created_at: integration.created_at.into(),
         }
     }
 }

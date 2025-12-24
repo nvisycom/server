@@ -5,24 +5,23 @@
 //! members. All operations are secured with proper authorization and follow
 //! role-based access control principles.
 
+use aide::axum::ApiRouter;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::UpdateProjectMember;
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::{ProjectRole, ProjectVisibility};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::UpdateMemberRole;
 use crate::handler::response::{Member, Members};
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project member operations.
@@ -30,7 +29,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::project_members";
 
 /// Combined path parameters for member-specific endpoints.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberPathParams {
     /// Unique identifier of the project.
@@ -44,42 +43,6 @@ pub struct MemberPathParams {
 /// Returns a paginated list of project members with their roles and status.
 /// Requires administrator permissions to view the member list.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/members/", tag = "members",
-    params(ProjectPathParams),
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied: insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project members listed successfully",
-            body = Members,
-        ),
-    ),
-)]
 async fn list_members(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -135,37 +98,6 @@ async fn list_members(
 /// Returns comprehensive information about a project member, including their role,
 /// permissions, and activity status. Requires administrator permissions.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/members/{accountId}/", tag = "members",
-    params(MemberPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied - insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project or member not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project member retrieved successfully",
-            body = Member,
-        ),
-    )
-)]
 async fn get_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -231,36 +163,6 @@ async fn get_member(
 /// The member will lose all access to the project and its resources.
 /// Requires administrator permissions.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/projects/{projectId}/members/{accountId}/", tag = "members",
-    params(MemberPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied - insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project or member not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project member removed successfully",
-        ),
-    )
-)]
 async fn delete_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -346,38 +248,6 @@ async fn delete_member(
 /// Allows project owners/admins to change a member's permission level.
 /// Cannot update your own role. Cannot remove the last owner.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/members/{accountId}/role", tag = "projects",
-    params(MemberPathParams),
-    request_body = UpdateMemberRole,
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request - cannot modify own role or remove last owner",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Member not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = UNAUTHORIZED,
-            description = "Unauthorized - insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Member role updated successfully",
-            body = Member,
-        ),
-    )
-)]
 async fn update_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -482,10 +352,23 @@ async fn update_member(
 /// Returns a [`Router`] with all project member related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
-        .routes(routes!(list_members))
-        .routes(routes!(get_member, update_member, delete_member))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/projects/:project_id/members/", get(list_members))
+        .api_route(
+            "/projects/:project_id/members/:account_id/",
+            get(get_member),
+        )
+        .api_route(
+            "/projects/:project_id/members/:account_id/",
+            delete(delete_member),
+        )
+        .api_route(
+            "/projects/:project_id/members/:account_id/role",
+            patch(update_member),
+        )
 }
 
 #[cfg(test)]

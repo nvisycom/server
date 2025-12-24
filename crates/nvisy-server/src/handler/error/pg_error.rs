@@ -101,6 +101,14 @@ impl From<PgError> for Error<'static> {
                 );
                 ErrorKind::InternalServerError.into_error()
             }
+            PgError::Jiff(jiff_error) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %jiff_error,
+                    "timestamp arithmetic error"
+                );
+                ErrorKind::InternalServerError.into_error()
+            }
         }
     }
 }

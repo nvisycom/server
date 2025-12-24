@@ -2,24 +2,17 @@
 
 use std::collections::HashMap;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 
 /// System monitoring status response with comprehensive health information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "updatedAt": "2023-12-07T10:30:00Z",
-    "isHealthy": true,
-    "overallStatus": "healthy",
-    "version": "1.0.0",
-    "uptime": 3600000
-}))]
 pub struct MonitorStatus {
     /// Timestamp when this status was generated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Overall system health status.
     pub is_healthy: bool,
     /// Overall system status.
@@ -37,7 +30,7 @@ pub struct MonitorStatus {
 }
 
 /// System status enumeration.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SystemStatus {
     /// All systems operational.
@@ -54,7 +47,7 @@ pub enum SystemStatus {
 
 /// Individual service health information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceHealth {
     /// Service name.
@@ -64,7 +57,7 @@ pub struct ServiceHealth {
     /// Response time in milliseconds.
     pub response_time_ms: u32,
     /// Last check timestamp.
-    pub last_checked: OffsetDateTime,
+    pub last_checked: Timestamp,
     /// Error message if unhealthy.
     pub error_message: Option<String>,
     /// Service-specific details.
@@ -72,7 +65,7 @@ pub struct ServiceHealth {
 }
 
 /// Service status enumeration.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceStatus {
     /// Service is healthy and responsive.
@@ -87,7 +80,7 @@ pub enum ServiceStatus {
 
 /// System metrics information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemMetrics {
     /// CPU usage percentage (0.0 to 1.0).
@@ -108,7 +101,7 @@ pub struct SystemMetrics {
 
 /// Network metrics information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkMetrics {
     /// Bytes received.
@@ -121,7 +114,7 @@ pub struct NetworkMetrics {
 
 /// Application-specific metrics.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationMetrics {
     /// Total HTTP requests processed.
@@ -142,7 +135,7 @@ pub struct ApplicationMetrics {
 
 /// System alert information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemAlert {
     /// Alert severity level.
@@ -152,13 +145,13 @@ pub struct SystemAlert {
     /// Component that generated the alert.
     pub component: String,
     /// Alert timestamp.
-    pub timestamp: OffsetDateTime,
+    pub timestamp: Timestamp,
     /// Additional alert context.
     pub context: Option<serde_json::Value>,
 }
 
 /// Alert severity levels.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertLevel {
     /// Informational message.
@@ -173,7 +166,7 @@ pub enum AlertLevel {
 
 /// Response for service health check operations.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceHealthResponse {
     /// Service health information.
@@ -186,7 +179,7 @@ pub struct ServiceHealthResponse {
 
 /// Deep health check results.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeepHealthCheck {
     /// Database connectivity check.
@@ -201,7 +194,7 @@ pub struct DeepHealthCheck {
 
 /// Database health information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseHealth {
     /// Connection status.
@@ -216,7 +209,7 @@ pub struct DatabaseHealth {
 
 /// Cache health information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CacheHealth {
     /// Connection status.
@@ -231,7 +224,7 @@ pub struct CacheHealth {
 
 /// External API health information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalApiHealth {
     /// API name or identifier.
@@ -248,7 +241,7 @@ pub struct ExternalApiHealth {
 
 /// Filesystem health information.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FilesystemHealth {
     /// Filesystem is accessible.
@@ -263,7 +256,7 @@ pub struct FilesystemHealth {
 
 /// Response for metrics collection operations.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsResponse {
     /// Collected metrics data.
@@ -273,14 +266,14 @@ pub struct MetricsResponse {
     /// Aggregation method used.
     pub aggregation: String,
     /// Collection timestamp.
-    pub collected_at: OffsetDateTime,
+    pub collected_at: Timestamp,
     /// Collection duration in milliseconds.
     pub collection_duration_ms: u32,
 }
 
 /// Metric value with metadata.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricValue {
     /// Current value.
@@ -296,7 +289,7 @@ pub struct MetricValue {
 }
 
 /// Trend direction enumeration.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TrendDirection {
     /// Metric is increasing.
@@ -311,11 +304,11 @@ pub enum TrendDirection {
 
 /// Historical data point.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoricalPoint {
     /// Timestamp of the data point.
-    pub timestamp: OffsetDateTime,
+    pub timestamp: Timestamp,
     /// Value at this point in time.
     pub value: f64,
 }
@@ -323,7 +316,7 @@ pub struct HistoricalPoint {
 impl Default for MonitorStatus {
     fn default() -> Self {
         Self {
-            updated_at: OffsetDateTime::now_utc(),
+            updated_at: Timestamp::now(),
             is_healthy: true,
             overall_status: SystemStatus::Healthy,
             version: "unknown".to_string(),

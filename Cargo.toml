@@ -63,14 +63,12 @@ tower-http = { version = "0.6", features = ["full"] }
 http-body-util = { version = "0.1", features = [] }
 
 # OpenAPI/Documentation
-utoipa = { version = "5.3", features = ["uuid", "time"] }
-utoipa-axum = { version = "0.2", features = [] }
-utoipa-swagger-ui = { version = "9.0", features = ["axum"] } # TODO: Remove swagger, keep scalar
-utoipa-scalar = { version = "0.3", features = ["axum"] }
+aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
+schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
 
 # Authentication & Security
 jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
-argon2 = { version = "0.6.0-rc.2", features = ["rand"] }
+argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
 base64 = { version = "0.22", features = [] }
 rand = { version = "0.10.0-rc.5", features = ["serde"] }
 sha2 = { version = "0.10", features = [] }
@@ -111,6 +109,7 @@ anyhow = { version = "1.0", features = [] }
 
 # Data types
 jiff = { version = "0.2", features = ["serde"] }
+jiff-diesel = { version = "0.1.3", features = [] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
@@ -122,3 +121,8 @@ url = { version = "2.5", features = [] }
 
 # Text processing
 regex = { version = "1.0", features = [] }
+
+# Archive/Compression
+tar = { version = "0.4", features = [] }
+flate2 = { version = "1.1", features = [] }
+zip = { version = "7.0", features = [] }

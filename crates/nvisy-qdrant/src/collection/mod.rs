@@ -18,9 +18,12 @@ pub use annotation::AnnotationCollection;
 pub use conversation::ConversationCollection;
 pub use document::DocumentCollection;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 /// Common search parameters used across all collection types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct SearchParams {
     /// Maximum number of results to return
     pub limit: Option<u64>,

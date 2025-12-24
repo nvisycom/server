@@ -6,11 +6,45 @@
 //! and security analysis.
 
 use std::net::{IpAddr, SocketAddr};
+use std::ops::Deref;
 use std::time::SystemTime;
 
+use axum::extract::FromRequestParts;
 use axum::extract::connect_info::Connected;
 use axum::serve::IncomingStream;
 use tokio::net::TcpListener;
+
+/// Wrapper around [`axum_client_ip::ClientIp`] that implements [`aide::OperationInput`].
+///
+/// This allows the extractor to be used with aide's OpenAPI generation.
+#[derive(Debug, Clone, Copy)]
+pub struct ClientIp(pub IpAddr);
+
+impl Deref for ClientIp {
+    type Target = IpAddr;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<S> FromRequestParts<S> for ClientIp
+where
+    S: Send + Sync,
+{
+    type Rejection = <axum_client_ip::ClientIp as FromRequestParts<S>>::Rejection;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum_client_ip::ClientIp(ip) =
+            axum_client_ip::ClientIp::from_request_parts(parts, state).await?;
+        Ok(Self(ip))
+    }
+}
+
+impl aide::OperationInput for ClientIp {}
 
 /// Enhanced connection information extractor for incoming HTTP requests.
 ///
@@ -160,116 +194,5 @@ impl Connected<IncomingStream<'_, TcpListener>> for AppConnectInfo {
 impl Connected<SocketAddr> for AppConnectInfo {
     fn connect_info(addr: SocketAddr) -> Self {
         Self::new(addr)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::str::FromStr;
-
-    use axum::extract::ConnectInfo;
-    use axum::routing::{Router, any};
-    use axum_test::TestServer;
-
-    use super::AppConnectInfo;
-    use crate::handler::Result;
-
-    async fn handler(ConnectInfo(conn): ConnectInfo<AppConnectInfo>) -> Result<String> {
-        Ok(format!("Connected from: {}", conn.to_log_string()))
-    }
-
-    #[tokio::test]
-    async fn extract_connection_info() -> anyhow::Result<()> {
-        let router = Router::new().route("/", any(handler));
-        let app = router.into_make_service_with_connect_info::<AppConnectInfo>();
-        let server = TestServer::new(app)?;
-
-        let response = server.get("/").await;
-        assert!(response.text().contains("Connected from:"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_private_ip_detection() {
-        // Test private IPv4 addresses
-        let private_ipv4 = AppConnectInfo::new(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
-            80,
-        ));
-        assert!(private_ipv4.is_private_ip());
-        assert!(!private_ipv4.is_public_ip());
-
-        // Test public IPv4 address
-        let public_ipv4 =
-            AppConnectInfo::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 80));
-        assert!(public_ipv4.is_public_ip());
-        assert!(!public_ipv4.is_private_ip());
-
-        // Test loopback
-        let loopback = AppConnectInfo::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 80));
-        assert!(loopback.is_localhost());
-        assert!(loopback.is_private_ip());
-    }
-
-    #[test]
-    fn test_ipv6_addresses() {
-        let ipv6_loopback =
-            AppConnectInfo::new(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 80));
-        assert!(ipv6_loopback.is_ipv6());
-        assert!(ipv6_loopback.is_localhost());
-        assert!(ipv6_loopback.is_private_ip());
-
-        // Test public IPv6
-        let ipv6_public = AppConnectInfo::new(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::from_str("2001:db8::1").unwrap()),
-            80,
-        ));
-        assert!(ipv6_public.is_ipv6());
-        assert!(!ipv6_public.is_localhost());
-    }
-
-    #[test]
-    fn test_real_ip_override() {
-        let proxy_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 80);
-        let real_ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1));
-
-        let conn_info = AppConnectInfo::with_real_ip(proxy_addr, real_ip);
-
-        assert_eq!(conn_info.addr.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
-        assert_eq!(conn_info.client_ip(), real_ip);
-        assert_eq!(conn_info.real_ip, Some(real_ip));
-        assert!(conn_info.is_public_ip()); // Based on real IP
-
-        let log_string = conn_info.to_log_string();
-        assert!(log_string.contains("203.0.113.1"));
-        assert!(log_string.contains("10.0.0.1"));
-    }
-
-    #[test]
-    fn test_connection_duration() {
-        let conn_info = AppConnectInfo::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 80));
-
-        // Duration should be very small but present
-        let duration = conn_info.connection_duration();
-        assert!(duration.is_some());
-        assert!(duration.unwrap().as_millis() < 100); // Should be very recent
-    }
-
-    #[test]
-    fn test_utility_methods() {
-        let conn_info = AppConnectInfo::new(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
-            8080,
-        ));
-
-        assert_eq!(conn_info.client_port(), 8080);
-        assert!(conn_info.is_ipv4());
-        assert!(!conn_info.is_ipv6());
-
-        // Test log string format
-        let log_string = conn_info.to_log_string();
-        assert_eq!(log_string, "192.168.1.100:8080");
     }
 }

@@ -2,6 +2,7 @@ use axum::extract::rejection::QueryRejection;
 use axum::extract::{FromRequestParts, OptionalFromRequestParts, Query as AxumQuery};
 use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut, From};
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 use crate::handler::{Error, ErrorKind};
@@ -148,4 +149,23 @@ fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     }
 
     None
+}
+
+impl<T> aide::OperationInput for Query<T>
+where
+    T: JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        AxumQuery::<T>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        AxumQuery::<T>::inferred_early_responses(ctx, operation)
+    }
 }

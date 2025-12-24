@@ -1,14 +1,14 @@
 //! Document file response types.
 
+use jiff::Timestamp;
 use nvisy_postgres::types::{ContentSegmentation, ProcessingStatus};
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Represents an uploaded file.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct File {
     /// Unique file identifier
@@ -24,14 +24,14 @@ pub struct File {
     pub processing_priority: Option<i32>,
     /// Update timestamp (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<OffsetDateTime>,
+    pub updated_at: Option<Timestamp>,
 }
 
 /// Response for file uploads.
 pub type Files = Vec<File>;
 
 /// Knowledge-related fields for document file responses.
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentKnowledge {
     /// Whether the file is indexed for knowledge extraction.

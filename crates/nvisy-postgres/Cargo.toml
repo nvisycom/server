@@ -22,10 +22,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
-# OpenAPI documentation support: enables ToSchema derives on Postgres types
+# JSON Schema support: enables JsonSchema derives on Postgres types
 # This allows Postgres types to be used directly in API documentation without
 # manual schema implementations, while keeping the dependency optional
-utoipa = ["dep:utoipa"]
+schema = ["dep:schemars"]
 
 [dependencies]
 # Async runtime
@@ -58,4 +58,4 @@ ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
 
 # OpenAPI documentation (optional)
-utoipa = { workspace = true, features = ["macros"], optional = true }
+schemars = { workspace = true, features = [], optional = true }

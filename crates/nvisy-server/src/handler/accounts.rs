@@ -4,17 +4,16 @@
 //! profile viewing, updating, and deletion. All operations follow security best
 //! practices with proper authorization, input validation, and audit logging.
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::AccountRepository;
 use nvisy_postgres::{PgClient, model};
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 
 use super::request::UpdateAccount;
 use super::response::Account;
 use crate::extract::{AuthState, Json, ValidateJson};
-use crate::handler::{ErrorKind, ErrorResponse, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
 /// Tracing target for account operations.
@@ -22,26 +21,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
 
 /// Retrieves the authenticated account.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/accounts/", tag = "accounts",
-    responses(
-        (
-            status = NOT_FOUND,
-            description = "Not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Account details",
-            body = Account,
-        ),
-    ),
-)]
 async fn get_own_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -72,32 +51,6 @@ async fn get_own_account(
 
 /// Updates the authenticated account.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/accounts/", tag = "accounts",
-    request_body = UpdateAccount,
-    responses(
-        (
-            status = NOT_FOUND,
-            description = "Account not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = CONFLICT,
-            description = "Email already exists",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            body = Account,
-            description = "Account updated successfully",
-        ),
-    )
-)]
 async fn update_own_account(
     State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
@@ -197,25 +150,6 @@ async fn update_own_account(
 
 /// Deletes the authenticated account.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/accounts/", tag = "accounts",
-    responses(
-        (
-            status = NOT_FOUND,
-            description = "Not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Account deleted",
-        ),
-    ),
-)]
 async fn delete_own_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -240,12 +174,13 @@ async fn delete_own_account(
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes(_state: ServiceState) -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new().routes(routes!(
-        get_own_account,
-        update_own_account,
-        delete_own_account
-    ))
+pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/me", get(get_own_account))
+        .api_route("/me", patch(update_own_account))
+        .api_route("/me", delete(delete_own_account))
 }
 
 #[cfg(test)]

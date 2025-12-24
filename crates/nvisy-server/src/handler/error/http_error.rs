@@ -6,6 +6,8 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use aide::generate::GenContext;
+use aide::openapi::{Operation, Response as ApiResponse};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
@@ -343,6 +345,46 @@ impl IntoResponse for ErrorKind {
     #[inline]
     fn into_response(self) -> Response {
         self.response().into_response()
+    }
+}
+
+// Aide OpenAPI support for Error type
+impl<'a> aide::OperationOutput for Error<'a> {
+    type Inner = ErrorResponse<'static>;
+
+    fn operation_response(ctx: &mut GenContext, _operation: &mut Operation) -> Option<ApiResponse> {
+        use aide::openapi::*;
+
+        // Generate schema for ErrorResponse
+        let schema = ctx.schema.subschema_for::<ErrorResponse>();
+
+        let media_type = MediaType {
+            schema: Some(SchemaObject {
+                json_schema: schema,
+                example: None,
+                external_docs: None,
+            }),
+            ..Default::default()
+        };
+
+        let response = Response {
+            description: "Error response".to_string(),
+            content: [("application/json".to_string(), media_type)].into(),
+            ..Default::default()
+        };
+
+        Some(response)
+    }
+
+    fn inferred_responses(
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<u16>, ApiResponse)> {
+        if let Some(response) = Self::operation_response(ctx, operation) {
+            vec![(None, response)]
+        } else {
+            vec![]
+        }
     }
 }
 

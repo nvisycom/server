@@ -3,6 +3,7 @@
 //! This module provides comprehensive comment management functionality for documents,
 //! files, and versions. Supports threaded conversations and @mentions.
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
@@ -10,10 +11,8 @@ use nvisy_postgres::model::NewDocumentComment;
 use nvisy_postgres::query::{
     DocumentCommentRepository, DocumentFileRepository, DocumentRepository,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, ValidateJson};
@@ -22,7 +21,7 @@ use crate::handler::request::{
     CreateDocumentComment, UpdateDocumentComment as UpdateCommentRequest,
 };
 use crate::handler::response::{DocumentComment, DocumentComments};
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document comment operations.
@@ -30,7 +29,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::document_comments";
 
 /// Combined path params for document and comment.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentCommentPathParams {
     /// Unique identifier of the document.
@@ -41,7 +40,7 @@ pub struct DocumentCommentPathParams {
 
 /// Path params for file ID.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FilePathParams {
     /// Unique identifier of the file.
@@ -50,7 +49,7 @@ pub struct FilePathParams {
 
 /// Path params for version ID.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VersionPathParams {
     /// Unique identifier of the version.
@@ -59,32 +58,6 @@ pub struct VersionPathParams {
 
 /// Creates a new comment on a document.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/documents/{documentId}/comments/",
-    params(DocumentPathParams), tag = "comments",
-    request_body(
-        content = CreateDocumentComment,
-        description = "New comment",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Comment created",
-            body = DocumentComment,
-        ),
-    ),
-)]
 async fn create_document_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -148,32 +121,6 @@ async fn create_document_comment(
 
 /// Returns all comments for a document.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/documents/{documentId}/comments/", tag = "comments",
-    params(DocumentPathParams),
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Comments listed",
-            body = DocumentComments,
-        ),
-    )
-)]
 async fn list_document_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -210,32 +157,6 @@ async fn list_document_comments(
 
 /// Returns top-level comments for a document (excludes replies).
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/documents/{documentId}/comments/top-level/", tag = "comments",
-    params(DocumentPathParams),
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Top-level comments listed",
-            body = DocumentComments,
-        ),
-    )
-)]
 async fn list_top_level_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -272,32 +193,6 @@ async fn list_top_level_comments(
 
 /// Gets a specific comment by ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/documents/{documentId}/comments/{commentId}/", tag = "comments",
-    params(DocumentCommentPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Comment not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Comment details",
-            body = DocumentComment,
-        ),
-    ),
-)]
 async fn get_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -338,32 +233,6 @@ async fn get_comment(
 
 /// Returns all replies to a comment.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/documents/{documentId}/comments/{commentId}/replies/", tag = "comments",
-    params(DocumentCommentPathParams),
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Replies listed",
-            body = DocumentComments,
-        ),
-    )
-)]
 async fn list_comment_replies(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -413,42 +282,6 @@ async fn list_comment_replies(
 
 /// Updates a comment by ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/documents/{documentId}/comments/{commentId}/", tag = "comments",
-    params(DocumentCommentPathParams),
-    request_body(
-        content = UpdateCommentRequest,
-        description = "Comment changes",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Not authorized to update this comment",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Comment not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Comment updated",
-            body = DocumentComment,
-        ),
-    ),
-)]
 async fn update_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -514,36 +347,6 @@ async fn update_comment(
 
 /// Deletes a comment by ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/documents/{documentId}/comments/{commentId}/", tag = "comments",
-    params(DocumentCommentPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Not authorized to delete this comment",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Comment not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Comment deleted",
-        ),
-    ),
-)]
 async fn delete_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -605,20 +408,6 @@ async fn delete_comment(
 
 /// Creates a new comment on a file.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/files/{fileId}/comments/",
-    params(FilePathParams), tag = "comments",
-    request_body(
-        content = CreateDocumentComment,
-        description = "New comment",
-        content_type = "application/json",
-    ),
-    responses(
-        (status = BAD_REQUEST, description = "Bad request", body = ErrorResponse),
-        (status = INTERNAL_SERVER_ERROR, description = "Internal server error", body = ErrorResponse),
-        (status = CREATED, description = "Comment created", body = DocumentComment),
-    ),
-)]
 async fn create_file_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -675,14 +464,6 @@ async fn create_file_comment(
 
 /// Returns all comments for a file.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/files/{fileId}/comments/", tag = "comments",
-    params(FilePathParams),
-    request_body(content = Pagination, description = "Pagination parameters"),
-    responses(
-        (status = OK, description = "Comments listed", body = DocumentComments),
-    )
-)]
 async fn list_file_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -732,20 +513,6 @@ async fn list_file_comments(
 
 /// Creates a new comment on a version.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/versions/{versionId}/comments/",
-    params(VersionPathParams), tag = "comments",
-    request_body(
-        content = CreateDocumentComment,
-        description = "New comment",
-        content_type = "application/json",
-    ),
-    responses(
-        (status = BAD_REQUEST, description = "Bad request", body = ErrorResponse),
-        (status = INTERNAL_SERVER_ERROR, description = "Internal server error", body = ErrorResponse),
-        (status = CREATED, description = "Comment created", body = DocumentComment),
-    ),
-)]
 async fn create_version_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -802,14 +569,6 @@ async fn create_version_comment(
 
 /// Returns all comments for a version.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/versions/{versionId}/comments/", tag = "comments",
-    params(VersionPathParams),
-    request_body(content = Pagination, description = "Pagination parameters"),
-    responses(
-        (status = OK, description = "Comments listed", body = DocumentComments),
-    )
-)]
 async fn list_version_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -856,24 +615,48 @@ async fn list_version_comments(
 /// Returns a [`Router`] with all comment-related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
         // Document comment routes
-        .routes(routes!(
-            create_document_comment,
-            list_document_comments,
-            list_top_level_comments
-        ))
-        .routes(routes!(
-            get_comment,
-            list_comment_replies,
-            update_comment,
-            delete_comment
-        ))
+        .api_route(
+            "/documents/:document_id/comments",
+            post(create_document_comment),
+        )
+        .api_route(
+            "/documents/:document_id/comments",
+            get(list_document_comments),
+        )
+        .api_route(
+            "/documents/:document_id/comments/top-level",
+            get(list_top_level_comments),
+        )
+        .api_route(
+            "/documents/:document_id/comments/:comment_id",
+            get(get_comment),
+        )
+        .api_route(
+            "/documents/:document_id/comments/:comment_id/replies",
+            get(list_comment_replies),
+        )
+        .api_route(
+            "/documents/:document_id/comments/:comment_id",
+            patch(update_comment),
+        )
+        .api_route(
+            "/documents/:document_id/comments/:comment_id",
+            delete(delete_comment),
+        )
         // File comment routes
-        .routes(routes!(create_file_comment, list_file_comments))
+        .api_route("/files/:file_id/comments", post(create_file_comment))
+        .api_route("/files/:file_id/comments", get(list_file_comments))
         // Version comment routes
-        .routes(routes!(create_version_comment, list_version_comments))
+        .api_route(
+            "/versions/:version_id/comments",
+            post(create_version_comment),
+        )
+        .api_route("/versions/:version_id/comments", get(list_version_comments))
 }
 
 #[cfg(test)]

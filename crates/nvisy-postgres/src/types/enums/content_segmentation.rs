@@ -1,18 +1,18 @@
 //! Content segmentation enumeration for knowledge extraction.
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the content segmentation strategy for document processing.
 ///
 /// This enumeration corresponds to the `CONTENT_SEGMENTATION` PostgreSQL enum and is used
 /// to specify how document content should be segmented for knowledge extraction.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ContentSegmentation"]
 pub enum ContentSegmentation {
     /// No segmentation applied - process content as a whole

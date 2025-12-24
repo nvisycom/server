@@ -4,8 +4,8 @@
 //! including point definitions, message types, and conversation-specific metadata.
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::SearchResult;
 use crate::error::{Error, Result};
@@ -22,7 +22,7 @@ fn create_metadata_payload() -> Payload {
 
 /// Types of messages in conversations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum MessageType {
     /// User message
     User,
@@ -63,7 +63,7 @@ impl std::fmt::Display for MessageType {
 
 /// Conversation status for filtering and management.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum ConversationStatus {
     /// Active conversation
     Active,
@@ -98,7 +98,7 @@ impl std::fmt::Display for ConversationStatus {
 
 /// A point representing a message or conversation element in the vector database.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ConversationPoint {
     /// Unique identifier for the message
     pub id: PointId,

@@ -369,8 +369,6 @@ pub struct VisualAnalysis {
     pub scene_classification: Option<Vec<SceneCategory>>,
     /// Estimated emotional tone or mood.
     pub emotional_analysis: Option<EmotionalAnalysis>,
-    /// Quality assessment of the image.
-    pub quality_assessment: Option<QualityAssessment>,
 }
 
 impl VisualAnalysis {
@@ -383,7 +381,6 @@ impl VisualAnalysis {
             image_properties: None,
             scene_classification: None,
             emotional_analysis: None,
-            quality_assessment: None,
         }
     }
 
@@ -410,7 +407,6 @@ impl VisualAnalysis {
                 .unwrap_or(false)
             || self.image_properties.is_some()
             || self.emotional_analysis.is_some()
-            || self.quality_assessment.is_some()
     }
 
     /// Get the total number of detected objects.
@@ -550,25 +546,6 @@ pub struct EmotionalAnalysis {
     pub arousal: Option<f64>,
 }
 
-/// Quality assessment of the image.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QualityAssessment {
-    /// Overall quality score (0.0 to 1.0).
-    pub overall_score: f64,
-    /// Sharpness assessment.
-    pub sharpness: Option<f64>,
-    /// Brightness level.
-    pub brightness: Option<f64>,
-    /// Contrast level.
-    pub contrast: Option<f64>,
-    /// Color saturation.
-    pub saturation: Option<f64>,
-    /// Noise level assessment.
-    pub noise_level: Option<f64>,
-    /// Specific quality issues detected.
-    pub issues: Vec<String>,
-}
-
 /// Additional metadata about the VLM response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResponseMetadata {
@@ -582,90 +559,6 @@ pub struct ResponseMetadata {
     pub warnings: Vec<String>,
     /// Additional service-specific metadata.
     pub extra: HashMap<String, serde_json::Value>,
-}
-
-/// Builder for creating comprehensive VLM responses.
-pub struct VlmResponseBuilder<Resp> {
-    content: String,
-    usage: Option<Usage>,
-    finish_reason: Option<String>,
-    confidence: Option<f64>,
-    visual_analysis: Option<VisualAnalysis>,
-    metadata: ResponseMetadata,
-    payload: Resp,
-}
-
-impl<Resp> VlmResponseBuilder<Resp> {
-    /// Create a new response builder.
-    pub fn new<C: Into<String>>(content: C, payload: Resp) -> Self {
-        Self {
-            content: content.into(),
-            usage: None,
-            finish_reason: None,
-            confidence: None,
-            visual_analysis: None,
-            metadata: ResponseMetadata::default(),
-            payload,
-        }
-    }
-
-    /// Set usage information.
-    pub fn usage(mut self, usage: Usage) -> Self {
-        self.usage = Some(usage);
-        self
-    }
-
-    /// Set finish reason.
-    pub fn finish_reason<S: Into<String>>(mut self, reason: S) -> Self {
-        self.finish_reason = Some(reason.into());
-        self
-    }
-
-    /// Set confidence score.
-    pub fn confidence(mut self, confidence: f64) -> Self {
-        self.confidence = Some(confidence.clamp(0.0, 1.0));
-        self
-    }
-
-    /// Add visual analysis results.
-    pub fn visual_analysis(mut self, analysis: VisualAnalysis) -> Self {
-        self.visual_analysis = Some(analysis);
-        self
-    }
-
-    /// Add detected objects.
-    pub fn detected_objects(mut self, objects: Vec<DetectedObject>) -> Self {
-        let mut analysis = self.visual_analysis.unwrap_or_default();
-        analysis.detected_objects = Some(objects);
-        self.visual_analysis = Some(analysis);
-        self
-    }
-
-    /// Add processing time metadata.
-    pub fn processing_time(mut self, time_ms: u64) -> Self {
-        self.metadata.processing_time_ms = Some(time_ms);
-        self
-    }
-
-    /// Add a warning.
-    pub fn warning<S: Into<String>>(mut self, warning: S) -> Self {
-        self.metadata.warnings.push(warning.into());
-        self
-    }
-
-    /// Build the final response.
-    pub fn build(self) -> Response<Resp> {
-        Response {
-            content: self.content,
-            usage: self.usage,
-            finish_reason: self.finish_reason,
-            created: SystemTime::now(),
-            confidence: self.confidence,
-            visual_analysis: self.visual_analysis,
-            metadata: self.metadata,
-            payload: self.payload,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -806,21 +699,6 @@ mod tests {
         let color = ColorInfo::from_rgb(255, 0, 0);
         assert_eq!(color.rgb, (255, 0, 0));
         assert_eq!(color.hex, Some("#ff0000".to_string()));
-    }
-
-    #[test]
-    fn test_response_builder() {
-        let usage = Usage::new(30, 70);
-        let response = VlmResponseBuilder::new("Built response", ())
-            .usage(usage.clone())
-            .confidence(0.88)
-            .finish_reason("stop")
-            .build();
-
-        assert_eq!(response.content, "Built response");
-        assert_eq!(response.confidence, Some(0.88));
-        assert_eq!(response.finish_reason, Some("stop".to_string()));
-        assert_eq!(response.usage, Some(usage));
     }
 
     #[test]

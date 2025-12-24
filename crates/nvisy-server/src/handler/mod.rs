@@ -22,9 +22,9 @@ mod tokens;
 mod utils;
 mod websocket;
 
+use aide::axum::ApiRouter;
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
-use utoipa_axum::router::OpenApiRouter;
 
 pub use crate::extract::Permission;
 pub use crate::handler::error::{Error, ErrorKind, Result};
@@ -39,12 +39,12 @@ async fn handler() -> Response {
     ErrorKind::NotFound.into_response()
 }
 
-/// Returns an [`OpenApiRouter`] with all private routes.
+/// Returns an [`ApiRouter`] with all private routes.
 fn private_routes(
-    additional_routes: Option<OpenApiRouter<ServiceState>>,
+    additional_routes: Option<ApiRouter<ServiceState>>,
     service_state: ServiceState,
-) -> OpenApiRouter<ServiceState> {
-    let mut router = OpenApiRouter::new()
+) -> ApiRouter<ServiceState> {
+    let mut router = ApiRouter::new()
         .merge(accounts::routes(service_state.clone()))
         .merge(tokens::routes())
         .merge(projects::routes())
@@ -65,13 +65,13 @@ fn private_routes(
     router
 }
 
-/// Returns an [`OpenApiRouter`] with all public routes.
+/// Returns an [`ApiRouter`] with all public routes.
 fn public_routes(
-    additional_routes: Option<OpenApiRouter<ServiceState>>,
+    additional_routes: Option<ApiRouter<ServiceState>>,
     _service_state: ServiceState,
     disable_authentication: bool,
-) -> OpenApiRouter<ServiceState> {
-    let mut router = OpenApiRouter::new();
+) -> ApiRouter<ServiceState> {
+    let mut router = ApiRouter::new();
 
     if !disable_authentication {
         router = router.merge(authentication::routes());
@@ -86,11 +86,11 @@ fn public_routes(
     router
 }
 
-/// Returns an [`OpenApiRouter`] with all routes.
+/// Returns an [`ApiRouter`] with all routes.
 pub fn openapi_routes(
     mut routes: CustomRoutes,
     state: ServiceState,
-) -> OpenApiRouter<ServiceState> {
+) -> ApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
     let refresh_token_middleware = from_fn_with_state(state.clone(), refresh_token_middleware);
 
@@ -111,7 +111,7 @@ pub fn openapi_routes(
     public_router = routes.map_public_before_middleware(public_router);
     public_router = routes.map_public_after_middleware(public_router);
 
-    OpenApiRouter::new()
+    ApiRouter::new()
         .merge(private_router)
         .merge(public_router)
         .fallback(handler)
@@ -244,8 +244,8 @@ mod test_utils {
 
 #[cfg(test)]
 mod test {
+    use aide::axum::ApiRouter;
     use axum_test::TestServer;
-    use utoipa_axum::router::OpenApiRouter;
 
     use super::test_utils;
     use crate::handler::{CustomRoutes, openapi_routes};
@@ -253,7 +253,7 @@ mod test {
 
     /// Returns a new [`TestServer`] with the given router.
     pub async fn create_test_server_with_router(
-        router: impl Fn(ServiceState) -> OpenApiRouter<ServiceState>,
+        router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::default();
         let ai_services = nvisy_core::AiServices::new(
@@ -268,7 +268,7 @@ mod test {
 
     /// Returns a new [`TestServer`] with the given router and state.
     pub async fn create_test_server_with_state(
-        router: OpenApiRouter<ServiceState>,
+        router: ApiRouter<ServiceState>,
         state: ServiceState,
     ) -> anyhow::Result<TestServer> {
         let app = router.with_state(state);

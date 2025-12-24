@@ -1,14 +1,14 @@
 //! Document comment response types.
 
+use jiff::Timestamp;
 use nvisy_postgres::model;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Represents a document comment.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentComment {
     /// ID of the comment.
@@ -26,9 +26,9 @@ pub struct DocumentComment {
     /// Comment text content.
     pub content: Option<String>,
     /// Timestamp when the comment was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the comment was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 impl From<model::DocumentComment> for DocumentComment {
@@ -41,8 +41,8 @@ impl From<model::DocumentComment> for DocumentComment {
             parent_comment_id: comment.parent_comment_id,
             reply_to_account_id: comment.reply_to_account_id,
             content: comment.get_content(),
-            created_at: comment.created_at,
-            updated_at: comment.updated_at,
+            created_at: comment.created_at.into(),
+            updated_at: comment.updated_at.into(),
         }
     }
 }

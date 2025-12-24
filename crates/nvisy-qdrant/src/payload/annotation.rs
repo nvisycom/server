@@ -4,8 +4,8 @@
 //! including point definitions, coordinate systems, and annotation types.
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::SearchResult;
 use crate::error::{Error, Result};
@@ -22,7 +22,7 @@ fn create_metadata_payload() -> Payload {
 
 /// Types of annotations supported by the system.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum AnnotationType {
     /// Text-based annotation
     Text,
@@ -66,7 +66,7 @@ impl std::fmt::Display for AnnotationType {
 
 /// Spatial coordinates for annotations that have positional information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct AnnotationCoordinates {
     /// X coordinate or left position
     pub x: f64,
@@ -117,7 +117,7 @@ impl AnnotationCoordinates {
 
 /// Payload structure for updating annotation data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct AnnotationPayload {
     /// The annotation text or description
     pub content: Option<String>,
@@ -211,7 +211,7 @@ impl Default for AnnotationPayload {
 
 /// A point representing an annotation in the vector database.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct AnnotationPoint {
     /// Unique identifier for the annotation
     pub id: PointId,

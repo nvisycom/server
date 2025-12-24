@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{BoxedStream, BoxedVlmProvider, Request, Response, Result, VlmProvier};
+use super::{BoxedStream, BoxedVlmProvider, Request, Response, Result, VlmProvider};
 use crate::types::ServiceHealth;
 
 /// VLM service wrapper with observability.
@@ -48,7 +48,7 @@ where
 }
 
 #[async_trait]
-impl<Req, Resp> VlmProvier<Req, Resp> for Service<Req, Resp>
+impl<Req, Resp> VlmProvider<Req, Resp> for Service<Req, Resp>
 where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + 'static,

@@ -3,6 +3,8 @@
 use std::time::Duration;
 
 use jiff::Timestamp;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,6 +12,7 @@ use super::event::{EventPriority, EventStatus};
 
 /// Project import job payload
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ProjectImportPayload {
     pub project_id: Uuid,
     pub account_id: Uuid,
@@ -20,6 +23,7 @@ pub struct ProjectImportPayload {
 
 /// Project import job
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ProjectImportJob {
     pub id: Uuid,
     pub payload: ProjectImportPayload,

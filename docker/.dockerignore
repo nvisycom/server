@@ -1,0 +1,93 @@
+# OS
+Thumbs.db
+.DS_Store
+
+# Editors
+.vs/
+.vscode/
+.idea/
+.fleet/
+.zed/
+
+# Rust
+debug/
+target/
+**/*.rs.bk
+*.pdb
+
+# Generated
+*.pem
+*.backup
+coverage/
+*.lcov
+
+# Intermediate output
+crates/nvisy-postgres/src/migrations/
+crates/nvisy-postgres/src/schema.rs
+
+# Build output
+dist/
+build/
+output/
+
+# Environment files
+.env*
+!.env.example
+.envrc
+
+# Logs
+logs/
+*.log
+*.log*
+
+# Development and CI files
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+scripts/
+Makefile
+
+# Scripts
+*.sh
+*.bat
+*.ps1
+
+# Documentation
+*.md
+!README.md
+docs/
+**/docs/
+
+# Test files
+tests/
+**/tests/
+fixtures/
+benchmarks/
+**/benchmarks/
+
+# Development tools
+rustfmt.toml
+clippy.toml
+deny.toml
+
+# Docker files (avoid recursion)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# License and legal
+LICENSE*
+COPYRIGHT*
+NOTICE*
+
+# Backup and temporary files
+*.bak
+*.backup
+*.tmp
+tmp/
+temp/
+
+# Other
+.ignore*/
+LLM.md

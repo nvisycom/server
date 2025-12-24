@@ -16,9 +16,8 @@ pub mod service;
 pub use context::{Context, ProcessingOptions};
 pub use request::{ImageInput, Request, RequestOptions, VlmInput};
 pub use response::{
-    ColorInfo, DetectedObject, EmotionalAnalysis, FontProperties, ImageProperties,
-    QualityAssessment, Response, ResponseMetadata, SceneCategory, TextRegion, Usage,
-    VisualAnalysis, VlmResponseBuilder, VlmResponseChunk,
+    ColorInfo, DetectedObject, EmotionalAnalysis, FontProperties, ImageProperties, Response,
+    ResponseMetadata, SceneCategory, TextRegion, Usage, VisualAnalysis, VlmResponseChunk,
 };
 pub use service::Service as VlmService;
 
@@ -26,7 +25,7 @@ use crate::types::ServiceHealth;
 pub use crate::{Error, ErrorKind, Result};
 
 /// Type alias for a boxed VLM service with specific request and response types.
-pub type BoxedVlmProvider<Req, Resp> = Box<dyn VlmProvier<Req, Resp> + Send + Sync>;
+pub type BoxedVlmProvider<Req, Resp> = Box<dyn VlmProvider<Req, Resp> + Send + Sync>;
 
 /// Type alias for boxed response stream.
 pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
@@ -45,7 +44,7 @@ pub const TRACING_TARGET: &str = "nvisy_core::vlm";
 /// * `Req` - The request payload type specific to the VLM implementation
 /// * `Resp` - The response payload type specific to the VLM implementation
 #[async_trait::async_trait]
-pub trait VlmProvier<Req, Resp>: Send + Sync {
+pub trait VlmProvider<Req, Resp>: Send + Sync {
     /// Process a vision-language request and return a complete response.
     ///
     /// # Parameters

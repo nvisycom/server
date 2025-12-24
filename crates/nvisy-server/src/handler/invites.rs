@@ -5,24 +5,23 @@
 //! All operations are secured with proper authorization and include invitation
 //! lifecycle management.
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
+use jiff::Timestamp;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewProjectInvite;
 use nvisy_postgres::query::{ProjectInviteRepository, ProjectMemberRepository};
 use nvisy_postgres::types::InviteStatus;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{CreateInvite, ReplyInvite};
 use crate::handler::response::{Invite, Invites};
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project invite operations.
@@ -30,7 +29,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::project_invites";
 
 /// Combined path parameters for invite-specific endpoints.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InvitePathParams {
     /// Unique identifier of the project.
@@ -45,47 +44,6 @@ pub struct InvitePathParams {
 /// The invitee will receive an email with instructions to accept or decline.
 /// Requires administrator permissions to send invitations.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/projects/{projectId}/invites/", tag = "invites",
-    params(ProjectPathParams),
-    request_body(
-        content = CreateInvite,
-        description = "Invitation details",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Invalid request data",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied - insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = CONFLICT,
-            description = "User is already a member or has a pending invitation",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Project invitation created successfully",
-            body = Invite,
-        ),
-    ),
-)]
 async fn send_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -152,13 +110,14 @@ async fn send_invite(
             .with_message("Invitation already sent")
             .with_context(format!(
                 "A pending invitation to {} already exists for this project (expires at {})",
-                normalized_email, pending_invite.expires_at
+                normalized_email,
+                pending_invite.expires_at.to_jiff()
             )));
     }
 
     // Generate expiration time
-    let expires_at = OffsetDateTime::now_utc()
-        + time::Duration::days(request.expires_in_days.unwrap_or(7).clamp(1, 30) as i64);
+    let expires_at = Timestamp::now()
+        + jiff::Span::new().days(request.expires_in_days.unwrap_or(7).clamp(1, 30) as i64);
 
     // Sanitize the invite message for additional security
     let sanitized_message = sanitize_text(&request.invite_message);
@@ -168,7 +127,7 @@ async fn send_invite(
         invitee_id: None, // Will be set when user accepts if they have an account
         invited_role: Some(request.invited_role),
         invite_message: Some(sanitized_message),
-        expires_at: Some(expires_at),
+        expires_at: Some(expires_at.into()),
         created_by: auth_claims.account_id,
         updated_by: auth_claims.account_id,
         ..Default::default()
@@ -194,45 +153,6 @@ async fn send_invite(
 /// Returns a paginated list of project invitations with their current status.
 /// Optionally filter by invitation status. Requires administrator permissions.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/invites/", tag = "invites",
-    params(
-        ProjectPathParams,
-        ("status" = Option<InviteStatus>, Query, description = "Filter by invitation status")
-    ),
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Invalid request parameters",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied - insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project invitations listed successfully",
-            body = Invites,
-        ),
-    ),
-)]
 async fn list_invites(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -274,36 +194,6 @@ async fn list_invites(
 /// Permanently cancels a pending invitation. The invitee will no longer be able
 /// to accept this invitation. Requires administrator permissions.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/projects/{projectId}/invites/{inviteId}/", tag = "invites",
-    params(InvitePathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Invalid request",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Access denied - insufficient permissions",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project or invitation not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project invitation cancelled successfully",
-        ),
-    ),
-)]
 async fn cancel_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -348,47 +238,6 @@ async fn cancel_invite(
 /// If accepted, the user becomes a member of the project with the specified role.
 /// The invitation must be valid and not expired.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/invites/{inviteId}/reply/", tag = "invites",
-    params(InvitePathParams),
-    request_body(
-        content = ReplyInvite,
-        description = "Invitation response",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Invalid request or invitation expired",
-            body = ErrorResponse,
-        ),
-        (
-            status = FORBIDDEN,
-            description = "Not authorized to respond to this invitation",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project or invitation not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = CONFLICT,
-            description = "User is already a member of the project",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Invitation response processed successfully",
-            body = Invite,
-        ),
-    )
-)]
 async fn reply_to_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -430,7 +279,8 @@ async fn reply_to_invite(
             .with_resource("project_invite")
             .with_context(format!(
                 "Invite status: {:?}, Expires at: {}",
-                invite.invite_status, invite.expires_at
+                invite.invite_status,
+                invite.expires_at.to_jiff()
             )));
     }
 
@@ -481,10 +331,20 @@ fn sanitize_text(text: &str) -> String {
 /// Returns a [`Router`] with all project invite related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
-        .routes(routes!(send_invite, list_invites))
-        .routes(routes!(cancel_invite, reply_to_invite))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/projects/:project_id/invites/", post(send_invite))
+        .api_route("/projects/:project_id/invites/", get(list_invites))
+        .api_route(
+            "/projects/:project_id/invites/:invite_id/",
+            delete(cancel_invite),
+        )
+        .api_route(
+            "/projects/:project_id/invites/:invite_id/reply/",
+            patch(reply_to_invite),
+        )
 }
 
 #[cfg(test)]

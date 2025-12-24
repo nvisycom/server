@@ -11,6 +11,7 @@ use std::num::NonZeroU32;
 use axum::RequestPartsExt;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::extract::Path;
@@ -214,6 +215,13 @@ impl From<Version> for bool {
     }
 }
 
+/// Path parameters for version extraction.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+struct VersionParams {
+    /// The API version string (e.g., "v1", "v2").
+    pub version: String,
+}
+
 impl<S> FromRequestParts<S> for Version
 where
     S: Sync,
@@ -221,14 +229,25 @@ where
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        #[derive(Debug, Clone, Deserialize)]
-        struct VersionParams {
-            pub version: String,
-        }
-
         Ok(match parts.extract::<Path<VersionParams>>().await {
             Ok(params) => Version::new(&params.version),
             Err(_) => Version::default(),
         })
+    }
+}
+
+impl aide::OperationInput for Version {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        Path::<VersionParams>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        Path::<VersionParams>::inferred_early_responses(ctx, operation)
     }
 }

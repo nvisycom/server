@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::ContentSegmentation;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -10,13 +10,8 @@ use crate::service::ArchiveFormat;
 
 /// Request to update file metadata.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[schema(example = json!({
-    "displayName": "renamed-document.pdf",
-    "processingPriority": 10,
-    "documentId": "550e8400-e29b-41d4-a716-446655440000"
-}))]
 pub struct UpdateFile {
     /// New display name for the file
     #[validate(length(min = 1, max = 255))]
@@ -31,7 +26,7 @@ pub struct UpdateFile {
 }
 
 /// Knowledge-related fields for document file updates.
-#[derive(Debug, Deserialize, Validate, Serialize, ToSchema)]
+#[derive(Debug, Deserialize, Validate, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDocumentKnowledge {
     /// Whether the file is indexed for knowledge extraction.
@@ -48,7 +43,7 @@ pub struct UpdateDocumentKnowledge {
 }
 
 /// Request to download multiple files.
-#[derive(Debug, Deserialize, Validate, ToSchema)]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadMultipleFilesRequest {
     /// File IDs to download (1-100 files).
@@ -57,7 +52,7 @@ pub struct DownloadMultipleFilesRequest {
 }
 
 /// Request to download files as an archive.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadArchivedFilesRequest {
     /// Archive format (defaults to tar).

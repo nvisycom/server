@@ -1,13 +1,13 @@
 //! Project pipeline response types.
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Represents a project pipeline.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPipeline {
     /// Unique pipeline identifier.
@@ -27,19 +27,19 @@ pub struct ProjectPipeline {
     /// Current status of the pipeline.
     pub status: String,
     /// Last execution timestamp.
-    pub last_execution: Option<OffsetDateTime>,
+    pub last_execution: Option<Timestamp>,
     /// Next scheduled execution timestamp.
-    pub next_execution: Option<OffsetDateTime>,
+    pub next_execution: Option<Timestamp>,
     /// Number of successful executions.
     pub success_count: i64,
     /// Number of failed executions.
     pub failure_count: i64,
     /// Timestamp when the pipeline was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the pipeline was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Response for listing project pipelines.

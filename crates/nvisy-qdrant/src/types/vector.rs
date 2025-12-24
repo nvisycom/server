@@ -1,15 +1,14 @@
 //! Vector-related types and utilities for Qdrant operations.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Vector distance metrics supported by Qdrant.
 ///
 /// These metrics determine how vector similarity is calculated during search operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "PascalCase")]
 #[derive(Default)]
 pub enum Distance {
@@ -56,7 +55,7 @@ impl Distance {
 
 /// Configuration parameters for vector fields in a collection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct VectorParams {
     /// The size (dimensionality) of the vectors
     pub size: u64,
@@ -122,7 +121,7 @@ impl VectorParams {
 
 /// HNSW (Hierarchical Navigable Small World) algorithm configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct HnswConfig {
     /// Number of connections each node will have
     pub m: Option<u64>,
@@ -192,7 +191,7 @@ impl Default for HnswConfig {
 
 /// Quantization configuration for reducing vector memory usage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct QuantizationConfig {
     /// Scalar quantization configuration
     pub scalar: Option<ScalarQuantization>,
@@ -260,7 +259,7 @@ impl QuantizationConfig {
 
 /// Scalar quantization configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ScalarQuantization {
     /// Quantization type (int8 or uint8)
     pub r#type: ScalarType,
@@ -274,7 +273,7 @@ pub struct ScalarQuantization {
 
 /// Scalar quantization types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum ScalarType {
     /// 8-bit signed integer
     Int8,
@@ -304,7 +303,7 @@ impl ScalarQuantization {
 
 /// Product quantization configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ProductQuantization {
     /// Compression ratio
     pub compression: CompressionRatio,
@@ -315,7 +314,7 @@ pub struct ProductQuantization {
 
 /// Compression ratio for product quantization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum CompressionRatio {
     /// 4x compression
     X4,
@@ -355,7 +354,7 @@ impl ProductQuantization {
 
 /// Binary quantization configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct BinaryQuantization {
     /// Whether to always use RAM for quantized vectors
     pub always_ram: Option<bool>,
@@ -385,7 +384,7 @@ impl Default for BinaryQuantization {
 
 /// Represents a vector with its values and metadata.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Vector {
     /// The vector values
     pub values: Vec<f32>,

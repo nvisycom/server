@@ -1,14 +1,14 @@
 //! Account response types.
 
+use jiff::Timestamp;
 use nvisy_postgres::model;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use uuid::Uuid;
 
 /// Represents an account.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     /// Unique identifier of the account.
@@ -30,9 +30,9 @@ pub struct Account {
     pub phone_number: Option<String>,
 
     /// Timestamp when the account was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the account was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 impl Account {
@@ -49,8 +49,8 @@ impl Account {
             company_name: account.company_name,
             phone_number: account.phone_number,
 
-            created_at: account.created_at,
-            updated_at: account.updated_at,
+            created_at: account.created_at.into(),
+            updated_at: account.updated_at.into(),
         }
     }
 }

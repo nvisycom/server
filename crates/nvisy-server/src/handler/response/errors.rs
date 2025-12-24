@@ -5,11 +5,11 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
-use utoipa::ToSchema;
+use schemars::JsonSchema;
 use validator::ValidationErrors;
 
 /// Error category for better error handling and logging.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCategory {
     /// Authentication and authorization errors
@@ -31,7 +31,7 @@ pub enum ErrorCategory {
 }
 
 /// Validation error details for field-specific errors.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ValidationErrorDetail {
     /// Field name that failed validation
     pub field: String,
@@ -50,12 +50,7 @@ pub struct ValidationErrorDetail {
 /// response, including the error name, message, HTTP status code, resource
 /// information, and user-friendly messages.
 #[must_use = "error responses do nothing unless serialized"]
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[schema(example = json!({
-    "name": "bad_request",
-    "message": "The request could not be processed due to invalid data",
-    "context": "Invalid email format",
-}))]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ErrorResponse<'a> {
     /// The error name/type identifier
     pub name: Cow<'a, str>,

@@ -5,21 +5,15 @@
 //! with comprehensive validation to prevent expensive database queries.
 
 use nvisy_postgres::query::Pagination as QueryPagination;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use validator::Validate;
 
 /// Pagination parameters with performance and security validation.
 ///
 /// `Pagination` allows clients to retrieve data in chunks, which helps manage
 /// large datasets by specifying how many records to skip and how many to fetch.
-#[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema, Validate)]
-#[schema(example = json!({
-    "offset": 20,
-    "limit": 10,
-    "cursor": None::<String>,
-    "direction": "forward"
-}))]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct Pagination {
     /// The number of records to skip before starting to return results.
     ///
@@ -30,7 +24,6 @@ pub struct Pagination {
     /// **Performance Impact**: High offsets require the database to scan
     /// and skip many records, which can be slow for large tables.
     #[validate(range(min = 0, max = 100000))]
-    #[schema(example = 20, maximum = 100000)]
     pub offset: Option<u32>,
 
     /// The maximum number of records to return in a single request.
@@ -38,7 +31,6 @@ pub struct Pagination {
     /// This is balanced between usability and performance. Very large limits
     /// can cause memory pressure and slow response times.
     #[validate(range(min = 1, max = 1000))]
-    #[schema(example = 10, minimum = 1, maximum = 1000)]
     pub limit: Option<u32>,
 }
 
@@ -85,8 +77,8 @@ impl Pagination {
 impl From<Pagination> for QueryPagination {
     fn from(pagination: Pagination) -> Self {
         Self {
-            limit: pagination.limit() as i64,
             offset: pagination.offset() as i64,
+            limit: pagination.limit() as i64,
         }
     }
 }
