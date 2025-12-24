@@ -19,17 +19,16 @@ pub mod request;
 pub mod response;
 mod templates;
 mod tokens;
-mod utils;
+mod utility;
+mod webhooks;
 mod websocket;
 
 use aide::axum::ApiRouter;
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
+pub use error::{Error, ErrorKind, Result};
+pub use utility::{CustomRoutes, RouterMapFn};
 
-pub use crate::extract::Permission;
-pub use crate::handler::error::{Error, ErrorKind, Result};
-pub use crate::handler::request::Pagination;
-pub use crate::handler::utils::{CustomRoutes, RouterMapFn};
 use crate::middleware::{refresh_token_middleware, require_authentication};
 use crate::service::ServiceState;
 
@@ -52,6 +51,7 @@ fn private_routes(
         .merge(members::routes())
         .merge(pipelines::routes())
         .merge(templates::routes())
+        .merge(webhooks::routes())
         .merge(websocket::routes())
         .merge(files::routes())
         .merge(documents::routes())
@@ -121,7 +121,8 @@ mod test_utils {
     //! for use in unit and integration tests.
 
     use nvisy_core::emb::{
-        EmbeddingData, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, EmbeddingService,
+        EmbeddingData, EmbeddingProvider, EmbeddingResult, EmbeddingService,
+        Request as EmbeddingRequest, Response as EmbeddingResponse,
     };
     use nvisy_core::ocr::{
         OcrProvider, OcrService, Request as OcrRequest, Response as OcrResponse,
@@ -151,16 +152,16 @@ mod test_utils {
     pub struct MockEmbeddingProvider;
 
     #[async_trait::async_trait]
-    impl EmbeddingProvider<(), ()> for MockEmbeddingProvider {
+    impl<Req, Resp> EmbeddingProvider<Req, Resp> for MockEmbeddingProvider
+    where
+        Req: Send + Sync + 'static,
+        Resp: Send + Sync + Default + 'static,
+    {
         async fn generate_embedding(
             &self,
-            request: &EmbeddingRequest,
-        ) -> Result<EmbeddingResponse> {
-            let data = vec![EmbeddingData::new(vec![0.1, 0.2, 0.3], 0)];
-            Ok(
-                EmbeddingResponse::new(request.request_id, "mock-model".to_string())
-                    .with_data(data),
-            )
+            request: EmbeddingRequest<Req>,
+        ) -> Result<EmbeddingResponse<Resp>> {
+            Ok(EmbeddingResponse::new(request.request_id, Resp::default()))
         }
 
         async fn health_check(&self) -> Result<ServiceHealth> {
@@ -179,15 +180,7 @@ mod test_utils {
         Resp: Send + Sync + Default + 'static,
     {
         async fn process_ocr(&self, request: OcrRequest<Req>) -> Result<OcrResponse<Resp>> {
-            Ok(OcrResponse {
-                response_id: uuid::Uuid::new_v4(),
-                request_id: request.request_id,
-                payload: Resp::default(),
-                processing_time_ms: Some(100),
-                timestamp: time::OffsetDateTime::now(),
-                usage: Default::default(),
-                metadata: Default::default(),
-            })
+            Ok(OcrResponse::new(request.request_id, Resp::default()))
         }
 
         async fn process_ocr_stream(
@@ -241,6 +234,7 @@ mod test_utils {
 #[cfg(test)]
 mod test {
     use aide::axum::ApiRouter;
+    use axum::Router;
     use axum_test::TestServer;
 
     use super::test_utils;
@@ -268,7 +262,7 @@ mod test {
         state: ServiceState,
     ) -> anyhow::Result<TestServer> {
         let app = router.with_state(state);
-        let (app, _) = app.split_for_parts();
+        let app = Into::<Router>::into(app);
         let server = TestServer::new(app)?;
         Ok(server)
     }

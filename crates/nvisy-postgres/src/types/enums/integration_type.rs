@@ -45,12 +45,6 @@ impl IntegrationType {
         matches!(self, IntegrationType::Storage)
     }
 
-    /// Returns whether this integration type supports webhooks.
-    #[inline]
-    pub fn supports_webhooks(self) -> bool {
-        matches!(self, IntegrationType::Webhook)
-    }
-
     /// Returns whether this integration type requires credentials.
     #[inline]
     pub fn requires_credentials(self) -> bool {

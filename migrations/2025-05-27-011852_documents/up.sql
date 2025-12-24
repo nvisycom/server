@@ -280,10 +280,8 @@ CREATE TABLE document_comments (
     -- Primary identifiers
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References (exactly one target must be set)
-    document_id         UUID             DEFAULT NULL REFERENCES documents (id) ON DELETE CASCADE,
-    document_file_id    UUID             DEFAULT NULL REFERENCES document_files (id) ON DELETE CASCADE,
-
+    -- References
+    file_id             UUID             NOT NULL REFERENCES document_files (id) ON DELETE CASCADE,
     account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Thread references
@@ -294,10 +292,6 @@ CREATE TABLE document_comments (
     content             TEXT             NOT NULL,
 
     CONSTRAINT document_comments_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
-    CONSTRAINT document_comments_single_target CHECK (
-        (document_id IS NOT NULL)::INTEGER +
-        (document_file_id IS NOT NULL)::INTEGER = 1
-    ),
 
     -- Metadata
     metadata            JSONB            NOT NULL DEFAULT '{}',
@@ -318,13 +312,9 @@ CREATE TABLE document_comments (
 SELECT setup_updated_at('document_comments');
 
 -- Create indexes for document comments
-CREATE INDEX document_comments_document_idx
-    ON document_comments (document_id, created_at DESC)
-    WHERE document_id IS NOT NULL AND deleted_at IS NULL;
-
 CREATE INDEX document_comments_file_idx
-    ON document_comments (document_file_id, created_at DESC)
-    WHERE document_file_id IS NOT NULL AND deleted_at IS NULL;
+    ON document_comments (file_id, created_at DESC)
+    WHERE deleted_at IS NULL;
 
 CREATE INDEX document_comments_account_idx
     ON document_comments (account_id, created_at DESC)
@@ -344,11 +334,10 @@ CREATE INDEX document_comments_metadata_idx
 
 -- Add table and column comments
 COMMENT ON TABLE document_comments IS
-    'User comments and discussions about documents and files, supporting threaded conversations and @mentions.';
+    'User comments and discussions on files, supporting threaded conversations and @mentions.';
 
 COMMENT ON COLUMN document_comments.id IS 'Unique comment identifier';
-COMMENT ON COLUMN document_comments.document_id IS 'Parent document reference (mutually exclusive with file)';
-COMMENT ON COLUMN document_comments.document_file_id IS 'Parent document file reference (mutually exclusive with document)';
+COMMENT ON COLUMN document_comments.file_id IS 'Parent file reference';
 COMMENT ON COLUMN document_comments.account_id IS 'Comment author reference';
 COMMENT ON COLUMN document_comments.parent_comment_id IS 'Parent comment for threaded replies (NULL for top-level)';
 COMMENT ON COLUMN document_comments.reply_to_account_id IS 'Account being replied to (@mention)';

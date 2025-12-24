@@ -1,52 +1,150 @@
 //! Response types for embedding operations.
 //!
-//! This module defines the response types returned from embedding generation,
-//! including embedding data, usage statistics, and response metadata.
+//! The `Response<Resp>` type is a generic wrapper that allows embedding implementations
+//! to define their own response payload types while maintaining a consistent
+//! interface for common metadata like response IDs, timestamps, and usage statistics.
 
 use std::collections::HashMap;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Response from an embedding generation request.
-///
-/// This struct represents a complete embedding response containing the
-/// generated embeddings, usage information, and metadata.
-///
-/// # Examples
-///
-/// ```rust
-/// use nvisy_core::emb::EmbeddingResponse;
-///
-/// // Process embedding response
-/// let response: EmbeddingResponse = service.embed(request).await?;
-///
-/// for (i, embedding) in response.data.iter().enumerate() {
-///     println!("Embedding {}: {} dimensions", i, embedding.embedding.len());
-/// }
-///
-/// if let Some(usage) = &response.usage {
-///     println!("Total tokens used: {}", usage.total_tokens);
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EmbeddingResponse {
-    /// Unique identifier for this response, matching the request ID.
-    pub request_id: Uuid,
+use super::context::UsageStats;
 
+/// Generic response from an embedding operation.
+///
+/// This wrapper type provides common metadata and statistics while allowing
+/// implementations to define their own specific response payload type.
+///
+/// # Type Parameters
+///
+/// * `Resp` - The implementation-specific response payload type
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[derive(Debug, Clone)]
+/// struct MyEmbeddingPayload {
+///     embeddings: Vec<Vec<f32>>,
+/// }
+///
+/// let response = Response::new(
+///     request_id,
+///     MyEmbeddingPayload {
+///         embeddings: vec![vec![0.1, 0.2, 0.3]],
+///     }
+/// );
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Response<Resp> {
+    /// Unique identifier for this response.
+    pub response_id: Uuid,
+    /// Request ID this response corresponds to.
+    pub request_id: Uuid,
+    /// Implementation-specific response payload.
+    pub payload: Resp,
+    /// Processing time in milliseconds.
+    pub processing_time_ms: Option<u64>,
+    /// When this response was generated.
+    pub timestamp: Timestamp,
+    /// Usage statistics for this operation.
+    pub usage: UsageStats,
+    /// Additional metadata about the processing.
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl<Resp> Response<Resp> {
+    /// Create a new embedding response with the given payload.
+    pub fn new(request_id: Uuid, payload: Resp) -> Self {
+        Self {
+            response_id: Uuid::new_v4(),
+            request_id,
+            payload,
+            processing_time_ms: None,
+            timestamp: Timestamp::now(),
+            usage: UsageStats::default(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Set the processing time.
+    pub fn with_processing_time(mut self, ms: u64) -> Self {
+        self.processing_time_ms = Some(ms);
+        self
+    }
+
+    /// Set usage statistics.
+    pub fn with_usage(mut self, usage: UsageStats) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    /// Add metadata to this response.
+    pub fn with_metadata(mut self, key: String, value: serde_json::Value) -> Self {
+        self.metadata.insert(key, value);
+        self
+    }
+}
+
+/// Batch response containing multiple embedding results.
+///
+/// # Type Parameters
+///
+/// * `Resp` - The implementation-specific response payload type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchResponse<Resp> {
+    /// Unique identifier for this batch response.
+    pub batch_id: Uuid,
+    /// Individual responses in the batch.
+    pub responses: Vec<Response<Resp>>,
+    /// Overall processing statistics.
+    pub batch_stats: BatchStats,
+    /// When the batch was processed.
+    pub timestamp: Timestamp,
+}
+
+/// Statistics for a batch embedding operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchStats {
+    /// Total number of items processed.
+    pub total_processed: usize,
+    /// Number of successful generations.
+    pub successful: usize,
+    /// Number of failed generations.
+    pub failed: usize,
+    /// Total processing time for the batch.
+    pub total_processing_time_ms: u64,
+}
+
+impl BatchStats {
+    /// Calculate success rate as a percentage.
+    pub fn success_rate(&self) -> f32 {
+        if self.total_processed == 0 {
+            0.0
+        } else {
+            (self.successful as f32 / self.total_processed as f32) * 100.0
+        }
+    }
+
+    /// Get average processing time per item.
+    pub fn average_processing_time(&self) -> f32 {
+        if self.total_processed == 0 {
+            0.0
+        } else {
+            self.total_processing_time_ms as f32 / self.total_processed as f32
+        }
+    }
+}
+
+/// Standard embedding result containing embedding vectors.
+///
+/// This provides a standardized way to represent embedding results,
+/// making it easier to integrate with downstream processing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingResult {
     /// The embedding data for each input.
     pub data: Vec<EmbeddingData>,
-
-    /// The model used for generating embeddings.
-    pub model: String,
-
-    /// Usage statistics for this request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<EmbeddingUsage>,
-
-    /// Additional metadata about the response.
-    #[serde(flatten)]
-    pub metadata: HashMap<String, serde_json::Value>,
 }
 
 /// Individual embedding data for a single input.
@@ -61,81 +159,26 @@ pub struct EmbeddingData {
     /// The index of this embedding in the original request.
     pub index: usize,
 
-    /// The object type (always "embedding").
-    #[serde(default = "default_object_type")]
-    pub object: String,
-
     /// Additional metadata for this specific embedding.
     #[serde(flatten)]
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-/// Usage statistics for embedding generation.
-///
-/// This struct provides information about resource consumption
-/// during the embedding generation process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EmbeddingUsage {
-    /// Number of tokens in the input(s).
-    pub prompt_tokens: u32,
-
-    /// Total number of tokens used (usually same as prompt_tokens for embeddings).
-    pub total_tokens: u32,
-
-    /// Additional usage metrics specific to the provider.
-    #[serde(flatten)]
-    pub additional_metrics: HashMap<String, serde_json::Value>,
-}
-
-fn default_object_type() -> String {
-    "embedding".to_string()
-}
-
-impl EmbeddingResponse {
-    /// Creates a new embedding response.
-    pub fn new(request_id: Uuid, model: String) -> Self {
-        Self {
-            request_id,
-            data: Vec::new(),
-            model,
-            usage: None,
-            metadata: HashMap::new(),
-        }
+impl EmbeddingResult {
+    /// Creates a new embedding result.
+    pub fn new(data: Vec<EmbeddingData>) -> Self {
+        Self { data }
     }
 
-    /// Sets the embedding data.
-    pub fn with_data(mut self, data: Vec<EmbeddingData>) -> Self {
-        self.data = data;
-        self
-    }
-
-    /// Adds a single embedding data entry.
-    pub fn with_embedding_data(mut self, embedding_data: EmbeddingData) -> Self {
-        self.data.push(embedding_data);
-        self
-    }
-
-    /// Sets the usage statistics.
-    pub fn with_usage(mut self, usage: EmbeddingUsage) -> Self {
-        self.usage = Some(usage);
-        self
-    }
-
-    /// Adds metadata.
-    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.metadata.insert(key.into(), value);
-        self
-    }
-
-    /// Returns the number of embeddings in this response.
+    /// Returns the number of embeddings in this result.
     pub fn embedding_count(&self) -> usize {
         self.data.len()
     }
 
     /// Returns the dimensionality of the embeddings.
     ///
-    /// All embeddings in a response should have the same dimensionality.
-    /// Returns `None` if there are no embeddings in the response.
+    /// All embeddings in a result should have the same dimensionality.
+    /// Returns `None` if there are no embeddings.
     pub fn embedding_dimensions(&self) -> Option<usize> {
         self.data.first().map(|embedding| embedding.embedding.len())
     }
@@ -147,7 +190,7 @@ impl EmbeddingResponse {
                 .iter()
                 .all(|embedding| embedding.embedding.len() == expected_dim)
         } else {
-            true // Empty response is considered consistent
+            true
         }
     }
 
@@ -164,26 +207,16 @@ impl EmbeddingResponse {
             .collect()
     }
 
-    /// Gets metadata value by key.
-    pub fn get_metadata(&self, key: &str) -> Option<&serde_json::Value> {
-        self.metadata.get(key)
-    }
-
-    /// Validates the response structure.
+    /// Validates the result structure.
     pub fn validate(&self) -> Result<(), String> {
         if self.data.is_empty() {
-            return Err("Response must contain at least one embedding".to_string());
-        }
-
-        if self.model.is_empty() {
-            return Err("Model must be specified in response".to_string());
+            return Err("Result must contain at least one embedding".to_string());
         }
 
         if !self.has_consistent_dimensions() {
             return Err("All embeddings must have the same dimensionality".to_string());
         }
 
-        // Validate indices are sequential and start from 0
         for (expected_index, embedding_data) in self.data.iter().enumerate() {
             if embedding_data.index != expected_index {
                 return Err(format!(
@@ -207,7 +240,6 @@ impl EmbeddingData {
         Self {
             embedding,
             index,
-            object: default_object_type(),
             metadata: HashMap::new(),
         }
     }
@@ -289,24 +321,84 @@ impl EmbeddingData {
     }
 }
 
-impl EmbeddingUsage {
-    /// Creates a new usage statistics entry.
-    pub fn new(prompt_tokens: u32, total_tokens: u32) -> Self {
-        Self {
-            prompt_tokens,
-            total_tokens,
-            additional_metrics: HashMap::new(),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_embedding_result_creation() {
+        let data = vec![
+            EmbeddingData::new(vec![0.1, 0.2, 0.3], 0),
+            EmbeddingData::new(vec![0.4, 0.5, 0.6], 1),
+        ];
+
+        let result = EmbeddingResult::new(data);
+
+        assert_eq!(result.embedding_count(), 2);
+        assert_eq!(result.embedding_dimensions(), Some(3));
+        assert!(result.has_consistent_dimensions());
     }
 
-    /// Adds an additional usage metric.
-    pub fn with_metric(mut self, key: String, value: serde_json::Value) -> Self {
-        self.additional_metrics.insert(key, value);
-        self
+    #[test]
+    fn test_embedding_data_operations() {
+        let embedding1 = EmbeddingData::new(vec![1.0, 0.0, 0.0], 0);
+        let embedding2 = EmbeddingData::new(vec![0.0, 1.0, 0.0], 1);
+
+        assert_eq!(embedding1.dimensions(), 3);
+        assert!((embedding1.magnitude() - 1.0).abs() < f32::EPSILON);
+
+        let similarity = embedding1.cosine_similarity(&embedding2);
+        assert!(similarity.is_some());
+        assert!((similarity.unwrap() - 0.0).abs() < f32::EPSILON);
     }
 
-    /// Gets an additional metric by key.
-    pub fn get_metric(&self, key: &str) -> Option<&serde_json::Value> {
-        self.additional_metrics.get(key)
+    #[test]
+    fn test_embedding_normalization() {
+        let mut embedding = EmbeddingData::new(vec![3.0, 4.0], 0);
+
+        let magnitude = embedding.normalize();
+        assert!((magnitude - 5.0).abs() < f32::EPSILON);
+        assert!((embedding.magnitude() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_euclidean_distance() {
+        let embedding1 = EmbeddingData::new(vec![0.0, 0.0], 0);
+        let embedding2 = EmbeddingData::new(vec![3.0, 4.0], 1);
+
+        let distance = embedding1.euclidean_distance(&embedding2);
+        assert!(distance.is_some());
+        assert!((distance.unwrap() - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_result_validation() {
+        let valid_result = EmbeddingResult::new(vec![
+            EmbeddingData::new(vec![0.1, 0.2], 0),
+            EmbeddingData::new(vec![0.3, 0.4], 1),
+        ]);
+        assert!(valid_result.validate().is_ok());
+
+        let empty_result = EmbeddingResult::new(vec![]);
+        assert!(empty_result.validate().is_err());
+
+        let inconsistent_result = EmbeddingResult::new(vec![
+            EmbeddingData::new(vec![0.1, 0.2], 0),
+            EmbeddingData::new(vec![0.3, 0.4, 0.5], 1),
+        ]);
+        assert!(inconsistent_result.validate().is_err());
+    }
+
+    #[test]
+    fn test_batch_stats() {
+        let stats = BatchStats {
+            total_processed: 10,
+            successful: 8,
+            failed: 2,
+            total_processing_time_ms: 5000,
+        };
+
+        assert_eq!(stats.success_rate(), 80.0);
+        assert_eq!(stats.average_processing_time(), 500.0);
     }
 }

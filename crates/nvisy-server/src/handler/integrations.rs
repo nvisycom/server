@@ -11,35 +11,21 @@ use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewProjectIntegration, UpdateProjectIntegration};
 use nvisy_postgres::query::ProjectIntegrationRepository;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{
-    CreateProjectIntegration, UpdateIntegrationCredentials, UpdateIntegrationMetadata,
-    UpdateIntegrationStatus, UpdateProjectIntegration as UpdateProjectIntegrationRequest,
+    CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
+    UpdateIntegrationCredentials, UpdateIntegrationMetadata, UpdateIntegrationStatus,
+    UpdateProjectIntegration as UpdateProjectIntegrationRequest,
 };
 use crate::handler::response::{
     ProjectIntegration, ProjectIntegrationSummaries, ProjectIntegrationWithCredentials,
 };
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project integration operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_integration";
-
-/// Combined path parameters for integration-specific endpoints.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct IntegrationPathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-    /// Unique identifier of the integration.
-    pub integration_id: Uuid,
-}
 
 /// Creates a new project integration.
 #[tracing::instrument(skip_all)]
@@ -604,44 +590,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
 }
 
-#[cfg(test)]
-mod test {
-    use crate::handler::test::create_test_server;
-
-    #[tokio::test]
-    async fn test_create_integration_success() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-
-        // TODO: Add test implementation
-        // This would require creating a test project first and authenticating
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_list_integrations() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-
-        // TODO: Add test implementation
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_update_integration() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-
-        // TODO: Add test implementation
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_delete_integration() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-
-        // TODO: Add test implementation
-
-        Ok(())
-    }
-}

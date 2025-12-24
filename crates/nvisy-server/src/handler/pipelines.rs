@@ -7,38 +7,15 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
-use crate::handler::request::CreateProjectPipeline;
+use crate::handler::request::{CreateProjectPipeline, PipelinePathParams, ProjectPathParams};
 use crate::handler::response::{ProjectPipeline, ProjectPipelines};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project pipeline operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_pipelines";
-
-/// Path parameters for project operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathParams {
-    /// The unique identifier of the project.
-    pub project_id: Uuid,
-}
-
-/// Path parameters for project pipeline operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPipelinePathParams {
-    /// The unique identifier of the project.
-    pub project_id: Uuid,
-    /// The unique identifier of the pipeline.
-    pub pipeline_id: Uuid,
-}
 
 /// Lists all pipelines for a project.
 #[tracing::instrument(skip(pg_client))]
@@ -73,7 +50,7 @@ async fn list_project_pipelines(
 #[tracing::instrument(skip(pg_client))]
 async fn get_project_pipeline(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectPipelinePathParams>,
+    Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<ProjectPipeline>)> {
     // Authorize project access
@@ -114,7 +91,7 @@ async fn create_project_pipeline(
 #[tracing::instrument(skip(pg_client, _request))]
 async fn update_project_pipeline(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectPipelinePathParams>,
+    Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_claims): AuthState,
     Json(_request): Json<CreateProjectPipeline>,
 ) -> Result<(StatusCode, Json<ProjectPipeline>)> {
@@ -135,7 +112,7 @@ async fn update_project_pipeline(
 #[tracing::instrument(skip(pg_client))]
 async fn delete_project_pipeline(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectPipelinePathParams>,
+    Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     // Authorize project access
@@ -178,14 +155,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::handler::test::create_test_server;
-
-    #[tokio::test]
-    async fn test_project_pipelines_routes() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-        // TODO: Add actual tests once database schema is implemented
-        Ok(())
-    }
-}

@@ -4,8 +4,9 @@
 //! from nvisy-core to simplify imports in consuming code.
 
 pub use crate::emb::{
-    Context as EmbeddingContext, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse,
-    EmbeddingService, EncodingFormat,
+    ContentEmbeddingRequest, Context as EmbeddingContext, EmbeddingData, EmbeddingProvider,
+    EmbeddingResult, EmbeddingService, EncodingFormat, Request as EmbeddingRequest,
+    Response as EmbeddingResponse,
 };
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::ocr::{

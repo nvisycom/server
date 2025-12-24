@@ -27,6 +27,7 @@ pub mod project_member;
 pub mod project_pipelines;
 pub mod project_runs;
 pub mod project_templates;
+pub mod project_webhooks;
 
 pub use account::AccountRepository;
 pub use account_action_tokens::AccountActionTokenRepository;
@@ -42,6 +43,7 @@ pub use project_invite::ProjectInviteRepository;
 pub use project_member::ProjectMemberRepository;
 pub use project_pipelines::ProjectPipelineRepository;
 pub use project_templates::ProjectTemplateRepository;
+pub use project_webhooks::ProjectWebhookRepository;
 use serde::{Deserialize, Serialize};
 
 /// Pagination parameters for database queries.

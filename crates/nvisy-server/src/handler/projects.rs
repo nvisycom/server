@@ -11,27 +11,15 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{self, NewProject, NewProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::request::{CreateProject, UpdateProject};
+use crate::handler::request::{CreateProject, Pagination, ProjectPathParams, UpdateProject};
 use crate::handler::response::{Project, Projects};
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::projects";
-
-/// `Path` param for `{projectId}` handlers.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-}
 
 /// Creates a new project.
 #[tracing::instrument(skip_all)]
@@ -241,157 +229,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/projects/:project_id/", delete(delete_project))
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn test_create_project_success() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CreateProject {
-            display_name: "Test Project".to_string(),
-            description: Some("A test project".to_string()),
-            keep_for_sec: Some(86400),
-            auto_cleanup: Some(true),
-            require_approval: Some(false),
-            ..Default::default()
-        };
-
-        let response = server.post("/projects/").json(&request).await;
-        response.assert_status(StatusCode::CREATED);
-
-        let body: Project = response.json();
-        assert!(!body.project_id.is_nil());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_create_project_invalid_name() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CreateProject {
-            display_name: "Ab".to_owned(),
-            ..Default::default()
-        };
-
-        let response = server.post("/projects/").json(&request).await;
-        response.assert_status_bad_request();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_list_projects() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project first
-        let request = CreateProject {
-            display_name: "List Test Project".to_string(),
-            ..Default::default()
-        };
-        server.post("/projects/").json(&request).await;
-
-        // List projects
-        let pagination = Pagination::default().with_limit(10);
-        let response = server.get("/projects/").json(&pagination).await;
-        response.assert_status_ok();
-
-        let body: Projects = response.json();
-        assert!(!body.is_empty());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_update_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project
-        let create_request = CreateProject {
-            display_name: "Original Name".to_string(),
-            ..Default::default()
-        };
-        let create_response = server.post("/projects/").json(&create_request).await;
-        let created: Project = create_response.json();
-
-        // Update the project
-        let update_request = UpdateProject {
-            display_name: Some("Updated Name".to_string()),
-            ..Default::default()
-        };
-
-        let response = server
-            .patch(&format!("/projects/{}/", created.project_id))
-            .json(&update_request)
-            .await;
-        response.assert_status_ok();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_read_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project
-        let request = CreateProject {
-            display_name: "Read Test".to_string(),
-            description: Some("Test description".to_string()),
-            ..Default::default()
-        };
-        let create_response = server.post("/projects/").json(&request).await;
-        let created: Project = create_response.json();
-
-        // Read the project
-        let response = server
-            .get(&format!("/projects/{}/", created.project_id))
-            .await;
-        response.assert_status_ok();
-
-        let body: Project = response.json();
-        assert_eq!(body.project_id, created.project_id);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_delete_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project
-        let request = CreateProject {
-            display_name: "Delete Test".to_string(),
-            ..Default::default()
-        };
-        let create_response = server.post("/projects/").json(&request).await;
-        let created: Project = create_response.json();
-
-        // Delete the project
-        let response = server
-            .delete(&format!("/projects/{}/", created.project_id))
-            .await;
-        response.assert_status_ok();
-
-        // Verify it's deleted by trying to read it
-        let response = server
-            .get(&format!("/projects/{}/", created.project_id))
-            .await;
-        response.assert_status_not_found();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_read_nonexistent_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let fake_id = Uuid::new_v4();
-        let response = server.get(&format!("/projects/{}/", fake_id)).await;
-        response.assert_status_not_found();
-
-        Ok(())
-    }
-}

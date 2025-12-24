@@ -7,38 +7,15 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
-use crate::handler::request::CreateProjectTemplate;
+use crate::handler::request::{CreateProjectTemplate, ProjectPathParams, TemplatePathParams};
 use crate::handler::response::{ProjectTemplate, ProjectTemplates};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project template operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_templates";
-
-/// Path parameters for project operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathParams {
-    /// The unique identifier of the project.
-    pub project_id: Uuid,
-}
-
-/// Path parameters for project template operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectTemplatePathParams {
-    /// The unique identifier of the project.
-    pub project_id: Uuid,
-    /// The unique identifier of the template.
-    pub template_id: Uuid,
-}
 
 /// Lists all templates for a project.
 #[tracing::instrument(skip(pg_client))]
@@ -73,7 +50,7 @@ async fn list_project_templates(
 #[tracing::instrument(skip(pg_client))]
 async fn get_project_template(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectTemplatePathParams>,
+    Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<ProjectTemplate>)> {
     // Authorize project access
@@ -114,7 +91,7 @@ async fn create_project_template(
 #[tracing::instrument(skip(pg_client, _request))]
 async fn update_project_template(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectTemplatePathParams>,
+    Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_claims): AuthState,
     Json(_request): Json<CreateProjectTemplate>,
 ) -> Result<(StatusCode, Json<ProjectTemplate>)> {
@@ -135,7 +112,7 @@ async fn update_project_template(
 #[tracing::instrument(skip(pg_client))]
 async fn delete_project_template(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectTemplatePathParams>,
+    Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     // Authorize project access
@@ -178,14 +155,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::handler::test::create_test_server;
-
-    #[tokio::test]
-    async fn test_project_templates_routes() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-        // TODO: Add actual tests once database schema is implemented
-        Ok(())
-    }
-}

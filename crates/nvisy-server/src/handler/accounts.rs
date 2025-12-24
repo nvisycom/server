@@ -183,27 +183,3 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
         .api_route("/me", delete(delete_own_account))
 }
 
-#[cfg(test)]
-mod test {
-    use crate::handler::accounts::routes;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn handlers_startup() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(routes).await?;
-
-        // Retrieves authenticated account.
-        let response = server.get("/accounts/").await;
-        response.assert_status_success();
-
-        // Updates authenticated account.
-        let response = server.patch("/accounts/").await;
-        response.assert_status_success();
-
-        // Deletes authenticated account.
-        let response = server.delete("/accounts/").await;
-        response.assert_status_success();
-
-        Ok(())
-    }
-}

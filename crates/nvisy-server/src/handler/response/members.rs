@@ -3,8 +3,8 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::ProjectRole;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents a project member.

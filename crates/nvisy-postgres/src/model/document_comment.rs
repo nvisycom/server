@@ -8,18 +8,15 @@ use crate::schema::document_comments;
 use crate::types::constants::comment;
 use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
-/// Document comment model representing user discussions about documents, files, or versions.
+/// Document comment model representing user discussions on files.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = document_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DocumentComment {
     /// Unique comment identifier.
     pub id: Uuid,
-    /// Reference to the parent document (mutually exclusive with file/version).
-    pub document_id: Option<Uuid>,
-    /// Reference to the parent document file (mutually exclusive with document/version).
-    pub document_file_id: Option<Uuid>,
-
+    /// Reference to the parent file.
+    pub file_id: Uuid,
     /// Reference to the account that authored this comment.
     pub account_id: Uuid,
     /// Parent comment for threaded replies (NULL for top-level comments).
@@ -43,11 +40,8 @@ pub struct DocumentComment {
 #[diesel(table_name = document_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentComment {
-    /// Document ID (mutually exclusive with file/version).
-    pub document_id: Option<Uuid>,
-    /// Document file ID (mutually exclusive with document/version).
-    pub document_file_id: Option<Uuid>,
-
+    /// File ID.
+    pub file_id: Uuid,
     /// Account ID.
     pub account_id: Uuid,
     /// Parent comment ID for replies.
@@ -71,15 +65,6 @@ pub struct UpdateDocumentComment {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Enum representing the target type of a comment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommentTarget {
-    /// Comment is on a document.
-    Document,
-    /// Comment is on a document file.
-    File,
-}
-
 impl DocumentComment {
     /// Returns the comment content, or `None` if the comment is deleted.
     pub fn get_content(&self) -> Option<String> {
@@ -88,22 +73,6 @@ impl DocumentComment {
         } else {
             Some(self.content.clone())
         }
-    }
-
-    /// Returns the target type of this comment.
-    pub fn target_type(&self) -> CommentTarget {
-        if self.document_id.is_some() {
-            CommentTarget::Document
-        } else {
-            CommentTarget::File
-        }
-    }
-
-    /// Returns the target ID of this comment.
-    pub fn target_id(&self) -> Uuid {
-        self.document_id
-            .or(self.document_file_id)
-            .expect("Comment must have exactly one target")
     }
 
     /// Returns whether this is a top-level comment (not a reply).
@@ -128,36 +97,17 @@ impl DocumentComment {
 
     /// Returns whether this comment has been edited.
     pub fn is_edited(&self) -> bool {
-        let duration = jiff::Timestamp::from(self.updated_at) - jiff::Timestamp::from(self.created_at);
+        let duration =
+            jiff::Timestamp::from(self.updated_at) - jiff::Timestamp::from(self.created_at);
         duration.get_seconds() > comment::EDIT_GRACE_PERIOD_SECONDS
-    }
-
-    /// Returns whether this comment is on a document.
-    pub fn is_document_comment(&self) -> bool {
-        self.document_id.is_some()
-    }
-
-    /// Returns whether this comment is on a file.
-    pub fn is_file_comment(&self) -> bool {
-        self.document_file_id.is_some()
     }
 }
 
 impl NewDocumentComment {
-    /// Creates a new comment on a document.
-    pub fn for_document(document_id: Uuid, account_id: Uuid, content: String) -> Self {
+    /// Creates a new comment on a file.
+    pub fn for_file(file_id: Uuid, account_id: Uuid, content: String) -> Self {
         Self {
-            document_id: Some(document_id),
-            account_id,
-            content,
-            ..Default::default()
-        }
-    }
-
-    /// Creates a new comment on a document file.
-    pub fn for_file(document_file_id: Uuid, account_id: Uuid, content: String) -> Self {
-        Self {
-            document_file_id: Some(document_file_id),
+            file_id,
             account_id,
             content,
             ..Default::default()

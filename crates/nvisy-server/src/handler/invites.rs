@@ -13,30 +13,18 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewProjectInvite;
 use nvisy_postgres::query::{ProjectInviteRepository, ProjectMemberRepository};
 use nvisy_postgres::types::InviteStatus;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::{CreateInvite, ReplyInvite};
-use crate::handler::response::{Invite, Invites};
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::handler::request::{
+    CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, Pagination,
+    ProjectPathParams, ReplyInvite,
+};
+use crate::handler::response::{Invite, InviteCode, Invites, Member};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_invites";
-
-/// Combined path parameters for invite-specific endpoints.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InvitePathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-    /// Unique identifier of the invite.
-    pub invite_id: Uuid,
-}
 
 /// Creates a new project invitation.
 ///
@@ -319,6 +307,137 @@ async fn reply_to_invite(
     Ok((StatusCode::OK, Json(Invite::from(project_invite))))
 }
 
+/// Generates a shareable invite code for a project.
+///
+/// Creates an invite code that can be shared with anyone to join the project.
+/// The code can be used multiple times until it expires. Requires permission
+/// to invite members.
+#[tracing::instrument(skip_all)]
+async fn generate_invite_code(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_claims): AuthState,
+    Path(path_params): Path<ProjectPathParams>,
+    ValidateJson(request): ValidateJson<GenerateInviteCode>,
+) -> Result<(StatusCode, Json<InviteCode>)> {
+    tracing::info!(
+        target: TRACING_TARGET,
+        account_id = %auth_claims.account_id,
+        project_id = %path_params.project_id,
+        role = ?request.role,
+        "Generating invite code"
+    );
+
+    // Verify user has permission to invite members
+    auth_claims
+        .authorize_project(
+            &pg_client,
+            path_params.project_id,
+            Permission::InviteMembers,
+        )
+        .await?;
+
+    // Generate expiration time based on the expiration option
+    let expires_at = request.expires.to_expiry_timestamp();
+
+    let new_invite = NewProjectInvite {
+        project_id: path_params.project_id,
+        invitee_id: None,
+        invited_role: Some(request.role),
+        invite_message: None,
+        expires_at: expires_at.map(Into::into),
+        created_by: auth_claims.account_id,
+        updated_by: auth_claims.account_id,
+        ..Default::default()
+    };
+
+    let project_invite = pg_client.create_project_invite(new_invite).await?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        account_id = %auth_claims.account_id,
+        project_id = %path_params.project_id,
+        invite_code = %project_invite.invite_token,
+        "Invite code generated successfully"
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(InviteCode::from_invite(&project_invite)),
+    ))
+}
+
+/// Joins a project using an invite code.
+///
+/// Allows a user to join a project by providing a valid invite code in the URL.
+/// The user will be added as a member with the role specified when the
+/// invite code was generated.
+#[tracing::instrument(skip_all)]
+async fn join_via_invite_code(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_claims): AuthState,
+    Path(path_params): Path<InviteCodePathParams>,
+) -> Result<(StatusCode, Json<Member>)> {
+    tracing::info!(
+        target: TRACING_TARGET,
+        account_id = %auth_claims.account_id,
+        "Attempting to join project via invite code"
+    );
+
+    // Find the invitation by token
+    let Some(invite) = pg_client
+        .find_invite_by_token(&path_params.invite_code)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_resource("invite_code")
+            .with_message("Invalid invite code")
+            .with_context("The invite code does not exist or has been revoked"));
+    };
+
+    // Check if invite is still valid
+    if !invite.can_be_used() {
+        return Err(ErrorKind::BadRequest
+            .with_message("This invite code has expired or is no longer valid")
+            .with_resource("invite_code")
+            .with_context(format!(
+                "Status: {:?}, Expires at: {}",
+                invite.invite_status,
+                invite.expires_at.to_jiff()
+            )));
+    }
+
+    // Check if user is already a member
+    if let Some(existing_member) = pg_client
+        .find_project_member(invite.project_id, auth_claims.account_id)
+        .await?
+        && existing_member.is_active
+    {
+        return Err(ErrorKind::Conflict
+            .with_message("You are already a member of this project")
+            .with_resource("project_member"));
+    }
+
+    // Add user as a project member
+    let new_member = nvisy_postgres::model::NewProjectMember {
+        project_id: invite.project_id,
+        account_id: auth_claims.account_id,
+        member_role: invite.invited_role,
+        ..Default::default()
+    };
+
+    let project_member = pg_client.add_project_member(new_member).await?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        account_id = %auth_claims.account_id,
+        project_id = %invite.project_id,
+        role = ?invite.invited_role,
+        "User joined project via invite code"
+    );
+
+    Ok((StatusCode::CREATED, Json(Member::from(project_member))))
+}
+
 /// Sanitizes user input by removing potentially dangerous characters.
 ///
 /// This is a defense-in-depth measure in addition to validation.
@@ -345,42 +464,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/:project_id/invites/:invite_id/reply/",
             patch(reply_to_invite),
         )
+        .api_route(
+            "/projects/:project_id/invites/code/",
+            post(generate_invite_code),
+        )
+        .api_route("/invites/:invite_code/join/", post(join_via_invite_code))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn project_invite_routes_integration() -> anyhow::Result<()> {
-        let _server = create_test_server_with_router(|_| routes()).await?;
-
-        // TODO: Add comprehensive integration tests for:
-        // - Creating invitations with proper validation
-        // - Listing invitations with pagination and filtering
-        // - Accepting/declining invitations
-        // - Cancelling invitations with proper authorization
-        // - Error scenarios and edge cases
-        // - Email validation and business logic
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_create_invite_validation() {
-        // TODO: Add tests using ValidateJson extractor
-        // - Test valid requests pass validation
-        // - Test invalid emails are rejected
-        // - Test message length limits
-        // - Test expiry day ranges
-    }
-
-    #[test]
-    fn test_response_conversions() {
-        // TODO: Add unit tests for response model conversions
-        // - Test From<ProjectInvite> implementations
-        // - Verify all fields are properly mapped
-        // - Check serialization behavior
-    }
-}

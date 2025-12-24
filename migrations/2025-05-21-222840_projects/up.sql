@@ -518,6 +518,103 @@ COMMENT ON COLUMN project_integrations.created_by IS 'Account that created the i
 COMMENT ON COLUMN project_integrations.created_at IS 'Timestamp when integration was created';
 COMMENT ON COLUMN project_integrations.updated_at IS 'Timestamp when integration was last modified';
 
+-- PROJECT_WEBHOOKS TABLE
+
+-- Webhook status enum
+CREATE TYPE WEBHOOK_STATUS AS ENUM (
+    'active',       -- Webhook is active and will receive events
+    'paused',       -- Webhook is temporarily paused
+    'disabled'      -- Webhook is disabled (e.g., too many failures)
+);
+
+COMMENT ON TYPE WEBHOOK_STATUS IS
+    'Defines the operational status of project webhooks.';
+
+-- Project webhooks table definition
+CREATE TABLE project_webhooks (
+    -- Primary identifier
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Reference
+    project_id       UUID             NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+
+    -- Webhook details
+    display_name     TEXT             NOT NULL,
+    description      TEXT             NOT NULL DEFAULT '',
+    url              TEXT             NOT NULL,
+    secret           TEXT             DEFAULT NULL,
+
+    CONSTRAINT project_webhooks_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 128),
+    CONSTRAINT project_webhooks_description_length CHECK (length(description) <= 500),
+    CONSTRAINT project_webhooks_url_length CHECK (length(url) BETWEEN 10 AND 2048),
+    CONSTRAINT project_webhooks_url_format CHECK (url ~ '^https?://'),
+    CONSTRAINT project_webhooks_secret_length CHECK (secret IS NULL OR length(secret) BETWEEN 16 AND 256),
+
+    -- Event configuration
+    events           TEXT[]           NOT NULL DEFAULT '{}',
+    headers          JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT project_webhooks_events_not_empty CHECK (array_length(events, 1) > 0),
+    CONSTRAINT project_webhooks_headers_size CHECK (length(headers::TEXT) BETWEEN 2 AND 4096),
+
+    -- Webhook status
+    status           WEBHOOK_STATUS   NOT NULL DEFAULT 'active',
+    failure_count    INT              NOT NULL DEFAULT 0,
+    max_failures     INT              NOT NULL DEFAULT 10,
+    last_triggered_at TIMESTAMPTZ     DEFAULT NULL,
+    last_success_at  TIMESTAMPTZ      DEFAULT NULL,
+    last_failure_at  TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT project_webhooks_failure_count_positive CHECK (failure_count >= 0),
+    CONSTRAINT project_webhooks_max_failures_positive CHECK (max_failures > 0),
+
+    -- Audit tracking
+    created_by       UUID             NOT NULL REFERENCES accounts (id),
+
+    -- Lifecycle timestamps
+    created_at       TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    updated_at       TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    deleted_at       TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT project_webhooks_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT project_webhooks_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
+);
+
+-- Triggers for project_webhooks table
+SELECT setup_updated_at('project_webhooks');
+
+-- Indexes for project_webhooks table
+CREATE INDEX project_webhooks_project_status_idx
+    ON project_webhooks (project_id, status)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX project_webhooks_status_failures_idx
+    ON project_webhooks (status, failure_count)
+    WHERE deleted_at IS NULL AND status = 'active';
+
+-- Comments for project_webhooks table
+COMMENT ON TABLE project_webhooks IS
+    'Webhook configurations for projects to receive event notifications.';
+
+COMMENT ON COLUMN project_webhooks.id IS 'Unique webhook identifier';
+COMMENT ON COLUMN project_webhooks.project_id IS 'Reference to the project';
+COMMENT ON COLUMN project_webhooks.display_name IS 'Human-readable webhook name (1-128 chars)';
+COMMENT ON COLUMN project_webhooks.description IS 'Webhook description (up to 500 chars)';
+COMMENT ON COLUMN project_webhooks.url IS 'Webhook endpoint URL (must be HTTP/HTTPS)';
+COMMENT ON COLUMN project_webhooks.secret IS 'Shared secret for webhook signature verification';
+COMMENT ON COLUMN project_webhooks.events IS 'Array of event types this webhook subscribes to';
+COMMENT ON COLUMN project_webhooks.headers IS 'Custom headers to include in webhook requests';
+COMMENT ON COLUMN project_webhooks.status IS 'Current webhook status (active, paused, disabled)';
+COMMENT ON COLUMN project_webhooks.failure_count IS 'Consecutive failure count';
+COMMENT ON COLUMN project_webhooks.max_failures IS 'Maximum failures before auto-disable';
+COMMENT ON COLUMN project_webhooks.last_triggered_at IS 'Timestamp of last webhook trigger';
+COMMENT ON COLUMN project_webhooks.last_success_at IS 'Timestamp of last successful delivery';
+COMMENT ON COLUMN project_webhooks.last_failure_at IS 'Timestamp of last failed delivery';
+COMMENT ON COLUMN project_webhooks.created_by IS 'Account that created the webhook';
+COMMENT ON COLUMN project_webhooks.created_at IS 'Timestamp when webhook was created';
+COMMENT ON COLUMN project_webhooks.updated_at IS 'Timestamp when webhook was last modified';
+COMMENT ON COLUMN project_webhooks.deleted_at IS 'Soft deletion timestamp';
+
 -- PROJECT_PIPELINES TABLE
 
 -- Project pipelines table definition

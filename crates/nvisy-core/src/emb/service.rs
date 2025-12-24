@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{
-    BoxedEmbeddingProvider, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, Result,
-};
+use super::{BoxedEmbeddingProvider, EmbeddingProvider, Request, Response, Result};
 use crate::types::ServiceHealth;
 
 /// Embedding service wrapper with observability.
@@ -53,11 +51,10 @@ where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + 'static,
 {
-    async fn generate_embedding(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
+    async fn generate_embedding(&self, request: Request<Req>) -> Result<Response<Resp>> {
         tracing::debug!(
             target: super::TRACING_TARGET,
-            input_count = request.inputs.len(),
-            model = %request.model,
+            request_id = %request.request_id,
             "Processing embedding request"
         );
 
@@ -69,7 +66,7 @@ where
             Ok(response) => {
                 tracing::debug!(
                     target: super::TRACING_TARGET,
-                    embedding_count = response.embedding_count(),
+                    response_id = %response.response_id,
                     elapsed = ?start.elapsed(),
                     "Embedding generation successful"
                 );

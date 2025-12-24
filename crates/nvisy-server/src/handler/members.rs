@@ -13,30 +13,15 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::model::UpdateProjectMember;
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::{ProjectRole, ProjectVisibility};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Path, Permission, ValidateJson};
-use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::UpdateMemberRole;
+use crate::handler::request::{MemberPathParams, Pagination, ProjectPathParams, UpdateMemberRole};
 use crate::handler::response::{Member, Members};
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::project_members";
-
-/// Combined path parameters for member-specific endpoints.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MemberPathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-    /// Unique identifier of the member account.
-    pub account_id: Uuid,
-}
 
 /// Lists all members of a project.
 ///
@@ -371,38 +356,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn project_member_routes_integration() -> anyhow::Result<()> {
-        let _server = create_test_server_with_router(|_| routes()).await?;
-
-        // TODO: Add comprehensive integration tests for:
-        // - Listing members with different permission levels
-        // - Getting member details with proper authorization
-        // - Removing members with various edge cases
-        // - Error scenarios and permission validation
-        // - Pagination behavior for large member lists
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn member_response_conversions() {
-        // TODO: Add unit tests for response model conversions
-        // - Test From<ProjectMember> implementations
-        // - Verify all fields are properly mapped
-        // - Check serialization behavior
-    }
-
-    #[tokio::test]
-    async fn member_validation_logic() {
-        // TODO: Add tests for business logic validation
-        // - Self-removal prevention
-        // - Permission level checks
-        // - Member existence validation
-    }
-}

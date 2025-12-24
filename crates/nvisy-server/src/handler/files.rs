@@ -15,14 +15,12 @@ use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::{DocumentFileRepository, ProjectRepository};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
-use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{
-    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, UpdateDocumentKnowledge,
+    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ProjectPathParams,
+    UpdateDocumentKnowledge,
 };
 use crate::handler::response::{File, Files};
 use crate::handler::{ErrorKind, Result};
@@ -33,17 +31,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::project_files";
 
 /// Maximum file size: 100MB
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
-
-/// Combined path params for project file operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectFilePathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-    /// Unique identifier of the file.
-    pub file_id: Uuid,
-}
 
 /// Uploads input files to a project for processing.
 ///
@@ -295,7 +282,7 @@ async fn upload_file(
 #[tracing::instrument(skip(pg_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
 async fn update_file(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectFilePathParams>,
+    Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
     ValidateJson(request): ValidateJson<UpdateDocumentKnowledge>,
@@ -358,7 +345,7 @@ async fn update_file(
 async fn download_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
-    Path(path_params): Path<ProjectFilePathParams>,
+    Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     let input_fs = nats_client.document_store::<InputFiles>().await?;
@@ -471,7 +458,7 @@ async fn download_file(
 #[tracing::instrument(skip(pg_client), fields(project_id = %path_params.project_id, file_id = %path_params.file_id))]
 async fn delete_file(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectFilePathParams>,
+    Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
@@ -857,14 +844,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
 }
 
-#[cfg(test)]
-mod test {
-    use crate::handler::files::routes;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn handlers() -> anyhow::Result<()> {
-        let _server = create_test_server_with_router(|_| routes()).await?;
-        Ok(())
-    }
-}

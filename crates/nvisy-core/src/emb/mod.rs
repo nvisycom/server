@@ -1,29 +1,29 @@
 //! Embeddings service abstractions.
 //!
-//! This module provides foundational abstractions for embedding services in the Nvisy ecosystem.
-//! It defines core traits and types for text and multimodal embedding operations without depending
-//! on any concrete implementations.
+//! This module provides traits and types for generating embeddings from text,
+//! documents, and other content. It supports various embedding operations including
+//! text embedding, multimodal embedding, and batch processing.
 
 pub mod context;
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use context::Context;
-pub use request::{EmbeddingRequest, EncodingFormat};
-pub use response::{EmbeddingData, EmbeddingResponse, EmbeddingUsage};
+pub use context::{Context, ProcessingOptions};
+pub use request::{ContentEmbeddingRequest, EncodingFormat, Request, RequestOptions};
+pub use response::{BatchResponse, BatchStats, EmbeddingData, EmbeddingResult, Response};
 pub use service::EmbeddingService;
 
 use crate::types::ServiceHealth;
 pub use crate::{Error, ErrorKind, Result};
 
-/// Type alias for a boxed embedding service with specific request and response types.
+/// Type alias for a boxed embedding provider with specific request and response types.
 pub type BoxedEmbeddingProvider<Req, Resp> = Box<dyn EmbeddingProvider<Req, Resp> + Send + Sync>;
 
 /// Tracing target for embedding operations.
 pub const TRACING_TARGET: &str = "nvisy_core::emb";
 
-/// Core trait for embedding service operations.
+/// Core trait for embedding operations.
 ///
 /// This trait is generic over request (`Req`) and response (`Resp`) types,
 /// allowing implementations to define their own specific data structures
@@ -35,27 +35,21 @@ pub const TRACING_TARGET: &str = "nvisy_core::emb";
 /// * `Resp` - The response payload type specific to the embedding implementation
 #[async_trait::async_trait]
 pub trait EmbeddingProvider<Req, Resp>: Send + Sync {
-    /// Generates embeddings for the provided input.
+    /// Generate embeddings for the provided input.
     ///
-    /// This method takes an [`EmbeddingRequest`] containing the input text/images
-    /// and model configuration, and returns an [`EmbeddingResponse`] with the
-    /// generated embeddings.
+    /// This method takes ownership of the request to allow efficient processing
+    /// without unnecessary cloning.
     ///
     /// # Parameters
     ///
-    /// - `request`: The embedding request containing input and configuration
+    /// * `request` - Embedding request containing the input and processing options
     ///
     /// # Returns
     ///
-    /// A [`Result`] containing the embedding response on success, or an error
-    /// if the operation failed. The response includes the embeddings, usage
-    /// information, and metadata.
-    async fn generate_embedding(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse>;
+    /// Returns a `Response<Resp>` containing the generated embeddings and metadata.
+    async fn generate_embedding(&self, request: Request<Req>) -> Result<Response<Resp>>;
 
-    /// Performs a health check on the embedding service.
-    ///
-    /// This method verifies that the service is reachable and properly configured.
-    /// It's typically used for monitoring and diagnostics purposes.
+    /// Perform a health check on the embedding service.
     ///
     /// # Returns
     ///

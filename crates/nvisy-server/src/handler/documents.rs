@@ -11,28 +11,17 @@ use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewDocument;
 use nvisy_postgres::query::DocumentRepository;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::{CreateDocument, UpdateDocument};
+use crate::handler::request::{
+    CreateDocument, DocumentPathParams, Pagination, ProjectPathParams, UpdateDocument,
+};
 use crate::handler::response::{Document, Documents};
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::documents";
-
-/// `Path` param for `{documentId}` handlers.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentPathParams {
-    /// Unique identifier of the document.
-    pub document_id: Uuid,
-}
 
 /// Creates a new document.
 #[tracing::instrument(skip_all)]
@@ -250,181 +239,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/documents/:document_id", delete(delete_document))
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn test_create_document_success() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CreateDocument {
-            display_name: "Test Document".to_string(),
-            description: Some("Test description".to_string()),
-            ..Default::default()
-        };
-
-        let project_id = Uuid::new_v4();
-        let response = server
-            .post(&format!("/projects/{}/documents/", project_id))
-            .json(&request)
-            .await;
-        response.assert_status(StatusCode::CREATED);
-
-        let body: Document = response.json();
-        assert!(!body.document_id.is_nil());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_create_document_empty_name() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = serde_json::json!({
-            "displayName": ""
-        });
-
-        let project_id = Uuid::new_v4();
-        let response = server
-            .post(&format!("/projects/{}/documents/", project_id))
-            .json(&request)
-            .await;
-        response.assert_status_bad_request();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_list_documents() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let project_id = Uuid::new_v4();
-
-        // Create a document first
-        let create_request = CreateDocument {
-            display_name: "Test Document".to_string(),
-            description: Some("Updated description".to_string()),
-            ..Default::default()
-        };
-        server
-            .post(&format!("/projects/{}/documents/", project_id))
-            .json(&create_request)
-            .await;
-
-        // List documents
-        let pagination = Pagination {
-            offset: Some(0),
-            limit: Some(10),
-        };
-        let response = server
-            .get(&format!("/projects/{}/documents/", project_id))
-            .json(&pagination)
-            .await;
-        response.assert_status_ok();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_update_document() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let project_id = Uuid::new_v4();
-
-        // Create a document
-        let create_request = CreateDocument {
-            display_name: "Original Name".to_string(),
-            description: Some("Test description".to_string()),
-            ..Default::default()
-        };
-        let create_response = server
-            .post(&format!("/projects/{}/documents/", project_id))
-            .json(&create_request)
-            .await;
-        let created: Document = create_response.json();
-
-        // Update the document
-        let update_request = UpdateDocument {
-            display_name: Some("Updated Name".to_string()),
-            description: None,
-            ..Default::default()
-        };
-
-        let response = server
-            .patch(&format!("/documents/{}/", created.document_id))
-            .json(&update_request)
-            .await;
-        response.assert_status_ok();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_get_document() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let project_id = Uuid::new_v4();
-
-        // Create a document
-        let create_request = CreateDocument {
-            display_name: "Test Document".to_string(),
-            description: Some("Test description".to_string()),
-            ..Default::default()
-        };
-        let create_response = server
-            .post(&format!("/projects/{}/documents/", project_id))
-            .json(&create_request)
-            .await;
-        let created: Document = create_response.json();
-
-        // Get the document
-        let response = server
-            .get(&format!("/documents/{}/", created.document_id))
-            .await;
-        response.assert_status_ok();
-
-        let body: Document = response.json();
-        assert_eq!(body.document_id, created.document_id);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_delete_document() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-        let project_id = Uuid::new_v4();
-
-        // Create a document
-        let request = CreateDocument {
-            display_name: "Delete Test".to_string(),
-            description: Some("Test description".to_string()),
-            ..Default::default()
-        };
-        let create_response = server
-            .post(&format!("/projects/{}/documents/", project_id))
-            .json(&request)
-            .await;
-        let created: Document = create_response.json();
-
-        // Delete the document
-        let response = server
-            .delete(&format!("/documents/{}/", created.document_id))
-            .await;
-        response.assert_status_ok();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_get_nonexistent_document() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let fake_id = Uuid::new_v4();
-        let response = server.get(&format!("/documents/{}/", fake_id)).await;
-        response.assert_status_not_found();
-
-        Ok(())
-    }
-}

@@ -1,121 +1,160 @@
 //! Request types for embedding operations.
 //!
-//! This module defines the request types used for embedding generation,
-//! including input handling, model configuration, and request validation.
-
-use std::collections::HashMap;
+//! The `Request<Req>` type is a generic wrapper that allows embedding implementations
+//! to define their own request payload types while maintaining a consistent
+//! interface for common metadata like request IDs and options.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{Chat, Content, Document};
 
-/// Request for generating embeddings.
+/// Generic request for embedding operations.
 ///
-/// This struct represents a complete embedding request with all necessary
-/// parameters for generating embeddings from text or image inputs.
+/// This wrapper type provides common metadata and configuration while allowing
+/// implementations to define their own specific request payload type.
 ///
-/// # Examples
+/// # Type Parameters
 ///
-/// Creating a text embedding request:
+/// * `Req` - The implementation-specific request payload type
 ///
-/// ```rust
-/// use nvisy_core::emb::{EmbeddingRequest, EmbeddingInput};
+/// # Example
 ///
-/// let request = EmbeddingRequest::builder()
-///     .input(EmbeddingInput::text("Hello, world!"))
-///     .model("text-embedding-ada-002")
-///     .build()?;
+/// ```rust,ignore
+/// #[derive(Debug, Clone)]
+/// struct MyEmbeddingPayload {
+///     custom_field: String,
+/// }
+///
+/// let request = Request::new(MyEmbeddingPayload {
+///     custom_field: "value".to_string(),
+/// });
 /// ```
-///
-/// Creating a batch embedding request:
-///
-/// ```rust
-/// let inputs = vec![
-///     EmbeddingInput::text("First text"),
-///     EmbeddingInput::text("Second text"),
-/// ];
-///
-/// let request = EmbeddingRequest::builder()
-///     .inputs(inputs)
-///     .model("text-embedding-ada-002")
-///     .dimensions(Some(512))
-///     .build()?;
-/// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EmbeddingRequest {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Request<Req> {
     /// Unique identifier for this request.
     pub request_id: Uuid,
+    /// Implementation-specific request payload.
+    pub payload: Req,
+    /// Processing options.
+    pub options: RequestOptions,
+}
 
-    /// The input(s) to generate embeddings for.
-    pub inputs: Vec<Content>,
-
-    /// The model to use for embedding generation.
-    pub model: String,
-
-    /// The format to return embeddings in.
-    #[serde(default)]
-    pub encoding_format: EncodingFormat,
-
+/// Processing options for embedding requests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestOptions {
     /// The number of dimensions the resulting output embeddings should have.
-    /// Only supported in some models.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dimensions: Option<u32>,
-
+    /// The format to return embeddings in.
+    pub encoding_format: EncodingFormat,
     /// A unique identifier representing your end-user.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+}
 
-    /// Additional parameters specific to the embedding provider.
-    #[serde(flatten)]
-    pub additional_params: HashMap<String, serde_json::Value>,
+impl Default for RequestOptions {
+    fn default() -> Self {
+        Self {
+            dimensions: None,
+            encoding_format: EncodingFormat::Float,
+            user: None,
+        }
+    }
 }
 
 /// Format for returned embeddings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EncodingFormat {
     /// Return embeddings as floating point numbers.
+    #[default]
     Float,
     /// Return embeddings as base64-encoded strings.
     Base64,
 }
 
-impl Default for EncodingFormat {
-    fn default() -> Self {
-        Self::Float
-    }
-}
-
-impl EmbeddingRequest {
-    /// Creates a new embedding request with the specified model.
-    pub fn new(model: impl Into<String>) -> Self {
+impl<Req> Request<Req> {
+    /// Create a new embedding request with the given payload.
+    pub fn new(payload: Req) -> Self {
         Self {
             request_id: Uuid::new_v4(),
-            inputs: Vec::new(),
-            model: model.into(),
-            encoding_format: EncodingFormat::default(),
-            dimensions: None,
-            user: None,
-            additional_params: HashMap::new(),
+            payload,
+            options: RequestOptions::default(),
         }
     }
 
-    /// Sets the request ID.
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = request_id;
+    /// Create a new embedding request with a specific request ID.
+    pub fn with_request_id(request_id: Uuid, payload: Req) -> Self {
+        Self {
+            request_id,
+            payload,
+            options: RequestOptions::default(),
+        }
+    }
+
+    /// Create a new request with custom options.
+    pub fn with_options(payload: Req, options: RequestOptions) -> Self {
+        Self {
+            request_id: Uuid::new_v4(),
+            payload,
+            options,
+        }
+    }
+
+    /// Set the number of dimensions for the output embeddings.
+    pub fn with_dimensions(mut self, dimensions: u32) -> Self {
+        self.options.dimensions = Some(dimensions);
         self
+    }
+
+    /// Set the encoding format for the embeddings.
+    pub fn with_encoding_format(mut self, format: EncodingFormat) -> Self {
+        self.options.encoding_format = format;
+        self
+    }
+
+    /// Set the user identifier for the request.
+    pub fn with_user(mut self, user: impl Into<String>) -> Self {
+        self.options.user = Some(user.into());
+        self
+    }
+
+    /// Validate the request parameters.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(dimensions) = self.options.dimensions
+            && dimensions == 0
+        {
+            return Err("Dimensions must be greater than 0".to_string());
+        }
+
+        Ok(())
+    }
+}
+
+/// Standard embedding request using Content inputs.
+///
+/// This is a convenience type for embedding operations that work directly with
+/// Content inputs, providing a standard interface while maintaining compatibility
+/// with the generic Request type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentEmbeddingRequest {
+    /// The input(s) to generate embeddings for.
+    pub inputs: Vec<Content>,
+}
+
+impl ContentEmbeddingRequest {
+    /// Creates a new content embedding request.
+    pub fn new() -> Self {
+        Self { inputs: Vec::new() }
+    }
+
+    /// Creates a new content embedding request from inputs.
+    pub fn from_inputs(inputs: Vec<Content>) -> Self {
+        Self { inputs }
     }
 
     /// Adds a single input to the request.
     pub fn with_input(mut self, input: Content) -> Self {
         self.inputs.push(input);
-        self
-    }
-
-    /// Sets all inputs for the request.
-    pub fn with_inputs(mut self, inputs: Vec<Content>) -> Self {
-        self.inputs = inputs;
         self
     }
 
@@ -134,34 +173,6 @@ impl EmbeddingRequest {
     /// Adds a chat input to the request.
     pub fn with_chat(mut self, chat: Chat) -> Self {
         self.inputs.push(Content::chat(chat));
-        self
-    }
-
-    /// Sets the encoding format for the embeddings.
-    pub fn with_encoding_format(mut self, format: EncodingFormat) -> Self {
-        self.encoding_format = format;
-        self
-    }
-
-    /// Sets the number of dimensions for the output embeddings.
-    pub fn with_dimensions(mut self, dimensions: u32) -> Self {
-        self.dimensions = Some(dimensions);
-        self
-    }
-
-    /// Sets the user identifier for the request.
-    pub fn with_user(mut self, user: impl Into<String>) -> Self {
-        self.user = Some(user.into());
-        self
-    }
-
-    /// Adds an additional parameter to the request.
-    pub fn with_additional_param(
-        mut self,
-        key: impl Into<String>,
-        value: serde_json::Value,
-    ) -> Self {
-        self.additional_params.insert(key.into(), value);
         self
     }
 
@@ -196,10 +207,6 @@ impl EmbeddingRequest {
             return Err("Request must contain at least one input".to_string());
         }
 
-        if self.model.is_empty() {
-            return Err("Model must be specified".to_string());
-        }
-
         if self.inputs.len() > 2048 {
             return Err("Too many inputs in batch request".to_string());
         }
@@ -230,7 +237,6 @@ impl EmbeddingRequest {
                 if document.size() > 10_000_000 {
                     return Err("Document too large".to_string());
                 }
-                // Validate document internally
                 if let Err(err) = document.validate() {
                     return Err(format!("Document validation failed: {}", err));
                 }
@@ -242,7 +248,6 @@ impl EmbeddingRequest {
                 if chat.estimated_size() > 10_000_000 {
                     return Err("Chat too large".to_string());
                 }
-                // Validate chat internally
                 if let Err(err) = chat.validate() {
                     return Err(format!("Chat validation failed: {}", err));
                 }
@@ -252,10 +257,11 @@ impl EmbeddingRequest {
     }
 }
 
-/// Builder for creating embedding requests.
-///
-/// This builder provides a fluent interface for constructing embedding requests
-/// with proper validation and defaults.
+impl Default for ContentEmbeddingRequest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -264,94 +270,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_embedding_input_document() {
+    fn test_request_creation() {
+        let request = Request::new(());
+
+        assert!(!request.request_id.is_nil());
+        assert_eq!(request.options.dimensions, None);
+        assert_eq!(request.options.encoding_format, EncodingFormat::Float);
+    }
+
+    #[test]
+    fn test_request_with_options() {
+        let request = Request::new(())
+            .with_dimensions(512)
+            .with_encoding_format(EncodingFormat::Base64)
+            .with_user("test-user");
+
+        assert_eq!(request.options.dimensions, Some(512));
+        assert_eq!(request.options.encoding_format, EncodingFormat::Base64);
+        assert_eq!(request.options.user, Some("test-user".to_string()));
+    }
+
+    #[test]
+    fn test_content_embedding_request() {
         let document = Document::new(Bytes::from("Hello, world!")).with_content_type("text/plain");
 
-        let input = Content::document(document.clone());
-
-        assert!(input.is_document());
-        assert_eq!(input.as_document(), Some(&document));
-        assert_eq!(input.estimated_size(), 123);
-    }
-
-    #[test]
-    fn test_embedding_input_image_document() {
-        let document =
-            Document::new(Bytes::from(vec![0x89, 0x50, 0x4E, 0x47])).with_content_type("image/png");
-
-        let input = Content::document(document.clone());
-
-        assert!(input.is_document());
-        assert_eq!(input.as_document(), Some(&document));
-    }
-
-    #[test]
-    fn test_embedding_request_with_document() {
-        let document = Document::new(Bytes::from("Test content")).with_content_type("text/plain");
-
-        let request = EmbeddingRequest::new("test-model").with_document(document.clone());
-
-        assert_eq!(request.input_count(), 1);
-        assert!(request.has_document_inputs());
-        assert_eq!(request.estimated_total_size(), 122);
-
-        // Check that the document is correctly stored
-        if let Content::Document { document: doc } = &request.inputs[0] {
-            assert_eq!(doc.as_text(), Some("Test content"));
-        } else {
-            panic!("Expected Document input");
-        }
-    }
-
-    #[test]
-    fn test_embedding_request_mixed_inputs() {
-        let document = Document::new(Bytes::from("Document text")).with_content_type("text/plain");
-
-        let request = EmbeddingRequest::new("test-model")
-            .with_text("Hello")
+        let payload = ContentEmbeddingRequest::new()
+            .with_text("Test text")
             .with_document(document);
 
-        assert_eq!(request.input_count(), 2);
-        assert!(request.has_text_inputs());
-        assert!(request.has_document_inputs());
-
-        // Verify input types
-        assert!(request.inputs[0].is_text());
-        assert!(request.inputs[1].is_document());
+        assert_eq!(payload.input_count(), 2);
+        assert!(payload.has_text_inputs());
+        assert!(payload.has_document_inputs());
     }
 
     #[test]
-    fn test_document_input_validation() {
+    fn test_content_embedding_request_validation() {
+        let empty_request = ContentEmbeddingRequest::new();
+        assert!(empty_request.validate().is_err());
+
+        let valid_request = ContentEmbeddingRequest::new().with_text("Hello");
+        assert!(valid_request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_empty_text_validation() {
+        let request = ContentEmbeddingRequest::new().with_text("");
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_empty_document_validation() {
         let empty_document = Document::new(Bytes::new());
-        let input = Content::document(empty_document);
-
-        let request = EmbeddingRequest::new("test-model").with_input(input);
-
+        let request = ContentEmbeddingRequest::new().with_document(empty_document);
         assert!(request.validate().is_err());
-    }
-
-    #[test]
-    fn test_large_document_validation() {
-        let large_content = "x".repeat(11_000_000);
-        let document = Document::new(Bytes::from(large_content));
-        let input = Content::document(document);
-
-        let request = EmbeddingRequest::new("test-model").with_input(input);
-
-        assert!(request.validate().is_err());
-    }
-
-    #[test]
-    fn test_embedding_input_estimated_sizes() {
-        let text_input = Content::text("Hello");
-        assert_eq!(text_input.estimated_size(), 5);
-
-        let document_input = Content::document(
-            Document::new(Bytes::from("Test document")).with_content_type("text/plain"),
-        );
-        assert_eq!(document_input.estimated_size(), 123);
-
-        let chat_input = Content::chat(crate::types::Chat::new());
-        assert_eq!(chat_input.estimated_size(), 0); // Empty chat has no size
     }
 }

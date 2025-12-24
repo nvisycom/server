@@ -41,3 +41,51 @@ pub struct ReplyInvite {
     #[validate(length(max = 300))]
     pub message: Option<String>,
 }
+
+/// Expiration options for invite codes.
+#[must_use]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum InviteExpiration {
+    /// Invite code never expires.
+    Never,
+    /// Expires in 24 hours.
+    In24Hours,
+    /// Expires in 7 days.
+    #[default]
+    In7Days,
+    /// Expires in 30 days.
+    In30Days,
+}
+
+impl InviteExpiration {
+    /// Returns the duration until expiration, or None if never expires.
+    pub fn to_span(self) -> Option<jiff::Span> {
+        match self {
+            Self::Never => None,
+            Self::In24Hours => Some(jiff::Span::new().hours(24)),
+            Self::In7Days => Some(jiff::Span::new().days(7)),
+            Self::In30Days => Some(jiff::Span::new().days(30)),
+        }
+    }
+
+    /// Returns the expiry timestamp from now, or None if never expires.
+    pub fn to_expiry_timestamp(self) -> Option<jiff::Timestamp> {
+        self.to_span().map(|span| jiff::Timestamp::now() + span)
+    }
+}
+
+/// Request to generate a shareable invite code for a project.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateInviteCode {
+    /// Role to assign when someone joins via this invite code.
+    #[serde(default)]
+    pub role: ProjectRole,
+
+    /// When the invite code expires.
+    #[serde(default)]
+    pub expires: InviteExpiration,
+}

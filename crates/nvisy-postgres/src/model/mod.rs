@@ -20,6 +20,7 @@ pub mod project_member;
 pub mod project_pipeline;
 pub mod project_run;
 pub mod project_template;
+pub mod project_webhook;
 
 // Re-export core PostgreSQL model types
 
@@ -37,9 +38,7 @@ pub use document::{Document, NewDocument, UpdateDocument};
 pub use document_annotation::{
     DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation,
 };
-pub use document_comment::{
-    CommentTarget, DocumentComment, NewDocumentComment, UpdateDocumentComment,
-};
+pub use document_comment::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
 pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 // Project models
 pub use project::{NewProject, Project, UpdateProject};
@@ -52,3 +51,4 @@ pub use project_member::{NewProjectMember, ProjectMember, UpdateProjectMember};
 pub use project_pipeline::{NewProjectPipeline, ProjectPipeline, UpdateProjectPipeline};
 pub use project_run::{NewProjectRun, ProjectRun, UpdateProjectRun};
 pub use project_template::{NewProjectTemplate, ProjectTemplate, UpdateProjectTemplate};
+pub use project_webhook::{NewProjectWebhook, ProjectWebhook, UpdateProjectWebhook};
