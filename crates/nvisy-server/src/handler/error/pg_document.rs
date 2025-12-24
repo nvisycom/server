@@ -152,11 +152,23 @@ impl From<DocumentCommentConstraints> for Error<'static> {
 
 impl From<DocumentAnnotationConstraints> for Error<'static> {
     fn from(c: DocumentAnnotationConstraints) -> Self {
-        // For now, return a generic error for document annotations
-        // TODO: Add specific error messages for each constraint variant
-        let _ = c;
-        ErrorKind::BadRequest
-            .with_message("Document annotation constraint violation")
-            .with_resource("document_annotation")
+        let error = match c {
+            DocumentAnnotationConstraints::ContentLength => {
+                ErrorKind::BadRequest.with_message("Annotation content length is invalid")
+            }
+            DocumentAnnotationConstraints::TypeFormat => {
+                ErrorKind::BadRequest.with_message("Annotation type format is invalid")
+            }
+            DocumentAnnotationConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Annotation metadata size is invalid")
+            }
+            DocumentAnnotationConstraints::UpdatedAfterCreated
+            | DocumentAnnotationConstraints::DeletedAfterCreated
+            | DocumentAnnotationConstraints::DeletedAfterUpdated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("document_annotation")
     }
 }

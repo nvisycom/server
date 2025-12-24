@@ -8,7 +8,6 @@
 use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
-use jiff::Timestamp;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewProjectInvite;
 use nvisy_postgres::query::{ProjectInviteRepository, ProjectMemberRepository};
@@ -103,19 +102,14 @@ async fn send_invite(
             )));
     }
 
-    // Generate expiration time
-    let expires_at = Timestamp::now()
-        + jiff::Span::new().days(request.expires_in_days.unwrap_or(7).clamp(1, 30) as i64);
-
-    // Sanitize the invite message for additional security
-    let sanitized_message = sanitize_text(&request.invite_message);
+    // Generate expiration time from InviteExpiration enum
+    let expires_at = request.expires.to_expiry_timestamp();
 
     let new_invite = NewProjectInvite {
         project_id: path_params.project_id,
         invitee_id: None, // Will be set when user accepts if they have an account
         invited_role: Some(request.invited_role),
-        invite_message: Some(sanitized_message),
-        expires_at: Some(expires_at.into()),
+        expires_at: expires_at.map(Into::into),
         created_by: auth_claims.account_id,
         updated_by: auth_claims.account_id,
         ..Default::default()
@@ -343,7 +337,6 @@ async fn generate_invite_code(
         project_id: path_params.project_id,
         invitee_id: None,
         invited_role: Some(request.role),
-        invite_message: None,
         expires_at: expires_at.map(Into::into),
         created_by: auth_claims.account_id,
         updated_by: auth_claims.account_id,
@@ -438,15 +431,6 @@ async fn join_via_invite_code(
     Ok((StatusCode::CREATED, Json(Member::from(project_member))))
 }
 
-/// Sanitizes user input by removing potentially dangerous characters.
-///
-/// This is a defense-in-depth measure in addition to validation.
-fn sanitize_text(text: &str) -> String {
-    text.chars()
-        .filter(|c| !matches!(c, '<' | '>' | '{' | '}' | '`'))
-        .collect()
-}
-
 /// Returns a [`Router`] with all project invite related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -470,4 +454,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         .api_route("/invites/:invite_code/join/", post(join_via_invite_code))
 }
-

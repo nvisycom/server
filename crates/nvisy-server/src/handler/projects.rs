@@ -52,7 +52,7 @@ async fn create_project(
     let new_member = NewProjectMember {
         project_id: project.id,
         account_id: auth_claims.account_id,
-        member_role: ProjectRole::Owner,
+        member_role: ProjectRole::Admin,
         ..Default::default()
     };
     pg_client.add_project_member(new_member).await?;
@@ -228,4 +228,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/projects/:project_id/", patch(update_project))
         .api_route("/projects/:project_id/", delete(delete_project))
 }
-

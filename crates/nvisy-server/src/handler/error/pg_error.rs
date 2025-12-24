@@ -32,6 +32,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::DocumentAnnotation(c) => c.into(),
             ConstraintViolation::DocumentFile(c) => c.into(),
             ConstraintViolation::DocumentVersion(c) => c.into(),
+            ConstraintViolation::ProjectWebhook(c) => c.into(),
         }
     }
 }

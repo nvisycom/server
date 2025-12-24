@@ -348,7 +348,7 @@ impl ProjectIntegrationRepository for PgClient {
         let integrations = query
             .filter(
                 sync_status
-                    .eq(Some(IntegrationStatus::Failure))
+                    .eq(Some(IntegrationStatus::Failed))
                     .or(is_active.eq(false)),
             )
             .select(ProjectIntegration::as_select())
@@ -386,7 +386,7 @@ impl ProjectIntegrationRepository for PgClient {
         // Count failed integrations
         let failed_count: i64 = project_integrations
             .filter(project_id.eq(proj_id))
-            .filter(sync_status.eq(Some(IntegrationStatus::Failure)))
+            .filter(sync_status.eq(Some(IntegrationStatus::Failed)))
             .count()
             .get_result(&mut conn)
             .await

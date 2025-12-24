@@ -56,10 +56,4 @@ impl WebhookStatus {
     pub fn can_activate(self) -> bool {
         matches!(self, WebhookStatus::Paused | WebhookStatus::Disabled)
     }
-
-    /// Returns whether the webhook can receive events.
-    #[inline]
-    pub fn can_receive_events(self) -> bool {
-        matches!(self, WebhookStatus::Active)
-    }
 }

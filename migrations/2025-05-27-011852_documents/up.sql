@@ -5,9 +5,7 @@ CREATE TYPE DOCUMENT_STATUS AS ENUM (
     'draft',        -- Document is being created/edited
     'processing',   -- Document is being processed
     'ready',        -- Document is ready for use
-    'archived',     -- Document is archived but accessible
-    'locked',       -- Document is locked for editing
-    'error'         -- Document processing failed
+    'archived'      -- Document is archived but accessible
 );
 
 COMMENT ON TYPE DOCUMENT_STATUS IS
@@ -93,8 +91,7 @@ CREATE TYPE PROCESSING_STATUS AS ENUM (
     'completed',    -- Processing completed successfully
     'failed',       -- Processing failed
     'canceled',     -- Processing was canceled
-    'skipped',      -- Processing was skipped
-    'retry'         -- Processing is queued for retry
+    'skipped'       -- Processing was skipped
 );
 
 COMMENT ON TYPE PROCESSING_STATUS IS
@@ -102,10 +99,10 @@ COMMENT ON TYPE PROCESSING_STATUS IS
 
 -- Create processing requirements enum
 CREATE TYPE REQUIRE_MODE AS ENUM (
-    'text',         -- Plain text content ready for analysis
-    'ocr',          -- Requires optical character recognition
-    'transcribe',   -- Requires audio/video transcription
-    'mixed'         -- May require multiple processing modes
+    'none',         -- No special processing required
+    'optical',      -- Requires OCR to extract text from images
+    'language',     -- Requires VLM for advanced content understanding
+    'both'          -- Requires both OCR and VLM processing
 );
 
 COMMENT ON TYPE REQUIRE_MODE IS
@@ -156,7 +153,7 @@ CREATE TABLE document_files (
     CONSTRAINT document_files_tags_count_max CHECK (array_length(tags, 1) IS NULL OR array_length(tags, 1) <= 32),
 
     -- Processing configuration
-    require_mode            REQUIRE_MODE     NOT NULL DEFAULT 'text',
+    require_mode            REQUIRE_MODE     NOT NULL DEFAULT 'none',
     processing_priority     INTEGER          NOT NULL DEFAULT 5,
     processing_status       PROCESSING_STATUS NOT NULL DEFAULT 'pending',
     virus_scan_status       VIRUS_SCAN_STATUS NOT NULL DEFAULT 'pending',

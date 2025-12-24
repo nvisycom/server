@@ -185,9 +185,9 @@ async fn delete_member(
         return Err(ErrorKind::NotFound.with_resource("project member"));
     };
 
-    // Check if removing the last owner
-    if member_to_remove.member_role == nvisy_postgres::types::ProjectRole::Owner {
-        // Count how many active owners exist
+    // Check if removing the last admin
+    if member_to_remove.member_role == ProjectRole::Admin {
+        // Count how many active admins exist
         let all_members = pg_client
             .list_project_members(
                 path_params.project_id,
@@ -198,16 +198,16 @@ async fn delete_member(
             )
             .await?;
 
-        let owner_count = all_members
+        let admin_count = all_members
             .iter()
-            .filter(|m| m.member_role == nvisy_postgres::types::ProjectRole::Owner && m.is_active)
+            .filter(|m| m.member_role == ProjectRole::Admin && m.is_active)
             .count();
 
-        if owner_count <= 1 {
+        if admin_count <= 1 {
             return Err(ErrorKind::BadRequest
-                .with_message("Cannot remove last owner")
+                .with_message("Cannot remove last admin")
                 .with_context(
-                    "Projects must have at least one owner. Transfer ownership or promote another member to owner before removing this member."
+                    "Projects must have at least one admin. Promote another member to admin before removing this member."
                 ));
         }
     }
@@ -269,8 +269,8 @@ async fn update_member(
         return Err(ErrorKind::NotFound.with_resource("project member"));
     };
 
-    // If demoting from owner, check we're not removing the last owner
-    if current_member.member_role == ProjectRole::Owner && request.role != ProjectRole::Owner {
+    // If demoting from admin, check we're not removing the last admin
+    if current_member.member_role == ProjectRole::Admin && request.role != ProjectRole::Admin {
         let all_members = pg_client
             .list_project_members(
                 path_params.project_id,
@@ -281,16 +281,16 @@ async fn update_member(
             )
             .await?;
 
-        let owner_count = all_members
+        let admin_count = all_members
             .iter()
-            .filter(|m| m.member_role == ProjectRole::Owner && m.is_active)
+            .filter(|m| m.member_role == ProjectRole::Admin && m.is_active)
             .count();
 
-        if owner_count <= 1 {
+        if admin_count <= 1 {
             return Err(ErrorKind::BadRequest
-                .with_message("Cannot demote last owner")
+                .with_message("Cannot demote last admin")
                 .with_context(
-                    "Projects must have at least one owner. Promote another member to owner first.",
+                    "Projects must have at least one admin. Promote another member to admin first.",
                 ));
         }
     }
@@ -355,4 +355,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
             patch(update_member),
         )
 }
-

@@ -7,8 +7,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// TODO: Add invitee emails
-
 /// Project invite with complete information.
 ///
 /// This response includes all the essential information about an

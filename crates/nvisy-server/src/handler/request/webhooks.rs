@@ -9,7 +9,7 @@ use validator::Validate;
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateProjectWebhook {
+pub struct CreateWebhook {
     /// Human-readable name for the webhook.
     #[validate(length(min = 1, max = 100))]
     pub display_name: String,
@@ -42,7 +42,7 @@ pub struct CreateProjectWebhook {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateProjectWebhook {
+pub struct UpdateWebhook {
     /// Updated human-readable name for the webhook.
     #[validate(length(min = 1, max = 100))]
     pub display_name: Option<String>,

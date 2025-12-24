@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
-use crate::handler::request::{CreateProjectPipeline, PipelinePathParams, ProjectPathParams};
+use crate::handler::request::{CreatePipeline, PipelinePathParams, ProjectPathParams};
 use crate::handler::response::{ProjectPipeline, ProjectPipelines};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -72,7 +72,7 @@ async fn create_project_pipeline(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
-    Json(_request): Json<CreateProjectPipeline>,
+    Json(_request): Json<CreatePipeline>,
 ) -> Result<(StatusCode, Json<ProjectPipeline>)> {
     // Authorize project access
     auth_claims
@@ -93,7 +93,7 @@ async fn update_project_pipeline(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_claims): AuthState,
-    Json(_request): Json<CreateProjectPipeline>,
+    Json(_request): Json<CreatePipeline>,
 ) -> Result<(StatusCode, Json<ProjectPipeline>)> {
     // Authorize project access
     auth_claims

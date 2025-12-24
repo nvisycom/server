@@ -90,11 +90,11 @@ pub trait ProjectMemberRepository {
     /// Counts total active members in a project.
     fn get_member_count(&self, proj_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
 
-    /// Counts active members grouped by role: (owners, admins, editors, viewers).
+    /// Counts active members grouped by role: (admins, editors, viewers).
     fn get_member_count_by_role(
         &self,
         proj_id: Uuid,
-    ) -> impl Future<Output = PgResult<(i64, i64, i64, i64)>> + Send;
+    ) -> impl Future<Output = PgResult<(i64, i64, i64)>> + Send;
 
     /// Checks if a user has any access to a project.
     fn check_project_access(
@@ -340,20 +340,10 @@ impl ProjectMemberRepository for PgClient {
         Ok(count)
     }
 
-    async fn get_member_count_by_role(&self, proj_id: Uuid) -> PgResult<(i64, i64, i64, i64)> {
+    async fn get_member_count_by_role(&self, proj_id: Uuid) -> PgResult<(i64, i64, i64)> {
         use schema::project_members::dsl::*;
 
         let mut conn = self.get_connection().await?;
-
-        // Count owners
-        let owner_count: i64 = project_members
-            .filter(project_id.eq(proj_id))
-            .filter(member_role.eq(ProjectRole::Owner))
-            .filter(is_active.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
 
         // Count admins
         let admin_count: i64 = project_members
@@ -385,7 +375,7 @@ impl ProjectMemberRepository for PgClient {
             .await
             .map_err(PgError::from)?;
 
-        Ok((owner_count, admin_count, editor_count, viewer_count))
+        Ok((admin_count, editor_count, viewer_count))
     }
 
     async fn check_project_access(&self, proj_id: Uuid, user_id: Uuid) -> PgResult<bool> {

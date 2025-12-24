@@ -44,10 +44,4 @@ impl IntegrationType {
     pub fn is_storage(self) -> bool {
         matches!(self, IntegrationType::Storage)
     }
-
-    /// Returns whether this integration type requires credentials.
-    #[inline]
-    pub fn requires_credentials(self) -> bool {
-        matches!(self, IntegrationType::Storage)
-    }
 }

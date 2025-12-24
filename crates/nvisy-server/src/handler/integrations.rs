@@ -15,8 +15,7 @@ use nvisy_postgres::query::ProjectIntegrationRepository;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
     CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
-    UpdateIntegrationCredentials, UpdateIntegrationMetadata, UpdateIntegrationStatus,
-    UpdateProjectIntegration as UpdateProjectIntegrationRequest,
+    UpdateIntegrationCredentials, UpdateProjectIntegration as UpdateProjectIntegrationRequest,
 };
 use crate::handler::response::{
     ProjectIntegration, ProjectIntegrationSummaries, ProjectIntegrationWithCredentials,
@@ -313,64 +312,6 @@ async fn update_integration(
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
-/// Updates integration status.
-#[tracing::instrument(skip_all)]
-async fn update_integration_status(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(payload): ValidateJson<UpdateIntegrationStatus>,
-) -> Result<(StatusCode, Json<ProjectIntegration>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Updating integration status"
-    );
-
-    // Verify user has permission to manage integrations
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ManageIntegrations,
-        )
-        .await?;
-
-    // Verify integration exists and belongs to the project
-    let Some(existing_integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
-
-    if existing_integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
-
-    let integration = pg_client
-        .update_integration_status(
-            path_params.integration_id,
-            payload.sync_status,
-            auth_claims.account_id,
-        )
-        .await?;
-
-    Ok((StatusCode::OK, Json(integration.into())))
-}
-
 /// Updates integration credentials.
 #[tracing::instrument(skip_all)]
 async fn update_integration_credentials(
@@ -422,64 +363,6 @@ async fn update_integration_credentials(
         .update_integration_auth(
             path_params.integration_id,
             payload.credentials,
-            auth_claims.account_id,
-        )
-        .await?;
-
-    Ok((StatusCode::OK, Json(integration.into())))
-}
-
-/// Updates integration metadata.
-#[tracing::instrument(skip_all)]
-async fn update_integration_metadata(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(payload): ValidateJson<UpdateIntegrationMetadata>,
-) -> Result<(StatusCode, Json<ProjectIntegration>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Updating integration metadata"
-    );
-
-    // Verify user has permission to manage integrations
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ManageIntegrations,
-        )
-        .await?;
-
-    // Verify integration exists and belongs to the project
-    let Some(existing_integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
-
-    if existing_integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
-
-    let integration = pg_client
-        .update_integration_metadata(
-            path_params.integration_id,
-            payload.metadata,
             auth_claims.account_id,
         )
         .await?;
@@ -573,20 +456,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
             put(update_integration),
         )
         .api_route(
-            "/projects/:project_id/integrations/:integration_id/status/",
-            patch(update_integration_status),
-        )
-        .api_route(
             "/projects/:project_id/integrations/:integration_id/credentials/",
             patch(update_integration_credentials),
-        )
-        .api_route(
-            "/projects/:project_id/integrations/:integration_id/metadata/",
-            patch(update_integration_metadata),
         )
         .api_route(
             "/projects/:project_id/integrations/:integration_id/",
             delete(delete_integration),
         )
 }
-

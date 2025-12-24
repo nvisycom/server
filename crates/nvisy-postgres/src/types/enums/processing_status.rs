@@ -1,4 +1,3 @@
-//! Processing status enumeration for file processing pipeline tracking.
 //! Processing status enumeration for document and file processing operations.
 
 use diesel_derive_enum::DbEnum;
@@ -47,18 +46,13 @@ pub enum ProcessingStatus {
     #[db_rename = "skipped"]
     #[serde(rename = "skipped")]
     Skipped,
-
-    /// File is queued for retry after a previous failure
-    #[db_rename = "retry"]
-    #[serde(rename = "retry")]
-    Retry,
 }
 
 impl ProcessingStatus {
     /// Returns whether the file is in a state that allows processing.
     #[inline]
     pub fn can_be_processed(self) -> bool {
-        matches!(self, ProcessingStatus::Pending | ProcessingStatus::Retry)
+        matches!(self, ProcessingStatus::Pending)
     }
 
     /// Returns whether the file is currently being processed.
@@ -97,19 +91,13 @@ impl ProcessingStatus {
     /// Returns whether the processing is pending (waiting to start).
     #[inline]
     pub fn is_pending(self) -> bool {
-        matches!(self, ProcessingStatus::Pending | ProcessingStatus::Retry)
+        matches!(self, ProcessingStatus::Pending)
     }
 
     /// Returns whether the file processing was skipped.
     #[inline]
     pub fn is_skipped(self) -> bool {
         matches!(self, ProcessingStatus::Skipped)
-    }
-
-    /// Returns whether the processing is queued for retry.
-    #[inline]
-    pub fn is_retry(self) -> bool {
-        matches!(self, ProcessingStatus::Retry)
     }
 
     /// Returns whether the processing can be retried.
@@ -123,7 +111,7 @@ impl ProcessingStatus {
     pub fn can_be_canceled(self) -> bool {
         matches!(
             self,
-            ProcessingStatus::Pending | ProcessingStatus::Processing | ProcessingStatus::Retry
+            ProcessingStatus::Pending | ProcessingStatus::Processing
         )
     }
 
@@ -132,23 +120,13 @@ impl ProcessingStatus {
     pub fn is_active(self) -> bool {
         matches!(
             self,
-            ProcessingStatus::Pending | ProcessingStatus::Processing | ProcessingStatus::Retry
+            ProcessingStatus::Pending | ProcessingStatus::Processing
         )
-    }
-
-    /// Returns whether this status indicates the file needs attention.
-    #[inline]
-    pub fn needs_attention(self) -> bool {
-        matches!(self, ProcessingStatus::Failed)
     }
 
     /// Returns processing statuses that are considered active (not final).
     pub fn active_statuses() -> &'static [ProcessingStatus] {
-        &[
-            ProcessingStatus::Pending,
-            ProcessingStatus::Processing,
-            ProcessingStatus::Retry,
-        ]
+        &[ProcessingStatus::Pending, ProcessingStatus::Processing]
     }
 
     /// Returns processing statuses that represent successful completion.

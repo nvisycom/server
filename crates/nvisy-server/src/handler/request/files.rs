@@ -1,8 +1,8 @@
 //! Document file request types.
 
 use nvisy_postgres::types::ContentSegmentation;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
@@ -10,35 +10,27 @@ use crate::service::ArchiveFormat;
 
 /// Request to update file metadata.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
+#[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateFile {
-    /// New display name for the file
+    /// New display name for the file.
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
 
-    /// New processing priority (1-10, higher = more priority)
+    /// New processing priority (1-10, higher = more priority).
     #[validate(range(min = 1, max = 10))]
     pub processing_priority: Option<i32>,
 
-    /// Document ID to assign the file to
+    /// Document ID to assign the file to.
     pub document_id: Option<Uuid>,
-}
 
-/// Knowledge-related fields for document file updates.
-#[derive(Debug, Deserialize, Validate, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateDocumentKnowledge {
     /// Whether the file is indexed for knowledge extraction.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_indexed: Option<bool>,
 
-    /// Content segmentation strategy.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Content segmentation strategy for knowledge extraction.
     pub content_segmentation: Option<ContentSegmentation>,
 
-    /// Whether visual elements are supported.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Whether visual elements are supported for knowledge extraction.
     pub visual_support: Option<bool>,
 }
 

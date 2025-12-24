@@ -122,8 +122,8 @@ impl Permission {
             | Self::ManageTemplates
             | Self::ManageSettings => ProjectRole::Admin,
 
-            // Owner-only permissions
-            Self::DeleteProject | Self::ManageRoles => ProjectRole::Owner,
+            // Admin-only permissions (highest level)
+            Self::DeleteProject | Self::ManageRoles => ProjectRole::Admin,
         }
     }
 

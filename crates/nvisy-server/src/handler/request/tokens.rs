@@ -1,13 +1,62 @@
 //! Request structures for API token operations.
 
-use jiff::Timestamp;
-use nvisy_postgres::types::ApiTokenType;
+use std::time::Duration;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::{Validate, ValidationError};
+use validator::Validate;
+
+/// Expiration options for API tokens.
+#[must_use]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum TokenExpiration {
+    /// Token never expires.
+    Never,
+    /// Expires in 7 days.
+    #[default]
+    In7Days,
+    /// Expires in 30 days.
+    In30Days,
+    /// Expires in 90 days.
+    In90Days,
+    /// Expires in 1 year.
+    In1Year,
+}
+
+impl TokenExpiration {
+    /// Returns the duration until expiration, or None if never expires.
+    pub fn to_span(self) -> Option<jiff::Span> {
+        match self {
+            Self::Never => None,
+            Self::In7Days => Some(jiff::Span::new().days(7)),
+            Self::In30Days => Some(jiff::Span::new().days(30)),
+            Self::In90Days => Some(jiff::Span::new().days(90)),
+            Self::In1Year => Some(jiff::Span::new().days(365)),
+        }
+    }
+
+    /// Returns the expiry timestamp from now, or None if never expires.
+    pub fn to_expiry_timestamp(self) -> Option<jiff::Timestamp> {
+        self.to_span().map(|span| jiff::Timestamp::now() + span)
+    }
+
+    /// Returns the duration until expiration, or None if never expires.
+    pub fn to_duration(self) -> Option<Duration> {
+        match self {
+            Self::Never => None,
+            Self::In7Days => Some(Duration::from_secs(7 * 24 * 60 * 60)),
+            Self::In30Days => Some(Duration::from_secs(30 * 24 * 60 * 60)),
+            Self::In90Days => Some(Duration::from_secs(90 * 24 * 60 * 60)),
+            Self::In1Year => Some(Duration::from_secs(365 * 24 * 60 * 60)),
+        }
+    }
+}
 
 /// Request to create a new API token.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateApiToken {
     /// Human-readable name for the API token.
     #[validate(length(min = 1, max = 100))]
@@ -17,13 +66,14 @@ pub struct CreateApiToken {
     #[validate(length(max = 500))]
     pub description: Option<String>,
 
-    /// Optional expiration date for the API token.
-    #[validate(custom(function = "validate_expires_at"))]
-    pub expires_at: Option<Timestamp>,
+    /// When the token expires.
+    #[serde(default)]
+    pub expires: TokenExpiration,
 }
 
 /// Request to update an existing API token.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateApiToken {
     /// Updated name for the API token.
     #[validate(length(min = 1, max = 100))]
@@ -32,51 +82,4 @@ pub struct UpdateApiToken {
     /// Updated description for the API token.
     #[validate(length(max = 500))]
     pub description: Option<String>,
-}
-
-/// Request to revoke (soft delete) an API token.
-#[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
-pub struct RevokeApiToken {
-    /// Reason for revocation (optional).
-    #[validate(length(min = 3, max = 200))]
-    pub reason: Option<String>,
-}
-
-// Validation functions
-
-fn validate_expires_at(expires_at: &Timestamp) -> Result<(), ValidationError> {
-    let now = Timestamp::now();
-
-    // Check if expiration is in the future
-    if *expires_at <= now {
-        return Err(ValidationError::new("expires_at must be in the future"));
-    }
-
-    // Check if expiration is not too far in the future (max 1 year)
-    let max_expiry = now + jiff::Span::new().days(365);
-    if *expires_at > max_expiry {
-        return Err(ValidationError::new("expires_at must be within 1 year"));
-    }
-
-    Ok(())
-}
-
-/// Query parameters for listing API tokens.
-#[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
-pub struct ListApiTokensQuery {
-    /// Include expired tokens in the results.
-    pub include_expired: Option<bool>,
-
-    /// Filter by token type.
-    pub token_type: Option<ApiTokenType>,
-
-    /// Filter tokens created after this date.
-    pub created_after: Option<Timestamp>,
-
-    /// Filter tokens created before this date.
-    pub created_before: Option<Timestamp>,
-
-    /// Search in token names and descriptions.
-    #[validate(length(min = 1, max = 100))]
-    pub search: Option<String>,
 }

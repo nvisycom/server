@@ -391,7 +391,7 @@ impl ProjectRunRepository for PgClient {
 
         let runs = project_runs::table
             .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::run_status.eq(IntegrationStatus::Failure))
+            .filter(dsl::run_status.eq(IntegrationStatus::Failed))
             .order(dsl::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
@@ -638,7 +638,7 @@ impl ProjectRunRepository for PgClient {
         let run = diesel::update(project_runs::table.filter(dsl::id.eq(run_id)))
             .set((
                 dsl::completed_at.eq(Some(jiff_diesel::Timestamp::from(now))),
-                dsl::run_status.eq(IntegrationStatus::Failure),
+                dsl::run_status.eq(IntegrationStatus::Failed),
                 dsl::duration_ms.eq(duration_ms),
                 dsl::error_details.eq(Some(error_details)),
             ))
@@ -743,7 +743,7 @@ impl ProjectRunRepository for PgClient {
         let successful = project_runs::table
             .filter(dsl::project_id.eq(project_id))
             .filter(dsl::completed_at.is_not_null())
-            .filter(dsl::run_status.ne(IntegrationStatus::Failure))
+            .filter(dsl::run_status.ne(IntegrationStatus::Failed))
             .count()
             .get_result::<i64>(&mut conn)
             .await
@@ -751,7 +751,7 @@ impl ProjectRunRepository for PgClient {
 
         let failed = project_runs::table
             .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::run_status.eq(IntegrationStatus::Failure))
+            .filter(dsl::run_status.eq(IntegrationStatus::Failed))
             .count()
             .get_result::<i64>(&mut conn)
             .await

@@ -145,8 +145,7 @@ COMMENT ON COLUMN projects.deleted_at IS 'Timestamp when the project was soft-de
 
 -- Enum types for project_members table
 CREATE TYPE PROJECT_ROLE AS ENUM (
-    'owner',        -- Full control, can delete project and manage all aspects
-    'admin',        -- Administrative access, cannot delete project
+    'admin',        -- Administrative access with full project management
     'editor',       -- Can edit content and manage files
     'viewer'        -- Read-only access to project content
 );
@@ -330,47 +329,57 @@ COMMENT ON COLUMN project_invites.updated_at IS 'Timestamp when the invitation w
 -- Enum types for project_activities table
 CREATE TYPE ACTIVITY_TYPE AS ENUM (
     -- Project activities
-    'project_created',
-    'project_updated',
-    'project_deleted',
-    'project_archived',
-    'project_restored',
-    'project_settings_changed',
-    'project_exported',
-    'project_imported',
+    'project:created',
+    'project:updated',
+    'project:deleted',
+    'project:archived',
+    'project:restored',
+    'project:settings_changed',
+    'project:exported',
+    'project:imported',
 
     -- Member activities
-    'member_added',
-    'member_kicked',
-    'member_updated',
-    'member_invited',
-    'member_invite_accepted',
-    'member_invite_declined',
-    'member_invite_canceled',
+    'member:added',
+    'member:kicked',
+    'member:updated',
+    'member:invited',
+    'member:invite_accepted',
+    'member:invite_declined',
+    'member:invite_canceled',
 
     -- Integration activities
-    'integration_created',
-    'integration_updated',
-    'integration_deleted',
-    'integration_enabled',
-    'integration_disabled',
-    'integration_synced',
-    'integration_succeeded',
-    'integration_failed',
+    'integration:created',
+    'integration:updated',
+    'integration:deleted',
+    'integration:enabled',
+    'integration:disabled',
+    'integration:synced',
+    'integration:succeeded',
+    'integration:failed',
+
+    -- Webhook activities
+    'webhook:created',
+    'webhook:updated',
+    'webhook:deleted',
+    'webhook:enabled',
+    'webhook:disabled',
+    'webhook:triggered',
+    'webhook:succeeded',
+    'webhook:failed',
 
     -- Document activities
-    'document_created',
-    'document_updated',
-    'document_deleted',
-    'document_processed',
-    'document_uploaded',
-    'document_downloaded',
-    'document_verified',
+    'document:created',
+    'document:updated',
+    'document:deleted',
+    'document:processed',
+    'document:uploaded',
+    'document:downloaded',
+    'document:verified',
 
     -- Comment activities
-    'comment_added',
-    'comment_updated',
-    'comment_deleted',
+    'comment:added',
+    'comment:updated',
+    'comment:deleted',
 
     -- Custom activities
     'custom'
@@ -435,7 +444,7 @@ COMMENT ON COLUMN project_activities.created_at IS 'Timestamp when the activity 
 CREATE TYPE INTEGRATION_STATUS AS ENUM (
     'pending',      -- Integration is being set up
     'executing',    -- Integration is actively running
-    'failure'       -- Integration has failed
+    'failed'        -- Integration has failed
 );
 
 COMMENT ON TYPE INTEGRATION_STATUS IS
@@ -867,7 +876,6 @@ SELECT
     p.display_name,
     p.status                                              AS project_status,
     COUNT(pm.account_id)                                  AS total_members,
-    COUNT(CASE WHEN pm.member_role = 'owner' THEN 1 END)  AS owners,
     COUNT(CASE WHEN pm.member_role = 'admin' THEN 1 END)  AS admins,
     COUNT(CASE WHEN pm.member_role = 'editor' THEN 1 END) AS editors,
     COUNT(CASE WHEN pm.member_role = 'viewer' THEN 1 END) AS viewers,

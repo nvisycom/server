@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateProjectTemplate {
+pub struct CreateTemplate {
     /// Template name.
     pub name: String,
     /// Template description.
@@ -25,4 +25,4 @@ pub struct CreateProjectTemplate {
 }
 
 /// Request body for updating a project template.
-pub type UpdateProjectTemplate = CreateProjectTemplate;
+pub type UpdateTemplate = CreateTemplate;

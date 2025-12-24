@@ -14,10 +14,10 @@ use nvisy_postgres::query::{Pagination, ProjectWebhookRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
-    CreateProjectWebhook, ProjectPathParams, UpdateProjectWebhook as UpdateProjectWebhookRequest,
+    CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateProjectWebhookRequest,
     UpdateWebhookStatus, WebhookPathParams,
 };
-use crate::handler::response::{ProjectWebhook, ProjectWebhookSummaries, ProjectWebhookWithSecret};
+use crate::handler::response::{Webhook, WebhookWithSecret, Webhooks};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -25,13 +25,15 @@ use crate::service::ServiceState;
 const TRACING_TARGET: &str = "nvisy_server::handler::project_webhook";
 
 /// Creates a new project webhook.
+///
+/// Returns the webhook with secret. The secret is only shown once at creation.
 #[tracing::instrument(skip_all)]
 async fn create_webhook(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(payload): ValidateJson<CreateProjectWebhook>,
-) -> Result<(StatusCode, Json<ProjectWebhook>)> {
+    ValidateJson(payload): ValidateJson<CreateWebhook>,
+) -> Result<(StatusCode, Json<WebhookWithSecret>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -84,7 +86,7 @@ async fn list_webhooks(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-) -> Result<(StatusCode, Json<ProjectWebhookSummaries>)> {
+) -> Result<(StatusCode, Json<Webhooks>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -105,9 +107,9 @@ async fn list_webhooks(
         .list_project_webhooks(path_params.project_id, Pagination::default())
         .await?;
 
-    let webhook_summaries: ProjectWebhookSummaries = webhooks.into_iter().map(Into::into).collect();
+    let webhooks: Webhooks = webhooks.into_iter().map(Into::into).collect();
 
-    Ok((StatusCode::OK, Json(webhook_summaries)))
+    Ok((StatusCode::OK, Json(webhooks)))
 }
 
 /// Retrieves a specific project webhook.
@@ -116,7 +118,7 @@ async fn read_webhook(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<WebhookPathParams>,
-) -> Result<(StatusCode, Json<ProjectWebhook>)> {
+) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -153,49 +155,6 @@ async fn read_webhook(
     Ok((StatusCode::OK, Json(webhook.into())))
 }
 
-/// Retrieves a project webhook with secret.
-#[tracing::instrument(skip_all)]
-async fn read_webhook_with_secret(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<WebhookPathParams>,
-) -> Result<(StatusCode, Json<ProjectWebhookWithSecret>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        webhook_id = path_params.webhook_id.to_string(),
-        "Reading project webhook with secret"
-    );
-
-    // Verify user has permission to manage webhooks (higher permission for secrets)
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ManageIntegrations,
-        )
-        .await?;
-
-    let Some(webhook) = pg_client
-        .find_project_webhook_by_id(path_params.webhook_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    };
-
-    // Verify the webhook belongs to the specified project
-    if webhook.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    }
-
-    Ok((StatusCode::OK, Json(webhook.into())))
-}
-
 /// Updates a project webhook.
 #[tracing::instrument(skip_all)]
 async fn update_webhook(
@@ -203,7 +162,7 @@ async fn update_webhook(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(payload): ValidateJson<UpdateProjectWebhookRequest>,
-) -> Result<(StatusCode, Json<ProjectWebhook>)> {
+) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -274,7 +233,7 @@ async fn update_webhook_status(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(payload): ValidateJson<UpdateWebhookStatus>,
-) -> Result<(StatusCode, Json<ProjectWebhook>)> {
+) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -326,7 +285,7 @@ async fn reset_webhook_failures(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<WebhookPathParams>,
-) -> Result<(StatusCode, Json<ProjectWebhook>)> {
+) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -438,10 +397,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/projects/:project_id/webhooks/:webhook_id/",
             get(read_webhook),
-        )
-        .api_route(
-            "/projects/:project_id/webhooks/:webhook_id/secret/",
-            get(read_webhook_with_secret),
         )
         .api_route(
             "/projects/:project_id/webhooks/:webhook_id/",

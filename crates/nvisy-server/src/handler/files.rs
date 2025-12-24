@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
 use crate::handler::request::{
     DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ProjectPathParams,
-    UpdateDocumentKnowledge,
+    UpdateFile as UpdateFileRequest,
 };
 use crate::handler::response::{File, Files};
 use crate::handler::{ErrorKind, Result};
@@ -285,7 +285,7 @@ async fn update_file(
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
-    ValidateJson(request): ValidateJson<UpdateDocumentKnowledge>,
+    ValidateJson(request): ValidateJson<UpdateFileRequest>,
 ) -> Result<(StatusCode, Json<File>)> {
     // Verify project write permissions
     auth_claims
@@ -305,8 +305,11 @@ async fn update_file(
         return Err(ErrorKind::NotFound.with_message("File not found in project"));
     }
 
-    // Create update struct
+    // Create update struct with all fields
     let updates = UpdateDocumentFile {
+        display_name: request.display_name,
+        processing_priority: request.processing_priority,
+        document_id: request.document_id.map(Some),
         is_indexed: request.is_indexed,
         content_segmentation: request.content_segmentation,
         visual_support: request.visual_support,
@@ -843,4 +846,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post(download_archived_files),
         )
 }
-

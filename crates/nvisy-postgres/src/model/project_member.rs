@@ -116,17 +116,12 @@ impl ProjectMember {
 
     /// Returns whether the member has admin privileges.
     pub fn is_admin(&self) -> bool {
-        matches!(self.member_role, ProjectRole::Admin | ProjectRole::Owner)
+        matches!(self.member_role, ProjectRole::Admin)
     }
 
     /// Returns whether the member can invite others.
     pub fn can_invite(&self) -> bool {
-        matches!(self.member_role, ProjectRole::Admin | ProjectRole::Owner)
-    }
-
-    /// Returns whether the member is the project owner.
-    pub fn is_owner(&self) -> bool {
-        self.member_role == ProjectRole::Owner
+        matches!(self.member_role, ProjectRole::Admin)
     }
 
     /// Returns whether the member is an editor.
@@ -141,15 +136,12 @@ impl ProjectMember {
 
     /// Returns whether the member can edit project content.
     pub fn can_edit(&self) -> bool {
-        matches!(
-            self.member_role,
-            ProjectRole::Owner | ProjectRole::Admin | ProjectRole::Editor
-        )
+        matches!(self.member_role, ProjectRole::Admin | ProjectRole::Editor)
     }
 
     /// Returns whether the member can manage other members.
     pub fn can_manage_members(&self) -> bool {
-        matches!(self.member_role, ProjectRole::Owner | ProjectRole::Admin)
+        matches!(self.member_role, ProjectRole::Admin)
     }
 
     /// Returns whether the member has notifications enabled for updates.
@@ -222,12 +214,12 @@ impl ProjectMember {
 
     /// Returns whether the member can modify project settings.
     pub fn can_modify_settings(&self) -> bool {
-        self.is_active && (self.is_owner() || self.is_admin())
+        self.is_active && self.is_admin()
     }
 
     /// Returns whether the member can delete the project.
     pub fn can_delete_project(&self) -> bool {
-        self.is_active && self.is_owner()
+        self.is_active && self.is_admin()
     }
 
     /// Returns whether the member can be promoted to the given role.
@@ -237,12 +229,12 @@ impl ProjectMember {
 
     /// Returns whether the member can be demoted to the given role.
     pub fn can_be_demoted_to(&self, role: ProjectRole) -> bool {
-        self.is_active && role < self.member_role && !self.is_owner()
+        self.is_active && role < self.member_role
     }
 
     /// Returns whether the membership can be removed.
     pub fn can_be_removed(&self) -> bool {
-        !self.is_owner() // Owners cannot be removed
+        true // Any member can be removed by an admin
     }
 }
 

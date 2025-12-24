@@ -80,7 +80,8 @@ pub struct UpdateProjectInvite {
 impl ProjectInvite {
     /// Returns whether the invitation is still valid.
     pub fn is_valid(&self) -> bool {
-        self.invite_status == InviteStatus::Pending && jiff::Timestamp::from(self.expires_at) > jiff::Timestamp::now()
+        self.invite_status == InviteStatus::Pending
+            && jiff::Timestamp::from(self.expires_at) > jiff::Timestamp::now()
     }
 
     /// Returns whether the invitation has expired.
@@ -142,7 +143,8 @@ impl ProjectInvite {
     /// Returns whether the invitation is expiring soon (within 24 hours).
     pub fn is_expiring_soon(&self) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
-            remaining.total(jiff::Unit::Second).ok() <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
+            remaining.total(jiff::Unit::Second).ok()
+                <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
         } else {
             false
         }
@@ -155,8 +157,9 @@ impl ProjectInvite {
 
     /// Returns the response time if the invitation was responded to.
     pub fn response_time(&self) -> Option<jiff::Span> {
-        self.responded_at
-            .map(|responded_at| jiff::Timestamp::from(responded_at) - jiff::Timestamp::from(self.created_at))
+        self.responded_at.map(|responded_at| {
+            jiff::Timestamp::from(responded_at) - jiff::Timestamp::from(self.created_at)
+        })
     }
 
     /// Returns whether the invitation has a custom message.
@@ -176,12 +179,7 @@ impl ProjectInvite {
 
     /// Returns whether the invitation grants admin privileges.
     pub fn grants_admin_access(&self) -> bool {
-        matches!(self.invited_role, ProjectRole::Admin | ProjectRole::Owner)
-    }
-
-    /// Returns whether the invitation grants owner privileges.
-    pub fn grants_owner_access(&self) -> bool {
-        self.invited_role == ProjectRole::Owner
+        matches!(self.invited_role, ProjectRole::Admin)
     }
 
     /// Returns whether the invitation can be canceled.

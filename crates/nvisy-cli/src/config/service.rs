@@ -9,8 +9,9 @@ use std::time::Duration;
 use clap::{Args, Parser};
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
-use nvisy_server::middleware::open_api::config::OpenApiConfig as ServerOpenApiConfig;
-use nvisy_server::middleware::security::cors::CorsConfig as ServerCorsConfig;
+use nvisy_server::middleware::{
+    CorsConfig as ServerCorsConfig, OpenApiConfig as ServerOpenApiConfig,
+};
 use nvisy_server::service::ServiceConfig as ServerServiceConfig;
 use serde::{Deserialize, Serialize};
 

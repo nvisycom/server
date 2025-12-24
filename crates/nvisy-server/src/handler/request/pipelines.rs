@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateProjectPipeline {
+pub struct CreatePipeline {
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.
@@ -21,5 +21,5 @@ pub struct CreateProjectPipeline {
 }
 
 /// Request body for updating a project pipeline.
-pub type UpdateProjectPipeline = CreateProjectPipeline;
+pub type UpdatePipeline = CreatePipeline;
 

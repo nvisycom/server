@@ -1,6 +1,6 @@
 //! Project integration request types.
 
-use nvisy_postgres::types::{IntegrationStatus, IntegrationType};
+use nvisy_postgres::types::IntegrationType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -57,15 +57,6 @@ pub struct UpdateProjectIntegration {
     pub is_active: Option<bool>,
 }
 
-/// Request payload for updating integration status.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateIntegrationStatus {
-    /// New synchronization status for the integration.
-    pub sync_status: IntegrationStatus,
-}
-
 /// Request payload for updating integration credentials only.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
@@ -73,13 +64,4 @@ pub struct UpdateIntegrationStatus {
 pub struct UpdateIntegrationCredentials {
     /// Updated authentication credentials for the external service.
     pub credentials: serde_json::Value,
-}
-
-/// Request payload for updating integration metadata only.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateIntegrationMetadata {
-    /// Updated configuration and service-specific metadata.
-    pub metadata: serde_json::Value,
 }

@@ -3,6 +3,7 @@
 use nvisy_postgres::types::{
     ProjectActivitiesConstraints, ProjectConstraints, ProjectIntegrationConstraints,
     ProjectInviteConstraints, ProjectMemberConstraints, ProjectRunConstraints,
+    ProjectWebhookConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -128,11 +129,69 @@ impl From<ProjectIntegrationConstraints> for Error<'static> {
 
 impl From<ProjectRunConstraints> for Error<'static> {
     fn from(c: ProjectRunConstraints) -> Self {
-        // For now, return a generic error for project runs
-        // TODO: Add specific error messages for each constraint variant
-        let _ = c;
-        ErrorKind::BadRequest
-            .with_message("Project run constraint violation")
-            .with_resource("project_run")
+        let error = match c {
+            ProjectRunConstraints::RunNameLength => {
+                ErrorKind::BadRequest.with_message("Run name length is invalid")
+            }
+            ProjectRunConstraints::RunTypeFormat => {
+                ErrorKind::BadRequest.with_message("Run type format is invalid")
+            }
+            ProjectRunConstraints::DurationPositive => {
+                ErrorKind::BadRequest.with_message("Run duration must be positive")
+            }
+            ProjectRunConstraints::ResultSummaryLength => {
+                ErrorKind::BadRequest.with_message("Run result summary is too long")
+            }
+            ProjectRunConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Run metadata size is invalid")
+            }
+            ProjectRunConstraints::ErrorDetailsSize => {
+                ErrorKind::BadRequest.with_message("Run error details size is invalid")
+            }
+            ProjectRunConstraints::CompletedAfterStarted
+            | ProjectRunConstraints::UpdatedAfterCreated
+            | ProjectRunConstraints::StartedAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("project_run")
+    }
+}
+
+impl From<ProjectWebhookConstraints> for Error<'static> {
+    fn from(c: ProjectWebhookConstraints) -> Self {
+        let error = match c {
+            ProjectWebhookConstraints::DisplayNameLength => ErrorKind::BadRequest
+                .with_message("Webhook name must be between 3 and 64 characters long"),
+            ProjectWebhookConstraints::DescriptionLength => {
+                ErrorKind::BadRequest.with_message("Webhook description is too long")
+            }
+            ProjectWebhookConstraints::UrlLength => {
+                ErrorKind::BadRequest.with_message("Webhook URL is too long")
+            }
+            ProjectWebhookConstraints::UrlFormat => {
+                ErrorKind::BadRequest.with_message("Webhook URL must be a valid HTTPS URL")
+            }
+            ProjectWebhookConstraints::SecretLength => {
+                ErrorKind::BadRequest.with_message("Webhook secret length is invalid")
+            }
+            ProjectWebhookConstraints::EventsNotEmpty => {
+                ErrorKind::BadRequest.with_message("Webhook must have at least one event")
+            }
+            ProjectWebhookConstraints::HeadersSize => {
+                ErrorKind::BadRequest.with_message("Webhook headers size is too large")
+            }
+            ProjectWebhookConstraints::FailureCountPositive
+            | ProjectWebhookConstraints::MaxFailuresPositive => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            ProjectWebhookConstraints::UpdatedAfterCreated
+            | ProjectWebhookConstraints::DeletedAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("project_webhook")
     }
 }

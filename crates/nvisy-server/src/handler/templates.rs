@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
-use crate::handler::request::{CreateProjectTemplate, ProjectPathParams, TemplatePathParams};
+use crate::handler::request::{CreateTemplate, ProjectPathParams, TemplatePathParams};
 use crate::handler::response::{ProjectTemplate, ProjectTemplates};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -72,7 +72,7 @@ async fn create_project_template(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
-    Json(_request): Json<CreateProjectTemplate>,
+    Json(_request): Json<CreateTemplate>,
 ) -> Result<(StatusCode, Json<ProjectTemplate>)> {
     // Authorize project access
     auth_claims
@@ -93,7 +93,7 @@ async fn update_project_template(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_claims): AuthState,
-    Json(_request): Json<CreateProjectTemplate>,
+    Json(_request): Json<CreateTemplate>,
 ) -> Result<(StatusCode, Json<ProjectTemplate>)> {
     // Authorize project access
     auth_claims
