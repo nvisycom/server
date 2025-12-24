@@ -96,7 +96,7 @@ pub struct Document {
 ///
 /// This struct contains various metadata fields commonly used for document processing,
 /// including content type information, filename, encoding, and custom attributes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentMetadata {
     /// MIME type of the document content.
     pub content_type: Option<String>,
@@ -344,10 +344,10 @@ impl Document {
     /// Validates the document structure and metadata.
     pub fn validate(&self) -> Result<()> {
         // Validate content type format if present
-        if let Some(ref content_type) = self.metadata.content_type {
-            if !content_type.contains('/') {
-                return Err(TypeError::InvalidContentType(content_type.clone()));
-            }
+        if let Some(ref content_type) = self.metadata.content_type
+            && !content_type.contains('/')
+        {
+            return Err(TypeError::InvalidContentType(content_type.clone()));
         }
 
         // Validate size consistency
@@ -365,21 +365,6 @@ impl Document {
         }
 
         Ok(())
-    }
-}
-
-impl Default for DocumentMetadata {
-    fn default() -> Self {
-        Self {
-            content_type: None,
-            encoding: None,
-            filename: None,
-            extension: None,
-            size: 0,
-            language: None,
-            attributes: HashMap::new(),
-            processing_hints: HashMap::new(),
-        }
     }
 }
 

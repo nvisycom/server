@@ -45,7 +45,6 @@ pub struct CreateDocument {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-
 pub struct UpdateDocument {
     /// Updated display name.
     #[validate(length(min = 1, max = 255))]

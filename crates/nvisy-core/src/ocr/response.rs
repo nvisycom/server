@@ -224,19 +224,18 @@ impl OcrResult {
     pub fn to_annotations(&self) -> Vec<Annotation> {
         self.text_extractions
             .iter()
-            .enumerate()
-            .map(|(_index, extraction)| {
+            .map(|extraction| {
                 let mut annotation = Annotation::new(AnnotationType::Text, "ocr_text")
                     .with_confidence(extraction.confidence)
                     .with_content(extraction.text.clone())
                     .with_source("ocr");
 
                 if let Some(text_span) = &extraction.text_span {
-                    annotation = annotation.with_text_span(text_span.clone());
+                    annotation = annotation.with_text_span(*text_span);
                 }
 
                 if let Some(bounding_box) = &extraction.bounding_box {
-                    annotation = annotation.with_bounding_box(bounding_box.clone());
+                    annotation = annotation.with_bounding_box(*bounding_box);
                 }
 
                 annotation

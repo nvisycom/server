@@ -111,16 +111,16 @@ impl<Req> Request<Req> {
 
     /// Validate the request parameters.
     pub fn validate(&self) -> Result<(), String> {
-        if let Some(threshold) = self.options.confidence_threshold {
-            if !(0.0..=1.0).contains(&threshold) {
-                return Err("Confidence threshold must be between 0.0 and 1.0".to_string());
-            }
+        if let Some(threshold) = self.options.confidence_threshold
+            && !(0.0..=1.0).contains(&threshold)
+        {
+            return Err("Confidence threshold must be between 0.0 and 1.0".to_string());
         }
 
-        if let Some(dpi) = self.options.dpi {
-            if dpi < 50 || dpi > 1200 {
-                return Err("DPI must be between 50 and 1200".to_string());
-            }
+        if let Some(dpi) = self.options.dpi
+            && !(50..=1200).contains(&dpi)
+        {
+            return Err("DPI must be between 50 and 1200".to_string());
         }
 
         Ok(())
@@ -205,24 +205,25 @@ impl DocumentOcrRequest {
         }
 
         // Validate content type
-        if let Some(content_type) = self.document.content_type() {
-            if !content_type.starts_with("image/") && content_type != "application/pdf" {
-                return Err("Document content type must be an image or PDF".to_string());
-            }
+        if let Some(content_type) = self.document.content_type()
+            && !content_type.starts_with("image/")
+            && content_type != "application/pdf"
+        {
+            return Err("Document content type must be an image or PDF".to_string());
         }
 
         // Validate region if specified
-        if let Some(region) = &self.region {
-            if !region.is_valid() {
-                return Err("Invalid bounding box region".to_string());
-            }
+        if let Some(region) = &self.region
+            && !region.is_valid()
+        {
+            return Err("Invalid bounding box region".to_string());
         }
 
         // Validate language code if specified
-        if let Some(lang) = &self.language {
-            if lang.len() != 2 {
-                return Err("Language must be a 2-character ISO 639-1 code".to_string());
-            }
+        if let Some(lang) = &self.language
+            && lang.len() != 2
+        {
+            return Err("Language must be a 2-character ISO 639-1 code".to_string());
         }
 
         Ok(())

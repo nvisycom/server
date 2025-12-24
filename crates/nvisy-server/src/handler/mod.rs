@@ -29,7 +29,6 @@ use axum::response::{IntoResponse, Response};
 pub use crate::extract::Permission;
 pub use crate::handler::error::{Error, ErrorKind, Result};
 pub use crate::handler::request::Pagination;
-pub(crate) use crate::handler::response::ErrorResponse;
 pub use crate::handler::utils::{CustomRoutes, RouterMapFn};
 use crate::middleware::{refresh_token_middleware, require_authentication};
 use crate::service::ServiceState;
@@ -87,10 +86,7 @@ fn public_routes(
 }
 
 /// Returns an [`ApiRouter`] with all routes.
-pub fn openapi_routes(
-    mut routes: CustomRoutes,
-    state: ServiceState,
-) -> ApiRouter<ServiceState> {
+pub fn openapi_routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
     let refresh_token_middleware = from_fn_with_state(state.clone(), refresh_token_middleware);
 

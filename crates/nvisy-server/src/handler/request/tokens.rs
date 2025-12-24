@@ -48,11 +48,15 @@ fn validate_expires_at(expires_at: &Timestamp) -> Result<(), ValidationError> {
     let now = Timestamp::now();
 
     // Check if expiration is in the future
-    if *expires_at <= now {}
+    if *expires_at <= now {
+        return Err(ValidationError::new("expires_at must be in the future"));
+    }
 
     // Check if expiration is not too far in the future (max 1 year)
     let max_expiry = now + jiff::Span::new().days(365);
-    if *expires_at > max_expiry {}
+    if *expires_at > max_expiry {
+        return Err(ValidationError::new("expires_at must be within 1 year"));
+    }
 
     Ok(())
 }
