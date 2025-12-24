@@ -4,6 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -321,9 +322,10 @@ impl ProjectTemplateRepository for PgClient {
 
         let mut query = project_templates
             .filter(
-                display_name
-                    .ilike(&search_pattern)
-                    .or(description.ilike(&search_pattern)),
+                diesel::BoolExpressionMethods::or(
+                    display_name.ilike(&search_pattern),
+                    description.ilike(&search_pattern)
+                ),
             )
             .filter(deleted_at.is_null())
             .into_boxed();
@@ -380,12 +382,11 @@ impl ProjectTemplateRepository for PgClient {
 
     async fn delete_project_template(&self, template_id: Uuid) -> PgResult<()> {
         use schema::project_templates::dsl::*;
-        use time::OffsetDateTime;
 
         let mut conn = self.get_connection().await?;
         diesel::update(project_templates)
             .filter(id.eq(template_id))
-            .set(deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;

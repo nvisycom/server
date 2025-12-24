@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -161,7 +161,7 @@ impl ProjectRepository for PgClient {
         diesel::update(projects)
             .filter(id.eq(project_id))
             .filter(deleted_at.is_null())
-            .set(deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
@@ -179,7 +179,7 @@ impl ProjectRepository for PgClient {
             .filter(status.eq(ProjectStatus::Active))
             .set((
                 status.eq(ProjectStatus::Archived),
-                archived_at.eq(Some(OffsetDateTime::now_utc())),
+                archived_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
             ))
             .returning(Project::as_returning())
             .get_result(&mut conn)
@@ -199,7 +199,7 @@ impl ProjectRepository for PgClient {
             .filter(status.eq(ProjectStatus::Archived))
             .set((
                 status.eq(ProjectStatus::Active),
-                archived_at.eq(None::<OffsetDateTime>),
+                archived_at.eq(None::<jiff_diesel::Timestamp>),
             ))
             .returning(Project::as_returning())
             .get_result(&mut conn)
@@ -253,9 +253,10 @@ impl ProjectRepository for PgClient {
         let project_list = projects
             .filter(deleted_at.is_null())
             .filter(
-                display_name
-                    .ilike(&search_pattern)
-                    .or(description.ilike(&search_pattern)),
+                diesel::BoolExpressionMethods::or(
+                    display_name.ilike(&search_pattern),
+                    description.ilike(&search_pattern)
+                ),
             )
             .filter(visibility.eq(ProjectVisibility::Public))
             .select(Project::as_select())

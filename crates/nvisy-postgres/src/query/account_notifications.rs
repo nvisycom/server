@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -168,7 +168,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -215,7 +215,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -264,7 +264,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -314,7 +314,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -358,7 +358,7 @@ impl AccountNotificationRepository for PgClient {
 
         let update_data = UpdateAccountNotification {
             is_read: Some(true),
-            read_at: Some(OffsetDateTime::now_utc()),
+            read_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
         };
 
         diesel::update(account_notifications::table.filter(dsl::id.eq(notification_id)))
@@ -432,7 +432,7 @@ impl AccountNotificationRepository for PgClient {
 
         let update_data = UpdateAccountNotification {
             is_read: Some(true),
-            read_at: Some(OffsetDateTime::now_utc()),
+            read_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
         };
 
         diesel::update(
@@ -552,7 +552,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         diesel::delete(
             account_notifications::table
@@ -592,7 +592,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -631,7 +631,7 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -677,8 +677,8 @@ impl AccountNotificationRepository for PgClient {
 
         use schema::account_notifications::{self, dsl};
 
-        let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
-        let now = OffsetDateTime::now_utc();
+        let seven_days_ago = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(7));
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))

@@ -1,7 +1,7 @@
 //! Main document model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::documents;
@@ -31,11 +31,11 @@ pub struct Document {
     /// Document settings.
     pub settings: serde_json::Value,
     /// Timestamp when the document was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the document was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the document was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new document.
@@ -237,19 +237,19 @@ impl Document {
 }
 
 impl HasCreatedAt for Document {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for Document {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for Document {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }

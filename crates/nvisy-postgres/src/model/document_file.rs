@@ -1,7 +1,7 @@
 //! Document file model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::document_files;
@@ -61,13 +61,13 @@ pub struct DocumentFile {
     /// Keep file for this many seconds (NULL for indefinite retention).
     pub keep_for_sec: Option<i32>,
     /// Auto delete timestamp.
-    pub auto_delete_at: Option<OffsetDateTime>,
+    pub auto_delete_at: Option<Timestamp>,
     /// Timestamp when the file was uploaded.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the file was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the file was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new document file.
@@ -118,7 +118,7 @@ pub struct NewDocumentFile {
     /// Keep for seconds
     pub keep_for_sec: Option<i32>,
     /// Auto delete at
-    pub auto_delete_at: Option<OffsetDateTime>,
+    pub auto_delete_at: Option<Timestamp>,
 }
 
 /// Data for updating a document file.
@@ -152,13 +152,13 @@ pub struct UpdateDocumentFile {
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Soft delete timestamp
-    pub deleted_at: Option<Option<OffsetDateTime>>,
+    pub deleted_at: Option<Option<Timestamp>>,
 }
 
 impl DocumentFile {
     /// Returns whether the file was uploaded recently.
     pub fn is_recently_uploaded(&self) -> bool {
-        self.was_created_within(time::Duration::hours(file::RECENTLY_UPLOADED_HOURS))
+        self.was_created_within(jiff::Span::new().hours(file::RECENTLY_UPLOADED_HOURS))
     }
 
     /// Returns whether the file is deleted.
@@ -204,7 +204,7 @@ impl DocumentFile {
     /// Returns whether the file should be auto-deleted now.
     pub fn should_be_deleted(&self) -> bool {
         if let Some(delete_at) = self.auto_delete_at {
-            OffsetDateTime::now_utc() >= delete_at
+            jiff::Timestamp::now() >= jiff::Timestamp::from(delete_at)
         } else {
             false
         }
@@ -245,9 +245,10 @@ impl DocumentFile {
     }
 
     /// Returns the time remaining until auto-deletion.
-    pub fn time_until_deletion(&self) -> Option<time::Duration> {
+    pub fn time_until_deletion(&self) -> Option<jiff::Span> {
         if let Some(delete_at) = self.auto_delete_at {
-            let now = OffsetDateTime::now_utc();
+            let now = jiff::Timestamp::now();
+            let delete_at = jiff::Timestamp::from(delete_at);
             if delete_at > now {
                 Some(delete_at - now)
             } else {
@@ -300,19 +301,19 @@ impl DocumentFile {
 }
 
 impl HasCreatedAt for DocumentFile {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for DocumentFile {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for DocumentFile {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }

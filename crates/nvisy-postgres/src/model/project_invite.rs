@@ -1,7 +1,7 @@
 //! Project invite model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::project_invites;
@@ -28,17 +28,17 @@ pub struct ProjectInvite {
     /// Current status of the invitation.
     pub invite_status: InviteStatus,
     /// When the invitation expires.
-    pub expires_at: OffsetDateTime,
+    pub expires_at: Timestamp,
     /// Account that created the invitation.
     pub created_by: Uuid,
     /// Account that last updated the invitation.
     pub updated_by: Uuid,
     /// Timestamp when invitee responded.
-    pub responded_at: Option<OffsetDateTime>,
+    pub responded_at: Option<Timestamp>,
     /// Timestamp when invitation was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when invitation was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 /// Data for creating a new project invitation.
@@ -57,7 +57,7 @@ pub struct NewProjectInvite {
     /// Invite token.
     pub invite_token: Option<String>,
     /// Expires at.
-    pub expires_at: Option<OffsetDateTime>,
+    pub expires_at: Option<Timestamp>,
     /// Created by.
     pub created_by: Uuid,
     /// Updated by.
@@ -72,7 +72,7 @@ pub struct UpdateProjectInvite {
     /// Invite status.
     pub invite_status: Option<InviteStatus>,
     /// Responded at.
-    pub responded_at: Option<OffsetDateTime>,
+    pub responded_at: Option<Timestamp>,
     /// Updated by.
     pub updated_by: Option<Uuid>,
 }
@@ -80,12 +80,12 @@ pub struct UpdateProjectInvite {
 impl ProjectInvite {
     /// Returns whether the invitation is still valid.
     pub fn is_valid(&self) -> bool {
-        self.invite_status == InviteStatus::Pending && self.expires_at > OffsetDateTime::now_utc()
+        self.invite_status == InviteStatus::Pending && jiff::Timestamp::from(self.expires_at) > jiff::Timestamp::now()
     }
 
     /// Returns whether the invitation has expired.
     pub fn is_expired(&self) -> bool {
-        self.expires_at <= OffsetDateTime::now_utc()
+        jiff::Timestamp::from(self.expires_at) <= jiff::Timestamp::now()
     }
 
     /// Returns whether the invitation can still be used.
@@ -125,14 +125,15 @@ impl ProjectInvite {
 
     /// Returns whether the invitation was sent recently.
     pub fn is_recently_sent(&self) -> bool {
-        self.was_created_within(time::Duration::hours(invite::RECENTLY_SENT_HOURS))
+        self.was_created_within(jiff::Span::new().hours(invite::RECENTLY_SENT_HOURS))
     }
 
     /// Returns the time remaining until expiration.
-    pub fn time_until_expiry(&self) -> Option<time::Duration> {
-        let now = OffsetDateTime::now_utc();
-        if self.expires_at > now {
-            Some(self.expires_at - now)
+    pub fn time_until_expiry(&self) -> Option<jiff::Span> {
+        let now = jiff::Timestamp::now();
+        let expires_at = jiff::Timestamp::from(self.expires_at);
+        if expires_at > now {
+            Some(expires_at - now)
         } else {
             None
         }
@@ -141,21 +142,21 @@ impl ProjectInvite {
     /// Returns whether the invitation is expiring soon (within 24 hours).
     pub fn is_expiring_soon(&self) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
-            remaining <= time::Duration::days(1)
+            remaining.total(jiff::Unit::Second).ok() <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
         } else {
             false
         }
     }
 
     /// Returns the age of the invitation since creation.
-    pub fn age(&self) -> time::Duration {
-        OffsetDateTime::now_utc() - self.created_at
+    pub fn age(&self) -> jiff::Span {
+        jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
     }
 
     /// Returns the response time if the invitation was responded to.
-    pub fn response_time(&self) -> Option<time::Duration> {
+    pub fn response_time(&self) -> Option<jiff::Span> {
         self.responded_at
-            .map(|responded_at| responded_at - self.created_at)
+            .map(|responded_at| jiff::Timestamp::from(responded_at) - jiff::Timestamp::from(self.created_at))
     }
 
     /// Returns whether the invitation has a custom message.
@@ -209,13 +210,13 @@ impl ProjectInvite {
 }
 
 impl HasCreatedAt for ProjectInvite {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for ProjectInvite {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }

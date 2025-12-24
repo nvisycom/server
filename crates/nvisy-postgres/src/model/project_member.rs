@@ -1,7 +1,7 @@
 //! Project member model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::project_members;
@@ -35,15 +35,15 @@ pub struct ProjectMember {
     /// Whether the membership is active.
     pub is_active: bool,
     /// Last time member accessed the project.
-    pub last_accessed_at: Option<OffsetDateTime>,
+    pub last_accessed_at: Option<Timestamp>,
     /// Account that created this membership.
     pub created_by: Uuid,
     /// Account that last updated this membership.
     pub updated_by: Uuid,
     /// Timestamp when membership was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when membership was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 /// Data for creating a new project member.
@@ -103,7 +103,7 @@ pub struct UpdateProjectMember {
     /// Is active.
     pub is_active: Option<bool>,
     /// Last accessed at.
-    pub last_accessed_at: Option<OffsetDateTime>,
+    pub last_accessed_at: Option<Timestamp>,
     /// Updated by.
     pub updated_by: Option<Uuid>,
 }
@@ -201,15 +201,15 @@ impl ProjectMember {
     }
 
     /// Returns the time since last access.
-    pub fn time_since_last_access(&self) -> Option<time::Duration> {
+    pub fn time_since_last_access(&self) -> Option<jiff::Span> {
         self.last_accessed_at
-            .map(|last_access| OffsetDateTime::now_utc() - last_access)
+            .map(|last_access| jiff::Timestamp::now() - jiff::Timestamp::from(last_access))
     }
 
     /// Returns whether the member is inactive (no recent access).
     pub fn is_inactive(&self) -> bool {
         if let Some(duration) = self.time_since_last_access() {
-            duration.whole_days() > 30 // No access for 30+ days
+            duration.get_days() > 30 // No access for 30+ days
         } else {
             true // Never accessed
         }
@@ -247,14 +247,14 @@ impl ProjectMember {
 }
 
 impl HasCreatedAt for ProjectMember {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for ProjectMember {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
@@ -269,7 +269,7 @@ impl HasOwnership for ProjectMember {
 }
 
 impl HasLastActivityAt for ProjectMember {
-    fn last_activity_at(&self) -> Option<OffsetDateTime> {
-        self.last_accessed_at
+    fn last_activity_at(&self) -> Option<jiff::Timestamp> {
+        self.last_accessed_at.map(Into::into)
     }
 }

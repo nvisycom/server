@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -185,7 +185,7 @@ impl ProjectInviteRepository for PgClient {
     async fn accept_invite(&self, invite_id: Uuid, _acceptor_id: Uuid) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Accepted),
-            responded_at: Some(OffsetDateTime::now_utc()),
+            responded_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
             ..Default::default()
         };
 
@@ -266,7 +266,7 @@ impl ProjectInviteRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let now = OffsetDateTime::now_utc();
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         let updated_count = diesel::update(project_invites)
             .filter(expires_at.lt(now))
@@ -287,7 +287,7 @@ impl ProjectInviteRepository for PgClient {
         let invites = project_invites
             .filter(project_id.eq(proj_id))
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.gt(OffsetDateTime::now_utc()))
+            .filter(expires_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
             .select(ProjectInvite::as_select())
             .order(created_at.desc())
             .load(&mut conn)
@@ -324,11 +324,14 @@ impl ProjectInviteRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let expiry_threshold = OffsetDateTime::now_utc() + time::Duration::hours(hours);
+        let expiry_threshold = jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().hours(hours));
 
         let invites = project_invites
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.between(OffsetDateTime::now_utc(), expiry_threshold))
+            .filter(expires_at.between(
+                jiff_diesel::Timestamp::from(Timestamp::now()),
+                expiry_threshold,
+            ))
             .select(ProjectInvite::as_select())
             .order(expires_at.asc())
             .load(&mut conn)

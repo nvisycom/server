@@ -33,7 +33,7 @@ tokio = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 
 # ORM & Database
-diesel = { workspace = true, features = ["postgres", "time", "uuid", "ipnet-address", "serde_json", "numeric", "64-column-tables"] }
+diesel = { workspace = true, features = ["postgres", "uuid", "ipnet-address", "serde_json", "numeric", "64-column-tables"] }
 diesel_migrations = { workspace = true, features = ["postgres"] }
 diesel-async = { workspace = true, features = ["postgres", "pool", "deadpool", "async-connection-wrapper"] }
 diesel-derive-enum = { workspace = true, features = ["postgres"] }
@@ -51,7 +51,8 @@ thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 
 # Data types
-time = { workspace = true, features = ["serde", "formatting", "parsing"] }
+jiff = { workspace = true, features = ["serde"] }
+jiff-diesel = { workspace = true, features = ["postgres"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }

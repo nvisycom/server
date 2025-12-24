@@ -5,7 +5,7 @@
 
 use diesel::prelude::*;
 use ipnet::IpNet;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::project_activities;
@@ -38,7 +38,7 @@ pub struct ProjectActivity {
     /// User agent string of the client that performed the activity.
     pub user_agent: Option<String>,
     /// Timestamp when the activity occurred.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
 }
 
 /// Data structure for creating a new project activity entry.
@@ -141,8 +141,8 @@ impl ProjectActivity {
 }
 
 impl HasCreatedAt for ProjectActivity {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 

@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -487,7 +487,7 @@ impl ProjectIntegrationRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let cutoff_time = OffsetDateTime::now_utc() - time::Duration::hours(hours);
+        let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
 
         let mut query = project_integrations
             .filter(updated_at.gt(cutoff_time))

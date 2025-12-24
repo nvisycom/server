@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -495,7 +495,7 @@ impl DocumentCommentRepository for PgClient {
         use schema::document_comments::{self, dsl};
 
         diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
-            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
@@ -617,7 +617,7 @@ impl DocumentCommentRepository for PgClient {
 
         use schema::document_comments::{self, dsl};
 
-        let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
+        let seven_days_ago = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(7));
 
         let comments = document_comments::table
             .filter(dsl::created_at.gt(seven_days_ago))

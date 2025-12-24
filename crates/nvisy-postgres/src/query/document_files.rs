@@ -5,7 +5,7 @@ use std::future::Future;
 use bigdecimal::BigDecimal;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -300,7 +300,7 @@ impl DocumentFileRepository for PgClient {
         use schema::document_files::{self, dsl};
 
         diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
-            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
@@ -657,9 +657,9 @@ impl DocumentFileRepository for PgClient {
         use schema::document_files::{self, dsl};
 
         let affected = diesel::update(document_files::table)
-            .filter(dsl::auto_delete_at.le(OffsetDateTime::now_utc()))
+            .filter(dsl::auto_delete_at.le(jiff_diesel::Timestamp::from(Timestamp::now())))
             .filter(dsl::deleted_at.is_null())
-            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
@@ -720,12 +720,12 @@ impl DocumentFileRepository for PgClient {
 
         use schema::document_files::{self, dsl};
 
-        let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
+        let cutoff_date = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(retention_days as i64));
 
         let affected = diesel::update(document_files::table)
             .filter(dsl::created_at.lt(cutoff_date))
             .filter(dsl::deleted_at.is_null())
-            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;

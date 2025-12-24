@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -296,7 +296,7 @@ impl ProjectMemberRepository for PgClient {
             .filter(project_id.eq(proj_id))
             .filter(account_id.eq(user_id))
             .filter(is_active.eq(true))
-            .set(last_accessed_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(last_accessed_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
@@ -462,7 +462,7 @@ impl ProjectMemberRepository for PgClient {
         use schema::project_members::dsl::*;
 
         let mut conn = self.get_connection().await?;
-        let cutoff_time = OffsetDateTime::now_utc() - time::Duration::hours(hours);
+        let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
 
         let members = project_members
             .filter(project_id.eq(proj_id))

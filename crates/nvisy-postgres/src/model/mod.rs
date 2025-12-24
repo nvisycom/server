@@ -8,6 +8,7 @@ pub mod account_action_token;
 pub mod account_api_token;
 pub mod account_notification;
 pub mod document;
+pub mod document_annotation;
 pub mod document_comment;
 pub mod document_file;
 
@@ -17,6 +18,7 @@ pub mod project_integration;
 pub mod project_invite;
 pub mod project_member;
 pub mod project_pipeline;
+pub mod project_run;
 pub mod project_template;
 
 // Re-export core PostgreSQL model types
@@ -32,6 +34,9 @@ pub use account_notification::{
 };
 // Document models
 pub use document::{Document, NewDocument, UpdateDocument};
+pub use document_annotation::{
+    DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation,
+};
 pub use document_comment::{
     CommentTarget, DocumentComment, NewDocumentComment, UpdateDocumentComment,
 };
@@ -45,4 +50,5 @@ pub use project_integration::{
 pub use project_invite::{NewProjectInvite, ProjectInvite, UpdateProjectInvite};
 pub use project_member::{NewProjectMember, ProjectMember, UpdateProjectMember};
 pub use project_pipeline::{NewProjectPipeline, ProjectPipeline, UpdateProjectPipeline};
+pub use project_run::{NewProjectRun, ProjectRun, UpdateProjectRun};
 pub use project_template::{NewProjectTemplate, ProjectTemplate, UpdateProjectTemplate};

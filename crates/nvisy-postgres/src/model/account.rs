@@ -12,7 +12,7 @@
 
 use diesel::prelude::*;
 use ipnet::IpNet;
-use time::{Duration, OffsetDateTime};
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::accounts;
@@ -51,15 +51,15 @@ pub struct Account {
     /// Number of consecutive failed login attempts.
     pub failed_login_attempts: i32,
     /// Timestamp until which the account is locked due to failed attempts.
-    pub locked_until: Option<OffsetDateTime>,
+    pub locked_until: Option<Timestamp>,
     /// Timestamp when password was last changed.
-    pub password_changed_at: Option<OffsetDateTime>,
+    pub password_changed_at: Option<Timestamp>,
     /// Timestamp when the account was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the account was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the account was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new account.
@@ -115,9 +115,9 @@ pub struct UpdateAccount {
     /// Number of consecutive failed login attempts.
     pub failed_login_attempts: Option<i32>,
     /// Timestamp until which the account is locked.
-    pub locked_until: Option<OffsetDateTime>,
+    pub locked_until: Option<Timestamp>,
     /// Timestamp when password was last changed.
-    pub password_changed_at: Option<OffsetDateTime>,
+    pub password_changed_at: Option<Timestamp>,
 }
 
 impl Account {
@@ -144,7 +144,7 @@ impl Account {
     /// Returns whether the account is currently locked due to failed login attempts.
     pub fn is_locked(&self) -> bool {
         if let Some(locked_until) = self.locked_until {
-            locked_until > OffsetDateTime::now_utc()
+            jiff::Timestamp::from(locked_until) > jiff::Timestamp::now()
         } else {
             false
         }
@@ -208,9 +208,10 @@ impl Account {
     ///
     /// When an account is temporarily locked due to failed login attempts,
     /// this method calculates how much time remains before automatic unlock.
-    pub fn time_until_unlock(&self) -> Option<Duration> {
+    pub fn time_until_unlock(&self) -> Option<jiff::Span> {
         if let Some(locked_until) = self.locked_until {
-            let now = OffsetDateTime::now_utc();
+            let now = jiff::Timestamp::now();
+            let locked_until = jiff::Timestamp::from(locked_until);
             if locked_until > now {
                 Some(locked_until - now)
             } else {
@@ -223,20 +224,20 @@ impl Account {
 }
 
 impl HasCreatedAt for Account {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for Account {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for Account {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }
 
