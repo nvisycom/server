@@ -180,7 +180,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::handler::test::create_test_server;
 
     #[tokio::test]

@@ -8,9 +8,7 @@ use zxcvbn::time_estimates::CrackTimeSeconds;
 use zxcvbn::zxcvbn;
 
 use crate::handler::{ErrorKind, Result};
-
-/// Target identifier for password strength service logging and error reporting.
-const TRACING_TARGET_PASSWORD_STRENGTH: &str = "nvisy_server::service::password_strength";
+use crate::utility::tracing_targets::PASSWORD_STRENGTH as TRACING_TARGET;
 
 /// Password strength evaluator using the zxcvbn algorithm.
 #[derive(Debug, Clone)]
@@ -79,7 +77,7 @@ impl PasswordStrength {
     /// * `user_inputs` - Optional user-specific words to penalize (e.g., username, email)
     pub fn evaluate(&self, password: &str, user_inputs: &[&str]) -> PasswordStrengthResult {
         tracing::debug!(
-            target: TRACING_TARGET_PASSWORD_STRENGTH,
+            target: TRACING_TARGET,
             user_inputs_count = user_inputs.len(),
             "evaluating password strength"
         );
@@ -109,7 +107,7 @@ impl PasswordStrength {
         let score: u8 = entropy.score().into();
 
         tracing::debug!(
-            target: TRACING_TARGET_PASSWORD_STRENGTH,
+            target: TRACING_TARGET,
             score = score,
             guesses = entropy.guesses(),
             has_feedback = feedback.is_some(),
@@ -136,7 +134,7 @@ impl PasswordStrength {
     /// Returns an HTTP 400 Bad Request error with suggestions if password is too weak.
     pub fn validate_password(&self, password: &str, user_inputs: &[&str]) -> Result<()> {
         tracing::debug!(
-            target: TRACING_TARGET_PASSWORD_STRENGTH,
+            target: TRACING_TARGET,
             min_score = self.min_score,
             "validating password strength"
         );
@@ -145,7 +143,7 @@ impl PasswordStrength {
 
         if result.score <= self.min_score {
             tracing::warn!(
-                target: TRACING_TARGET_PASSWORD_STRENGTH,
+                target: TRACING_TARGET,
                 score = result.score,
                 min_score = self.min_score,
                 has_warning = result.feedback.as_ref().and_then(|f| f.warning.as_ref()).is_some(),
@@ -173,7 +171,7 @@ impl PasswordStrength {
         }
 
         tracing::debug!(
-            target: TRACING_TARGET_PASSWORD_STRENGTH,
+            target: TRACING_TARGET,
             score = result.score,
             "password validation successful"
         );
@@ -189,7 +187,7 @@ impl PasswordStrength {
     /// * `user_inputs` - Optional user-specific words to penalize
     pub fn meets_requirements(&self, password: &str, user_inputs: &[&str]) -> bool {
         tracing::debug!(
-            target: TRACING_TARGET_PASSWORD_STRENGTH,
+            target: TRACING_TARGET,
             min_score = self.min_score,
             "checking if password meets requirements"
         );
@@ -198,7 +196,7 @@ impl PasswordStrength {
         let meets_requirements = result.score >= self.min_score;
 
         tracing::debug!(
-            target: TRACING_TARGET_PASSWORD_STRENGTH,
+            target: TRACING_TARGET,
             score = result.score,
             min_score = self.min_score,
             meets_requirements = meets_requirements,

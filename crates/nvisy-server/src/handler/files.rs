@@ -859,7 +859,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod test {
-    use crate::handler::project_files::routes;
+    use crate::handler::files::routes;
     use crate::handler::test::create_test_server_with_router;
 
     #[tokio::test]

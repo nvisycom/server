@@ -1,39 +1,63 @@
 //! Middleware for `axum::Router` and HTTP request processing.
 //!
-//! This module provides a comprehensive set of middleware for:
-//! - Authentication and authorization
-//! - Security (CORS, headers, body limits)
-//! - Observability (metrics, tracing, request IDs)
-//! - Error handling (panics, timeouts, service errors)
-//! - Rate limiting
-//! - OpenAPI documentation
+//! This module provides a comprehensive set of middleware for authentication,
+//! authorization, security, observability, error recovery, and API documentation.
+//! Each middleware category has its own extension trait for ergonomic composition.
 //!
-//! # Quick Start
+//! # Middleware Ordering
+//!
+//! The order in which middleware is applied matters significantly. Axum applies
+//! layers in reverse order, meaning the last layer added wraps the outermost
+//! request handling. The recommended ordering from outermost to innermost is:
+//!
+//! 1. **Recovery** - Catches panics and enforces timeouts at the outermost layer,
+//!    ensuring all errors are properly handled regardless of where they occur.
+//!
+//! 2. **Observability** - Generates request IDs and adds tracing spans early,
+//!    so all subsequent middleware and handlers are properly instrumented.
+//!
+//! 3. **Security** - Applies CORS, security headers, and body limits before
+//!    any request processing occurs.
+//!
+//! 4. **Metrics** - Tracks request timing and categorization after security
+//!    checks but before authentication.
+//!
+//! 5. **Authentication** - Validates credentials and establishes identity
+//!    for the innermost route handlers.
+//!
+//! # Example
 //!
 //! ```rust,no_run
-//! use std::time::Duration;
 //! use axum::Router;
-//! use nvisy_server::middleware::{RouterExt, CorsConfig, SecurityHeadersConfig};
+//! use nvisy_server::middleware::{
+//!     RecoveryConfig, RouterRecoveryExt, RouterObservabilityExt,
+//!     RouterSecurityExt, RouterAuthExt,
+//! };
+//! use nvisy_server::service::ServiceState;
 //!
-//! let app = Router::new()
-//!     .with_error_handling_layer(Duration::from_secs(30))
-//!     .with_observability_layer()
-//!     .with_default_security_layer()
-//!     .with_metrics_layer();
+//! fn create_router(state: ServiceState) -> Router {
+//!     Router::new()
+//!         // Innermost: route handlers go here
+//!         .with_authentication(state.clone())  // 5. Auth
+//!         .with_metrics()                      // 4. Metrics
+//!         .with_default_security()             // 3. Security
+//!         .with_observability()                // 2. Observability
+//!         .with_default_recovery()             // 1. Recovery (outermost)
+//! }
 //! ```
 
-mod auth;
-mod error_handling;
-mod extensions;
+mod authentication;
+mod authorization;
 mod observability;
-pub mod open_api;
-mod rate_limiting;
-pub mod security;
+mod recovery;
+mod security;
+mod specification;
 
-pub use auth::{refresh_token_middleware, require_admin, require_authentication};
-pub use extensions::RouterExt;
-pub use open_api::{OpenApiConfig, RouterOpenApiExt};
-pub use security::{CorsConfig, SecurityHeadersConfig};
-
-// Tracing target constants for consistent logging.
-pub const TRACING_TARGET_AUTH: &str = "nvisy_server::middleware::auth";
+pub use authentication::{RouterAuthExt, refresh_token_middleware, require_authentication};
+pub use authorization::require_admin;
+pub use observability::RouterObservabilityExt;
+pub use recovery::{RecoveryConfig, RouterRecoveryExt};
+pub use security::{
+    CorsConfig, FrameOptions, ReferrerPolicy, RouterSecurityExt, SecurityHeadersConfig,
+};
+pub use specification::{OpenApiConfig, RouterOpenApiExt};

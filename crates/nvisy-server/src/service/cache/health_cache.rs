@@ -17,9 +17,7 @@ use nvisy_postgres::PgClient;
 use tokio::sync::RwLock;
 
 use crate::service::ServiceState;
-
-/// Tracing target for health service operations.
-const TRACING_TARGET_HEALTH: &str = "nvisy_server::service::health";
+use crate::utility::tracing_targets::HEALTH_CACHE as TRACING_TARGET;
 
 /// Default cache duration for health checks.
 const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(30);
@@ -176,7 +174,7 @@ impl HealthCache {
     /// Consider your SLA requirements and health check endpoint call frequency.
     pub fn with_cache_duration(cache_duration: Duration) -> Self {
         tracing::info!(
-            target: TRACING_TARGET_HEALTH,
+            target: TRACING_TARGET,
             cache_duration_secs = cache_duration.as_secs(),
             "health service initialized"
         );
@@ -261,7 +259,7 @@ impl HealthCache {
         self.cache.invalidate().await;
 
         tracing::debug!(
-            target: TRACING_TARGET_HEALTH,
+            target: TRACING_TARGET,
             "Health cache invalidated"
         );
     }
@@ -273,7 +271,7 @@ impl HealthCache {
     /// minimize total check duration.
     ///
     /// Detailed metrics are logged including per-service status and total duration.
-    #[tracing::instrument(skip_all, target = TRACING_TARGET_HEALTH)]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET)]
     async fn check_all_components(
         &self,
         pg_client: &PgClient,
@@ -294,7 +292,7 @@ impl HealthCache {
         let overall_healthy = db_healthy && nats_healthy && ocr_healthy && vlm_healthy;
 
         tracing::info!(
-            target: TRACING_TARGET_HEALTH,
+            target: TRACING_TARGET,
             duration_ms = check_duration.as_millis(),
             database_healthy = db_healthy,
             nats_healthy = nats_healthy,
@@ -314,12 +312,12 @@ impl HealthCache {
     async fn check_database(&self, pg_client: &PgClient) -> bool {
         match pg_client.get_connection().await {
             Ok(_) => {
-                tracing::debug!(target: TRACING_TARGET_HEALTH, "Postgres health check passed");
+                tracing::debug!(target: TRACING_TARGET, "Postgres health check passed");
                 true
             }
             Err(e) => {
                 tracing::warn!(
-                    target: TRACING_TARGET_HEALTH,
+                    target: TRACING_TARGET,
                     error = %e,
                     "postgres health check failed"
                 );
@@ -339,7 +337,7 @@ impl HealthCache {
         let stats = nats_client.stats();
         if !stats.is_connected {
             tracing::warn!(
-                target: TRACING_TARGET_HEALTH,
+                target: TRACING_TARGET,
                 "nats is not connected"
             );
 
@@ -350,7 +348,7 @@ impl HealthCache {
         match nats_client.ping().await {
             Ok(duration) => {
                 tracing::debug!(
-                    target: TRACING_TARGET_HEALTH,
+                    target: TRACING_TARGET,
                     ping_ms = duration.as_millis(),
                     "nats health check passed"
                 );
@@ -358,7 +356,7 @@ impl HealthCache {
             }
             Err(e) => {
                 tracing::warn!(
-                    target: TRACING_TARGET_HEALTH,
+                    target: TRACING_TARGET,
                     error = %e,
                     "nats health check failed"
                 );
@@ -373,7 +371,7 @@ impl HealthCache {
     /// For now, we assume the service is healthy if the client is configured.
     async fn check_ocr(&self, _ocr_client: &OcrService) -> bool {
         // TODO: Implement actual OCR health check
-        tracing::debug!(target: TRACING_TARGET_HEALTH, "OCR health check skipped (not yet implemented)");
+        tracing::debug!(target: TRACING_TARGET, "OCR health check skipped (not yet implemented)");
         true
     }
 
@@ -383,7 +381,7 @@ impl HealthCache {
     /// For now, we assume the service is healthy if the client is configured.
     async fn check_vlm(&self, _vlm_client: &VlmService) -> bool {
         // TODO: Implement actual VLM health check
-        tracing::debug!(target: TRACING_TARGET_HEALTH, "VLM health check skipped (not yet implemented)");
+        tracing::debug!(target: TRACING_TARGET, "VLM health check skipped (not yet implemented)");
         true
     }
 }

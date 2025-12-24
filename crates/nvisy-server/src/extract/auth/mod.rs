@@ -15,18 +15,9 @@ pub use self::auth_state::AuthState;
 pub use self::jwt_claims::AuthClaims;
 pub use self::jwt_header::AuthHeader;
 pub use self::permission::{AuthResult, Permission};
-
-/// Tracing target for authentication operations.
-///
-/// Used for logging JWT token validation, session verification, account lookup,
-/// and other operations that verify user identity and session validity.
-pub const TRACING_TARGET_AUTHENTICATION: &str = "nvisy_server::extract::authentication";
-
-/// Tracing target for authorization operations.
-///
-/// Used for logging permission checks, role validation, project access control,
-/// and other operations that determine what authenticated users can access.
-pub const TRACING_TARGET_AUTHORIZATION: &str = "nvisy_server::extract::authorization";
+pub use crate::utility::tracing_targets::{
+    AUTHENTICATION as TRACING_TARGET_AUTHENTICATION, AUTHORIZATION as TRACING_TARGET_AUTHORIZATION,
+};
 
 impl<T> AuthProvider for AuthClaims<T> {
     fn account_id(&self) -> uuid::Uuid {

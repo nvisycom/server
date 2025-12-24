@@ -1,3 +1,8 @@
+//! Enhanced query parameter extractor with improved error handling.
+//!
+//! This module provides [`Query`], an enhanced version of [`axum::extract::Query`]
+//! with better error messages and OpenAPI documentation support.
+
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{FromRequestParts, OptionalFromRequestParts, Query as AxumQuery};
 use axum::http::request::Parts;

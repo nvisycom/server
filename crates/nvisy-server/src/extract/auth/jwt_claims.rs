@@ -1,3 +1,9 @@
+//! JWT claims structure and token encoding/decoding.
+//!
+//! This module provides [`AuthClaims`], the core JWT claims structure used for
+//! authentication tokens. It handles token creation, validation, encoding, and
+//! decoding with comprehensive security checks.
+
 use std::borrow::Cow;
 
 use axum_extra::TypedHeader;
