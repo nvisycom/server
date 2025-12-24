@@ -148,3 +148,22 @@ fn sanitize_error_message(message: &str) -> String {
         .take(150) // Limit message length
         .collect()
 }
+
+impl<T> aide::OperationInput for Path<T>
+where
+    T: schemars::JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        AxumPath::<T>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        AxumPath::<T>::inferred_early_responses(ctx, operation)
+    }
+}

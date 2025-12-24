@@ -17,8 +17,7 @@ use crate::{Error, Result};
 ///
 /// This struct is a minimal wrapper around `bytes::Bytes` that stores content data
 /// along with optional metadata and headers.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContentData {
     /// The actual content data
     data: Bytes,

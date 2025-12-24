@@ -3,6 +3,8 @@
 use std::time::Duration;
 
 use jiff::Timestamp;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -16,6 +18,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 300;
 
 /// Document processing stages
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessingStage {
     /// Initial document preprocessing
@@ -29,6 +32,7 @@ pub enum ProcessingStage {
 
 /// Document processing type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessingType {
     /// OCR processing
@@ -43,6 +47,7 @@ pub enum ProcessingType {
 
 /// Document processing options
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ProcessingOptions {
     /// Quality settings
     pub quality: Option<String>,
@@ -54,6 +59,7 @@ pub struct ProcessingOptions {
 
 /// Document job payload containing processing details
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct DocumentJobPayload {
     pub document_id: Uuid,
     pub account_id: Uuid,
@@ -103,6 +109,7 @@ impl DocumentJobPayload {
 
 /// Document processing job
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct DocumentJob {
     pub id: Uuid,
     pub payload: DocumentJobPayload,

@@ -1,7 +1,7 @@
 //! Account notification model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::{Duration, OffsetDateTime};
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_notifications;
@@ -26,7 +26,7 @@ pub struct AccountNotification {
     /// Whether notification has been read.
     pub is_read: bool,
     /// Timestamp when notification was read.
-    pub read_at: Option<OffsetDateTime>,
+    pub read_at: Option<Timestamp>,
     /// ID of related entity (comment, document, etc.).
     pub related_id: Option<Uuid>,
     /// Type of related entity.
@@ -34,9 +34,9 @@ pub struct AccountNotification {
     /// Additional notification data.
     pub metadata: serde_json::Value,
     /// Notification creation timestamp.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Optional expiration timestamp.
-    pub expires_at: Option<OffsetDateTime>,
+    pub expires_at: Option<Timestamp>,
 }
 
 /// Data for creating a new account notification.
@@ -59,7 +59,7 @@ pub struct NewAccountNotification {
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
     /// Expiration timestamp.
-    pub expires_at: Option<OffsetDateTime>,
+    pub expires_at: Option<Timestamp>,
 }
 
 /// Data for updating an account notification.
@@ -70,7 +70,7 @@ pub struct UpdateAccountNotification {
     /// Mark as read/unread.
     pub is_read: Option<bool>,
     /// Read timestamp.
-    pub read_at: Option<OffsetDateTime>,
+    pub read_at: Option<Timestamp>,
 }
 
 impl AccountNotification {
@@ -82,7 +82,7 @@ impl AccountNotification {
     /// Returns whether the notification has expired.
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
-            OffsetDateTime::now_utc() > expires_at
+            jiff::Timestamp::now() > jiff::Timestamp::from(expires_at)
         } else {
             false
         }
@@ -99,9 +99,10 @@ impl AccountNotification {
     }
 
     /// Returns the time remaining until expiration.
-    pub fn time_until_expiry(&self) -> Option<Duration> {
+    pub fn time_until_expiry(&self) -> Option<jiff::Span> {
         if let Some(expires_at) = self.expires_at {
-            let now = OffsetDateTime::now_utc();
+            let now = jiff::Timestamp::now();
+            let expires_at = jiff::Timestamp::from(expires_at);
             if expires_at > now {
                 Some(expires_at - now)
             } else {
@@ -113,14 +114,14 @@ impl AccountNotification {
     }
 
     /// Returns the duration since the notification was created.
-    pub fn age(&self) -> Duration {
-        OffsetDateTime::now_utc() - self.created_at
+    pub fn age(&self) -> jiff::Span {
+        jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
     }
 
     /// Returns whether the notification is expiring soon (within 24 hours).
     pub fn is_expiring_soon(&self) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
-            remaining <= Duration::days(1)
+            remaining.total(jiff::Unit::Second).ok() <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
         } else {
             false
         }
@@ -177,15 +178,16 @@ impl AccountNotification {
 }
 
 impl HasCreatedAt for AccountNotification {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasExpiresAt for AccountNotification {
-    fn expires_at(&self) -> OffsetDateTime {
-        self.expires_at.unwrap_or(
-            OffsetDateTime::now_utc() + Duration::days(notification::DEFAULT_RETENTION_DAYS as i64),
+    fn expires_at(&self) -> jiff::Timestamp {
+        self.expires_at.map(Into::into).unwrap_or(
+            jiff::Timestamp::now()
+                + jiff::Span::new().days(notification::DEFAULT_RETENTION_DAYS as i64),
         )
     }
 }

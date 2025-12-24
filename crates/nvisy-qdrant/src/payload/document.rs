@@ -4,11 +4,11 @@
 //! including point definitions, document types, status tracking, and document-specific metadata.
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
 use crate::SearchResult;
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 use crate::types::{Payload, Point, PointId, Vector};
 
 /// Create a payload with standard metadata fields
@@ -22,7 +22,7 @@ fn create_metadata_payload() -> Payload {
 
 /// Types of documents supported by the system.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum DocumentType {
     /// Plain text document
     Text,
@@ -117,7 +117,7 @@ impl std::fmt::Display for DocumentType {
 
 /// Document processing and publication status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum DocumentStatus {
     /// Draft document, not yet finalized
     Draft,
@@ -174,7 +174,7 @@ impl std::fmt::Display for DocumentStatus {
 
 /// A point representing a document in the vector database.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct DocumentPoint {
     /// Unique identifier for the document
     pub id: PointId,
@@ -309,6 +309,7 @@ impl DocumentPoint {
     }
 
     /// Create a document chunk
+    #[allow(clippy::too_many_arguments)]
     pub fn document_chunk(
         id: impl Into<PointId>,
         embedding: Vector,
@@ -453,7 +454,9 @@ impl DocumentPoint {
     }
 
     /// Create from a search result
-    pub fn from_search_result(result: SearchResult) -> QdrantResult<Self> {
+    pub fn from_search_result(result: SearchResult) -> Result<Self> {
+        let id = result.id.clone();
+        let embedding = result.vector().unwrap_or_default();
         let payload = result.payload;
 
         let document_type = match payload.get_string("document_type") {
@@ -479,7 +482,9 @@ impl DocumentPoint {
                     }
                 }
             }
-            None => return Err(QdrantError::PayloadError("Missing document_type".into())),
+            None => {
+                return Err(Error::invalid_input().with_message("Missing document_type"));
+            }
         };
 
         let status = match payload.get_string("status") {
@@ -499,17 +504,17 @@ impl DocumentPoint {
 
         let title = payload
             .get_string("title")
-            .ok_or_else(|| QdrantError::PayloadError("Missing title".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing title"))?
             .to_string();
 
         let content = payload
             .get_string("content")
-            .ok_or_else(|| QdrantError::PayloadError("Missing content".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing content"))?
             .to_string();
 
         let author_id = payload
             .get_string("author_id")
-            .ok_or_else(|| QdrantError::PayloadError("Missing author_id".into()))?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing author_id"))?
             .to_string();
 
         let tags = payload
@@ -538,8 +543,8 @@ impl DocumentPoint {
             .map(|s| s.to_string());
 
         Ok(Self {
-            id: result.id,
-            embedding: result.vector.unwrap_or_default(),
+            id,
+            embedding,
             document_type,
             status,
             title,

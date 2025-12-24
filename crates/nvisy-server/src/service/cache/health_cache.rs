@@ -216,8 +216,7 @@ impl HealthCache {
                 self.check_all_components(
                     &service_state.pg_client,
                     &service_state.nats_client,
-                    &service_state.ocr_client,
-                    &service_state.vlm_client,
+                    &service_state.ai_services,
                 )
             })
             .await
@@ -279,8 +278,7 @@ impl HealthCache {
         &self,
         pg_client: &PgClient,
         nats_client: &NatsClient,
-        ocr_client: &OcrService,
-        vlm_client: &VlmService,
+        ai_services: &nvisy_core::AiServices,
     ) -> bool {
         let start = Instant::now();
 
@@ -288,8 +286,8 @@ impl HealthCache {
         let (db_healthy, nats_healthy, ocr_healthy, vlm_healthy) = tokio::join!(
             self.check_database(pg_client),
             self.check_nats(nats_client),
-            self.check_ocr(ocr_client),
-            self.check_vlm(vlm_client)
+            self.check_ocr(&ai_services.ocr),
+            self.check_vlm(&ai_services.vlm)
         );
 
         let check_duration = start.elapsed();

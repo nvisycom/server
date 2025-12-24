@@ -20,6 +20,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
+schema = ["dep:schemars"]
 
 [dependencies]
 # NATS messaging client
@@ -49,3 +50,6 @@ bytes = { workspace = true, features = [] }
 # Cryptography
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
+
+# Optional: JSON schema generation
+schemars = { workspace = true, features = [], optional = true }

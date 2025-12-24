@@ -5,7 +5,7 @@ use std::future::Future;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use ipnet::IpNet;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -199,7 +199,7 @@ impl AccountRepository for PgClient {
         let mut conn = self.get_connection().await?;
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
-            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .returning(Account::as_returning())
             .get_result(&mut conn)
             .await
@@ -237,7 +237,8 @@ impl AccountRepository for PgClient {
 
         // Lock account if too many failed attempts
         if account.failed_login_attempts >= 5 {
-            let lock_until = OffsetDateTime::now_utc() + time::Duration::hours(1);
+            let lock_until = Timestamp::now() + Span::new().hours(1);
+            let lock_until = jiff_diesel::Timestamp::from(lock_until);
             self.update_account(
                 account_id,
                 UpdateAccount {
@@ -256,7 +257,6 @@ impl AccountRepository for PgClient {
         account_id: Uuid,
         _ip_address: IpNet,
     ) -> PgResult<Account> {
-        let _now = OffsetDateTime::now_utc();
         self.update_account(
             account_id,
             UpdateAccount {
@@ -285,7 +285,7 @@ impl AccountRepository for PgClient {
             account_id,
             UpdateAccount {
                 password_hash: Some(password_hash),
-                password_changed_at: Some(OffsetDateTime::now_utc()),
+                password_changed_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
                 ..Default::default()
             },
         )
@@ -389,7 +389,7 @@ impl AccountRepository for PgClient {
         let mut conn = self.get_connection().await?;
 
         accounts::table
-            .filter(dsl::locked_until.gt(OffsetDateTime::now_utc()))
+            .filter(dsl::locked_until.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::locked_until.desc())
             .limit(pagination.limit)
@@ -408,7 +408,8 @@ impl AccountRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let thirty_days_ago = OffsetDateTime::now_utc() - time::Duration::days(30);
+        let thirty_days_ago = Timestamp::now() - Span::new().days(30);
+        let thirty_days_ago = jiff_diesel::Timestamp::from(thirty_days_ago);
 
         accounts::table
             .filter(dsl::created_at.gt(thirty_days_ago))
@@ -427,7 +428,8 @@ impl AccountRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let ninety_days_ago = OffsetDateTime::now_utc() - time::Duration::days(90);
+        let ninety_days_ago = Timestamp::now() - Span::new().days(90);
+        let ninety_days_ago = jiff_diesel::Timestamp::from(ninety_days_ago);
 
         accounts::table
             .filter(dsl::updated_at.lt(ninety_days_ago))
@@ -493,11 +495,11 @@ impl AccountRepository for PgClient {
             accounts::table.filter(
                 dsl::locked_until
                     .is_not_null()
-                    .and(dsl::locked_until.le(OffsetDateTime::now_utc())),
+                    .and(dsl::locked_until.le(jiff_diesel::Timestamp::from(Timestamp::now()))),
             ),
         )
         .set((
-            dsl::locked_until.eq(None::<OffsetDateTime>),
+            dsl::locked_until.eq(None::<jiff_diesel::Timestamp>),
             dsl::failed_login_attempts.eq(0),
         ))
         .returning(Account::as_returning())

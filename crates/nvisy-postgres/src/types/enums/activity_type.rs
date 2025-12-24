@@ -1,10 +1,10 @@
 //! Activity type enumeration for project audit logging.
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the type of activity performed in a project for audit logging.
 ///
@@ -12,8 +12,8 @@ use utoipa::ToSchema;
 /// to categorize different types of activities that occur within projects for comprehensive
 /// audit trail and activity tracking.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ActivityType"]
 pub enum ActivityType {
     // Project activities

@@ -13,7 +13,9 @@ pub mod account;
 pub mod account_action_tokens;
 pub mod account_api_tokens;
 pub mod account_notifications;
+
 pub mod document;
+pub mod document_annotations;
 pub mod document_comments;
 pub mod document_files;
 
@@ -23,6 +25,7 @@ pub mod project_integration;
 pub mod project_invite;
 pub mod project_member;
 pub mod project_pipelines;
+pub mod project_runs;
 pub mod project_templates;
 
 pub use account::AccountRepository;

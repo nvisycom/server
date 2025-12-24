@@ -1,7 +1,7 @@
 //! Main project model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::projects;
@@ -26,8 +26,8 @@ pub struct Project {
     pub status: ProjectStatus,
     /// Project visibility level (public, private, etc.).
     pub visibility: ProjectVisibility,
-    /// Data retention period in seconds.
-    pub keep_for_sec: i32,
+    /// Data retention period in seconds (NULL for indefinite retention).
+    pub keep_for_sec: Option<i32>,
     /// Whether automatic cleanup is enabled.
     pub auto_cleanup: bool,
     /// Maximum number of members allowed.
@@ -47,13 +47,13 @@ pub struct Project {
     /// Account that created the project.
     pub created_by: Uuid,
     /// Timestamp when the project was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the project was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the project was archived.
-    pub archived_at: Option<OffsetDateTime>,
+    pub archived_at: Option<Timestamp>,
     /// Timestamp when the project was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new project.
@@ -263,8 +263,8 @@ impl Project {
     }
 
     /// Returns the data retention period in days.
-    pub fn retention_days(&self) -> i32 {
-        self.keep_for_sec / (24 * 60 * 60) // Convert seconds to days
+    pub fn retention_days(&self) -> Option<i32> {
+        self.keep_for_sec.map(|sec| sec / (24 * 60 * 60)) // Convert seconds to days
     }
 
     /// Returns whether the project allows file uploads.
@@ -278,8 +278,8 @@ impl Project {
     }
 
     /// Returns the age of the project since creation.
-    pub fn age(&self) -> time::Duration {
-        OffsetDateTime::now_utc() - self.created_at
+    pub fn age(&self) -> jiff::Span {
+        jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
     }
 
     /// Returns the display name or a default.
@@ -293,20 +293,20 @@ impl Project {
 }
 
 impl HasCreatedAt for Project {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for Project {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for Project {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }
 

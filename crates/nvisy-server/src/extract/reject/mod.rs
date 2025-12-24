@@ -5,11 +5,11 @@
 //! designed to be drop-in replacements for their standard Axum counterparts while
 //! providing additional features like detailed error context and automatic validation.
 
-pub mod enhanced_form;
-pub mod enhanced_json;
-pub mod enhanced_path;
-pub mod enhanced_query;
-pub mod validated_json;
+mod enhanced_form;
+mod enhanced_json;
+mod enhanced_path;
+mod enhanced_query;
+mod validated_json;
 
 pub use self::enhanced_form::Form;
 pub use self::enhanced_json::Json;

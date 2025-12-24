@@ -159,3 +159,43 @@ fn sanitize_error_message(message: &str) -> String {
     // Limit message length.
     lines.join(" ").chars().take(200).collect()
 }
+
+impl<T> aide::OperationInput for Json<T>
+where
+    T: schemars::JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        AxumJson::<T>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        AxumJson::<T>::inferred_early_responses(ctx, operation)
+    }
+}
+
+impl<T> aide::OperationOutput for Json<T>
+where
+    T: schemars::JsonSchema + Serialize,
+{
+    type Inner = T;
+
+    fn operation_response(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Option<aide::openapi::Response> {
+        AxumJson::<T>::operation_response(ctx, operation)
+    }
+
+    fn inferred_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        AxumJson::<T>::inferred_responses(ctx, operation)
+    }
+}

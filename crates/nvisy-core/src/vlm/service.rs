@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{Boxed, BoxedStream, Request, Response, Result, Vlm};
-use crate::health::ServiceHealth;
+use super::{BoxedStream, BoxedVlmProvider, Request, Response, Result, VlmProvider};
+use crate::types::ServiceHealth;
 
 /// VLM service wrapper with observability.
 ///
@@ -25,8 +25,7 @@ pub struct Service<Req = (), Resp = ()> {
 }
 
 struct ServiceInner<Req, Resp> {
-    vlm: Boxed<Req, Resp>,
-    service_name: String,
+    vlm: BoxedVlmProvider<Req, Resp>,
 }
 
 impl<Req, Resp> Service<Req, Resp>
@@ -39,32 +38,24 @@ where
     /// # Parameters
     ///
     /// * `vlm` - VLM implementation
-    /// * `service_name` - Name for logging and identification
-    pub fn new(vlm: Boxed<Req, Resp>, service_name: impl Into<String>) -> Self {
+    pub fn new(vlm: BoxedVlmProvider<Req, Resp>) -> Self {
         Self {
             inner: Arc::new(ServiceInner {
                 vlm,
-                service_name: service_name.into(),
             }),
         }
-    }
-
-    /// Get the service name.
-    pub fn service_name(&self) -> &str {
-        &self.inner.service_name
     }
 }
 
 #[async_trait]
-impl<Req, Resp> Vlm<Req, Resp> for Service<Req, Resp>
+impl<Req, Resp> VlmProvider<Req, Resp> for Service<Req, Resp>
 where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + 'static,
 {
-    async fn process(&self, request: &Request<Req>) -> Result<Response<Resp>> {
+    async fn process_vlm(&self, request: &Request<Req>) -> Result<Response<Resp>> {
         tracing::debug!(
-            target: crate::TRACING_TARGET_VLM,
-            service = %self.inner.service_name,
+            target: super::TRACING_TARGET,
             request_id = %request.request_id,
             image_count = request.images.len(),
             "Processing VLM request"
@@ -72,21 +63,19 @@ where
 
         let start = std::time::Instant::now();
 
-        let result = self.inner.vlm.process(request).await;
+        let result = self.inner.vlm.process_vlm(request).await;
 
         match &result {
             Ok(_) => {
                 tracing::debug!(
-                    target: crate::TRACING_TARGET_VLM,
-                    service = %self.inner.service_name,
+                    target: super::TRACING_TARGET,
                     elapsed = ?start.elapsed(),
                     "VLM processing successful"
                 );
             }
             Err(error) => {
                 tracing::error!(
-                    target: crate::TRACING_TARGET_VLM,
-                    service = %self.inner.service_name,
+                    target: super::TRACING_TARGET,
                     error = %error,
                     elapsed = ?start.elapsed(),
                     "VLM processing failed"
@@ -97,21 +86,22 @@ where
         result
     }
 
-    async fn process_stream(&self, request: &Request<Req>) -> Result<BoxedStream<Response<Resp>>> {
+    async fn process_vlm_stream(
+        &self,
+        request: &Request<Req>,
+    ) -> Result<BoxedStream<Response<Resp>>> {
         tracing::debug!(
-            target: crate::TRACING_TARGET_VLM,
-            service = %self.inner.service_name,
+            target: super::TRACING_TARGET,
             request_id = %request.request_id,
             "Starting VLM stream processing"
         );
 
-        self.inner.vlm.process_stream(request).await
+        self.inner.vlm.process_vlm_stream(request).await
     }
 
     async fn health_check(&self) -> Result<ServiceHealth> {
         tracing::trace!(
-            target: crate::TRACING_TARGET_VLM,
-            service = %self.inner.service_name,
+            target: super::TRACING_TARGET,
             "Performing health check"
         );
 

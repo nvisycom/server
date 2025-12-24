@@ -4,22 +4,21 @@
 //! creating, reading, updating, and deleting projects. All operations are secured
 //! with role-based access control.
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{self, NewProject, NewProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::ProjectRole;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{CreateProject, UpdateProject};
 use crate::handler::response::{Project, Projects};
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project operations.
@@ -27,7 +26,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::projects";
 
 /// `Path` param for `{projectId}` handlers.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPathParams {
     /// Unique identifier of the project.
@@ -36,31 +35,6 @@ pub struct ProjectPathParams {
 
 /// Creates a new project.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/projects/", tag = "projects",
-    request_body(
-        content = CreateProject,
-        description = "New project",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Project created",
-            body = Project,
-        ),
-    ),
-)]
 async fn create_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -109,31 +83,6 @@ async fn create_project(
 
 /// Returns all projects for an account.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/", tag = "projects",
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Projects listed",
-            body = Projects,
-        ),
-    ),
-)]
 async fn list_projects(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -161,27 +110,6 @@ async fn list_projects(
 
 /// Gets a project by its project ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/", tag = "projects",
-    params(ProjectPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project details",
-            body = Project,
-        ),
-    ),
-)]
 async fn read_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -210,32 +138,6 @@ async fn read_project(
 
 /// Updates a project by the project ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/projects/{projectId}/", tag = "projects",
-    params(ProjectPathParams),
-    request_body(
-        content = UpdateProject,
-        description = "Project changes",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project changes",
-            body = Project,
-        ),
-    ),
-)]
 async fn update_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -286,36 +188,6 @@ async fn update_project(
 
 /// Deletes a project by its project ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/projects/{projectId}/", tag = "projects",
-    params(ProjectPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Project not found",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Project deleted",
-        ),
-    ),
-)]
 async fn delete_project(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -358,10 +230,15 @@ async fn delete_project(
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
-        .routes(routes!(create_project, list_projects))
-        .routes(routes!(read_project, update_project, delete_project))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/projects/", post(create_project))
+        .api_route("/projects/", get(list_projects))
+        .api_route("/projects/:project_id/", get(read_project))
+        .api_route("/projects/:project_id/", patch(update_project))
+        .api_route("/projects/:project_id/", delete(delete_project))
 }
 
 #[cfg(test)]

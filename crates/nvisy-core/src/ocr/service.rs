@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{BoxedOcr, BoxedStream, Ocr, Request, Response, Result};
-use crate::health::ServiceHealth;
+use super::{BoxedOcrProvider, BoxedStream, OcrProvider, Request, Response, Result};
+use crate::types::ServiceHealth;
 
 /// OCR service wrapper with observability.
 ///
@@ -25,8 +25,7 @@ pub struct OcrService<Req = (), Resp = ()> {
 }
 
 struct ServiceInner<Req, Resp> {
-    ocr: BoxedOcr<Req, Resp>,
-    service_name: String,
+    ocr: BoxedOcrProvider<Req, Resp>,
 }
 
 impl<Req, Resp> OcrService<Req, Resp>
@@ -39,45 +38,34 @@ where
     /// # Parameters
     ///
     /// * `ocr` - OCR implementation
-    /// * `service_name` - Name for logging and identification
-    pub fn new(ocr: BoxedOcr<Req, Resp>, service_name: impl Into<String>) -> Self {
+    pub fn new(ocr: BoxedOcrProvider<Req, Resp>) -> Self {
         Self {
-            inner: Arc::new(ServiceInner {
-                ocr,
-                service_name: service_name.into(),
-            }),
+            inner: Arc::new(ServiceInner { ocr }),
         }
-    }
-
-    /// Get the service name.
-    pub fn service_name(&self) -> &str {
-        &self.inner.service_name
     }
 }
 
 #[async_trait]
-impl<Req, Resp> Ocr<Req, Resp> for OcrService<Req, Resp>
+impl<Req, Resp> OcrProvider<Req, Resp> for OcrService<Req, Resp>
 where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + 'static,
 {
-    async fn process_with_ocr(&self, request: Request<Req>) -> Result<Response<Resp>> {
+    async fn process_ocr(&self, request: Request<Req>) -> Result<Response<Resp>> {
         tracing::debug!(
-            target: crate::TRACING_TARGET_OCR,
-            service = %self.inner.service_name,
+            target: super::TRACING_TARGET,
             request_id = %request.request_id,
             "Processing OCR request"
         );
 
         let start = std::time::Instant::now();
 
-        let result = self.inner.ocr.process_with_ocr(request).await;
+        let result = self.inner.ocr.process_ocr(request).await;
 
         match &result {
             Ok(response) => {
                 tracing::debug!(
-                    target: crate::TRACING_TARGET_OCR,
-                    service = %self.inner.service_name,
+                    target: super::TRACING_TARGET,
                     response_id = %response.response_id,
                     elapsed = ?start.elapsed(),
                     "OCR processing successful"
@@ -85,8 +73,7 @@ where
             }
             Err(error) => {
                 tracing::error!(
-                    target: crate::TRACING_TARGET_OCR,
-                    service = %self.inner.service_name,
+                    target: super::TRACING_TARGET,
                     error = %error,
                     elapsed = ?start.elapsed(),
                     "OCR processing failed"
@@ -97,21 +84,22 @@ where
         result
     }
 
-    async fn process_stream(&self, request: Request<Req>) -> Result<BoxedStream<Response<Resp>>> {
+    async fn process_ocr_stream(
+        &self,
+        request: Request<Req>,
+    ) -> Result<BoxedStream<Response<Resp>>> {
         tracing::debug!(
-            target: crate::TRACING_TARGET_OCR,
-            service = %self.inner.service_name,
+            target: super::TRACING_TARGET,
             request_id = %request.request_id,
             "Starting OCR stream processing"
         );
 
-        self.inner.ocr.process_stream(request).await
+        self.inner.ocr.process_ocr_stream(request).await
     }
 
     async fn health_check(&self) -> Result<ServiceHealth> {
         tracing::trace!(
-            target: crate::TRACING_TARGET_OCR,
-            service = %self.inner.service_name,
+            target: super::TRACING_TARGET,
             "Performing health check"
         );
 

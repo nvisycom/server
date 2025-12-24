@@ -24,28 +24,25 @@ default = []
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true, features = [] }
-nvisy-nats = { workspace = true, features = [] }
-nvisy-postgres = { workspace = true, features = ["utoipa"] }
-nvisy-qdrant = { workspace = true, features = ["utoipa"] }
+nvisy-nats = { workspace = true, features = ["schema"] }
+nvisy-postgres = { workspace = true, features = ["schema"] }
+nvisy-qdrant = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
-scoped-futures = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
 
 # HTTP & Web server
 axum = { workspace = true, features = ["http2", "macros", "ws", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
-axum-extra = { workspace = true, features = ["typed-header", "attachment"] }
-http-body-util = { workspace = true, features = [] }
+axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
 # OpenAPI/Documentation
-utoipa = { workspace = true, features = ["time", "uuid", "yaml"] }
-utoipa-axum = { workspace = true, features = [] }
-utoipa-swagger-ui = { workspace = true, features = [] }
-utoipa-scalar = { workspace = true, features = ["axum"] }
+aide = { workspace = true, features = ["axum", "axum-query", "axum-form", "axum-json", "axum-ws", "axum-multipart", "axum-extra", "bytes", "http"] }
+schemars = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -66,19 +63,22 @@ validator = { workspace = true, features = [] }
 # Text processing
 regex = { workspace = true, features = [] }
 
+# Archive/Compression
+tar = { workspace = true, features = [] }
+flate2 = { workspace = true, features = [] }
+zip = { workspace = true, features = [] }
+
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
 derive_builder = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
-lazy_static = "1.4"
 
 # Data types
-time = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+jiff = { workspace = true, features = ["serde"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
-ecow = { workspace = true, features = [] }
 zxcvbn = { workspace = true, features = [] }
 url = { workspace = true, features = [] }
 

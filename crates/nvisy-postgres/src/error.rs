@@ -63,6 +63,13 @@ pub enum PgError {
     /// other error types.
     #[error("Unexpected error: {0}")]
     Unexpected(Cow<'static, str>),
+
+    /// Timestamp arithmetic error.
+    ///
+    /// This occurs when timestamp arithmetic (addition or subtraction) results
+    /// in a value outside the valid range or uses invalid span units.
+    #[error("Timestamp arithmetic error: {0}")]
+    Jiff(#[from] jiff::Error),
 }
 
 impl PgError {

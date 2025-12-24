@@ -17,6 +17,8 @@ pub enum DocumentFileConstraints {
     OriginalFilenameLength,
     #[strum(serialize = "document_files_file_extension_format")]
     FileExtensionFormat,
+    #[strum(serialize = "document_files_tags_count_max")]
+    TagsCountMax,
 
     // File processing constraints
     #[strum(serialize = "document_files_processing_priority_range")]
@@ -63,6 +65,7 @@ impl DocumentFileConstraints {
             DocumentFileConstraints::DisplayNameLength
             | DocumentFileConstraints::OriginalFilenameLength
             | DocumentFileConstraints::FileExtensionFormat
+            | DocumentFileConstraints::TagsCountMax
             | DocumentFileConstraints::ProcessingPriorityRange
             | DocumentFileConstraints::FileSizeMin
             | DocumentFileConstraints::StoragePathNotEmpty

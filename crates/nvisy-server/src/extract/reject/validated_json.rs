@@ -221,3 +221,22 @@ impl From<ValidationErrors> for Error<'static> {
             .with_context(format!("Request body validation failed: {}", error_context))
     }
 }
+
+impl<T> aide::OperationInput for ValidateJson<T>
+where
+    T: schemars::JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        axum::Json::<T>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        axum::Json::<T>::inferred_early_responses(ctx, operation)
+    }
+}

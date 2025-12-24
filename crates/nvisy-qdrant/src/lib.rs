@@ -28,40 +28,24 @@ pub const TRACING_TARGET_SEARCH: &str = "nvisy_qdrant::search";
 pub const TRACING_TARGET_CONNECTION: &str = "nvisy_qdrant::connection";
 
 mod client;
-pub mod collections;
+pub mod collection;
 mod error;
-mod manager;
 pub mod payload;
 #[doc(hidden)]
 pub mod prelude;
-mod search;
 pub mod types;
 
-pub use client::{QdrantClient, QdrantConfig, QdrantConnection};
-// Re-export collection operation traits
-pub use collections::{
-    AnnotationConfig, AnnotationOperations, AuthorStats, ConversationConfig,
-    ConversationOperations, ConversationStats, DocumentConfig, DocumentOperations, DocumentStats,
-    DocumentTypeStats, SearchParams as CollectionSearchParams,
+pub use client::{QdrantClient, QdrantConfig};
+pub use collection::{
+    AnnotationCollection, ConversationCollection, DocumentCollection,
+    SearchParams as CollectionSearchParams,
 };
-pub use error::{QdrantError, QdrantResult};
-// Re-export payload types for easy access
+pub use error::{Error, Result};
 pub use payload::{
     AnnotationCoordinates, AnnotationPoint, AnnotationType, ConversationPoint, ConversationStatus,
     DocumentPoint, DocumentStatus, DocumentType, MessageType,
 };
-// Re-export the main Qdrant client for advanced usage
-pub use qdrant_client::Qdrant as RawQdrantClient;
-// Re-export commonly used Qdrant client types for convenience
-pub use qdrant_client::qdrant::{
-    Condition, FieldCondition, Filter, Match, Range, SearchPoints, WithPayloadSelector,
-    condition::ConditionOneOf, r#match::MatchValue, point_id::PointIdOptions,
-    vectors::VectorsOptions, with_payload_selector::SelectorOptions,
-};
-pub use search::{
-    BatchSearchRequest, BatchSearchResults, SearchParams, SearchResult, SearchResults,
-};
 pub use types::{
-    CollectionConfig, CollectionInfo, CollectionStatus, Distance, Payload, Point, PointId, Vector,
-    VectorParams,
+    Condition, Distance, Payload, Point, PointId, SearchResult, Vector, VectorParams,
+    WithPayloadSelector,
 };

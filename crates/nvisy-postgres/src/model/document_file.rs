@@ -1,13 +1,14 @@
 //! Document file model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::document_files;
 use crate::types::constants::file;
 use crate::types::{
-    HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus, RequireMode, VirusScanStatus,
+    ContentSegmentation, HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus, RequireMode,
+    VirusScanStatus,
 };
 
 /// Document file model representing a file attached to a document.
@@ -17,7 +18,9 @@ use crate::types::{
 pub struct DocumentFile {
     /// Unique file identifier.
     pub id: Uuid,
-    /// Reference to the document this file belongs to.
+    /// Reference to the project this file belongs to (required).
+    pub project_id: Uuid,
+    /// Reference to the document this file belongs to (optional).
     pub document_id: Option<Uuid>,
     /// Reference to the account that owns this file.
     pub account_id: Uuid,
@@ -31,6 +34,8 @@ pub struct DocumentFile {
     pub original_filename: String,
     /// File extension (without the dot).
     pub file_extension: String,
+    /// Classification tags.
+    pub tags: Vec<Option<String>>,
     /// Processing mode requirements.
     pub require_mode: RequireMode,
     /// Processing priority (higher numbers = higher priority).
@@ -39,6 +44,10 @@ pub struct DocumentFile {
     pub processing_status: ProcessingStatus,
     /// Virus scan status.
     pub virus_scan_status: VirusScanStatus,
+    /// Content segmentation strategy.
+    pub content_segmentation: ContentSegmentation,
+    /// Whether to enable visual content processing.
+    pub visual_support: bool,
     /// File size in bytes.
     pub file_size_bytes: i64,
     /// SHA-256 hash of the file.
@@ -49,16 +58,16 @@ pub struct DocumentFile {
     pub storage_bucket: String,
     /// File metadata (JSON).
     pub metadata: serde_json::Value,
-    /// Keep file for this many seconds.
-    pub keep_for_sec: i32,
+    /// Keep file for this many seconds (NULL for indefinite retention).
+    pub keep_for_sec: Option<i32>,
     /// Auto delete timestamp.
-    pub auto_delete_at: Option<OffsetDateTime>,
+    pub auto_delete_at: Option<Timestamp>,
     /// Timestamp when the file was uploaded.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the file was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the file was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new document file.
@@ -66,7 +75,9 @@ pub struct DocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentFile {
-    /// Document ID.
+    /// Project ID (required).
+    pub project_id: Uuid,
+    /// Document ID (optional).
     pub document_id: Option<Uuid>,
     /// Account ID.
     pub account_id: Uuid,
@@ -80,6 +91,8 @@ pub struct NewDocumentFile {
     pub original_filename: Option<String>,
     /// File extension.
     pub file_extension: Option<String>,
+    /// Tags
+    pub tags: Option<Vec<Option<String>>>,
     /// Require mode
     pub require_mode: Option<RequireMode>,
     /// Processing priority
@@ -88,6 +101,10 @@ pub struct NewDocumentFile {
     pub processing_status: Option<ProcessingStatus>,
     /// Virus scan status
     pub virus_scan_status: Option<VirusScanStatus>,
+    /// Content segmentation
+    pub content_segmentation: Option<ContentSegmentation>,
+    /// Visual support
+    pub visual_support: Option<bool>,
     /// File size in bytes
     pub file_size_bytes: Option<i64>,
     /// SHA-256 hash
@@ -99,9 +116,9 @@ pub struct NewDocumentFile {
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Keep for seconds
-    pub keep_for_sec: i32,
+    pub keep_for_sec: Option<i32>,
     /// Auto delete at
-    pub auto_delete_at: Option<OffsetDateTime>,
+    pub auto_delete_at: Option<Timestamp>,
 }
 
 /// Data for updating a document file.
@@ -109,6 +126,7 @@ pub struct NewDocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateDocumentFile {
+    // Note: project_id is required and should not be updated after creation
     /// Document ID
     pub document_id: Option<Option<Uuid>>,
     /// Display name
@@ -117,6 +135,8 @@ pub struct UpdateDocumentFile {
     pub parent_id: Option<Option<Uuid>>,
     /// Is indexed flag
     pub is_indexed: Option<bool>,
+    /// Tags
+    pub tags: Option<Vec<Option<String>>>,
     /// Require mode
     pub require_mode: Option<RequireMode>,
     /// Processing priority
@@ -125,14 +145,20 @@ pub struct UpdateDocumentFile {
     pub processing_status: Option<ProcessingStatus>,
     /// Virus scan status
     pub virus_scan_status: Option<VirusScanStatus>,
+    /// Content segmentation
+    pub content_segmentation: Option<ContentSegmentation>,
+    /// Visual support
+    pub visual_support: Option<bool>,
     /// Metadata
     pub metadata: Option<serde_json::Value>,
+    /// Soft delete timestamp
+    pub deleted_at: Option<Option<Timestamp>>,
 }
 
 impl DocumentFile {
     /// Returns whether the file was uploaded recently.
     pub fn is_recently_uploaded(&self) -> bool {
-        self.was_created_within(time::Duration::hours(file::RECENTLY_UPLOADED_HOURS))
+        self.was_created_within(jiff::Span::new().hours(file::RECENTLY_UPLOADED_HOURS))
     }
 
     /// Returns whether the file is deleted.
@@ -178,7 +204,7 @@ impl DocumentFile {
     /// Returns whether the file should be auto-deleted now.
     pub fn should_be_deleted(&self) -> bool {
         if let Some(delete_at) = self.auto_delete_at {
-            OffsetDateTime::now_utc() >= delete_at
+            jiff::Timestamp::now() >= jiff::Timestamp::from(delete_at)
         } else {
             false
         }
@@ -219,9 +245,10 @@ impl DocumentFile {
     }
 
     /// Returns the time remaining until auto-deletion.
-    pub fn time_until_deletion(&self) -> Option<time::Duration> {
+    pub fn time_until_deletion(&self) -> Option<jiff::Span> {
         if let Some(delete_at) = self.auto_delete_at {
-            let now = OffsetDateTime::now_utc();
+            let now = jiff::Timestamp::now();
+            let delete_at = jiff::Timestamp::from(delete_at);
             if delete_at > now {
                 Some(delete_at - now)
             } else {
@@ -274,19 +301,19 @@ impl DocumentFile {
 }
 
 impl HasCreatedAt for DocumentFile {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for DocumentFile {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for DocumentFile {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }

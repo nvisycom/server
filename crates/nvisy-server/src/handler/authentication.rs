@@ -4,22 +4,21 @@
 //! registration (signup), and logout functionality. All authentication operations
 //! follow security best practices including:
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum_client_ip::ClientIp;
-use axum_extra::TypedHeader;
 use axum_extra::headers::UserAgent;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 
 use super::request::{Login, Signup};
 use super::response::AuthToken;
-use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, ValidateJson};
-use crate::handler::{ErrorKind, ErrorResponse, Result};
+use crate::extract::{
+    AuthClaims, AuthHeader, AuthState, ClientIp, Json, TypedHeader, ValidateJson,
+};
+use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState, SessionKeys};
 
 /// Tracing target for authentication operations.
@@ -42,60 +41,6 @@ fn create_auth_header(
 
 /// Creates a new account API token.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/auth/login/", tag = "accounts",
-    request_body(
-        content = Login,
-        description = "Login credentials",
-        content_type = "application/json",
-        example = json!({
-            "emailAddress": "user@example.com",
-            "password": "SecurePassword123!",
-            "rememberMe": true
-        })
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request - Invalid email format or missing fields",
-            body = ErrorResponse,
-            example = json!({
-                "name": "bad_request",
-                "message": "The request could not be processed due to invalid data",
-                "context": "Invalid email format"
-            })
-        ),
-        (
-            status = NOT_FOUND,
-            description = "Invalid credentials - user not found or password incorrect",
-            body = ErrorResponse,
-            example = json!({
-                "name": "not_found",
-                "message": "The requested resource was not found"
-            })
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-            example = json!({
-                "name": "internal_server_error",
-                "message": "An internal server error occurred. Please try again later"
-            })
-        ),
-        (
-            status = CREATED,
-            description = "API token created successfully - use the Set-Cookie header for authentication",
-            body = AuthToken,
-            example = json!({
-                "accountId": "550e8400-e29b-41d4-a716-446655440000",
-                "dataCollection": true,
-                "issuedAt": "2025-01-15T10:30:00Z",
-                "expiresAt": "2025-01-22T10:30:00Z"
-            })
-        ),
-    ),
-)]
 async fn login(
     State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
@@ -202,31 +147,6 @@ async fn login(
 
 /// Creates a new account and API token.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/auth/signup/", tag = "accounts",
-    request_body(
-        content = Signup,
-        description = "Signup credentials",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Account created",
-            body = AuthToken,
-        ),
-    ),
-)]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
     State(pg_client): State<PgClient>,
@@ -323,25 +243,6 @@ async fn signup(
 
 /// Deletes an API token by its ID (from the Authorization header).
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/auth/logout/", tag = "accounts",
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "API token deleted",
-        ),
-    ),
-)]
 async fn logout(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -405,11 +306,13 @@ async fn logout(
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
-        .routes(routes!(login))
-        .routes(routes!(signup))
-        .routes(routes!(logout))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/auth/login", post(login))
+        .api_route("/auth/signup", post(signup))
+        .api_route("/auth/logout", post(logout))
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 
 use diesel::prelude::*;
 use ipnet::IpNet;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_api_tokens;
@@ -45,13 +45,13 @@ pub struct AccountApiToken {
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: bool,
     /// Timestamp of token creation.
-    pub issued_at: OffsetDateTime,
+    pub issued_at: Timestamp,
     /// Timestamp when the token expires and becomes invalid.
-    pub expired_at: OffsetDateTime,
+    pub expired_at: Timestamp,
     /// Timestamp of most recent token activity.
-    pub last_used_at: Option<OffsetDateTime>,
+    pub last_used_at: Option<Timestamp>,
     /// Timestamp when the token was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new account API token.
@@ -82,7 +82,7 @@ pub struct NewAccountApiToken {
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid.
-    pub expired_at: Option<OffsetDateTime>,
+    pub expired_at: Option<Timestamp>,
 }
 
 /// Data for updating an account API token.
@@ -91,7 +91,7 @@ pub struct NewAccountApiToken {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountApiToken {
     /// Timestamp of most recent token activity.
-    pub last_used_at: Option<OffsetDateTime>,
+    pub last_used_at: Option<Timestamp>,
     /// Updated name for the API token.
     pub name: Option<String>,
     /// Updated description for the API token.
@@ -101,9 +101,9 @@ pub struct UpdateAccountApiToken {
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid.
-    pub expired_at: Option<OffsetDateTime>,
+    pub expired_at: Option<Timestamp>,
     /// Timestamp when the token was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 impl AccountApiToken {
@@ -114,7 +114,7 @@ impl AccountApiToken {
 
     /// Returns whether the token has expired.
     pub fn is_expired(&self) -> bool {
-        OffsetDateTime::now_utc() > self.expired_at
+        jiff::Timestamp::now() > jiff::Timestamp::from(self.expired_at)
     }
 
     /// Returns whether the token is deleted.
@@ -138,37 +138,39 @@ impl AccountApiToken {
     }
 
     /// Returns the remaining time until token expires.
-    pub fn time_until_expiry(&self) -> Option<time::Duration> {
-        let now = OffsetDateTime::now_utc();
-        if self.expired_at > now {
-            Some(self.expired_at - now)
+    pub fn time_until_expiry(&self) -> Option<jiff::Span> {
+        let now = jiff::Timestamp::now();
+        let expired_at = jiff::Timestamp::from(self.expired_at);
+        if expired_at > now {
+            Some(expired_at - now)
         } else {
             None
         }
     }
 
     /// Returns the duration since the token was last used.
-    pub fn time_since_last_used(&self) -> time::Duration {
+    pub fn time_since_last_used(&self) -> jiff::Span {
+        let now = jiff::Timestamp::now();
         if let Some(last_used) = self.last_used_at {
-            OffsetDateTime::now_utc() - last_used
+            now - jiff::Timestamp::from(last_used)
         } else {
-            OffsetDateTime::now_utc() - self.issued_at
+            now - jiff::Timestamp::from(self.issued_at)
         }
     }
 
     /// Returns the total duration the token has been active.
-    pub fn token_duration(&self) -> time::Duration {
+    pub fn token_duration(&self) -> jiff::Span {
         if let Some(last_used) = self.last_used_at {
-            last_used - self.issued_at
+            jiff::Timestamp::from(last_used) - jiff::Timestamp::from(self.issued_at)
         } else {
-            time::Duration::ZERO
+            jiff::Span::new()
         }
     }
 
     /// Returns whether the token is about to expire (within specified minutes).
     pub fn is_expiring_soon(&self, minutes: i64) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
-            remaining.whole_minutes() <= minutes
+            remaining.get_minutes() <= minutes
         } else {
             false
         }
@@ -211,7 +213,7 @@ impl AccountApiToken {
 
     /// Returns whether the token is long-lived (active for more than 24 hours).
     pub fn is_long_lived(&self) -> bool {
-        self.token_duration().whole_hours() > token::LONG_LIVED_THRESHOLD_HOURS
+        i64::from(self.token_duration().get_hours()) > token::LONG_LIVED_THRESHOLD_HOURS
     }
 
     /// Returns a shortened version of the access token for logging/display.
@@ -236,14 +238,14 @@ impl AccountApiToken {
 }
 
 impl HasCreatedAt for AccountApiToken {
-    fn created_at(&self) -> OffsetDateTime {
-        self.issued_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.issued_at.into()
     }
 }
 
 impl HasExpiresAt for AccountApiToken {
-    fn expires_at(&self) -> OffsetDateTime {
-        self.expired_at
+    fn expires_at(&self) -> jiff::Timestamp {
+        self.expired_at.into()
     }
 }
 

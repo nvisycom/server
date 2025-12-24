@@ -3,11 +3,14 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 
-use crate::error::{QdrantError, QdrantResult};
+use crate::error::{Error, Result};
 
 /// Configuration for Qdrant client connections.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct QdrantConfig {
     /// Qdrant server URL (e.g., "http://localhost:6334")
     pub url: String,
@@ -35,12 +38,6 @@ pub struct QdrantConfig {
 
     /// TLS configuration
     pub tls: Option<QdrantTlsConfig>,
-
-    /// Compression settings
-    pub compression: CompressionConfig,
-
-    /// Retry configuration
-    pub retry: RetryConfig,
 }
 
 impl QdrantConfig {
@@ -53,18 +50,18 @@ impl QdrantConfig {
     /// # Errors
     ///
     /// Returns an error if the URL is invalid.
-    pub fn new(url: impl Into<String>) -> QdrantResult<Self> {
+    pub fn new(url: impl Into<String>) -> Result<Self> {
         let url = url.into();
 
         // Validate URL format
         if url.is_empty() {
-            return Err(QdrantError::invalid_config("URL cannot be empty"));
+            return Err(Error::configuration().with_message("URL cannot be empty"));
         }
 
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err(QdrantError::invalid_config(
-                "URL must start with http:// or https://",
-            ));
+            return Err(
+                Error::configuration().with_message("URL must start with http:// or https://")
+            );
         }
 
         Ok(Self {
@@ -81,8 +78,6 @@ impl QdrantConfig {
                 std::env::consts::OS
             )),
             tls: None,
-            compression: CompressionConfig::default(),
-            retry: RetryConfig::default(),
         })
     }
 
@@ -140,18 +135,6 @@ impl QdrantConfig {
         self
     }
 
-    /// Set compression configuration.
-    pub fn compression(mut self, compression: CompressionConfig) -> Self {
-        self.compression = compression;
-        self
-    }
-
-    /// Set retry configuration.
-    pub fn retry(mut self, retry: RetryConfig) -> Self {
-        self.retry = retry;
-        self
-    }
-
     /// Check if TLS is enabled.
     pub fn is_tls_enabled(&self) -> bool {
         self.tls.is_some() || self.url.starts_with("https://")
@@ -163,32 +146,30 @@ impl QdrantConfig {
     }
 
     /// Validate the configuration.
-    pub fn validate(&self) -> QdrantResult<()> {
+    pub fn validate(&self) -> Result<()> {
         // Validate URL
         if self.url.is_empty() {
-            return Err(QdrantError::invalid_config("URL cannot be empty"));
+            return Err(Error::configuration().with_message("URL cannot be empty"));
         }
 
         // Validate timeouts
         if self.connect_timeout.is_zero() {
-            return Err(QdrantError::invalid_config(
-                "Connect timeout must be greater than zero",
-            ));
+            return Err(
+                Error::configuration().with_message("Connect timeout must be greater than zero")
+            );
         }
 
         if self.timeout.is_zero() {
-            return Err(QdrantError::invalid_config(
-                "Request timeout must be greater than zero",
-            ));
+            return Err(
+                Error::configuration().with_message("Request timeout must be greater than zero")
+            );
         }
 
         // Validate pool size
-        if let Some(pool_size) = self.pool_size {
-            if pool_size == 0 {
-                return Err(QdrantError::invalid_config(
-                    "Pool size must be greater than zero",
-                ));
-            }
+        if let Some(pool_size) = self.pool_size
+            && pool_size == 0
+        {
+            return Err(Error::configuration().with_message("Pool size must be greater than zero"));
         }
 
         // Validate TLS configuration if present
@@ -208,6 +189,7 @@ impl Default for QdrantConfig {
 
 /// TLS configuration for Qdrant connections.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct QdrantTlsConfig {
     /// Accept invalid certificates (for development only)
     pub accept_invalid_certs: bool,
@@ -280,18 +262,16 @@ impl QdrantTlsConfig {
     }
 
     /// Validate the TLS configuration.
-    pub fn validate(&self) -> QdrantResult<()> {
+    pub fn validate(&self) -> Result<()> {
         // Validate client certificate and key are both present or both absent
         match (&self.client_certificate_pem, &self.client_private_key_pem) {
             (Some(_), None) => {
-                return Err(QdrantError::invalid_config(
-                    "Client certificate provided but private key is missing",
-                ));
+                return Err(Error::configuration()
+                    .with_message("Client certificate provided but private key is missing"));
             }
             (None, Some(_)) => {
-                return Err(QdrantError::invalid_config(
-                    "Client private key provided but certificate is missing",
-                ));
+                return Err(Error::configuration()
+                    .with_message("Client private key provided but certificate is missing"));
             }
             _ => {}
         }
@@ -308,150 +288,6 @@ impl QdrantTlsConfig {
 impl Default for QdrantTlsConfig {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Compression configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CompressionConfig {
-    /// Enable gzip compression for requests
-    pub gzip: bool,
-
-    /// Enable brotli compression for requests
-    pub brotli: bool,
-
-    /// Enable deflate compression for requests
-    pub deflate: bool,
-}
-
-impl CompressionConfig {
-    /// Create compression configuration with all methods disabled.
-    pub fn none() -> Self {
-        Self {
-            gzip: false,
-            brotli: false,
-            deflate: false,
-        }
-    }
-
-    /// Create compression configuration with all methods enabled.
-    pub fn all() -> Self {
-        Self {
-            gzip: true,
-            brotli: true,
-            deflate: true,
-        }
-    }
-
-    /// Enable only gzip compression.
-    pub fn gzip_only() -> Self {
-        Self {
-            gzip: true,
-            brotli: false,
-            deflate: false,
-        }
-    }
-}
-
-impl Default for CompressionConfig {
-    fn default() -> Self {
-        Self::gzip_only()
-    }
-}
-
-/// Retry configuration for failed requests.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct RetryConfig {
-    /// Maximum number of retry attempts
-    pub max_attempts: u32,
-
-    /// Initial retry delay
-    pub initial_delay: Duration,
-
-    /// Maximum retry delay
-    pub max_delay: Duration,
-
-    /// Backoff multiplier (exponential backoff)
-    pub backoff_multiplier: f64,
-
-    /// Jitter factor to avoid thundering herd (0.0 to 1.0)
-    pub jitter: f64,
-}
-
-impl RetryConfig {
-    /// Create a new retry configuration.
-    pub fn new(max_attempts: u32) -> Self {
-        Self {
-            max_attempts,
-            initial_delay: Duration::from_millis(100),
-            max_delay: Duration::from_secs(30),
-            backoff_multiplier: 2.0,
-            jitter: 0.1,
-        }
-    }
-
-    /// Disable retries.
-    pub fn none() -> Self {
-        Self {
-            max_attempts: 0,
-            initial_delay: Duration::from_millis(100),
-            max_delay: Duration::from_secs(30),
-            backoff_multiplier: 2.0,
-            jitter: 0.1,
-        }
-    }
-
-    /// Set the initial delay between retries.
-    pub fn initial_delay(mut self, delay: Duration) -> Self {
-        self.initial_delay = delay;
-        self
-    }
-
-    /// Set the maximum delay between retries.
-    pub fn max_delay(mut self, delay: Duration) -> Self {
-        self.max_delay = delay;
-        self
-    }
-
-    /// Set the backoff multiplier for exponential backoff.
-    pub fn backoff_multiplier(mut self, multiplier: f64) -> Self {
-        self.backoff_multiplier = multiplier;
-        self
-    }
-
-    /// Set the jitter factor to add randomness to delays.
-    pub fn jitter(mut self, jitter: f64) -> Self {
-        self.jitter = jitter.clamp(0.0, 1.0);
-        self
-    }
-
-    /// Calculate the delay for a given attempt number.
-    pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        if attempt == 0 || self.max_attempts == 0 {
-            return Duration::from_millis(0);
-        }
-
-        let delay_ms = self.initial_delay.as_millis() as f64
-            * self.backoff_multiplier.powi(attempt as i32 - 1);
-
-        let delay = Duration::from_millis(delay_ms as u64);
-        let capped_delay = delay.min(self.max_delay);
-
-        // Add jitter
-        if self.jitter > 0.0 {
-            let jitter_range = capped_delay.as_millis() as f64 * self.jitter;
-            let jitter_ms = fastrand::f64() * jitter_range;
-            let final_delay_ms = capped_delay.as_millis() as f64 + jitter_ms;
-            Duration::from_millis(final_delay_ms as u64)
-        } else {
-            capped_delay
-        }
-    }
-}
-
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self::new(3) // 3 retry attempts by default
     }
 }
 
@@ -513,36 +349,6 @@ mod tests {
 
         let valid_tls = QdrantTlsConfig::new();
         assert!(valid_tls.validate().is_ok());
-    }
-
-    #[test]
-    fn test_compression_config() {
-        let none = CompressionConfig::none();
-        assert!(!none.gzip && !none.brotli && !none.deflate);
-
-        let all = CompressionConfig::all();
-        assert!(all.gzip && all.brotli && all.deflate);
-
-        let gzip_only = CompressionConfig::gzip_only();
-        assert!(gzip_only.gzip && !gzip_only.brotli && !gzip_only.deflate);
-    }
-
-    #[test]
-    fn test_retry_config() {
-        let retry = RetryConfig::new(5)
-            .initial_delay(Duration::from_millis(200))
-            .backoff_multiplier(1.5)
-            .jitter(0.2);
-
-        assert_eq!(retry.max_attempts, 5);
-        assert_eq!(retry.initial_delay, Duration::from_millis(200));
-        assert_eq!(retry.backoff_multiplier, 1.5);
-        assert_eq!(retry.jitter, 0.2);
-
-        // Test delay calculation
-        let delay1 = retry.calculate_delay(1);
-        let delay2 = retry.calculate_delay(2);
-        assert!(delay2 > delay1); // Should increase with exponential backoff
     }
 
     #[test]

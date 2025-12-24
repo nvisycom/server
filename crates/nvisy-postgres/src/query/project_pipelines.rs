@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -287,7 +287,7 @@ impl ProjectPipelineRepository for PgClient {
         let mut conn = self.get_connection().await?;
         diesel::update(project_pipelines)
             .filter(id.eq(pipeline_id))
-            .set(deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;

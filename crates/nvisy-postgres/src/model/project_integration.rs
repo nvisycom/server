@@ -12,7 +12,7 @@
 //! - [`UpdateProjectIntegration`] - Data structure for updating existing integrations
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::project_integrations;
@@ -55,7 +55,7 @@ pub struct ProjectIntegration {
     pub is_active: bool,
 
     /// Timestamp of the most recent successful synchronization.
-    pub last_sync_at: Option<OffsetDateTime>,
+    pub last_sync_at: Option<Timestamp>,
 
     /// Current status of synchronization operations.
     pub sync_status: Option<IntegrationStatus>,
@@ -64,10 +64,10 @@ pub struct ProjectIntegration {
     pub created_by: Uuid,
 
     /// Timestamp when this integration was first created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
 
     /// Timestamp when this integration was last modified.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
 }
 
 /// Data structure for creating a new project integration.
@@ -101,7 +101,7 @@ pub struct NewProjectIntegration {
     pub is_active: Option<bool>,
 
     /// Optional timestamp of last synchronization.
-    pub last_sync_at: Option<OffsetDateTime>,
+    pub last_sync_at: Option<Timestamp>,
 
     /// Optional initial synchronization status.
     pub sync_status: Option<IntegrationStatus>,
@@ -138,7 +138,7 @@ pub struct UpdateProjectIntegration {
     pub is_active: Option<bool>,
 
     /// Updated timestamp of last successful synchronization.
-    pub last_sync_at: Option<OffsetDateTime>,
+    pub last_sync_at: Option<Timestamp>,
 
     /// Updated synchronization status.
     pub sync_status: Option<IntegrationStatus>,
@@ -196,7 +196,7 @@ impl ProjectIntegration {
     /// Returns whether the integration's sync is overdue (>24 hours or never synced).
     pub fn is_sync_overdue(&self) -> bool {
         if let Some(duration) = self.time_since_last_activity() {
-            duration.whole_hours() > 24
+            duration.get_hours() > 24
         } else {
             true // Never synced
         }
@@ -212,20 +212,20 @@ impl ProjectIntegration {
 }
 
 impl HasCreatedAt for ProjectIntegration {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for ProjectIntegration {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasLastActivityAt for ProjectIntegration {
-    fn last_activity_at(&self) -> Option<OffsetDateTime> {
-        self.last_sync_at
+    fn last_activity_at(&self) -> Option<jiff::Timestamp> {
+        self.last_sync_at.map(jiff::Timestamp::from)
     }
 }
 

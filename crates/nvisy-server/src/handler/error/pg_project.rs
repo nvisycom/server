@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::{
     ProjectActivitiesConstraints, ProjectConstraints, ProjectIntegrationConstraints,
-    ProjectInviteConstraints, ProjectMemberConstraints,
+    ProjectInviteConstraints, ProjectMemberConstraints, ProjectRunConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -123,5 +123,16 @@ impl From<ProjectIntegrationConstraints> for Error<'static> {
         };
 
         error.with_resource("project_integration")
+    }
+}
+
+impl From<ProjectRunConstraints> for Error<'static> {
+    fn from(c: ProjectRunConstraints) -> Self {
+        // For now, return a generic error for project runs
+        // TODO: Add specific error messages for each constraint variant
+        let _ = c;
+        ErrorKind::BadRequest
+            .with_message("Project run constraint violation")
+            .with_resource("project_run")
     }
 }

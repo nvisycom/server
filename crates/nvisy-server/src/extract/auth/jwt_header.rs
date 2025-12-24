@@ -226,3 +226,8 @@ impl From<JwtError> for Error<'static> {
         error.with_resource("authentication")
     }
 }
+
+// Aide OpenAPI support - AuthHeader generates a response header
+// Note: For now, we don't implement OperationOutput for AuthHeader since it's only used
+// in responses where the Authorization header is added manually via TypedHeader.
+// If needed in the future, we can implement this using aide's header support.

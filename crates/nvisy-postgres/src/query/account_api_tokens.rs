@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -45,7 +45,7 @@ pub trait AccountApiTokenRepository {
     fn extend_token(
         &self,
         access_token: Uuid,
-        extension: time::Duration,
+        extension: Span,
     ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
 
     fn refresh_token(
@@ -75,7 +75,7 @@ pub trait AccountApiTokenRepository {
     fn find_expiring_tokens(
         &self,
         account_id: Uuid,
-        expires_within: time::Duration,
+        expires_within: Span,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
 
@@ -88,10 +88,7 @@ pub trait AccountApiTokenRepository {
 
     fn purge_old_tokens(&self, older_than_days: u32) -> impl Future<Output = PgResult<i64>> + Send;
 
-    fn revoke_old_tokens(
-        &self,
-        older_than: time::Duration,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
+    fn revoke_old_tokens(&self, older_than: Span) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
 impl AccountApiTokenRepository for PgClient {
@@ -256,7 +253,7 @@ impl AccountApiTokenRepository for PgClient {
         self.update_token(
             access_token,
             UpdateAccountApiToken {
-                last_used_at: Some(OffsetDateTime::now_utc()),
+                last_used_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
                 ..Default::default()
             },
         )
@@ -279,17 +276,13 @@ impl AccountApiTokenRepository for PgClient {
     ///
     /// The updated `AccountApiToken` with new expiration time,
     /// or a database error if the operation fails.
-    async fn extend_token(
-        &self,
-        access_token: Uuid,
-        extension: time::Duration,
-    ) -> PgResult<AccountApiToken> {
-        let new_expiry = OffsetDateTime::now_utc() + extension;
+    async fn extend_token(&self, access_token: Uuid, extension: Span) -> PgResult<AccountApiToken> {
+        let new_expiry = (Timestamp::now() + extension).into();
         self.update_token(
             access_token,
             UpdateAccountApiToken {
                 expired_at: Some(new_expiry),
-                last_used_at: Some(OffsetDateTime::now_utc()),
+                last_used_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
                 ..Default::default()
             },
         )
@@ -331,14 +324,14 @@ impl AccountApiTokenRepository for PgClient {
 
         let new_access_seq = Uuid::new_v4();
         let new_refresh_seq = Uuid::new_v4();
-        let new_expiry = OffsetDateTime::now_utc() + time::Duration::days(7);
+        let new_expiry = jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().days(7));
 
         diesel::update(account_api_tokens::table.filter(dsl::refresh_seq.eq(refresh_token)))
             .set((
                 dsl::access_seq.eq(new_access_seq),
                 dsl::refresh_seq.eq(new_refresh_seq),
                 dsl::expired_at.eq(new_expiry),
-                dsl::last_used_at.eq(Some(OffsetDateTime::now_utc())),
+                dsl::last_used_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
             ))
             .returning(AccountApiToken::as_returning())
             .get_result(&mut conn)
@@ -376,7 +369,7 @@ impl AccountApiTokenRepository for PgClient {
 
         let rows_affected =
             diesel::update(account_api_tokens::table.filter(dsl::access_seq.eq(access_token)))
-                .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+                .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
                 .execute(&mut conn)
                 .await
                 .map_err(PgError::from)?;
@@ -418,7 +411,7 @@ impl AccountApiTokenRepository for PgClient {
                 .filter(dsl::account_id.eq(account_id))
                 .filter(dsl::deleted_at.is_null()),
         )
-        .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+        .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
         .execute(&mut conn)
         .await
         .map_err(PgError::from)
@@ -453,7 +446,7 @@ impl AccountApiTokenRepository for PgClient {
         account_api_tokens::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
-            .filter(dsl::expired_at.gt(OffsetDateTime::now_utc()))
+            .filter(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
             .order(dsl::issued_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
@@ -530,20 +523,20 @@ impl AccountApiTokenRepository for PgClient {
     async fn find_expiring_tokens(
         &self,
         account_id: Uuid,
-        expires_within: time::Duration,
+        expires_within: Span,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
         let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
-        let expiry_threshold = OffsetDateTime::now_utc() + expires_within;
+        let expiry_threshold = jiff_diesel::Timestamp::from(Timestamp::now() + expires_within);
 
         account_api_tokens::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .filter(dsl::expired_at.le(expiry_threshold))
-            .filter(dsl::expired_at.gt(OffsetDateTime::now_utc()))
+            .filter(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
             .order(dsl::expired_at.asc())
             .limit(pagination.limit)
             .offset(pagination.offset)
@@ -627,10 +620,10 @@ impl AccountApiTokenRepository for PgClient {
 
         diesel::update(
             account_api_tokens::table
-                .filter(dsl::expired_at.lt(OffsetDateTime::now_utc()))
+                .filter(dsl::expired_at.lt(jiff_diesel::Timestamp::from(Timestamp::now())))
                 .filter(dsl::deleted_at.is_null()),
         )
-        .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+        .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
         .execute(&mut conn)
         .await
         .map_err(PgError::from)
@@ -671,7 +664,7 @@ impl AccountApiTokenRepository for PgClient {
 
         use schema::account_api_tokens::{self, dsl};
 
-        let cutoff_date = OffsetDateTime::now_utc() - time::Duration::days(older_than_days as i64);
+        let cutoff_date = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(older_than_days as i64));
 
         diesel::delete(account_api_tokens::table.filter(dsl::deleted_at.lt(cutoff_date)))
             .execute(&mut conn)
@@ -708,19 +701,19 @@ impl AccountApiTokenRepository for PgClient {
     ///
     /// Can be used to implement organizational policies requiring
     /// periodic token rotation regardless of expiration times.
-    async fn revoke_old_tokens(&self, older_than: time::Duration) -> PgResult<i64> {
+    async fn revoke_old_tokens(&self, older_than: Span) -> PgResult<i64> {
         let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
-        let cutoff_date = OffsetDateTime::now_utc() - older_than;
+        let cutoff_date = jiff_diesel::Timestamp::from(Timestamp::now() - older_than);
 
         diesel::update(
             account_api_tokens::table
                 .filter(dsl::issued_at.lt(cutoff_date))
                 .filter(dsl::deleted_at.is_null()),
         )
-        .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+        .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
         .execute(&mut conn)
         .await
         .map_err(PgError::from)

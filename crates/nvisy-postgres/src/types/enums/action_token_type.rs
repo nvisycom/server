@@ -1,10 +1,10 @@
 //! Action token type enumeration for secure operations and verifications.
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the type of action that a security token authorizes.
 ///
@@ -12,8 +12,8 @@ use utoipa::ToSchema;
 /// for various token-based security operations including account verification,
 /// password management, and data operations.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ActionTokenType"]
 pub enum ActionTokenType {
     /// Email verification for new account activation

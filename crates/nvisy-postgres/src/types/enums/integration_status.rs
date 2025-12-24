@@ -1,18 +1,18 @@
 //! Integration status enumeration for integration lifecycle management.
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the operational status of a project integration.
 ///
 /// This enumeration corresponds to the `INTEGRATION_STATUS` PostgreSQL enum and is used
 /// to manage integration states from initial setup through active execution and error handling.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::IntegrationStatus"]
 pub enum IntegrationStatus {
     /// Integration is pending configuration or activation

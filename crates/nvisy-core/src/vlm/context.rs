@@ -13,36 +13,35 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::types::{Annotation, Chat, Message, MessageRole};
+
 /// Context information for VLM operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
-    /// Unique identifier for this context session.
-    pub session_id: Uuid,
     /// User identifier associated with this context.
     pub user_id: Uuid,
-    /// Conversation identifier for tracking related interactions.
-    pub conversation_id: Uuid,
     /// Processing options and configuration.
     pub processing_options: ProcessingOptions,
-    /// Messages in the conversation history.
-    pub messages: Vec<Message>,
+    /// Chat conversation history.
+    pub chat: Chat,
     /// Usage statistics for this context.
     pub usage: UsageStats,
     /// Metadata about the context and processing.
     pub metadata: ContextMetadata,
+    /// Annotations associated with this context.
+    pub annotations: Vec<Annotation>,
 }
 
 impl Context {
     /// Create a new VLM context.
-    pub fn new(user_id: Uuid, conversation_id: Uuid) -> Self {
+    pub fn new(user_id: Uuid) -> Self {
         Self {
-            session_id: Uuid::new_v4(),
             user_id,
-            conversation_id,
             processing_options: ProcessingOptions::default(),
-            messages: Vec::new(),
+            chat: Chat::new(),
             usage: UsageStats::default(),
             metadata: ContextMetadata::default(),
+            annotations: Vec::new(),
         }
     }
 
@@ -50,7 +49,7 @@ impl Context {
     pub fn add_message(&mut self, message: Message) {
         // Update usage statistics
         self.usage.total_messages += 1;
-        self.usage.total_tokens += message.token_count.unwrap_or(0);
+        // Token counting would need to be implemented based on message content
 
         if message.role == MessageRole::User {
             self.usage.user_messages += 1;
@@ -63,27 +62,32 @@ impl Context {
             }
         }
 
-        self.messages.push(message);
+        self.chat.add_message(message);
     }
 
     /// Get all messages in the conversation.
     pub fn messages(&self) -> &[Message] {
-        &self.messages
+        &self.chat.messages
     }
 
     /// Get messages of a specific role.
     pub fn messages_by_role(&self, role: MessageRole) -> Vec<&Message> {
-        self.messages.iter().filter(|m| m.role == role).collect()
+        self.chat
+            .messages
+            .iter()
+            .filter(|m| m.role == role)
+            .collect()
     }
 
     /// Get the last message in the conversation.
     pub fn last_message(&self) -> Option<&Message> {
-        self.messages.last()
+        self.chat.last_message()
     }
 
     /// Get the last user message.
     pub fn last_user_message(&self) -> Option<&Message> {
-        self.messages
+        self.chat
+            .messages
             .iter()
             .rev()
             .find(|m| m.role == MessageRole::User)
@@ -91,7 +95,8 @@ impl Context {
 
     /// Get the last assistant message.
     pub fn last_assistant_message(&self) -> Option<&Message> {
-        self.messages
+        self.chat
+            .messages
             .iter()
             .rev()
             .find(|m| m.role == MessageRole::Assistant)
@@ -99,18 +104,41 @@ impl Context {
 
     /// Get the number of messages in the conversation.
     pub fn message_count(&self) -> usize {
-        self.messages.len()
+        self.chat.message_count()
     }
 
     /// Check if the conversation has any messages.
     pub fn has_messages(&self) -> bool {
-        !self.messages.is_empty()
+        self.chat.message_count() > 0
     }
 
     /// Clear all messages from the conversation.
     pub fn clear_messages(&mut self) {
-        self.messages.clear();
+        self.chat = Chat::new();
         self.usage = UsageStats::default();
+        self.annotations.clear();
+    }
+
+    /// Sets the annotations for this context.
+    pub fn with_annotations(mut self, annotations: Vec<Annotation>) -> Self {
+        self.annotations = annotations;
+        self
+    }
+
+    /// Adds an annotation to this context.
+    pub fn with_annotation(mut self, annotation: Annotation) -> Self {
+        self.annotations.push(annotation);
+        self
+    }
+
+    /// Gets all annotations.
+    pub fn get_annotations(&self) -> &[Annotation] {
+        &self.annotations
+    }
+
+    /// Adds an annotation.
+    pub fn add_annotation(&mut self, annotation: Annotation) {
+        self.annotations.push(annotation);
     }
 }
 
@@ -138,167 +166,6 @@ impl Default for ProcessingOptions {
     }
 }
 
-/// A message in the conversation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    /// Unique identifier for this message.
-    pub id: Uuid,
-    /// Role of the message sender.
-    pub role: MessageRole,
-    /// Text content of the message.
-    pub content: String,
-    /// Optional images associated with this message.
-    pub images: Vec<ImageData>,
-    /// Token count for this message.
-    pub token_count: Option<u32>,
-    /// When this message was created.
-    pub created_at: Timestamp,
-    /// Processing metadata for this message.
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
-impl Message {
-    /// Create a new user message.
-    pub fn user(content: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            role: MessageRole::User,
-            content,
-            images: Vec::new(),
-            token_count: None,
-            created_at: Timestamp::now(),
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// Create a new user message with images.
-    pub fn user_with_images(content: String, images: Vec<ImageData>) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            role: MessageRole::User,
-            content,
-            images,
-            token_count: None,
-            created_at: Timestamp::now(),
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// Create a new assistant message.
-    pub fn assistant(content: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            role: MessageRole::Assistant,
-            content,
-            images: Vec::new(),
-            token_count: None,
-            created_at: Timestamp::now(),
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// Create a new system message.
-    pub fn system(content: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            role: MessageRole::System,
-            content,
-            images: Vec::new(),
-            token_count: None,
-            created_at: Timestamp::now(),
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// Set token count for this message.
-    pub fn with_token_count(mut self, count: u32) -> Self {
-        self.token_count = Some(count);
-        self
-    }
-
-    /// Add metadata to this message.
-    pub fn with_metadata(mut self, key: String, value: serde_json::Value) -> Self {
-        self.metadata.insert(key, value);
-        self
-    }
-
-    /// Check if this message has images.
-    pub fn has_images(&self) -> bool {
-        !self.images.is_empty()
-    }
-
-    /// Get the number of images in this message.
-    pub fn image_count(&self) -> usize {
-        self.images.len()
-    }
-
-    /// Check if this message is empty.
-    pub fn is_empty(&self) -> bool {
-        self.content.trim().is_empty() && self.images.is_empty()
-    }
-}
-
-/// Role of a message in the conversation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    /// Message from the user.
-    User,
-    /// Message from the assistant.
-    Assistant,
-    /// System message for context.
-    System,
-}
-
-/// Image data associated with a message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageData {
-    /// Unique identifier for this image.
-    pub id: Uuid,
-    /// Image data as base64 encoded string.
-    pub data: String,
-    /// MIME type of the image.
-    pub mime_type: String,
-    /// Optional filename or description.
-    pub filename: Option<String>,
-    /// Image dimensions if known.
-    pub dimensions: Option<(u32, u32)>,
-    /// Size of the image in bytes.
-    pub size_bytes: Option<u64>,
-}
-
-impl ImageData {
-    /// Create new image data.
-    pub fn new(data: String, mime_type: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            data,
-            mime_type,
-            filename: None,
-            dimensions: None,
-            size_bytes: None,
-        }
-    }
-
-    /// Set filename for this image.
-    pub fn with_filename(mut self, filename: String) -> Self {
-        self.filename = Some(filename);
-        self
-    }
-
-    /// Set dimensions for this image.
-    pub fn with_dimensions(mut self, width: u32, height: u32) -> Self {
-        self.dimensions = Some((width, height));
-        self
-    }
-
-    /// Set size for this image.
-    pub fn with_size(mut self, size_bytes: u64) -> Self {
-        self.size_bytes = Some(size_bytes);
-        self
-    }
-}
-
 /// Usage statistics for VLM operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
@@ -320,7 +187,6 @@ pub struct UsageStats {
     /// Estimated cost for this conversation.
     pub estimated_cost: Option<f64>,
 }
-
 
 impl UsageStats {
     /// Get total number of responses.

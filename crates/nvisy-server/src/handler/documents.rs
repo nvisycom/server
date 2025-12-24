@@ -4,23 +4,22 @@
 //! including creation, reading, updating, and deletion of documents. All operations
 //! are secured with proper authorization and follow project-based access control.
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewDocument;
 use nvisy_postgres::query::DocumentRepository;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::IntoParams;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::projects::ProjectPathParams;
 use crate::handler::request::{CreateDocument, UpdateDocument};
 use crate::handler::response::{Document, Documents};
-use crate::handler::{ErrorKind, ErrorResponse, Pagination, Result};
+use crate::handler::{ErrorKind, Pagination, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for document operations.
@@ -28,7 +27,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::documents";
 
 /// `Path` param for `{documentId}` handlers.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentPathParams {
     /// Unique identifier of the document.
@@ -37,32 +36,6 @@ pub struct DocumentPathParams {
 
 /// Creates a new document.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    post, path = "/projects/{projectId}/documents/",
-    params(ProjectPathParams), tag = "documents",
-    request_body(
-        content = CreateDocument,
-        description = "New document",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = CREATED,
-            description = "Document created",
-            body = Document,
-        ),
-    ),
-)]
 async fn create_document(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -107,32 +80,6 @@ async fn create_document(
 
 /// Returns all documents for a project.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/projects/{projectId}/documents/", tag = "documents",
-    params(ProjectPathParams),
-    request_body(
-        content = Pagination,
-        description = "Pagination parameters",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Documents listed",
-            body = Documents,
-        ),
-    )
-)]
 async fn get_all_documents(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -166,27 +113,6 @@ async fn get_all_documents(
 
 /// Gets a document by its document ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    get, path = "/documents/{documentId}/", tag = "documents",
-    params(DocumentPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Document details",
-            body = Document,
-        ),
-    ),
-)]
 async fn get_document(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -219,32 +145,6 @@ async fn get_document(
 
 /// Updates a document by its document ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    patch, path = "/documents/{documentId}/", tag = "documents",
-    params(DocumentPathParams),
-    request_body(
-        content = UpdateDocument,
-        description = "Document changes",
-        content_type = "application/json",
-    ),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Document updated",
-            body = Document,
-        ),
-    ),
-)]
 async fn update_document(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
@@ -295,26 +195,6 @@ async fn update_document(
 
 /// Deletes a document by its document ID.
 #[tracing::instrument(skip_all)]
-#[utoipa::path(
-    delete, path = "/documents/{documentId}/", tag = "documents",
-    params(DocumentPathParams),
-    responses(
-        (
-            status = BAD_REQUEST,
-            description = "Bad request",
-            body = ErrorResponse,
-        ),
-        (
-            status = INTERNAL_SERVER_ERROR,
-            description = "Internal server error",
-            body = ErrorResponse,
-        ),
-        (
-            status = OK,
-            description = "Document deleted",
-        ),
-    )
-)]
 async fn delete_document(
     State(pg_client): State<PgClient>,
     State(_nats_client): State<NatsClient>,
@@ -359,10 +239,15 @@ async fn delete_document(
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new()
-        .routes(routes!(create_document, get_all_documents))
-        .routes(routes!(get_document, update_document, delete_document))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
+        .api_route("/projects/:project_id/documents", post(create_document))
+        .api_route("/projects/:project_id/documents", get(get_all_documents))
+        .api_route("/documents/:document_id", get(get_document))
+        .api_route("/documents/:document_id", patch(update_document))
+        .api_route("/documents/:document_id", delete(delete_document))
 }
 
 #[cfg(test)]

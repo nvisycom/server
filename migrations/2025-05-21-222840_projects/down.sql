@@ -3,17 +3,13 @@
 
 -- Drop functions
 DROP FUNCTION IF EXISTS cleanup_expired_invites();
-DROP FUNCTION IF EXISTS check_project_permission(
-    _project_id UUID,
-    _account_id UUID,
-    _required_permission TEXT
-);
 
 -- Drop views
 DROP VIEW IF EXISTS pending_project_invites;
 DROP VIEW IF EXISTS project_member_summary;
 
 -- Drop tables (indexes and triggers dropped automatically with tables)
+DROP TABLE IF EXISTS project_runs;
 DROP TABLE IF EXISTS project_templates;
 DROP TABLE IF EXISTS project_pipelines;
 DROP TABLE IF EXISTS project_integrations;

@@ -2,7 +2,7 @@
 
 use diesel::prelude::*;
 use ipnet::IpNet;
-use time::{Duration, OffsetDateTime};
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_action_tokens;
@@ -32,11 +32,11 @@ pub struct AccountActionToken {
     /// Maximum allowed attempts before token becomes invalid.
     pub max_attempts: i32,
     /// Timestamp when the token was created.
-    pub issued_at: OffsetDateTime,
+    pub issued_at: Timestamp,
     /// Timestamp when the token expires.
-    pub expired_at: OffsetDateTime,
+    pub expired_at: Timestamp,
     /// Timestamp when the token was successfully used.
-    pub used_at: Option<OffsetDateTime>,
+    pub used_at: Option<Timestamp>,
 }
 
 /// Data for creating a new account action token.
@@ -59,7 +59,7 @@ pub struct NewAccountActionToken {
     /// Maximum allowed attempts before token becomes invalid.
     pub max_attempts: Option<i32>,
     /// Timestamp when the token expires.
-    pub expired_at: Option<OffsetDateTime>,
+    pub expired_at: Option<Timestamp>,
 }
 
 /// Data for updating an account action token.
@@ -70,7 +70,7 @@ pub struct UpdateAccountActionToken {
     /// Number of times this token has been attempted.
     pub attempt_count: Option<i32>,
     /// Timestamp when the token was successfully used.
-    pub used_at: Option<OffsetDateTime>,
+    pub used_at: Option<Timestamp>,
 }
 
 impl AccountActionToken {
@@ -81,7 +81,7 @@ impl AccountActionToken {
 
     /// Returns whether the token has expired.
     pub fn is_expired(&self) -> bool {
-        OffsetDateTime::now_utc() > self.expired_at
+        jiff::Timestamp::now() > jiff::Timestamp::from(self.expired_at)
     }
 
     /// Returns whether the token has been successfully used.
@@ -162,12 +162,12 @@ impl AccountActionToken {
     }
 
     /// Returns the recommended expiry time for this token type.
-    pub fn recommended_expiry_duration(&self) -> Duration {
+    pub fn recommended_expiry_duration(&self) -> jiff::Span {
         match self.action_type {
-            ActionTokenType::ActivateAccount => Duration::hours(24),
-            ActionTokenType::ResetPassword => Duration::hours(1),
-            ActionTokenType::LoginVerification => Duration::minutes(15),
-            _ => Duration::hours(2),
+            ActionTokenType::ActivateAccount => jiff::Span::new().hours(24),
+            ActionTokenType::ResetPassword => jiff::Span::new().hours(1),
+            ActionTokenType::LoginVerification => jiff::Span::new().minutes(15),
+            _ => jiff::Span::new().hours(2),
         }
     }
 
@@ -181,7 +181,7 @@ impl AccountActionToken {
 
     /// Returns whether the token is stale (created more than recommended duration ago but not expired).
     pub fn is_stale(&self) -> bool {
-        !self.is_expired() && self.creation_age() > self.recommended_expiry_duration()
+        !self.is_expired() && self.creation_age().total(jiff::Unit::Second).ok() > self.recommended_expiry_duration().total(jiff::Unit::Second).ok()
     }
 
     /// Returns whether the token is from a suspicious source.
@@ -202,14 +202,14 @@ impl AccountActionToken {
 }
 
 impl HasCreatedAt for AccountActionToken {
-    fn created_at(&self) -> OffsetDateTime {
-        self.issued_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.issued_at.into()
     }
 }
 
 impl HasExpiresAt for AccountActionToken {
-    fn expires_at(&self) -> OffsetDateTime {
-        self.expired_at
+    fn expires_at(&self) -> jiff::Timestamp {
+        self.expired_at.into()
     }
 }
 

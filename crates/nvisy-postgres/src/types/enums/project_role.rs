@@ -3,18 +3,18 @@
 use std::cmp;
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the role and permission level of a project member.
 ///
 /// This enumeration corresponds to the `PROJECT_ROLE` PostgreSQL enum and provides
 /// hierarchical access control for project members with clearly defined capabilities.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectRole"]
 pub enum ProjectRole {
     /// Full control over the project, including deletion and all management aspects

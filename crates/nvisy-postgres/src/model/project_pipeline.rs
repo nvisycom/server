@@ -1,7 +1,7 @@
 //! Project pipeline model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::project_pipelines;
@@ -33,11 +33,11 @@ pub struct ProjectPipeline {
     /// Reference to the account that created this pipeline.
     pub created_by: Uuid,
     /// Timestamp when the pipeline was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the pipeline was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new project pipeline.
@@ -89,7 +89,7 @@ pub struct UpdateProjectPipeline {
 impl ProjectPipeline {
     /// Returns whether the pipeline was created recently.
     pub fn is_recently_created(&self) -> bool {
-        self.was_created_within(time::Duration::hours(24))
+        self.was_created_within(jiff::Span::new().hours(24))
     }
 
     /// Returns whether the pipeline is deleted.
@@ -186,19 +186,19 @@ impl ProjectPipeline {
 }
 
 impl HasCreatedAt for ProjectPipeline {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for ProjectPipeline {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for ProjectPipeline {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }

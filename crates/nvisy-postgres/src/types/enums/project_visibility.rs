@@ -1,18 +1,18 @@
 //! Project visibility enumeration for access control and discovery.
 
 use diesel_derive_enum::DbEnum;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 /// Defines the visibility and discovery settings for a project.
 ///
 /// This enumeration corresponds to the `PROJECT_VISIBILITY` PostgreSQL enum and is used
 /// to control how projects can be discovered and accessed by users.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[cfg_attr(feature = "utoipa", derive(ToSchema))]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectVisibility"]
 pub enum ProjectVisibility {
     /// Project is private and only accessible to members

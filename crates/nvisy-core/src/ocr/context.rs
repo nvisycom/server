@@ -13,6 +13,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::types::{BoundingBox, Document};
+
 /// Context information for OCR operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
@@ -118,21 +120,6 @@ impl Context {
         self.usage = UsageStats::default();
         self.quality_metrics = QualityMetrics::default();
     }
-}
-
-/// Document information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Document {
-    /// Original filename, if available.
-    pub filename: Option<String>,
-    /// MIME type of the document.
-    pub mime_type: String,
-    /// Number of pages in the document.
-    pub page_count: Option<u32>,
-    /// Document size in bytes.
-    pub size_bytes: u64,
-    /// Document creation timestamp.
-    pub created_at: Option<Timestamp>,
 }
 
 /// Processing options for OCR operations.
@@ -248,51 +235,6 @@ pub struct TextRegion {
     pub region_type: TextRegionType,
     /// Individual words in this region.
     pub words: Vec<Word>,
-}
-
-/// Bounding box coordinates.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct BoundingBox {
-    /// Left coordinate.
-    pub left: f32,
-    /// Top coordinate.
-    pub top: f32,
-    /// Width of the box.
-    pub width: f32,
-    /// Height of the box.
-    pub height: f32,
-}
-
-impl BoundingBox {
-    /// Create a new bounding box.
-    pub fn new(left: f32, top: f32, width: f32, height: f32) -> Self {
-        Self {
-            left,
-            top,
-            width,
-            height,
-        }
-    }
-
-    /// Get right coordinate.
-    pub fn right(&self) -> f32 {
-        self.left + self.width
-    }
-
-    /// Get bottom coordinate.
-    pub fn bottom(&self) -> f32 {
-        self.top + self.height
-    }
-
-    /// Calculate area.
-    pub fn area(&self) -> f32 {
-        self.width * self.height
-    }
-
-    /// Check if point is contained within this box.
-    pub fn contains(&self, x: f32, y: f32) -> bool {
-        x >= self.left && x <= self.right() && y >= self.top && y <= self.bottom()
-    }
 }
 
 /// Type of text region.
@@ -427,7 +369,6 @@ pub struct UsageStats {
     /// Estimated cost for processing.
     pub estimated_cost: Option<f64>,
 }
-
 
 impl UsageStats {
     /// Get total number of extractions (successful + failed).

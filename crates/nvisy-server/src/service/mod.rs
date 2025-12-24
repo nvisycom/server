@@ -1,21 +1,22 @@
 //! Application state and dependency injection.
 
+mod archive;
 mod cache;
 mod config;
 mod security;
 
-use nvisy_core::ocr::OcrService;
-use nvisy_core::vlm::VlmService;
+use nvisy_core::AiServices;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 
+pub use crate::service::archive::{ArchiveFormat, ArchiveService};
 pub use crate::service::cache::HealthCache;
 pub use crate::service::config::ServiceConfig;
 pub use crate::service::security::{
     AuthKeysConfig, PasswordHasher, PasswordStrength, RateLimitKey, RateLimiter, SessionKeys,
 };
 // Re-export error types from crate root for convenience
-pub use crate::{Result, Error};
+pub use crate::{Error, Result};
 
 /// Application state.
 ///
@@ -28,14 +29,14 @@ pub struct ServiceState {
     // External services:
     pub pg_client: PgClient,
     pub nats_client: NatsClient,
-    pub ocr_client: OcrService,
-    pub vlm_client: VlmService,
+    pub ai_services: AiServices,
 
     // Internal services:
     pub auth_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
     pub auth_keys: SessionKeys,
     pub health_cache: HealthCache,
+    pub archive: ArchiveService,
 }
 
 impl ServiceState {
@@ -44,19 +45,18 @@ impl ServiceState {
     /// Connects to all external services and loads required resources.
     pub async fn from_config(
         service_config: ServiceConfig,
-        ocr_service: OcrService,
-        vlm_service: VlmService,
+        ai_services: AiServices,
     ) -> Result<Self> {
         let service_state = Self {
             pg_client: service_config.connect_postgres().await?,
             nats_client: service_config.connect_nats().await?,
-            ocr_client: ocr_service,
-            vlm_client: vlm_service,
+            ai_services,
 
             auth_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
             auth_keys: service_config.load_auth_keys().await?,
             health_cache: HealthCache::new(),
+            archive: ArchiveService::new(),
         };
 
         Ok(service_state)
@@ -76,11 +76,11 @@ macro_rules! impl_di {
 // External services:
 impl_di!(pg_client: PgClient);
 impl_di!(nats_client: NatsClient);
-impl_di!(ocr_client: OcrService);
-impl_di!(vlm_client: VlmService);
+impl_di!(ai_services: AiServices);
 
 // Internal services:
 impl_di!(auth_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(auth_keys: SessionKeys);
 impl_di!(health_cache: HealthCache);
+impl_di!(archive: ArchiveService);

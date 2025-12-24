@@ -4,11 +4,10 @@
 //! API server and its dependencies. It includes both public health checks and
 //! authenticated detailed status information with simple caching.
 
+use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
-use time::OffsetDateTime;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
+use jiff::Timestamp;
 
 use super::request::CheckHealth;
 use super::response::MonitorStatus;
@@ -21,26 +20,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 
 /// Returns system health status.
 #[tracing::instrument(skip_all, fields(authenticated = auth_state.is_some()))]
-#[utoipa::path(
-    post, path = "/health", tag = "monitors",
-    request_body(
-        content = Option<CheckHealth>,
-        description = "Optional health status request parameters",
-        content_type = "application/json"
-    ),
-    responses(
-        (
-            status = 200,
-            description = "System is healthy",
-            body = MonitorStatus,
-        ),
-        (
-            status = 503,
-            description = "System is unhealthy",
-            body = MonitorStatus,
-        ),
-    ),
-)]
 async fn health_status(
     State(service_state): State<ServiceState>,
     State(health_service): State<HealthCache>,
@@ -67,7 +46,7 @@ async fn health_status(
     };
 
     let response = MonitorStatus {
-        updated_at: OffsetDateTime::now_utc(),
+        updated_at: Timestamp::now(),
         is_healthy,
         overall_status: if is_healthy {
             super::response::SystemStatus::Healthy
@@ -101,8 +80,10 @@ async fn health_status(
 /// Returns a [`Router`] with all health monitoring routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> OpenApiRouter<ServiceState> {
-    OpenApiRouter::new().routes(routes!(health_status))
+pub fn routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new().api_route("/health", post(health_status))
 }
 
 #[cfg(test)]

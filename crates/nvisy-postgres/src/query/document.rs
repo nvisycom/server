@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use time::OffsetDateTime;
+use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -282,7 +282,7 @@ impl DocumentRepository for PgClient {
         use schema::documents::{self, dsl};
 
         diesel::update(documents::table.filter(dsl::id.eq(document_id)))
-            .set(dsl::deleted_at.eq(Some(OffsetDateTime::now_utc())))
+            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
             .execute(&mut conn)
             .await
             .map_err(PgError::from)?;
@@ -358,9 +358,10 @@ impl DocumentRepository for PgClient {
         let mut query = documents::table
             .filter(dsl::deleted_at.is_null())
             .filter(
-                dsl::display_name
-                    .ilike(&search_pattern)
-                    .or(dsl::description.ilike(&search_pattern)),
+                diesel::BoolExpressionMethods::or(
+                    dsl::display_name.ilike(&search_pattern),
+                    dsl::description.ilike(&search_pattern)
+                ),
             )
             .order(dsl::display_name.asc())
             .limit(pagination.limit)
@@ -440,7 +441,7 @@ impl DocumentRepository for PgClient {
 
         use schema::documents::{self, dsl};
 
-        let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
+        let seven_days_ago = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(7));
 
         let documents = documents::table
             .filter(dsl::created_at.gt(seven_days_ago))
@@ -480,7 +481,7 @@ impl DocumentRepository for PgClient {
 
         use schema::documents::{self, dsl};
 
-        let seven_days_ago = OffsetDateTime::now_utc() - time::Duration::days(7);
+        let seven_days_ago = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(7));
 
         let documents = documents::table
             .filter(dsl::updated_at.gt(seven_days_ago))

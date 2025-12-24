@@ -9,8 +9,10 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::{BoundingBox, Message, MessageRole};
+
 /// Usage statistics for VLM operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     /// Number of tokens in the prompt
     pub prompt_tokens: u64,
@@ -56,7 +58,6 @@ impl Usage {
 ///
 /// let response = Response {
 ///     content: "This image shows a beautiful sunset over the ocean.".to_string(),
-///     model: "gpt-4-vision".to_string(),
 ///     usage: None,
 ///     finish_reason: Some("complete".to_string()),
 ///     created: SystemTime::now(),
@@ -73,8 +74,6 @@ impl Usage {
 pub struct Response<Resp> {
     /// The generated text content describing or analyzing the visual input.
     pub content: String,
-    /// The model that generated this response.
-    pub model: String,
     /// Token usage information, if available.
     pub usage: Option<Usage>,
     /// Reason why generation finished.
@@ -106,15 +105,13 @@ impl<Resp> Response<Resp> {
     /// use nvisy_core::vlm::response::Response;
     ///
     /// let response = Response::new(
-    ///     "The image contains three cats sitting on a windowsill",
-    ///     "claude-3-vision",
+    ///     "I can see a beautiful landscape with mountains in the background.",
     ///     ()
     /// );
     /// ```
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
+    pub fn new<C: Into<String>>(content: C, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             usage: None,
             finish_reason: None,
             created: SystemTime::now(),
@@ -126,15 +123,9 @@ impl<Resp> Response<Resp> {
     }
 
     /// Create a new response with usage information.
-    pub fn with_usage<C: Into<String>, M: Into<String>>(
-        content: C,
-        model: M,
-        usage: Usage,
-        payload: Resp,
-    ) -> Self {
+    pub fn with_usage<C: Into<String>>(content: C, usage: Usage, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             usage: Some(usage),
             finish_reason: None,
             created: SystemTime::now(),
@@ -222,11 +213,40 @@ impl<Resp> Response<Resp> {
             content: self.content.clone(),
             finish_reason: self.finish_reason.clone(),
             usage: self.usage.clone(),
-            model: self.model.clone(),
             created: self.created,
             confidence: self.confidence,
             payload: self.payload.clone(),
         }
+    }
+
+    /// Convert this VLM response to a Message for chat integration.
+    pub fn to_message(&self) -> Message {
+        let mut message = Message::new(MessageRole::Assistant, &self.content);
+
+        // Add token count if available
+
+        // Add processing time as metadata if available
+        if let Some(processing_time) = self.metadata.processing_time_ms {
+            message = message.with_metadata(
+                "processing_time_ms".to_string(),
+                serde_json::json!(processing_time),
+            );
+        }
+
+        // Add confidence as metadata
+        if let Some(confidence) = self.confidence {
+            message =
+                message.with_metadata("confidence".to_string(), serde_json::json!(confidence));
+        }
+
+        // Add visual analysis results as metadata if available
+        if let Some(analysis) = &self.visual_analysis
+            && let Ok(analysis_json) = serde_json::to_value(analysis)
+        {
+            message = message.with_metadata("visual_analysis".to_string(), analysis_json);
+        }
+
+        message
     }
 }
 
@@ -244,8 +264,7 @@ pub struct VlmResponseChunk<Resp> {
     pub finish_reason: Option<String>,
     /// Usage information, typically only in the final chunk.
     pub usage: Option<Usage>,
-    /// The model generating this chunk.
-    pub model: String,
+
     /// Timestamp when the chunk was created.
     pub created: SystemTime,
     /// Confidence score for this chunk.
@@ -256,10 +275,9 @@ pub struct VlmResponseChunk<Resp> {
 
 impl<Resp> VlmResponseChunk<Resp> {
     /// Create a new response chunk.
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
+    pub fn new<C: Into<String>>(content: C, payload: Resp) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             finish_reason: None,
             usage: None,
             created: SystemTime::now(),
@@ -269,15 +287,13 @@ impl<Resp> VlmResponseChunk<Resp> {
     }
 
     /// Create a final chunk with finish reason.
-    pub fn final_chunk<C: Into<String>, M: Into<String>, R: Into<String>>(
+    pub fn final_chunk<C: Into<String>, R: Into<String>>(
         content: C,
-        model: M,
         finish_reason: R,
         payload: Resp,
     ) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             finish_reason: Some(finish_reason.into()),
             usage: None,
             created: SystemTime::now(),
@@ -287,9 +303,8 @@ impl<Resp> VlmResponseChunk<Resp> {
     }
 
     /// Create a final chunk with usage and confidence.
-    pub fn with_completion<C: Into<String>, M: Into<String>, R: Into<String>>(
+    pub fn with_completion<C: Into<String>, R: Into<String>>(
         content: C,
-        model: M,
         finish_reason: R,
         usage: Usage,
         confidence: Option<f64>,
@@ -297,7 +312,6 @@ impl<Resp> VlmResponseChunk<Resp> {
     ) -> Self {
         Self {
             content: content.into(),
-            model: model.into(),
             finish_reason: Some(finish_reason.into()),
             usage: Some(usage),
             created: SystemTime::now(),
@@ -326,7 +340,6 @@ impl<Resp> VlmResponseChunk<Resp> {
     {
         Response {
             content: self.content.clone(),
-            model: self.model.clone(),
             usage: self.usage.clone(),
             finish_reason: self.finish_reason.clone(),
             created: self.created,
@@ -356,8 +369,6 @@ pub struct VisualAnalysis {
     pub scene_classification: Option<Vec<SceneCategory>>,
     /// Estimated emotional tone or mood.
     pub emotional_analysis: Option<EmotionalAnalysis>,
-    /// Quality assessment of the image.
-    pub quality_assessment: Option<QualityAssessment>,
 }
 
 impl VisualAnalysis {
@@ -370,7 +381,6 @@ impl VisualAnalysis {
             image_properties: None,
             scene_classification: None,
             emotional_analysis: None,
-            quality_assessment: None,
         }
     }
 
@@ -397,7 +407,6 @@ impl VisualAnalysis {
                 .unwrap_or(false)
             || self.image_properties.is_some()
             || self.emotional_analysis.is_some()
-            || self.quality_assessment.is_some()
     }
 
     /// Get the total number of detected objects.
@@ -436,31 +445,6 @@ pub struct DetectedObject {
     pub bounding_box: Option<BoundingBox>,
     /// Additional attributes or properties.
     pub attributes: HashMap<String, String>,
-}
-
-/// Bounding box coordinates for detected objects.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoundingBox {
-    /// X coordinate of the top-left corner.
-    pub x: f64,
-    /// Y coordinate of the top-left corner.
-    pub y: f64,
-    /// Width of the bounding box.
-    pub width: f64,
-    /// Height of the bounding box.
-    pub height: f64,
-}
-
-impl BoundingBox {
-    /// Calculate the area of the bounding box.
-    pub fn area(&self) -> f64 {
-        self.width * self.height
-    }
-
-    /// Get the center point of the bounding box.
-    pub fn center(&self) -> (f64, f64) {
-        (self.x + self.width / 2.0, self.y + self.height / 2.0)
-    }
 }
 
 /// Text region extracted from the image.
@@ -562,25 +546,6 @@ pub struct EmotionalAnalysis {
     pub arousal: Option<f64>,
 }
 
-/// Quality assessment of the image.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QualityAssessment {
-    /// Overall quality score (0.0 to 1.0).
-    pub overall_score: f64,
-    /// Sharpness assessment.
-    pub sharpness: Option<f64>,
-    /// Brightness level.
-    pub brightness: Option<f64>,
-    /// Contrast level.
-    pub contrast: Option<f64>,
-    /// Color saturation.
-    pub saturation: Option<f64>,
-    /// Noise level assessment.
-    pub noise_level: Option<f64>,
-    /// Specific quality issues detected.
-    pub issues: Vec<String>,
-}
-
 /// Additional metadata about the VLM response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResponseMetadata {
@@ -596,89 +561,160 @@ pub struct ResponseMetadata {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-/// Builder for creating comprehensive VLM responses.
-pub struct VlmResponseBuilder<Resp> {
-    content: String,
-    model: String,
-    usage: Option<Usage>,
-    finish_reason: Option<String>,
-    confidence: Option<f64>,
-    visual_analysis: Option<VisualAnalysis>,
-    metadata: ResponseMetadata,
-    payload: Resp,
-}
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
 
-impl<Resp> VlmResponseBuilder<Resp> {
-    /// Create a new response builder.
-    pub fn new<C: Into<String>, M: Into<String>>(content: C, model: M, payload: Resp) -> Self {
-        Self {
-            content: content.into(),
-            model: model.into(),
-            usage: None,
-            finish_reason: None,
-            confidence: None,
-            visual_analysis: None,
-            metadata: ResponseMetadata::default(),
-            payload,
-        }
+    use super::*;
+
+    #[test]
+    fn test_vlm_response_to_message() {
+        let usage = Usage::new(50, 100).with_images(2);
+        let mut metadata = ResponseMetadata::default();
+        metadata.processing_time_ms = Some(1500);
+
+        let response = Response::with_usage("This image shows a beautiful sunset.", usage, ())
+            .with_confidence(0.95)
+            .with_finish_reason("complete")
+            .with_metadata(metadata);
+
+        let message = response.to_message();
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(message.content, "This image shows a beautiful sunset.");
+
+        // Check metadata
+        assert!(message.metadata.contains_key("confidence"));
+        assert!(message.metadata.contains_key("processing_time_ms"));
     }
 
-    /// Set usage information.
-    pub fn usage(mut self, usage: Usage) -> Self {
-        self.usage = Some(usage);
-        self
+    #[test]
+    fn test_vlm_response_to_message_without_usage() {
+        let mut metadata = ResponseMetadata::default();
+        metadata.processing_time_ms = Some(800);
+
+        let response = Response::new("Simple response without usage.", ())
+            .with_confidence(0.85)
+            .with_finish_reason("stop")
+            .with_metadata(metadata);
+
+        let message = response.to_message();
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(message.content, "Simple response without usage.");
+
+        // Check metadata
+        assert!(message.metadata.contains_key("confidence"));
+        assert!(message.metadata.contains_key("processing_time_ms"));
+        assert_eq!(message.metadata["confidence"], serde_json::json!(0.85));
+        assert_eq!(
+            message.metadata["processing_time_ms"],
+            serde_json::json!(800)
+        );
     }
 
-    /// Set finish reason.
-    pub fn finish_reason<S: Into<String>>(mut self, reason: S) -> Self {
-        self.finish_reason = Some(reason.into());
-        self
+    #[test]
+    fn test_vlm_response_to_message_with_visual_analysis() {
+        let mut visual_analysis = VisualAnalysis::new();
+        visual_analysis.detected_objects = Some(vec![DetectedObject {
+            class: "cat".to_string(),
+            confidence: 0.9,
+            bounding_box: Some(BoundingBox::new(10.0, 20.0, 100.0, 150.0)),
+            attributes: HashMap::new(),
+        }]);
+
+        let response = Response::new("I can see a cat in the image.", ())
+            .with_visual_analysis(visual_analysis);
+
+        let message = response.to_message();
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(message.content, "I can see a cat in the image.");
+        assert!(message.metadata.contains_key("visual_analysis"));
     }
 
-    /// Set confidence score.
-    pub fn confidence(mut self, confidence: f64) -> Self {
-        self.confidence = Some(confidence.clamp(0.0, 1.0));
-        self
+    #[test]
+    fn test_usage_statistics() {
+        let usage = Usage::new(25, 75);
+        assert_eq!(usage.prompt_tokens, 25);
+        assert_eq!(usage.completion_tokens, 75);
+        assert_eq!(usage.total_tokens, 100);
+        assert_eq!(usage.images_processed, None);
+
+        let usage_with_images = usage.with_images(3);
+        assert_eq!(usage_with_images.images_processed, Some(3));
     }
 
-    /// Add visual analysis results.
-    pub fn visual_analysis(mut self, analysis: VisualAnalysis) -> Self {
-        self.visual_analysis = Some(analysis);
-        self
+    #[test]
+    fn test_response_status_methods() {
+        let complete_response =
+            Response::new("Complete response", ()).with_finish_reason("complete");
+        assert!(complete_response.is_complete());
+        assert!(!complete_response.is_truncated());
+        assert!(!complete_response.is_filtered());
+
+        let truncated_response = Response::new("Truncated", ()).with_finish_reason("length");
+        assert!(!truncated_response.is_complete());
+        assert!(truncated_response.is_truncated());
+        assert!(!truncated_response.is_filtered());
+
+        let filtered_response = Response::new("Filtered", ()).with_finish_reason("content_filter");
+        assert!(!filtered_response.is_complete());
+        assert!(!filtered_response.is_truncated());
+        assert!(filtered_response.is_filtered());
     }
 
-    /// Add detected objects.
-    pub fn detected_objects(mut self, objects: Vec<DetectedObject>) -> Self {
-        let mut analysis = self.visual_analysis.unwrap_or_default();
+    #[test]
+    fn test_visual_analysis_methods() {
+        let mut analysis = VisualAnalysis::new();
+        assert!(!analysis.has_results());
+        assert_eq!(analysis.object_count(), 0);
+
+        let objects = vec![
+            DetectedObject {
+                class: "dog".to_string(),
+                confidence: 0.95,
+                bounding_box: Some(BoundingBox::new(0.0, 0.0, 50.0, 50.0)),
+                attributes: HashMap::new(),
+            },
+            DetectedObject {
+                class: "cat".to_string(),
+                confidence: 0.7,
+                bounding_box: Some(BoundingBox::new(60.0, 60.0, 40.0, 40.0)),
+                attributes: HashMap::new(),
+            },
+        ];
+
         analysis.detected_objects = Some(objects);
-        self.visual_analysis = Some(analysis);
-        self
+        assert!(analysis.has_results());
+        assert_eq!(analysis.object_count(), 2);
+
+        let high_confidence = analysis.high_confidence_objects(0.8);
+        assert_eq!(high_confidence.len(), 1);
+        assert_eq!(high_confidence[0].class, "dog");
     }
 
-    /// Add processing time metadata.
-    pub fn processing_time(mut self, time_ms: u64) -> Self {
-        self.metadata.processing_time_ms = Some(time_ms);
-        self
+    #[test]
+    fn test_color_info_from_rgb() {
+        let color = ColorInfo::from_rgb(255, 0, 0);
+        assert_eq!(color.rgb, (255, 0, 0));
+        assert_eq!(color.hex, Some("#ff0000".to_string()));
     }
 
-    /// Add a warning.
-    pub fn warning<S: Into<String>>(mut self, warning: S) -> Self {
-        self.metadata.warnings.push(warning.into());
-        self
-    }
+    #[test]
+    fn test_streaming_chunk_to_response() {
+        let usage = Usage::new(10, 20);
+        let chunk = VlmResponseChunk::with_completion(
+            "Chunk content",
+            "complete".to_string(),
+            usage.clone(),
+            Some(0.9),
+            (),
+        );
 
-    /// Build the final response.
-    pub fn build(self) -> Response<Resp> {
-        Response {
-            content: self.content,
-            model: self.model,
-            usage: self.usage,
-            finish_reason: self.finish_reason,
-            created: SystemTime::now(),
-            confidence: self.confidence,
-            visual_analysis: self.visual_analysis,
-            metadata: self.metadata,
-            payload: self.payload,
-        }
+        let response = chunk.to_response();
+        assert_eq!(response.content, "Chunk content");
+        assert_eq!(response.usage, Some(usage));
+        assert_eq!(response.finish_reason, Some("complete".to_string()));
     }
 }

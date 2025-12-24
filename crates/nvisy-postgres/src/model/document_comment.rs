@@ -1,7 +1,7 @@
 //! Document comment model for PostgreSQL database operations.
 
 use diesel::prelude::*;
-use time::OffsetDateTime;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::document_comments;
@@ -31,11 +31,11 @@ pub struct DocumentComment {
     /// Additional comment metadata.
     pub metadata: serde_json::Value,
     /// Timestamp when the comment was created.
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
     /// Timestamp when the comment was last updated.
-    pub updated_at: OffsetDateTime,
+    pub updated_at: Timestamp,
     /// Timestamp when the comment was soft-deleted.
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new document comment.
@@ -128,8 +128,8 @@ impl DocumentComment {
 
     /// Returns whether this comment has been edited.
     pub fn is_edited(&self) -> bool {
-        let duration = self.updated_at - self.created_at;
-        duration.whole_seconds() > comment::EDIT_GRACE_PERIOD_SECONDS
+        let duration = jiff::Timestamp::from(self.updated_at) - jiff::Timestamp::from(self.created_at);
+        duration.get_seconds() > comment::EDIT_GRACE_PERIOD_SECONDS
     }
 
     /// Returns whether this comment is on a document.
@@ -184,19 +184,19 @@ impl NewDocumentComment {
 }
 
 impl HasCreatedAt for DocumentComment {
-    fn created_at(&self) -> OffsetDateTime {
-        self.created_at
+    fn created_at(&self) -> jiff::Timestamp {
+        self.created_at.into()
     }
 }
 
 impl HasUpdatedAt for DocumentComment {
-    fn updated_at(&self) -> OffsetDateTime {
-        self.updated_at
+    fn updated_at(&self) -> jiff::Timestamp {
+        self.updated_at.into()
     }
 }
 
 impl HasDeletedAt for DocumentComment {
-    fn deleted_at(&self) -> Option<OffsetDateTime> {
-        self.deleted_at
+    fn deleted_at(&self) -> Option<jiff::Timestamp> {
+        self.deleted_at.map(Into::into)
     }
 }

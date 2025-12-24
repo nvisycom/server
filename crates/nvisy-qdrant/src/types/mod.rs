@@ -3,19 +3,17 @@
 //! This module provides strongly-typed interfaces for all Qdrant operations,
 //! ensuring type safety and providing convenient constructors and utilities.
 
-pub mod collection;
 mod payload;
 mod point;
+mod search;
 mod vector;
 
-pub use collection::{CollectionConfig, CollectionInfo, CollectionStatus};
 pub use payload::Payload;
 pub use point::{Point, PointId, PointVectors};
-/// Re-export commonly used Qdrant client types for convenience
-pub use qdrant_client::qdrant::{
-    PointStruct as RawPoint, Value as PayloadValue, point_id::PointIdOptions,
-    vectors::VectorsOptions,
-};
+pub use qdrant_client::qdrant::point_id::PointIdOptions;
+pub use qdrant_client::qdrant::vectors::VectorsOptions;
+pub use qdrant_client::qdrant::{PointStruct as RawPoint, Value as PayloadValue};
+pub use search::{Condition, SearchResult, WithPayloadSelector};
 pub use vector::{Distance, Vector, VectorParams};
 
 /// Trait for types that can be converted to Qdrant point IDs
@@ -63,7 +61,8 @@ impl IntoPointId for &str {
 impl IntoPointId for PointId {
     fn into_point_id(self) -> PointIdOptions {
         match self {
-            PointId::Uuid(uuid) => PointIdOptions::Uuid(uuid),
+            PointId::Uuid(uuid) => PointIdOptions::Uuid(uuid.to_string()),
+            PointId::Text(text) => PointIdOptions::Uuid(text),
             PointId::Num(num) => PointIdOptions::Num(num),
         }
     }

@@ -151,7 +151,7 @@ where
             account_id = %auth_claims.account_id,
             token_id = %auth_claims.token_id,
             is_admin = account.is_admin,
-            token_expires = %api_token.expired_at,
+            token_expires = %api_token.expired_at.to_jiff(),
             "authentication verification completed successfully"
         );
 
@@ -230,8 +230,8 @@ where
                 target: TRACING_TARGET_AUTHENTICATION,
                 token_id = %auth_claims.token_id,
                 account_id = %auth_claims.account_id,
-                expired_at = %api_token.expired_at,
-                current_time = %time::OffsetDateTime::now_utc(),
+                expired_at = %api_token.expired_at.to_jiff(),
+                current_time = %jiff::Timestamp::now(),
                 "Authentication failed: API token expired at database level"
             );
 
@@ -244,7 +244,7 @@ where
         tracing::debug!(
             target: TRACING_TARGET_AUTHENTICATION,
             token_id = %auth_claims.token_id,
-            token_expires = %api_token.expired_at,
+            token_expires = %api_token.expired_at.to_jiff(),
             "API token validation successful"
         );
 
@@ -440,5 +440,18 @@ where
             Ok(auth_state) => Ok(Some(auth_state)),
             Err(_) => Ok(None),
         }
+    }
+}
+
+impl<T> aide::OperationInput for AuthState<T>
+where
+    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn operation_input(
+        _ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        // Add security requirement for Bearer token
+        operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
     }
 }

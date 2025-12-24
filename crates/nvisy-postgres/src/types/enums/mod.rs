@@ -19,6 +19,7 @@ pub mod project_status;
 pub mod project_visibility;
 
 // Document-related enumerations
+pub mod content_segmentation;
 pub mod document_status;
 pub mod processing_status;
 pub mod require_mode;
@@ -27,6 +28,7 @@ pub mod virus_scan_status;
 pub use action_token_type::ActionTokenType;
 pub use activity_type::{ActivityCategory, ActivityType};
 pub use api_token_type::ApiTokenType;
+pub use content_segmentation::ContentSegmentation;
 pub use document_status::DocumentStatus;
 pub use integration_status::IntegrationStatus;
 pub use integration_type::IntegrationType;
