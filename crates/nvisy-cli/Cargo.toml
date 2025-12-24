@@ -27,6 +27,7 @@ telemetry = ["uuid", "reqwest", "serde_json"]
 [dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = [] }
+nvisy-postgres = { workspace = true, features = [] }
 nvisy-server = { workspace = true, features = [] }
 
 # Async runtime

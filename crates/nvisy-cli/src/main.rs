@@ -121,7 +121,7 @@ async fn run_application() -> anyhow::Result<()> {
         cors_origins = ?cors_config.allowed_origins,
         cors_credentials = cors_config.allow_credentials,
         openapi_json_path = %openapi_config.open_api_json,
-        swagger_path = %openapi_config.swagger_ui,
+        scalar_path = %openapi_config.scalar_ui,
         "service configuration loaded successfully"
     );
 

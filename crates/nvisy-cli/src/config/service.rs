@@ -4,8 +4,11 @@
 //! that can be converted to the plain server configuration types.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Args, Parser};
+use nvisy_nats::NatsConfig;
+use nvisy_postgres::PgConfig;
 use nvisy_server::middleware::open_api::config::OpenApiConfig as ServerOpenApiConfig;
 use nvisy_server::middleware::security::cors::CorsConfig as ServerCorsConfig;
 use nvisy_server::service::ServiceConfig as ServerServiceConfig;
@@ -72,11 +75,15 @@ impl Default for ServiceConfig {
 
 impl From<ServiceConfig> for ServerServiceConfig {
     fn from(cli_config: ServiceConfig) -> Self {
+        let mut pg_config = PgConfig::new(&cli_config.postgres_url);
+        pg_config.max_size = std::num::NonZeroU32::new(cli_config.postgres_max_pool);
+        pg_config.connection_timeout = Some(Duration::from_secs(cli_config.postgres_timeout_secs));
+
+        let nats_config = NatsConfig::new(&cli_config.nats_url);
+
         Self {
-            postgres_endpoint: cli_config.postgres_url,
-            postgres_max_connections: cli_config.postgres_max_pool,
-            postgres_connection_timeout_secs: cli_config.postgres_timeout_secs,
-            nats_url: cli_config.nats_url,
+            postgres_config: pg_config,
+            nats_config,
             auth_decoding_key: cli_config.auth_decoding_key,
             auth_encoding_key: cli_config.auth_encoding_key,
         }
@@ -129,10 +136,6 @@ pub struct OpenApiConfig {
     #[arg(short, long, default_value = "/api/openapi.json")]
     pub open_api_json: String,
 
-    /// Path which exposes `SwaggerUI` to the user.
-    #[arg(short, long, default_value = "/api/swagger")]
-    pub swagger_ui: String,
-
     /// Path which exposes Scalar to the user.
     #[arg(short = 'c', long, default_value = "/api/scalar")]
     pub scalar_ui: String,
@@ -142,7 +145,6 @@ impl Default for OpenApiConfig {
     fn default() -> Self {
         Self {
             open_api_json: "/api/openapi.json".to_owned(),
-            swagger_ui: "/api/swagger".to_string(),
             scalar_ui: "/api/scalar".to_string(),
         }
     }
@@ -152,7 +154,6 @@ impl From<OpenApiConfig> for ServerOpenApiConfig {
     fn from(cli_config: OpenApiConfig) -> Self {
         Self {
             open_api_json: cli_config.open_api_json,
-            swagger_ui: cli_config.swagger_ui,
             scalar_ui: cli_config.scalar_ui,
         }
     }

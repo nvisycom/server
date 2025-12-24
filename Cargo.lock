@@ -2580,6 +2580,7 @@ dependencies = [
  "axum-server",
  "clap",
  "nvisy-nats",
+ "nvisy-postgres",
  "nvisy-server",
  "reqwest",
  "serde",
