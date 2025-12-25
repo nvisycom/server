@@ -2579,17 +2579,19 @@ dependencies = [
  "axum 0.8.8",
  "axum-server",
  "clap",
+ "nvisy-core",
  "nvisy-nats",
+ "nvisy-ollama",
+ "nvisy-olmocr2",
  "nvisy-postgres",
+ "nvisy-qdrant",
  "nvisy-server",
- "reqwest",
+ "nvisy-test",
  "serde",
- "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -2602,6 +2604,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "jiff",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -2617,6 +2620,7 @@ dependencies = [
  "async-nats",
  "async-stream",
  "bytes",
+ "clap",
  "derive_more",
  "futures",
  "hex",
@@ -2679,6 +2683,7 @@ name = "nvisy-postgres"
 version = "0.1.0"
 dependencies = [
  "bigdecimal",
+ "clap",
  "deadpool",
  "diesel",
  "diesel-async",
@@ -2704,6 +2709,7 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "bytes",
+ "clap",
  "derive_more",
  "futures",
  "jiff",
@@ -2731,7 +2737,7 @@ dependencies = [
  "axum-test",
  "base64",
  "bigdecimal",
- "derive_builder",
+ "clap",
  "derive_more",
  "flate2",
  "futures",
@@ -2742,6 +2748,7 @@ dependencies = [
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-qdrant",
+ "nvisy-test",
  "rand 0.10.0-rc.5",
  "regex",
  "schemars",
@@ -2762,6 +2769,17 @@ dependencies = [
  "validator",
  "zip",
  "zxcvbn",
+]
+
+[[package]]
+name = "nvisy-test"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "futures",
+ "nvisy-core",
+ "serde",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! HTTP/HTTPS server configuration and startup with comprehensive lifecycle management.
 //!
-//! This module provides a clean API for starting HTTP and HTTPS servers with optional
-//! telemetry support, enhanced error handling, and production-ready lifecycle management.
+//! This module provides a clean API for starting HTTP and HTTPS servers with
+//! enhanced error handling and production-ready lifecycle management.
 //! It automatically handles protocol selection based on TLS configuration.
 
 mod error;
@@ -14,20 +14,11 @@ mod shutdown;
 use axum::Router;
 pub use error::{ServerError, ServerResult};
 use http_server::serve_http;
-#[cfg(feature = "telemetry")]
-use http_server::serve_http_with_telemetry;
 #[cfg(feature = "tls")]
 use https_server::serve_https;
-#[cfg(all(feature = "tls", feature = "telemetry"))]
-use https_server::serve_https_with_telemetry;
-use lifecycle::serve_with_shutdown;
-#[cfg(feature = "telemetry")]
-pub use lifecycle::serve_with_shutdown_and_telemetry;
 use shutdown::shutdown_signal;
 
 use crate::config::ServerConfig;
-#[cfg(feature = "telemetry")]
-use crate::telemetry::TelemetryContext;
 
 /// Starts a server with automatic protocol selection (HTTP/HTTPS) based on configuration.
 ///
@@ -46,22 +37,6 @@ use crate::telemetry::TelemetryContext;
 /// - TLS certificates are configured but cannot be loaded (HTTPS mode)
 /// - Cannot bind to the specified address/port
 /// - Server encounters a fatal error during operation
-///
-/// # Examples
-///
-/// ```no_run
-/// use axum::Router;
-/// use nvisy_cli::config::ServerConfig;
-/// use nvisy_cli::server::serve;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let app = Router::new();
-/// let config = ServerConfig::default(); // Will use HTTP
-///
-/// serve(app, config).await?;
-/// # Ok(())
-/// # }
-/// ```
 pub async fn serve(app: Router, config: ServerConfig) -> ServerResult<()> {
     #[cfg(feature = "tls")]
     {
@@ -90,64 +65,6 @@ pub async fn serve(app: Router, config: ServerConfig) -> ServerResult<()> {
             ));
         }
         serve_http(app, config).await
-    }
-}
-
-/// Starts a server with automatic protocol selection and telemetry support.
-///
-/// This enhanced version includes telemetry integration when the telemetry
-/// feature is enabled, providing usage analytics and crash reporting.
-///
-/// # Arguments
-///
-/// * `app` - The Axum router to serve
-/// * `config` - Server configuration that determines protocol and settings
-/// * `telemetry_context` - Optional telemetry context for reporting
-///
-/// # Errors
-///
-/// Returns the same errors as `serve`. Telemetry failures are logged
-/// but do not cause server startup to fail.
-#[cfg(feature = "telemetry")]
-pub async fn serve_with_telemetry(
-    app: Router,
-    config: ServerConfig,
-    telemetry_context: Option<&TelemetryContext>,
-) -> ServerResult<()> {
-    #[cfg(feature = "tls")]
-    {
-        if !config.is_tls_enabled() {
-            return serve_http_with_telemetry(app, config, telemetry_context).await;
-        }
-
-        let cert_path = config.tls_cert_path.as_ref().ok_or_else(|| {
-            ServerError::InvalidConfig("TLS enabled but no cert path provided".to_string())
-        })?;
-        let key_path = config.tls_key_path.as_ref().ok_or_else(|| {
-            ServerError::InvalidConfig("TLS enabled but no key path provided".to_string())
-        })?;
-
-        let cert_path = cert_path.clone();
-        let key_path = key_path.clone();
-        return serve_https_with_telemetry(
-            app,
-            config,
-            cert_path.as_path(),
-            key_path.as_path(),
-            telemetry_context,
-        )
-        .await;
-    }
-
-    #[cfg(not(feature = "tls"))]
-    {
-        let tls_enabled = config.is_tls_enabled();
-        if tls_enabled {
-            return Err(ServerError::InvalidConfig(
-                "TLS is configured but the 'tls' feature is not enabled".to_string(),
-            ));
-        }
-        return serve_http_with_telemetry(app, config, telemetry_context).await;
     }
 }
 

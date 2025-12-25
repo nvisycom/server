@@ -22,13 +22,24 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 tls = ["axum-server"]
 otel = ["tracing-subscriber/env-filter"]
-telemetry = ["uuid", "reqwest", "serde_json"]
+
+# AI service backends for embeddings, OCRs, and VLMs
+mock = ["dep:nvisy-test"]
+ollama = ["dep:nvisy-ollama"]
+olmocr = ["dep:nvisy-olmocr2"]
 
 [dependencies]
 # Internal crates
-nvisy-nats = { workspace = true, features = [] }
-nvisy-postgres = { workspace = true, features = [] }
-nvisy-server = { workspace = true, features = [] }
+nvisy-core = { workspace = true }
+nvisy-nats = { workspace = true, features = ["config"] }
+nvisy-postgres = { workspace = true, features = ["config"] }
+nvisy-qdrant = { workspace = true, features = ["config"] }
+nvisy-server = { workspace = true, features = ["config"] }
+
+# AI service backends (optional)
+nvisy-test = { workspace = true, optional = true }
+nvisy-ollama = { workspace = true, optional = true }
+nvisy-olmocr2 = { workspace = true, optional = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
@@ -46,12 +57,7 @@ tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = [], optional = true }
 
 # Error handling
 anyhow = { workspace = true, features = ["backtrace"] }
 thiserror = { workspace = true, features = [] }
-
-# Telemetry (optional)
-uuid = { workspace = true, features = ["v4", "serde"], optional = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls"], optional = true }

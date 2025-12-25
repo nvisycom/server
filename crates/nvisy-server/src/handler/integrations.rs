@@ -17,9 +17,7 @@ use crate::handler::request::{
     CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
     UpdateIntegrationCredentials, UpdateProjectIntegration as UpdateProjectIntegrationRequest,
 };
-use crate::handler::response::{
-    ProjectIntegration, ProjectIntegrationSummaries, ProjectIntegrationWithCredentials,
-};
+use crate::handler::response::{Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -33,7 +31,7 @@ async fn create_integration(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(payload): ValidateJson<CreateProjectIntegration>,
-) -> Result<(StatusCode, Json<ProjectIntegration>)> {
+) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -93,7 +91,7 @@ async fn list_integrations(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(_pagination): Json<Pagination>,
-) -> Result<(StatusCode, Json<ProjectIntegrationSummaries>)> {
+) -> Result<(StatusCode, Json<Integrations>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -114,12 +112,12 @@ async fn list_integrations(
         .list_project_integrations(path_params.project_id)
         .await?;
 
-    let integration_summaries: ProjectIntegrationSummaries = integrations
+    let integrations: Integrations = integrations
         .into_iter()
         .map(|integration| integration.into())
         .collect();
 
-    Ok((StatusCode::OK, Json(integration_summaries)))
+    Ok((StatusCode::OK, Json(integrations)))
 }
 
 /// Retrieves a specific project integration.
@@ -128,7 +126,7 @@ async fn read_integration(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
-) -> Result<(StatusCode, Json<ProjectIntegration>)> {
+) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -171,55 +169,6 @@ async fn read_integration(
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
-/// Retrieves a project integration with credentials.
-#[tracing::instrument(skip_all)]
-async fn read_integration_with_credentials(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<IntegrationPathParams>,
-) -> Result<(StatusCode, Json<ProjectIntegrationWithCredentials>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Reading project integration with credentials"
-    );
-
-    // Verify user has permission to manage integrations (higher permission for credentials)
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ManageIntegrations,
-        )
-        .await?;
-
-    let Some(integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
-
-    // Verify the integration belongs to the specified project
-    if integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
-
-    Ok((StatusCode::OK, Json(integration.into())))
-}
-
 /// Updates a project integration.
 #[tracing::instrument(skip_all)]
 async fn update_integration(
@@ -227,7 +176,7 @@ async fn update_integration(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(payload): ValidateJson<UpdateProjectIntegrationRequest>,
-) -> Result<(StatusCode, Json<ProjectIntegration>)> {
+) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -319,7 +268,7 @@ async fn update_integration_credentials(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(payload): ValidateJson<UpdateIntegrationCredentials>,
-) -> Result<(StatusCode, Json<ProjectIntegration>)> {
+) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -446,10 +395,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/projects/:project_id/integrations/:integration_id/",
             get(read_integration),
-        )
-        .api_route(
-            "/projects/:project_id/integrations/:integration_id/credentials/",
-            get(read_integration_with_credentials),
         )
         .api_route(
             "/projects/:project_id/integrations/:integration_id/",

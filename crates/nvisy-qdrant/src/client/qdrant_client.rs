@@ -1,10 +1,12 @@
 //! High-level Qdrant client implementation with connection management.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use qdrant_client::Qdrant;
-use tracing::{debug, error, info, instrument};
+use qdrant_client::qdrant::{
+    CreateCollection, DeleteCollectionBuilder, DeletePointsBuilder, GetPointsBuilder,
+    UpsertPointsBuilder,
+};
 
 use crate::TRACING_TARGET_CLIENT;
 use crate::client::QdrantConfig;
@@ -24,7 +26,7 @@ use crate::types::{Point, PointId};
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     // Create client
-///     let config = QdrantConfig::new("http://localhost:6334")?;
+///     let config = QdrantConfig::new("http://localhost:6334", "your-api-key")?;
 ///     let client = QdrantClient::new(config).await?;
 ///
 ///     // Create a collection using the collection trait
@@ -57,29 +59,33 @@ impl QdrantClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection cannot be established.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(url = %config.url))]
-    pub async fn new(config: QdrantConfig) -> Result<Self> {
-        // Validate configuration
+    /// Returns an error if the configuration is invalid or client creation fails.
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(url = %config.url))]
+    pub fn new(config: QdrantConfig) -> Result<Self> {
         config.validate()?;
 
-        info!(
+        tracing::info!(
             target: TRACING_TARGET_CLIENT,
             url = %config.url,
             "Creating new Qdrant client"
         );
 
-        // Build the Qdrant client
-        let mut client_builder = Qdrant::from_url(&config.url);
+        let mut builder = Qdrant::from_url(&config.url).api_key(config.api_key.as_str());
 
-        if let Some(ref api_key) = config.api_key {
-            client_builder = client_builder.api_key(Some(api_key));
+        if let Some(connect_timeout) = config.connect_timeout() {
+            builder.set_connect_timeout(connect_timeout);
         }
 
-        client_builder = client_builder.timeout(config.timeout);
+        if let Some(timeout) = config.timeout() {
+            builder.set_timeout(timeout);
+        }
 
-        let client = client_builder.build().map_err(|e| {
-            error!(
+        if let Some(keep_alive) = config.keep_alive {
+            builder.set_keep_alive_while_idle(keep_alive);
+        }
+
+        let client = builder.build().map_err(|e| {
+            tracing::error!(
                 target: TRACING_TARGET_CLIENT,
                 error = %e,
                 url = %config.url,
@@ -90,7 +96,7 @@ impl QdrantClient {
 
         let inner = Arc::new(QdrantClientInner { client, config });
 
-        info!(
+        tracing::info!(
             target: TRACING_TARGET_CLIENT,
             url = %inner.config.url,
             "Qdrant client created successfully"
@@ -119,14 +125,14 @@ impl QdrantClient {
     ///
     /// Returns an error if the collection cannot be created or if a collection
     /// with the same name already exists.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %create_collection.collection_name))]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %create_collection.collection_name))]
     pub(crate) async fn create_collection(
         &self,
-        create_collection: qdrant_client::qdrant::CreateCollection,
+        create_collection: CreateCollection,
     ) -> Result<()> {
         let collection_name = create_collection.collection_name.clone();
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             "Creating collection"
@@ -137,7 +143,7 @@ impl QdrantClient {
             .create_collection(create_collection)
             .await
             .map_err(|e| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CLIENT,
                     error = %e,
                     collection = %collection_name,
@@ -146,7 +152,7 @@ impl QdrantClient {
                 Error::collection().with_message(format!("create_collection failed: {}", e))
             })?;
 
-        info!(
+        tracing::info!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             "Collection created successfully"
@@ -160,27 +166,21 @@ impl QdrantClient {
     /// # Arguments
     ///
     /// * `collection_name` - Name of the collection to delete
-    /// * `timeout` - Optional timeout for the operation
     ///
     /// # Errors
     ///
     /// Returns an error if the collection cannot be deleted or doesn't exist.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name))]
-    pub(crate) async fn delete_collection(
-        &self,
-        collection_name: &str,
-        timeout: Option<Duration>,
-    ) -> Result<()> {
-        debug!(
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name))]
+    pub(crate) async fn delete_collection(&self, collection_name: &str) -> Result<()> {
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             "Deleting collection"
         );
 
-        let mut delete_collection =
-            qdrant_client::qdrant::DeleteCollectionBuilder::new(collection_name);
+        let mut delete_collection = DeleteCollectionBuilder::new(collection_name);
 
-        if let Some(timeout) = timeout {
+        if let Some(timeout) = self.inner.config.timeout() {
             delete_collection = delete_collection.timeout(timeout.as_secs());
         }
 
@@ -189,7 +189,7 @@ impl QdrantClient {
             .delete_collection(delete_collection)
             .await
             .map_err(|e| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CLIENT,
                     error = %e,
                     collection = %collection_name,
@@ -198,7 +198,7 @@ impl QdrantClient {
                 Error::collection().with_message(format!("delete_collection failed: {}", e))
             })?;
 
-        info!(
+        tracing::info!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             "Collection deleted successfully"
@@ -213,19 +213,13 @@ impl QdrantClient {
     ///
     /// * `collection_name` - Name of the collection
     /// * `point` - The point to upsert
-    /// * `wait` - Whether to wait for the operation to complete
     ///
     /// # Errors
     ///
     /// Returns an error if the point cannot be upserted.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_id = ?point.id))]
-    pub(crate) async fn upsert_point(
-        &self,
-        collection_name: &str,
-        point: Point,
-        wait: bool,
-    ) -> Result<()> {
-        debug!(
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_id = ?point.id))]
+    pub(crate) async fn upsert_point(&self, collection_name: &str, point: Point) -> Result<()> {
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             point_id = ?point.id,
@@ -235,19 +229,15 @@ impl QdrantClient {
         let point_id = point.id.clone();
         let qdrant_point = point.to_qdrant_point()?;
 
-        let mut upsert_points =
-            qdrant_client::qdrant::UpsertPointsBuilder::new(collection_name, vec![qdrant_point]);
-
-        if wait {
-            upsert_points = upsert_points.wait(true);
-        }
+        let upsert_points =
+            UpsertPointsBuilder::new(collection_name, vec![qdrant_point]).wait(true);
 
         self.inner
             .client
             .upsert_points(upsert_points)
             .await
             .map_err(|e| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CLIENT,
                     error = %e,
                     collection = %collection_name,
@@ -257,7 +247,7 @@ impl QdrantClient {
                 Error::point().with_message(format!("upsert_point failed: {}", e))
             })?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             point_id = ?point_id,
@@ -273,19 +263,17 @@ impl QdrantClient {
     ///
     /// * `collection_name` - Name of the collection
     /// * `points` - The points to upsert
-    /// * `wait` - Whether to wait for the operation to complete
     ///
     /// # Errors
     ///
     /// Returns an error if the points cannot be upserted.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_count = points.len()))]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_count = points.len()))]
     pub(crate) async fn upsert_points(
         &self,
         collection_name: &str,
         points: Vec<Point>,
-        wait: bool,
     ) -> Result<()> {
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             point_count = points.len(),
@@ -296,19 +284,14 @@ impl QdrantClient {
             points.into_iter().map(|p| p.to_qdrant_point()).collect();
         let qdrant_points = qdrant_points?;
 
-        let mut upsert_points =
-            qdrant_client::qdrant::UpsertPointsBuilder::new(collection_name, qdrant_points);
-
-        if wait {
-            upsert_points = upsert_points.wait(true);
-        }
+        let upsert_points = UpsertPointsBuilder::new(collection_name, qdrant_points).wait(true);
 
         self.inner
             .client
             .upsert_points(upsert_points)
             .await
             .map_err(|e| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CLIENT,
                     error = %e,
                     collection = %collection_name,
@@ -317,7 +300,7 @@ impl QdrantClient {
                 Error::point().with_message(format!("upsert_points failed: {}", e))
             })?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             "Points upserted successfully"
@@ -336,13 +319,13 @@ impl QdrantClient {
     /// # Errors
     ///
     /// Returns an error if the point cannot be retrieved.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_id = ?point_id))]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_id = ?point_id))]
     pub(crate) async fn get_point(
         &self,
         collection_name: &str,
         point_id: PointId,
     ) -> Result<Option<Point>> {
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             point_id = ?point_id,
@@ -350,12 +333,14 @@ impl QdrantClient {
         );
 
         let point_id_clone = point_id.clone();
-        let get_points = qdrant_client::qdrant::GetPointsBuilder::new(
-            collection_name,
-            vec![point_id.to_qdrant_point_id()],
-        )
-        .with_payload(true)
-        .with_vectors(true);
+        let mut get_points =
+            GetPointsBuilder::new(collection_name, vec![point_id.to_qdrant_point_id()])
+                .with_payload(true)
+                .with_vectors(true);
+
+        if let Some(timeout) = self.inner.config.timeout() {
+            get_points = get_points.timeout(timeout.as_secs());
+        }
 
         let response = self
             .inner
@@ -363,7 +348,7 @@ impl QdrantClient {
             .get_points(get_points)
             .await
             .map_err(|e| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CLIENT,
                     error = %e,
                     collection = %collection_name,
@@ -377,19 +362,11 @@ impl QdrantClient {
             .result
             .into_iter()
             .next()
-            .map(|retrieved_point| {
-                // Convert RetrievedPoint to PointStruct
-                let point_struct = qdrant_client::qdrant::PointStruct {
-                    id: retrieved_point.id,
-                    payload: retrieved_point.payload,
-                    vectors: None, // TODO: Fix vector conversion from VectorsOutput
-                };
-                Point::from_qdrant_point_struct(point_struct)
-            })
+            .map(Point::try_from)
             .transpose()
             .map_err(|e| Error::serialization().with_message(e.to_string()))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             point_id = ?point_id_clone,
@@ -406,20 +383,17 @@ impl QdrantClient {
     ///
     /// * `collection_name` - Name of the collection
     /// * `point_id` - ID of the point to delete
-    /// * `wait` - Whether to wait for the operation to complete
     ///
     /// # Errors
     ///
     /// Returns an error if the point cannot be deleted.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_id = ?point_id))]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_id = ?point_id))]
     pub(crate) async fn delete_point(
         &self,
         collection_name: &str,
         point_id: PointId,
-        wait: bool,
     ) -> Result<()> {
-        self.delete_points(collection_name, vec![point_id], wait)
-            .await
+        self.delete_points(collection_name, vec![point_id]).await
     }
 
     /// Delete multiple points from a collection.
@@ -428,19 +402,17 @@ impl QdrantClient {
     ///
     /// * `collection_name` - Name of the collection
     /// * `point_ids` - IDs of the points to delete
-    /// * `wait` - Whether to wait for the operation to complete
     ///
     /// # Errors
     ///
     /// Returns an error if the points cannot be deleted.
-    #[instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_count = point_ids.len()))]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(collection = %collection_name, point_count = point_ids.len()))]
     pub(crate) async fn delete_points(
         &self,
         collection_name: &str,
         point_ids: Vec<PointId>,
-        wait: bool,
     ) -> Result<()> {
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             point_count = point_ids.len(),
@@ -452,19 +424,16 @@ impl QdrantClient {
             .map(|id| id.to_qdrant_point_id())
             .collect();
 
-        let mut delete_points =
-            qdrant_client::qdrant::DeletePointsBuilder::new(collection_name).points(ids);
-
-        if wait {
-            delete_points = delete_points.wait(true);
-        }
+        let delete_points = DeletePointsBuilder::new(collection_name)
+            .points(ids)
+            .wait(true);
 
         self.inner
             .client
             .delete_points(delete_points)
             .await
             .map_err(|e| {
-                error!(
+                tracing::error!(
                     target: TRACING_TARGET_CLIENT,
                     error = %e,
                     collection = %collection_name,
@@ -473,7 +442,7 @@ impl QdrantClient {
                 Error::point().with_message(format!("delete_points failed: {}", e))
             })?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             collection = %collection_name,
             "Points deleted successfully"
@@ -488,32 +457,28 @@ mod tests {
     use super::*;
 
     fn create_test_config() -> QdrantConfig {
-        QdrantConfig::new("http://localhost:6334").unwrap()
+        QdrantConfig::new("http://localhost:6334", "test-key")
     }
 
-    #[tokio::test]
-    #[ignore] // Requires a running Qdrant instance
-    async fn test_client_creation() {
+    #[test]
+    fn test_client_creation() {
         let config = create_test_config();
-        let result = QdrantClient::new(config).await;
-
-        // This will fail if Qdrant is not running, which is expected in CI
-        match result {
-            Ok(_client) => {
-                // Client created successfully
-            }
-            Err(e) => {
-                // Expected when Qdrant is not available
-                println!("Expected error when Qdrant not available: {}", e);
-            }
-        }
+        let _ = QdrantClient::new(config);
     }
 
     #[test]
     fn test_config_validation() {
-        assert!(QdrantConfig::new("http://localhost:6334").is_ok());
-        assert!(QdrantConfig::new("https://example.com:6334").is_ok());
-        assert!(QdrantConfig::new("").is_err());
-        assert!(QdrantConfig::new("invalid-url").is_err());
+        assert!(
+            QdrantConfig::new("http://localhost:6334", "key")
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            QdrantConfig::new("https://example.com:6334", "key")
+                .validate()
+                .is_ok()
+        );
+        assert!(QdrantConfig::new("", "key").validate().is_err());
+        assert!(QdrantConfig::new("invalid-url", "key").validate().is_err());
     }
 }

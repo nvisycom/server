@@ -8,6 +8,7 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use jiff::Timestamp;
+use nvisy_core::ServiceStatus;
 
 use super::request::CheckHealth;
 use super::response::MonitorStatus;
@@ -45,19 +46,16 @@ async fn health_status(
         health_service.get_cached_health()
     };
 
+    let status = if is_healthy {
+        ServiceStatus::Healthy
+    } else {
+        ServiceStatus::Unhealthy
+    };
+
     let response = MonitorStatus {
-        updated_at: Timestamp::now(),
-        is_healthy,
-        overall_status: if is_healthy {
-            super::response::SystemStatus::Healthy
-        } else {
-            super::response::SystemStatus::Critical
-        },
+        checked_at: Timestamp::now(),
+        status,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: 0, // TODO: Implement actual uptime tracking
-        services: None,
-        metrics: None,
-        alerts: None,
     };
 
     let status_code = if is_healthy {
@@ -85,4 +83,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new().api_route("/health", post(health_status))
 }
-

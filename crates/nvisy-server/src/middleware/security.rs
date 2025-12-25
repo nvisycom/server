@@ -10,6 +10,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::http::Method;
 use axum::http::header::{self, HeaderValue};
+#[cfg(feature = "config")]
+use clap::Args;
 use serde::{Deserialize, Serialize};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
@@ -99,15 +101,28 @@ where
 /// Controls which origins can access your API and what HTTP methods
 /// and headers are allowed in cross-origin requests.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "config", derive(Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct CorsConfig {
     /// List of allowed CORS origins. If empty, defaults to localhost origins for development.
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "CORS_ORIGINS", value_delimiter = ',')
+    )]
     pub allowed_origins: Vec<String>,
 
     /// Maximum age for CORS preflight requests in seconds.
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "CORS_MAX_AGE", default_value = "3600")
+    )]
     pub max_age_seconds: u64,
 
     /// Whether to allow credentials in CORS requests.
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "CORS_ALLOW_CREDENTIALS", default_value = "true")
+    )]
     pub allow_credentials: bool,
 }
 

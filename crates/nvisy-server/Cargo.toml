@@ -21,9 +21,18 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
+# CLI configuration support: enables clap derives for config types
+# This allows config types to be used with command-line argument parsing
+config = [
+    "dep:clap",
+    "nvisy-nats/config",
+    "nvisy-postgres/config",
+    "nvisy-qdrant/config",
+]
+
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true, features = [] }
+nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-qdrant = { workspace = true, features = ["schema"] }
@@ -71,7 +80,6 @@ zip = { workspace = true, features = [] }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
-derive_builder = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 
 # Data types
@@ -85,7 +93,17 @@ url = { workspace = true, features = [] }
 # Error handling
 anyhow = { workspace = true, features = [] }
 
+# CLI (optional)
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
 [dev-dependencies]
+# Internal crates (with config feature for ServiceConfig::default in tests)
+nvisy-test = { workspace = true, features = [] }
+nvisy-nats = { workspace = true, features = ["config"] }
+nvisy-postgres = { workspace = true, features = ["config"] }
+nvisy-qdrant = { workspace = true, features = ["config"] }
+
+clap = { workspace = true, features = ["derive", "env"] }
 axum-test = { workspace = true, features = [] }
 anyhow = { workspace = true, features = ["backtrace"] }
 tempfile = { workspace = true, features = [] }

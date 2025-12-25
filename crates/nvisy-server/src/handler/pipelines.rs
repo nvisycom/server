@@ -10,7 +10,7 @@ use nvisy_postgres::PgClient;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
 use crate::handler::request::{CreatePipeline, PipelinePathParams, ProjectPathParams};
-use crate::handler::response::{ProjectPipeline, ProjectPipelines};
+use crate::handler::response::{Pipeline, Pipelines};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -23,7 +23,7 @@ async fn list_project_pipelines(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<ProjectPipelines>)> {
+) -> Result<(StatusCode, Json<Pipelines>)> {
     // Authorize project access
     auth_claims
         .authorize_project(
@@ -52,7 +52,7 @@ async fn get_project_pipeline(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<ProjectPipeline>)> {
+) -> Result<(StatusCode, Json<Pipeline>)> {
     // Authorize project access
     auth_claims
         .authorize_project(
@@ -73,7 +73,7 @@ async fn create_project_pipeline(
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
     Json(_request): Json<CreatePipeline>,
-) -> Result<(StatusCode, Json<ProjectPipeline>)> {
+) -> Result<(StatusCode, Json<Pipeline>)> {
     // Authorize project access
     auth_claims
         .authorize_project(
@@ -94,7 +94,7 @@ async fn update_project_pipeline(
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_claims): AuthState,
     Json(_request): Json<CreatePipeline>,
-) -> Result<(StatusCode, Json<ProjectPipeline>)> {
+) -> Result<(StatusCode, Json<Pipeline>)> {
     // Authorize project access
     auth_claims
         .authorize_project(

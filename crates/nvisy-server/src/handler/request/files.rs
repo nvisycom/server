@@ -24,6 +24,16 @@ pub struct UpdateFile {
     /// Document ID to assign the file to.
     pub document_id: Option<Uuid>,
 
+    /// Knowledge extraction settings update.
+    #[serde(flatten)]
+    pub knowledge: Option<UpdateFileKnowledge>,
+}
+
+/// Request to update file knowledge extraction settings.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFileKnowledge {
     /// Whether the file is indexed for knowledge extraction.
     pub is_indexed: Option<bool>,
 

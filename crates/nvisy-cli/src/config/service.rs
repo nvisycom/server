@@ -4,11 +4,11 @@
 //! that can be converted to the plain server configuration types.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use clap::{Args, Parser};
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
+use nvisy_qdrant::QdrantConfig;
 use nvisy_server::middleware::{
     CorsConfig as ServerCorsConfig, OpenApiConfig as ServerOpenApiConfig,
 };
@@ -19,25 +19,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Args, Serialize, Deserialize)]
 #[must_use = "config does nothing unless you use it"]
 pub struct ServiceConfig {
-    /// Postgres database connection string.
-    #[arg(short = 'd', long, env = "POSTGRES_URL")]
-    #[arg(default_value = "postgresql://postgres:postgres@localhost:5432/postgres")]
-    pub postgres_url: String,
+    /// Postgres configuration.
+    #[clap(flatten)]
+    pub postgres: PgConfig,
 
-    /// Maximum number of connections in the Postgres connection pool.
-    #[arg(long, env = "POSTGRES_MAX_CONNECTIONS")]
-    #[arg(default_value_t = 10)]
-    pub postgres_max_pool: u32,
+    /// NATS configuration.
+    #[clap(flatten)]
+    pub nats: NatsConfig,
 
-    /// Connection timeout for Postgres operations in seconds.
-    #[arg(long, env = "POSTGRES_CONNECTION_TIMEOUT_SECS")]
-    #[arg(default_value_t = 30)]
-    pub postgres_timeout_secs: u64,
-
-    /// NATS server URL.
-    #[arg(long, env = "NATS_URL")]
-    #[arg(default_value = "nats://127.0.0.1:4222")]
-    pub nats_url: String,
+    /// Qdrant configuration.
+    #[clap(flatten)]
+    pub qdrant: QdrantConfig,
 
     /// File path to the JWT decoding (public) key used for sessions.
     #[arg(long, env = "AUTH_PUBLIC_PEM_FILEPATH")]
@@ -48,43 +40,26 @@ pub struct ServiceConfig {
     #[arg(long, env = "AUTH_PRIVATE_PEM_FILEPATH")]
     #[arg(default_value = "./private.pem")]
     pub auth_encoding_key: PathBuf,
-
-    /// `OpenRouter` API key.
-    #[arg(long, env = "OPENROUTER_API_KEY")]
-    pub openrouter_api_key: String,
-
-    /// `OpenRouter` base URL.
-    #[arg(long, env = "OPENROUTER_BASE_URL")]
-    #[arg(default_value = "https://openrouter.ai/api/v1/")]
-    pub openrouter_base_url: Option<String>,
 }
 
 impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
-            postgres_url: "postgresql://postgres:postgres@localhost:5432/postgres".to_owned(),
-            postgres_max_pool: 10,
-            postgres_timeout_secs: 30,
-            nats_url: "nats://127.0.0.1:4222".to_owned(),
+            postgres: PgConfig::default(),
+            nats: NatsConfig::default(),
+            qdrant: QdrantConfig::default(),
             auth_decoding_key: "./public.pem".into(),
             auth_encoding_key: "./private.pem".into(),
-            openrouter_api_key: format!("sk-or-v1-{}", "A".repeat(64)),
-            openrouter_base_url: Some("https://openrouter.ai/api/v1/".to_owned()),
         }
     }
 }
 
 impl From<ServiceConfig> for ServerServiceConfig {
     fn from(cli_config: ServiceConfig) -> Self {
-        let mut pg_config = PgConfig::new(&cli_config.postgres_url);
-        pg_config.max_size = std::num::NonZeroU32::new(cli_config.postgres_max_pool);
-        pg_config.connection_timeout = Some(Duration::from_secs(cli_config.postgres_timeout_secs));
-
-        let nats_config = NatsConfig::new(&cli_config.nats_url);
-
         Self {
-            postgres_config: pg_config,
-            nats_config,
+            postgres_config: cli_config.postgres,
+            nats_config: cli_config.nats,
+            qdrant_config: cli_config.qdrant,
             auth_decoding_key: cli_config.auth_decoding_key,
             auth_encoding_key: cli_config.auth_encoding_key,
         }
@@ -161,11 +136,10 @@ impl From<OpenApiConfig> for ServerOpenApiConfig {
 }
 
 /// Complete CLI configuration combining all service configurations.
-#[derive(Debug, Clone, Parser, Serialize, Deserialize)]
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, Default)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy API Server")]
 #[command(version)]
-#[derive(Default)]
 pub struct CliConfig {
     /// Service configuration
     #[clap(flatten)]

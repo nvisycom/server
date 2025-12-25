@@ -3,6 +3,7 @@
 //! This prelude module exports the most commonly used types, traits, and functions
 //! from nvisy-core to simplify imports in consuming code.
 
+pub use crate::AiServices;
 pub use crate::emb::{
     ContentEmbeddingRequest, Context as EmbeddingContext, EmbeddingData, EmbeddingProvider,
     EmbeddingResult, EmbeddingService, EncodingFormat, Request as EmbeddingRequest,
@@ -15,4 +16,8 @@ pub use crate::ocr::{
 pub use crate::types::{
     Annotation, AnnotationType, BoundingBox, Chat, Document, Message, MessageRole, ServiceHealth,
     ServiceStatus,
+};
+pub use crate::vlm::{
+    Context as VlmContext, ImageInput, ProcessingOptions, Request as VlmRequest,
+    Response as VlmResponse, VlmProvider, VlmService,
 };

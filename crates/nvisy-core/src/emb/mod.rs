@@ -18,7 +18,8 @@ use crate::types::ServiceHealth;
 pub use crate::{Error, ErrorKind, Result};
 
 /// Type alias for a boxed embedding provider with specific request and response types.
-pub type BoxedEmbeddingProvider<Req, Resp> = Box<dyn EmbeddingProvider<Req, Resp> + Send + Sync>;
+pub type BoxedEmbeddingProvider<Req = (), Resp = ()> =
+    Box<dyn EmbeddingProvider<Req, Resp> + Send + Sync>;
 
 /// Tracing target for embedding operations.
 pub const TRACING_TARGET: &str = "nvisy_core::emb";

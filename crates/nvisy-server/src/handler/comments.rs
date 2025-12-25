@@ -15,7 +15,7 @@ use crate::handler::request::{
     CreateDocumentComment, FileCommentPathParams, FilePathParams, Pagination,
     UpdateDocumentComment as UpdateCommentRequest,
 };
-use crate::handler::response::{DocumentComment, DocumentComments};
+use crate::handler::response::{Comment, Comments};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -24,12 +24,12 @@ const TRACING_TARGET: &str = "nvisy_server::handler::comments";
 
 /// Creates a new comment on a file.
 #[tracing::instrument(skip_all)]
-async fn create_file_comment(
+async fn post_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
-) -> Result<(StatusCode, Json<DocumentComment>)> {
+) -> Result<(StatusCode, Json<Comment>)> {
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -87,12 +87,12 @@ async fn create_file_comment(
 
 /// Returns all comments for a file.
 #[tracing::instrument(skip_all)]
-async fn list_file_comments(
+async fn list_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     Json(pagination): Json<Pagination>,
-) -> Result<(StatusCode, Json<DocumentComments>)> {
+) -> Result<(StatusCode, Json<Comments>)> {
     // Verify file exists
     let Some(_file) = pg_client
         .find_document_file_by_id(path_params.file_id)
@@ -121,46 +121,6 @@ async fn list_file_comments(
     ))
 }
 
-/// Gets a specific comment by ID.
-#[tracing::instrument(skip_all)]
-async fn get_comment(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<FileCommentPathParams>,
-) -> Result<(StatusCode, Json<DocumentComment>)> {
-    // Verify file exists
-    let Some(_file) = pg_client
-        .find_document_file_by_id(path_params.file_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("File not found: {}", path_params.file_id))
-            .with_resource("file"));
-    };
-
-    let Some(comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Comment not found: {}", path_params.comment_id))
-            .with_resource("comment"));
-    };
-
-    // Verify comment belongs to the file in the path
-    if comment.file_id != path_params.file_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Comment does not belong to this file")
-            .with_resource("comment"));
-    }
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        comment_id = path_params.comment_id.to_string(),
-        "Retrieved comment details"
-    );
-
-    Ok((StatusCode::OK, Json(comment.into())))
-}
-
 /// Updates a comment by ID.
 #[tracing::instrument(skip_all)]
 async fn update_comment(
@@ -168,7 +128,7 @@ async fn update_comment(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateCommentRequest>,
-) -> Result<(StatusCode, Json<DocumentComment>)> {
+) -> Result<(StatusCode, Json<Comment>)> {
     tracing::info!(
         target: TRACING_TARGET,
         account_id = auth_claims.account_id.to_string(),
@@ -292,15 +252,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
             "/projects/:project_id/files/:file_id/comments",
-            post(create_file_comment),
+            post(post_comment),
         )
         .api_route(
             "/projects/:project_id/files/:file_id/comments",
-            get(list_file_comments),
-        )
-        .api_route(
-            "/projects/:project_id/files/:file_id/comments/:comment_id",
-            get(get_comment),
+            get(list_comments),
         )
         .api_route(
             "/projects/:project_id/files/:file_id/comments/:comment_id",

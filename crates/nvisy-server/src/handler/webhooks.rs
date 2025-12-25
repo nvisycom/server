@@ -15,7 +15,7 @@ use nvisy_postgres::query::{Pagination, ProjectWebhookRepository};
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
     CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateProjectWebhookRequest,
-    UpdateWebhookStatus, WebhookPathParams,
+    WebhookPathParams,
 };
 use crate::handler::response::{Webhook, WebhookWithSecret, Webhooks};
 use crate::handler::{ErrorKind, Result};
@@ -226,113 +226,6 @@ async fn update_webhook(
     Ok((StatusCode::OK, Json(webhook.into())))
 }
 
-/// Updates webhook status.
-#[tracing::instrument(skip_all)]
-async fn update_webhook_status(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<WebhookPathParams>,
-    ValidateJson(payload): ValidateJson<UpdateWebhookStatus>,
-) -> Result<(StatusCode, Json<Webhook>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        webhook_id = path_params.webhook_id.to_string(),
-        "Updating webhook status"
-    );
-
-    // Verify user has permission to manage webhooks
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ManageIntegrations,
-        )
-        .await?;
-
-    // Verify webhook exists and belongs to the project
-    let Some(existing_webhook) = pg_client
-        .find_project_webhook_by_id(path_params.webhook_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    };
-
-    if existing_webhook.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    }
-
-    let update_data = UpdateProjectWebhook {
-        status: Some(payload.status),
-        ..Default::default()
-    };
-
-    let webhook = pg_client
-        .update_project_webhook(path_params.webhook_id, update_data)
-        .await?;
-
-    Ok((StatusCode::OK, Json(webhook.into())))
-}
-
-/// Resets webhook failure count and reactivates if disabled.
-#[tracing::instrument(skip_all)]
-async fn reset_webhook_failures(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<WebhookPathParams>,
-) -> Result<(StatusCode, Json<Webhook>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        webhook_id = path_params.webhook_id.to_string(),
-        "Resetting webhook failures"
-    );
-
-    // Verify user has permission to manage webhooks
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ManageIntegrations,
-        )
-        .await?;
-
-    // Verify webhook exists and belongs to the project
-    let Some(existing_webhook) = pg_client
-        .find_project_webhook_by_id(path_params.webhook_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    };
-
-    if existing_webhook.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    }
-
-    let webhook = pg_client
-        .reset_webhook_failures(path_params.webhook_id)
-        .await?;
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        webhook_id = path_params.webhook_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Webhook failures reset successfully"
-    );
-
-    Ok((StatusCode::OK, Json(webhook.into())))
-}
-
 /// Deletes a project webhook.
 #[tracing::instrument(skip_all)]
 async fn delete_webhook(
@@ -401,14 +294,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/projects/:project_id/webhooks/:webhook_id/",
             put(update_webhook),
-        )
-        .api_route(
-            "/projects/:project_id/webhooks/:webhook_id/status/",
-            patch(update_webhook_status),
-        )
-        .api_route(
-            "/projects/:project_id/webhooks/:webhook_id/reset/",
-            post(reset_webhook_failures),
         )
         .api_route(
             "/projects/:project_id/webhooks/:webhook_id/",

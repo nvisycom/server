@@ -7,9 +7,39 @@ use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfi
 
 use super::custom_hooks;
 use crate::{
-    ConnectionPool, PgConfig, PgError, PgPoolStatus, PgResult, PooledConnection,
-    TRACING_TARGET_CONNECTION,
+    ConnectionPool, PgConfig, PgError, PgResult, PooledConnection, TRACING_TARGET_CONNECTION,
 };
+
+/// Connection pool status information.
+#[derive(Debug, Clone)]
+pub struct PgPoolStatus {
+    /// Maximum number of connections in the pool
+    pub max_size: usize,
+    /// Current number of connections in the pool
+    pub size: usize,
+    /// Number of available connections
+    pub available: usize,
+    /// Number of requests waiting for connections
+    pub waiting: usize,
+}
+
+impl PgPoolStatus {
+    /// Returns the utilization percentage of the pool (0.0 to 1.0).
+    #[inline]
+    pub fn utilization(&self) -> f64 {
+        if self.max_size == 0 {
+            0.0
+        } else {
+            (self.size - self.available) as f64 / self.max_size as f64
+        }
+    }
+
+    /// Returns whether the pool is under pressure (high utilization or waiting requests).
+    #[inline]
+    pub fn is_under_pressure(&self) -> bool {
+        self.waiting > 0 || self.utilization() > 0.8
+    }
+}
 
 /// High-level database client that manages connections and migrations.
 ///
@@ -51,13 +81,13 @@ impl PgClient {
         let mut manager_config = ManagerConfig::default();
         manager_config.custom_setup = Box::new(custom_hooks::setup_callback);
         let manager =
-            AsyncDieselConnectionManager::new_with_config(&config.database_url, manager_config);
+            AsyncDieselConnectionManager::new_with_config(&config.url, manager_config);
 
         let pool = Pool::builder(manager)
-            .max_size(config.get_max_size())
-            .wait_timeout(config.get_connection_timeout())
-            .create_timeout(config.get_connection_timeout())
-            .recycle_timeout(config.get_idle_timeout())
+            .max_size(config.max_connections as usize)
+            .wait_timeout(config.connection_timeout())
+            .create_timeout(config.connection_timeout())
+            .recycle_timeout(config.idle_timeout())
             .runtime(deadpool::Runtime::Tokio1)
             .post_create(Hook::sync_fn(custom_hooks::post_create))
             .pre_recycle(Hook::sync_fn(custom_hooks::pre_recycle))
@@ -126,9 +156,9 @@ impl PgClient {
 
         tracing::info!(
             target: TRACING_TARGET_CONNECTION,
-            max_size = this.inner.config.get_max_size(),
-            connection_timeout = ?this.inner.config.get_connection_timeout(),
-            idle_timeout = ?this.inner.config.get_idle_timeout(),
+            max_connections = this.inner.config.max_connections,
+            connection_timeout_secs = this.inner.config.connection_timeout_secs,
+            idle_timeout_secs = this.inner.config.idle_timeout_secs,
             "Database client initialized successfully"
         );
 
@@ -197,15 +227,15 @@ impl std::fmt::Debug for PgClient {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")
             .field("database_url", &self.inner.config.database_url_masked())
-            .field("pool_max_size", &self.inner.config.get_max_size())
+            .field("pool_max_connections", &self.inner.config.max_connections)
             .field("pool_current_size", &pool_status.size)
             .field("pool_available", &pool_status.available)
             .field("pool_waiting", &pool_status.waiting)
             .field(
-                "connection_timeout",
-                &self.inner.config.get_connection_timeout(),
+                "connection_timeout_secs",
+                &self.inner.config.connection_timeout_secs,
             )
-            .field("idle_timeout", &self.inner.config.get_idle_timeout())
+            .field("idle_timeout_secs", &self.inner.config.idle_timeout_secs)
             .finish()
     }
 }

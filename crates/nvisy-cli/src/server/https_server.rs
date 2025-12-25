@@ -8,9 +8,8 @@ use axum_server::tls_rustls::RustlsConfig;
 
 use crate::TRACING_TARGET_SERVER_STARTUP;
 use crate::config::ServerConfig;
-#[cfg(feature = "telemetry")]
-use crate::server::serve_with_shutdown_and_telemetry;
-use crate::server::{ServerError, ServerResult, serve_with_shutdown, shutdown_signal};
+use crate::server::lifecycle::serve_with_shutdown;
+use crate::server::{ServerError, ServerResult, shutdown_signal};
 
 /// Starts an HTTPS server with enhanced lifecycle management.
 #[allow(dead_code)]
@@ -65,70 +64,6 @@ pub async fn serve_https(
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
     })
-    .await
-}
-
-/// Starts an HTTPS server with telemetry support.
-#[cfg(feature = "telemetry")]
-#[allow(dead_code)]
-pub async fn serve_https_with_telemetry(
-    app: Router,
-    server_config: ServerConfig,
-    cert_path: impl AsRef<Path>,
-    key_path: impl AsRef<Path>,
-    telemetry_context: Option<&crate::telemetry::TelemetryContext>,
-) -> ServerResult<()> {
-    let service_name = "https-server";
-    let server_addr = server_config.server_addr();
-    let shutdown_timeout = server_config.shutdown_timeout();
-    let cert_path = cert_path.as_ref();
-    let key_path = key_path.as_ref();
-
-    // Pre-validate TLS files before starting lifecycle
-    validate_tls_files(cert_path, key_path)?;
-
-    serve_with_shutdown_and_telemetry(
-        &server_config,
-        service_name,
-        telemetry_context,
-        move || async move {
-            let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
-                .await
-                .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Failed to load TLS certificates: {e}"),
-                    )
-                })?;
-
-            tracing::info!(
-                target: TRACING_TARGET_SERVER_STARTUP,
-                cert_path = %cert_path.display(),
-                key_path = %key_path.display(),
-                "TLS certificates loaded successfully"
-            );
-
-            tracing::info!(
-                target: TRACING_TARGET_SERVER_STARTUP,
-                addr = %server_addr,
-                telemetry_enabled = telemetry_context.is_some(),
-                "HTTPS server bound with telemetry support"
-            );
-
-            let handle = axum_server::Handle::new();
-            let shutdown_handle = handle.clone();
-
-            tokio::spawn(async move {
-                shutdown_signal(shutdown_timeout).await;
-                shutdown_handle.graceful_shutdown(Some(shutdown_timeout));
-            });
-
-            axum_server::bind_rustls(server_addr, tls_config)
-                .handle(handle)
-                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-                .await
-        },
-    )
     .await
 }
 

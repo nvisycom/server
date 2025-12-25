@@ -1,9 +1,8 @@
 //! Server lifecycle management and utilities.
 //!
 //! This module provides comprehensive server lifecycle management including
-//! startup, shutdown, health monitoring, and telemetry integration. All
-//! functions are designed for production use with proper error handling
-//! and observability.
+//! startup, shutdown, and health monitoring. All functions are designed for
+//! production use with proper error handling and observability.
 
 use std::future::Future;
 use std::io;
@@ -11,14 +10,6 @@ use std::time::Instant;
 
 use crate::config::ServerConfig;
 use crate::server::{ServerError, ServerResult};
-#[cfg(feature = "telemetry")]
-use crate::telemetry::{
-    TelemetryContext,
-    helpers::{
-        send_config_error_telemetry, send_crash_telemetry, send_shutdown_telemetry,
-        send_startup_telemetry,
-    },
-};
 use crate::{TRACING_TARGET_SERVER_SHUTDOWN, TRACING_TARGET_SERVER_STARTUP};
 
 /// Serves with lifecycle management and service-specific context.
@@ -36,38 +27,10 @@ use crate::{TRACING_TARGET_SERVER_SHUTDOWN, TRACING_TARGET_SERVER_STARTUP};
 /// # Errors
 ///
 /// Returns detailed errors with recovery suggestions and service context.
+#[allow(clippy::too_many_lines)]
 pub async fn serve_with_shutdown<F>(
     server_config: &ServerConfig,
     service_name: &str,
-    serve_fn: impl FnOnce() -> F,
-) -> ServerResult<()>
-where
-    F: Future<Output = io::Result<()>>,
-{
-    serve_with_shutdown_and_telemetry(server_config, service_name, None, serve_fn).await
-}
-
-/// Serves with comprehensive lifecycle management, telemetry, and service context.
-///
-/// The most comprehensive server lifecycle function, providing detailed
-/// error handling, service-specific context, and full telemetry integration.
-///
-/// # Arguments
-///
-/// * `server_config` - Server configuration
-/// * `service_name` - Name of the service for enhanced logging
-/// * `telemetry_context` - Optional telemetry context
-/// * `serve_fn` - Function that returns the server future
-///
-/// # Errors
-///
-/// Returns comprehensive errors with full context and recovery information.
-#[allow(clippy::too_many_lines)]
-pub async fn serve_with_shutdown_and_telemetry<F>(
-    server_config: &ServerConfig,
-    service_name: &str,
-    #[cfg(feature = "telemetry")] telemetry_context: Option<&TelemetryContext>,
-    #[cfg(not(feature = "telemetry"))] _telemetry_context: Option<()>,
     serve_fn: impl FnOnce() -> F,
 ) -> ServerResult<()>
 where
@@ -93,11 +56,6 @@ where
         );
 
         let config_error = ServerError::invalid_config(&validation_error);
-
-        // Send crash telemetry for config errors
-        #[cfg(feature = "telemetry")]
-        send_config_error_telemetry(telemetry_context, &config_error, service_name);
-
         return Err(config_error);
     }
 
@@ -129,10 +87,6 @@ where
         "Server configuration active"
     );
 
-    // Send startup telemetry
-    #[cfg(feature = "telemetry")]
-    send_startup_telemetry(telemetry_context, server_config, service_name);
-
     tracing::info!(
         target: TRACING_TARGET_SERVER_STARTUP,
         service = service_name,
@@ -163,16 +117,6 @@ where
             );
         }
 
-        // Send crash telemetry
-        #[cfg(feature = "telemetry")]
-        send_crash_telemetry(
-            telemetry_context,
-            &server_error,
-            uptime,
-            server_config,
-            service_name,
-        );
-
         server_error
     });
 
@@ -186,10 +130,6 @@ where
                 uptime_seconds = uptime.as_secs(),
                 "Server shutdown completed successfully"
             );
-
-            // Send shutdown telemetry
-            #[cfg(feature = "telemetry")]
-            send_shutdown_telemetry(telemetry_context, server_config, uptime, service_name);
         }
         Err(err) => {
             // Log error context for debugging
@@ -287,13 +227,5 @@ mod tests {
         let context = error.context();
         assert!(context.iter().any(|(key, _)| *key == "error_code"));
         assert!(context.iter().any(|(key, _)| *key == "suggestion"));
-    }
-
-    #[test]
-    fn lifecycle_functions_provide_comprehensive_features() {
-        // Test that the basic serve_with_shutdown delegates to comprehensive version
-        // Test that the service versions provide service context
-        // This is a compilation test to ensure the API is clean
-        // No runtime assertions needed - this test ensures the module compiles correctly
     }
 }

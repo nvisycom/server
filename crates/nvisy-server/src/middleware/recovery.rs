@@ -11,6 +11,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
 use axum::response::{IntoResponse, Response};
+#[cfg(feature = "config")]
+use clap::Args;
 use futures::future::{BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
@@ -28,10 +30,15 @@ type Panic = Box<dyn Any + Send + 'static>;
 /// This struct controls how the recovery middleware handles various
 /// error conditions including timeouts and panic recovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "config", derive(Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct RecoveryConfig {
     /// Maximum duration in seconds to wait for a request to complete before timing out.
     /// Requests exceeding this duration receive a 500 response with a timeout message.
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "REQUEST_TIMEOUT", default_value = "30")
+    )]
     pub request_timeout_secs: u64,
 }
 

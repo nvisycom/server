@@ -334,8 +334,7 @@ impl HealthCache {
     /// This ensures both the client state and actual network connectivity are verified.
     async fn check_nats(&self, nats_client: &NatsClient) -> bool {
         // First check connection state
-        let stats = nats_client.stats();
-        if !stats.is_connected {
+        if !nats_client.is_connected() {
             tracing::warn!(
                 target: TRACING_TARGET,
                 "nats is not connected"

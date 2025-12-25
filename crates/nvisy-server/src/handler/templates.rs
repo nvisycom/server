@@ -10,7 +10,7 @@ use nvisy_postgres::PgClient;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
 use crate::handler::request::{CreateTemplate, ProjectPathParams, TemplatePathParams};
-use crate::handler::response::{ProjectTemplate, ProjectTemplates};
+use crate::handler::response::{Template, Templates};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -23,7 +23,7 @@ async fn list_project_templates(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<ProjectTemplates>)> {
+) -> Result<(StatusCode, Json<Templates>)> {
     // Authorize project access
     auth_claims
         .authorize_project(
@@ -52,7 +52,7 @@ async fn get_project_template(
     State(pg_client): State<PgClient>,
     Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<ProjectTemplate>)> {
+) -> Result<(StatusCode, Json<Template>)> {
     // Authorize project access
     auth_claims
         .authorize_project(
@@ -73,7 +73,7 @@ async fn create_project_template(
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
     Json(_request): Json<CreateTemplate>,
-) -> Result<(StatusCode, Json<ProjectTemplate>)> {
+) -> Result<(StatusCode, Json<Template>)> {
     // Authorize project access
     auth_claims
         .authorize_project(
@@ -94,7 +94,7 @@ async fn update_project_template(
     Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_claims): AuthState,
     Json(_request): Json<CreateTemplate>,
-) -> Result<(StatusCode, Json<ProjectTemplate>)> {
+) -> Result<(StatusCode, Json<Template>)> {
     // Authorize project access
     auth_claims
         .authorize_project(

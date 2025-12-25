@@ -86,7 +86,7 @@ fn public_routes(
 }
 
 /// Returns an [`ApiRouter`] with all routes.
-pub fn openapi_routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRouter<ServiceState> {
+pub fn routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
     let refresh_token_middleware = from_fn_with_state(state.clone(), refresh_token_middleware);
 
@@ -114,131 +114,12 @@ pub fn openapi_routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRoute
 }
 
 #[cfg(test)]
-mod test_utils {
-    //! Test utilities for handler tests.
-    //!
-    //! This module provides mock implementations of services defined in nvisy-core
-    //! for use in unit and integration tests.
-
-    use nvisy_core::emb::{
-        EmbeddingData, EmbeddingProvider, EmbeddingResult, EmbeddingService,
-        Request as EmbeddingRequest, Response as EmbeddingResponse,
-    };
-    use nvisy_core::ocr::{
-        OcrProvider, OcrService, Request as OcrRequest, Response as OcrResponse,
-    };
-    use nvisy_core::vlm::{
-        BoxedStream, Request as VlmRequest, Response as VlmResponse, VlmProvider, VlmService,
-    };
-    use nvisy_core::{Result, ServiceHealth};
-
-    /// Create a mock embedding service for testing.
-    pub fn mock_emb_service() -> EmbeddingService {
-        EmbeddingService::new(Box::new(MockEmbeddingProvider))
-    }
-
-    /// Create a mock OCR service for testing.
-    pub fn mock_ocr_service() -> OcrService {
-        OcrService::new(Box::new(MockOcrProvider))
-    }
-
-    /// Create a mock VLM service for testing.
-    pub fn mock_vlm_service() -> VlmService {
-        VlmService::new(Box::new(MockVlmProvider))
-    }
-
-    /// Mock embedding provider for testing.
-    #[derive(Clone, Default)]
-    pub struct MockEmbeddingProvider;
-
-    #[async_trait::async_trait]
-    impl<Req, Resp> EmbeddingProvider<Req, Resp> for MockEmbeddingProvider
-    where
-        Req: Send + Sync + 'static,
-        Resp: Send + Sync + Default + 'static,
-    {
-        async fn generate_embedding(
-            &self,
-            request: EmbeddingRequest<Req>,
-        ) -> Result<EmbeddingResponse<Resp>> {
-            Ok(EmbeddingResponse::new(request.request_id, Resp::default()))
-        }
-
-        async fn health_check(&self) -> Result<ServiceHealth> {
-            Ok(ServiceHealth::healthy())
-        }
-    }
-
-    /// Mock OCR provider for testing.
-    #[derive(Clone, Default)]
-    pub struct MockOcrProvider;
-
-    #[async_trait::async_trait]
-    impl<Req, Resp> OcrProvider<Req, Resp> for MockOcrProvider
-    where
-        Req: Send + Sync + 'static,
-        Resp: Send + Sync + Default + 'static,
-    {
-        async fn process_ocr(&self, request: OcrRequest<Req>) -> Result<OcrResponse<Resp>> {
-            Ok(OcrResponse::new(request.request_id, Resp::default()))
-        }
-
-        async fn process_ocr_stream(
-            &self,
-            _request: OcrRequest<Req>,
-        ) -> Result<nvisy_core::ocr::BoxedStream<OcrResponse<Resp>>> {
-            Ok(Box::new(futures::stream::empty()))
-        }
-
-        async fn health_check(&self) -> Result<ServiceHealth> {
-            Ok(ServiceHealth::healthy())
-        }
-    }
-
-    /// Mock VLM provider for testing.
-    #[derive(Clone, Default)]
-    pub struct MockVlmProvider;
-
-    #[async_trait::async_trait]
-    impl<Req, Resp> VlmProvider<Req, Resp> for MockVlmProvider
-    where
-        Req: Send + Sync + 'static,
-        Resp: Send + Sync + Default + 'static,
-    {
-        async fn process_vlm(&self, _request: &VlmRequest<Req>) -> Result<VlmResponse<Resp>> {
-            Ok(VlmResponse {
-                content: "Mock VLM response".to_string(),
-                usage: None,
-                finish_reason: Some("stop".to_string()),
-                created: std::time::SystemTime::now(),
-                confidence: Some(0.95),
-                visual_analysis: None,
-                metadata: Default::default(),
-                payload: Resp::default(),
-            })
-        }
-
-        async fn process_vlm_stream(
-            &self,
-            _request: &VlmRequest<Req>,
-        ) -> Result<BoxedStream<VlmResponse<Resp>>> {
-            Ok(Box::new(futures::stream::empty()))
-        }
-
-        async fn health_check(&self) -> Result<ServiceHealth> {
-            Ok(ServiceHealth::healthy())
-        }
-    }
-}
-
-#[cfg(test)]
 mod test {
     use aide::axum::ApiRouter;
     use axum::Router;
     use axum_test::TestServer;
 
-    use super::test_utils;
-    use crate::handler::{CustomRoutes, openapi_routes};
+    use crate::handler::{CustomRoutes, routes};
     use crate::service::{ServiceConfig, ServiceState};
 
     /// Returns a new [`TestServer`] with the given router.
@@ -246,12 +127,8 @@ mod test {
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::default();
-        let ai_services = nvisy_core::AiServices::new(
-            test_utils::mock_emb_service(),
-            test_utils::mock_ocr_service(),
-            test_utils::mock_vlm_service(),
-        );
-        let state = ServiceState::from_config(config, ai_services).await?;
+        let mock_services = nvisy_test::create_mock_services();
+        let state = ServiceState::from_config(config, mock_services).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }
@@ -270,13 +147,9 @@ mod test {
     /// Returns a new [`TestServer`] with the default router and state.
     pub async fn create_test_server() -> anyhow::Result<TestServer> {
         let config = ServiceConfig::default();
-        let ai_services = nvisy_core::AiServices::new(
-            test_utils::mock_emb_service(),
-            test_utils::mock_ocr_service(),
-            test_utils::mock_vlm_service(),
-        );
+        let ai_services = nvisy_test::create_mock_services();
         let state = ServiceState::from_config(config, ai_services).await?;
-        let router = openapi_routes(CustomRoutes::new(), state.clone());
+        let router = routes(CustomRoutes::new(), state.clone());
         create_test_server_with_state(router, state).await
     }
 

@@ -1,5 +1,6 @@
 //! Vector-related types and utilities for Qdrant operations.
 
+use qdrant_client::qdrant::{self, vector_output};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,23 +33,23 @@ pub enum Distance {
 
 impl Distance {
     /// Convert to Qdrant's internal distance enum
-    pub fn to_qdrant_distance(self) -> qdrant_client::qdrant::Distance {
+    pub fn to_qdrant_distance(self) -> qdrant::Distance {
         match self {
-            Distance::Cosine => qdrant_client::qdrant::Distance::Cosine,
-            Distance::Euclid => qdrant_client::qdrant::Distance::Euclid,
-            Distance::Dot => qdrant_client::qdrant::Distance::Dot,
-            Distance::Manhattan => qdrant_client::qdrant::Distance::Manhattan,
+            Distance::Cosine => qdrant::Distance::Cosine,
+            Distance::Euclid => qdrant::Distance::Euclid,
+            Distance::Dot => qdrant::Distance::Dot,
+            Distance::Manhattan => qdrant::Distance::Manhattan,
         }
     }
 
     /// Create from Qdrant's internal distance enum
-    pub fn from_qdrant_distance(distance: qdrant_client::qdrant::Distance) -> Self {
+    pub fn from_qdrant_distance(distance: qdrant::Distance) -> Self {
         match distance {
-            qdrant_client::qdrant::Distance::Cosine => Distance::Cosine,
-            qdrant_client::qdrant::Distance::Euclid => Distance::Euclid,
-            qdrant_client::qdrant::Distance::Dot => Distance::Dot,
-            qdrant_client::qdrant::Distance::Manhattan => Distance::Manhattan,
-            qdrant_client::qdrant::Distance::UnknownDistance => Distance::Cosine, // Default fallback
+            qdrant::Distance::Cosine => Distance::Cosine,
+            qdrant::Distance::Euclid => Distance::Euclid,
+            qdrant::Distance::Dot => Distance::Dot,
+            qdrant::Distance::Manhattan => Distance::Manhattan,
+            qdrant::Distance::UnknownDistance => Distance::Cosine, // Default fallback
         }
     }
 }
@@ -104,8 +105,8 @@ impl VectorParams {
     }
 
     /// Convert to Qdrant's internal VectorParams
-    pub fn to_qdrant_vector_params(self) -> qdrant_client::qdrant::VectorParams {
-        qdrant_client::qdrant::VectorParams {
+    pub fn to_qdrant_vector_params(self) -> qdrant::VectorParams {
+        qdrant::VectorParams {
             size: self.size,
             distance: self.distance.to_qdrant_distance().into(),
             hnsw_config: self.hnsw_config.map(|h| h.into_qdrant_hnsw_config()),
@@ -170,8 +171,8 @@ impl HnswConfig {
     }
 
     /// Convert to Qdrant's internal HnswConfigDiff
-    pub fn into_qdrant_hnsw_config(self) -> qdrant_client::qdrant::HnswConfigDiff {
-        qdrant_client::qdrant::HnswConfigDiff {
+    pub fn into_qdrant_hnsw_config(self) -> qdrant::HnswConfigDiff {
+        qdrant::HnswConfigDiff {
             m: self.m,
             ef_construct: self.ef_construct,
             full_scan_threshold: self.full_scan_threshold,
@@ -232,23 +233,19 @@ impl QuantizationConfig {
     }
 
     /// Convert to Qdrant's internal QuantizationConfig
-    pub fn into_qdrant_quantization_config(self) -> qdrant_client::qdrant::QuantizationConfig {
-        qdrant_client::qdrant::QuantizationConfig {
+    pub fn into_qdrant_quantization_config(self) -> qdrant::QuantizationConfig {
+        qdrant::QuantizationConfig {
             quantization: if let Some(scalar) = self.scalar {
-                Some(
-                    qdrant_client::qdrant::quantization_config::Quantization::Scalar(
-                        scalar.into_qdrant_scalar_quantization(),
-                    ),
-                )
+                Some(qdrant::quantization_config::Quantization::Scalar(
+                    scalar.into_qdrant_scalar_quantization(),
+                ))
             } else if let Some(product) = self.product {
-                Some(
-                    qdrant_client::qdrant::quantization_config::Quantization::Product(
-                        product.into_qdrant_product_quantization(),
-                    ),
-                )
+                Some(qdrant::quantization_config::Quantization::Product(
+                    product.into_qdrant_product_quantization(),
+                ))
             } else {
                 self.binary.map(|binary| {
-                    qdrant_client::qdrant::quantization_config::Quantization::Binary(
+                    qdrant::quantization_config::Quantization::Binary(
                         binary.into_qdrant_binary_quantization(),
                     )
                 })
@@ -290,10 +287,10 @@ impl ScalarQuantization {
     }
 
     /// Convert to Qdrant's internal ScalarQuantization
-    pub fn into_qdrant_scalar_quantization(self) -> qdrant_client::qdrant::ScalarQuantization {
-        qdrant_client::qdrant::ScalarQuantization {
+    pub fn into_qdrant_scalar_quantization(self) -> qdrant::ScalarQuantization {
+        qdrant::ScalarQuantization {
             r#type: match self.r#type {
-                ScalarType::Int8 => qdrant_client::qdrant::QuantizationType::Int8.into(),
+                ScalarType::Int8 => qdrant::QuantizationType::Int8.into(),
             },
             quantile: self.quantile,
             always_ram: self.always_ram,
@@ -338,14 +335,14 @@ impl ProductQuantization {
     }
 
     /// Convert to Qdrant's internal ProductQuantization
-    pub fn into_qdrant_product_quantization(self) -> qdrant_client::qdrant::ProductQuantization {
-        qdrant_client::qdrant::ProductQuantization {
+    pub fn into_qdrant_product_quantization(self) -> qdrant::ProductQuantization {
+        qdrant::ProductQuantization {
             compression: match self.compression {
-                CompressionRatio::X4 => qdrant_client::qdrant::CompressionRatio::X4 as i32,
-                CompressionRatio::X8 => qdrant_client::qdrant::CompressionRatio::X8 as i32,
-                CompressionRatio::X16 => qdrant_client::qdrant::CompressionRatio::X16 as i32,
-                CompressionRatio::X32 => qdrant_client::qdrant::CompressionRatio::X32 as i32,
-                CompressionRatio::X64 => qdrant_client::qdrant::CompressionRatio::X64 as i32,
+                CompressionRatio::X4 => qdrant::CompressionRatio::X4 as i32,
+                CompressionRatio::X8 => qdrant::CompressionRatio::X8 as i32,
+                CompressionRatio::X16 => qdrant::CompressionRatio::X16 as i32,
+                CompressionRatio::X32 => qdrant::CompressionRatio::X32 as i32,
+                CompressionRatio::X64 => qdrant::CompressionRatio::X64 as i32,
             },
             always_ram: self.always_ram,
         }
@@ -367,8 +364,8 @@ impl BinaryQuantization {
     }
 
     /// Convert to Qdrant's internal BinaryQuantization
-    pub fn into_qdrant_binary_quantization(self) -> qdrant_client::qdrant::BinaryQuantization {
-        qdrant_client::qdrant::BinaryQuantization {
+    pub fn into_qdrant_binary_quantization(self) -> qdrant::BinaryQuantization {
+        qdrant::BinaryQuantization {
             always_ram: self.always_ram,
             encoding: None,
             query_encoding: None,
@@ -441,14 +438,34 @@ impl Vector {
 
     /// Convert to Qdrant's internal Vector representation
     #[allow(deprecated)]
-    pub fn to_qdrant_vector(self) -> qdrant_client::qdrant::Vector {
-        qdrant_client::qdrant::Vector {
-            vector: Some(qdrant_client::qdrant::vector::Vector::Dense(
-                qdrant_client::qdrant::DenseVector { data: self.values },
-            )),
+    pub fn to_qdrant_vector(self) -> qdrant::Vector {
+        qdrant::Vector {
+            vector: Some(qdrant::vector::Vector::Dense(qdrant::DenseVector {
+                data: self.values,
+            })),
             data: vec![],
             indices: None,
             vectors_count: None,
+        }
+    }
+
+    /// Create from Qdrant's VectorOutput (used when retrieving points)
+    pub fn from_vector_output(vector_output: qdrant::VectorOutput) -> Self {
+        match vector_output.into_vector() {
+            vector_output::Vector::Dense(dense) => Vector::new(dense.data),
+            vector_output::Vector::Sparse(sparse) => {
+                // For sparse vectors, convert to dense representation
+                Vector::new(sparse.values)
+            }
+            vector_output::Vector::MultiDense(multi) => {
+                // For multi-dense, use the first vector if available
+                multi
+                    .vectors
+                    .into_iter()
+                    .next()
+                    .map(|v| Vector::new(v.data))
+                    .unwrap_or_default()
+            }
         }
     }
 }
@@ -477,28 +494,28 @@ impl From<&[f64]> for Vector {
     }
 }
 
-impl From<qdrant_client::qdrant::Vector> for Vector {
-    fn from(vector: qdrant_client::qdrant::Vector) -> Self {
+impl From<qdrant::Vector> for Vector {
+    fn from(vector: qdrant::Vector) -> Self {
         match vector.vector {
-            Some(qdrant_client::qdrant::vector::Vector::Dense(dense)) => Vector::new(dense.data),
-            Some(qdrant_client::qdrant::vector::Vector::Sparse(sparse)) => {
+            Some(qdrant::vector::Vector::Dense(dense)) => Vector::new(dense.data),
+            Some(qdrant::vector::Vector::Sparse(sparse)) => {
                 // For sparse vectors, we'll just use the indices as values for now
                 // This is a simplified conversion
                 Vector::new(sparse.indices.into_iter().map(|i| i as f32).collect())
             }
-            Some(qdrant_client::qdrant::vector::Vector::MultiDense(_)) => {
+            Some(qdrant::vector::Vector::MultiDense(_)) => {
                 // Multi-dense vectors not supported, use empty vector
                 Vector::new(vec![])
             }
-            Some(qdrant_client::qdrant::vector::Vector::Document(_)) => {
+            Some(qdrant::vector::Vector::Document(_)) => {
                 // Document vectors not supported, use empty vector
                 Vector::new(vec![])
             }
-            Some(qdrant_client::qdrant::vector::Vector::Image(_)) => {
+            Some(qdrant::vector::Vector::Image(_)) => {
                 // Image vectors not supported, use empty vector
                 Vector::new(vec![])
             }
-            Some(qdrant_client::qdrant::vector::Vector::Object(_)) => {
+            Some(qdrant::vector::Vector::Object(_)) => {
                 // Object vectors not supported, use empty vector
                 Vector::new(vec![])
             }

@@ -10,7 +10,7 @@ use uuid::Uuid;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentComment {
+pub struct Comment {
     /// ID of the comment.
     pub comment_id: Uuid,
     /// ID of the file this comment belongs to.
@@ -29,7 +29,7 @@ pub struct DocumentComment {
     pub updated_at: Timestamp,
 }
 
-impl From<model::DocumentComment> for DocumentComment {
+impl From<model::DocumentComment> for Comment {
     fn from(comment: model::DocumentComment) -> Self {
         Self {
             comment_id: comment.id,
@@ -45,4 +45,4 @@ impl From<model::DocumentComment> for DocumentComment {
 }
 
 /// Response for listing comments.
-pub type DocumentComments = Vec<DocumentComment>;
+pub type Comments = Vec<Comment>;

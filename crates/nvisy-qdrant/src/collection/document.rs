@@ -144,20 +144,17 @@ impl DocumentCollection for QdrantClient {
     }
 
     async fn delete_collection(&self) -> Result<()> {
-        self.delete_collection(Self::DOCUMENT_COLLECTION, None)
-            .await
+        self.delete_collection(Self::DOCUMENT_COLLECTION).await
     }
 
     async fn insert_document(&self, document: DocumentPoint) -> Result<()> {
         let point: Point = document.into();
-        self.upsert_point(Self::DOCUMENT_COLLECTION, point, true)
-            .await
+        self.upsert_point(Self::DOCUMENT_COLLECTION, point).await
     }
 
     async fn insert_documents(&self, documents: Vec<DocumentPoint>) -> Result<()> {
         let points: Vec<Point> = documents.into_iter().map(|d| d.into()).collect();
-        self.upsert_points(Self::DOCUMENT_COLLECTION, points, true)
-            .await
+        self.upsert_points(Self::DOCUMENT_COLLECTION, points).await
     }
 
     async fn search_documents(
@@ -592,25 +589,23 @@ impl DocumentCollection for QdrantClient {
             let now = jiff::Timestamp::now().to_string();
             point.payload = point.payload.with("updated_at", now);
 
-            self.upsert_point(Self::DOCUMENT_COLLECTION, point, true)
-                .await
+            self.upsert_point(Self::DOCUMENT_COLLECTION, point).await
         } else {
             Err(Error::not_found().with_message(format!("Document with ID {:?} not found", id)))
         }
     }
 
     async fn delete_document(&self, id: PointId) -> Result<()> {
-        self.delete_points(Self::DOCUMENT_COLLECTION, vec![id], true)
+        self.delete_points(Self::DOCUMENT_COLLECTION, vec![id])
             .await
     }
 
     async fn delete_documents(&self, ids: Vec<PointId>) -> Result<()> {
-        self.delete_points(Self::DOCUMENT_COLLECTION, ids, true)
-            .await
+        self.delete_points(Self::DOCUMENT_COLLECTION, ids).await
     }
 
     async fn delete_point(&self, id: PointId) -> Result<()> {
-        self.delete_point(Self::DOCUMENT_COLLECTION, id, true).await
+        self.delete_point(Self::DOCUMENT_COLLECTION, id).await
     }
 
     async fn archive_document(&self, id: PointId) -> Result<()> {

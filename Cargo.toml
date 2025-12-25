@@ -11,6 +11,7 @@ members = [
     "./crates/nvisy-postgres",
     "./crates/nvisy-qdrant",
     "./crates/nvisy-server",
+    "./crates/nvisy-test",
 ]
 
 [workspace.package]
@@ -40,6 +41,7 @@ nvisy-portkey = { path = "./crates/nvisy-portkey", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-qdrant = { path = "./crates/nvisy-qdrant", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
+nvisy-test = { path = "./crates/nvisy-test", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }

@@ -2,8 +2,8 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::types::{ContentSegmentation, ProcessingStatus};
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents an uploaded file.
@@ -30,10 +30,10 @@ pub struct File {
 /// Response for file uploads.
 pub type Files = Vec<File>;
 
-/// Knowledge-related fields for document file responses.
+/// Knowledge-related fields for file responses.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentKnowledge {
+pub struct FileKnowledge {
     /// Whether the file is indexed for knowledge extraction.
     pub is_indexed: bool,
 

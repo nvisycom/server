@@ -310,9 +310,12 @@ async fn update_file(
         display_name: request.display_name,
         processing_priority: request.processing_priority,
         document_id: request.document_id.map(Some),
-        is_indexed: request.is_indexed,
-        content_segmentation: request.content_segmentation,
-        visual_support: request.visual_support,
+        is_indexed: request.knowledge.as_ref().and_then(|k| k.is_indexed),
+        content_segmentation: request
+            .knowledge
+            .as_ref()
+            .and_then(|k| k.content_segmentation),
+        visual_support: request.knowledge.as_ref().and_then(|k| k.visual_support),
         ..Default::default()
     };
 

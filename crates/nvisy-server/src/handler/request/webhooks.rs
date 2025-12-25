@@ -1,6 +1,5 @@
 //! Project webhook request types.
 
-use nvisy_postgres::types::WebhookStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -68,13 +67,4 @@ pub struct UpdateWebhook {
     /// Updated maximum number of consecutive failures before disabling.
     #[validate(range(min = 1, max = 100))]
     pub max_failures: Option<i32>,
-}
-
-/// Request payload for updating webhook status.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateWebhookStatus {
-    /// New status for the webhook.
-    pub status: WebhookStatus,
 }

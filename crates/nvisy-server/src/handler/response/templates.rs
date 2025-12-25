@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectTemplate {
+pub struct Template {
     /// Unique template identifier.
     pub template_id: Uuid,
     /// ID of the project this template belongs to.
@@ -39,4 +39,4 @@ pub struct ProjectTemplate {
 }
 
 /// Response for listing project templates.
-pub type ProjectTemplates = Vec<ProjectTemplate>;
+pub type Templates = Vec<Template>;

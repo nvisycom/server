@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 use derive_more::{Display, From};
-use serde::{Deserialize, Serialize};
+use qdrant_client::qdrant::vectors_output::VectorsOptions;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -339,17 +340,13 @@ impl TryFrom<qdrant_client::qdrant::RetrievedPoint> for Point {
         };
 
         let vectors = match point.vectors.and_then(|v| v.vectors_options) {
-            Some(qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(_vector)) => {
-                // VectorOutput conversion - for now return empty vector as placeholder
-                // This needs proper implementation based on VectorOutput structure
-                PointVectors::Single(Vector::new(vec![]))
+            Some(VectorsOptions::Vector(vector_output)) => {
+                PointVectors::Single(Vector::from_vector_output(vector_output))
             }
-            Some(qdrant_client::qdrant::vectors_output::VectorsOptions::Vectors(named_vectors)) => {
+            Some(VectorsOptions::Vectors(named_vectors)) => {
                 let mut vectors_map = HashMap::new();
-                for (name, _vector) in named_vectors.vectors {
-                    // VectorOutput conversion - for now return empty vector as placeholder
-                    // This needs proper implementation based on VectorOutput structure
-                    vectors_map.insert(name, Vector::new(vec![]));
+                for (name, vector_output) in named_vectors.vectors {
+                    vectors_map.insert(name, Vector::from_vector_output(vector_output));
                 }
                 PointVectors::Named(vectors_map)
             }

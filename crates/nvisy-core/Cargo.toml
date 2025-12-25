@@ -19,7 +19,13 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
+
+# JSON Schema support: enables JsonSchema derives on core types
+# This allows core types to be used directly in API documentation without
+# manual schema implementations, while keeping the dependency optional
+schema = ["dep:schemars"]
 
 [dependencies]
 # Async runtime
@@ -38,6 +44,9 @@ tracing = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 base64 = { workspace = true, features = [] }
+
+# OpenAPI documentation (optional)
+schemars = { workspace = true, features = [], optional = true }
 
 # Commonly used datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }

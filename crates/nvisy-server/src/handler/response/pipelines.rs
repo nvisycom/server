@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectPipeline {
+pub struct Pipeline {
     /// Unique pipeline identifier.
     pub pipeline_id: Uuid,
     /// ID of the project this pipeline belongs to.
@@ -43,4 +43,4 @@ pub struct ProjectPipeline {
 }
 
 /// Response for listing project pipelines.
-pub type ProjectPipelines = Vec<ProjectPipeline>;
+pub type Pipelines = Vec<Pipeline>;
