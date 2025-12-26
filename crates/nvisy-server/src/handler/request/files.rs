@@ -1,5 +1,6 @@
 //! Document file request types.
 
+use nvisy_postgres::model::UpdateDocumentFile;
 use nvisy_postgres::types::ContentSegmentation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,21 @@ pub struct UpdateFile {
     /// Knowledge extraction settings update.
     #[serde(flatten)]
     pub knowledge: Option<UpdateFileKnowledge>,
+}
+
+impl UpdateFile {
+    /// Converts this request into a database model.
+    pub fn into_model(self) -> UpdateDocumentFile {
+        UpdateDocumentFile {
+            display_name: self.display_name,
+            processing_priority: self.processing_priority,
+            document_id: self.document_id.map(Some),
+            is_indexed: self.knowledge.as_ref().and_then(|k| k.is_indexed),
+            content_segmentation: self.knowledge.as_ref().and_then(|k| k.content_segmentation),
+            visual_support: self.knowledge.as_ref().and_then(|k| k.visual_support),
+            ..Default::default()
+        }
+    }
 }
 
 /// Request to update file knowledge extraction settings.

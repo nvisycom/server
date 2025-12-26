@@ -3,9 +3,9 @@
 //! This module provides payload structures and utilities for document collections,
 //! including point definitions, document types, status tracking, and document-specific metadata.
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::SearchResult;
 use crate::error::{Error, Result};

@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 

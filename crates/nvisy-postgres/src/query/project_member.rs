@@ -1,4 +1,4 @@
-//! Project member repository for managing project membership operations.
+//! Project member repository for managing project membership.
 
 use std::future::Future;
 
@@ -38,28 +38,32 @@ pub trait ProjectMemberRepository {
         changes: UpdateProjectMember,
     ) -> impl Future<Output = PgResult<ProjectMember>> + Send;
 
-    /// Removes a member from a project.
+    /// Permanently removes a member from a project.
     fn remove_project_member(
         &self,
         proj_id: Uuid,
         member_account_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Lists active members of a project, ordered by role and creation date.
+    /// Lists active members of a project.
+    ///
+    /// Returns members ordered by role and creation date.
     fn list_project_members(
         &self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectMember>>> + Send;
 
-    /// Lists projects where a user is a member, ordered by favorites and recent activity.
+    /// Lists projects where a user is a member.
+    ///
+    /// Returns memberships ordered by favorites and recent activity.
     fn list_user_projects(
         &self,
         user_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectMember>>> + Send;
 
-    /// Lists user projects with full project details (uses JOIN to avoid N+1 queries).
+    /// Lists user projects with full project details via JOIN.
     fn list_user_projects_with_details(
         &self,
         user_id: Uuid,
@@ -67,6 +71,8 @@ pub trait ProjectMemberRepository {
     ) -> impl Future<Output = PgResult<Vec<(Project, ProjectMember)>>> + Send;
 
     /// Gets a user's role in a project for permission checking.
+    ///
+    /// Returns the role if the user is an active member, None otherwise.
     fn check_user_role(
         &self,
         proj_id: Uuid,
@@ -80,7 +86,7 @@ pub trait ProjectMemberRepository {
         user_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Finds all members with a specific role.
+    /// Finds all active members with a specific role.
     fn find_members_by_role(
         &self,
         proj_id: Uuid,
@@ -90,7 +96,9 @@ pub trait ProjectMemberRepository {
     /// Counts total active members in a project.
     fn get_member_count(&self, proj_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
 
-    /// Counts active members grouped by role: (admins, editors, viewers).
+    /// Counts active members grouped by role.
+    ///
+    /// Returns a tuple of (admins, editors, viewers).
     fn get_member_count_by_role(
         &self,
         proj_id: Uuid,
@@ -109,14 +117,14 @@ pub trait ProjectMemberRepository {
         proj_id: Uuid,
     ) -> impl Future<Output = PgResult<Vec<ProjectMember>>> + Send;
 
-    /// Finds members who have enabled notifications for a specific type.
+    /// Finds members who have enabled a specific notification type.
     fn get_notifiable_members(
         &self,
         proj_id: Uuid,
         notification_type: &str,
     ) -> impl Future<Output = PgResult<Vec<ProjectMember>>> + Send;
 
-    /// Finds members who accessed the project within the specified number of hours.
+    /// Finds members who accessed the project within the specified hours.
     fn get_recently_active_members(
         &self,
         proj_id: Uuid,
@@ -124,7 +132,6 @@ pub trait ProjectMemberRepository {
     ) -> impl Future<Output = PgResult<Vec<ProjectMember>>> + Send;
 }
 
-/// Default implementation of ProjectMemberRepository using AsyncPgConnection.
 impl ProjectMemberRepository for PgClient {
     async fn add_project_member(&self, member: NewProjectMember) -> PgResult<ProjectMember> {
         use schema::project_members;
@@ -345,7 +352,6 @@ impl ProjectMemberRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        // Count admins
         let admin_count: i64 = project_members
             .filter(project_id.eq(proj_id))
             .filter(member_role.eq(ProjectRole::Admin))
@@ -355,7 +361,6 @@ impl ProjectMemberRepository for PgClient {
             .await
             .map_err(PgError::from)?;
 
-        // Count editors
         let editor_count: i64 = project_members
             .filter(project_id.eq(proj_id))
             .filter(member_role.eq(ProjectRole::Editor))
@@ -365,7 +370,6 @@ impl ProjectMemberRepository for PgClient {
             .await
             .map_err(PgError::from)?;
 
-        // Count viewers
         let viewer_count: i64 = project_members
             .filter(project_id.eq(proj_id))
             .filter(member_role.eq(ProjectRole::Viewer))
@@ -426,12 +430,11 @@ impl ProjectMemberRepository for PgClient {
             .filter(is_active.eq(true))
             .into_boxed();
 
-        // Filter by notification type
         match notification_type {
             "updates" => query = query.filter(notify_updates.eq(true)),
             "comments" => query = query.filter(notify_comments.eq(true)),
             "mentions" => query = query.filter(notify_mentions.eq(true)),
-            _ => {} // No additional filter
+            _ => {}
         }
 
         let members = query

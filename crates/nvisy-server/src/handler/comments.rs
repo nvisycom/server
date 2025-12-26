@@ -23,37 +23,27 @@ use crate::service::ServiceState;
 const TRACING_TARGET: &str = "nvisy_server::handler::comments";
 
 /// Creates a new comment on a file.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        file_id = %path_params.file_id,
+    )
+)]
 async fn post_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        file_id = path_params.file_id.to_string(),
-        "Creating new comment on file",
-    );
+    tracing::info!(target: TRACING_TARGET, "Creating comment");
 
     // Verify file exists
-    let Some(_file) = pg_client
-        .find_document_file_by_id(path_params.file_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("File not found: {}", path_params.file_id))
-            .with_resource("file"));
-    };
+    let _ = find_file(&pg_client, path_params.file_id).await?;
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
-        let Some(parent_comment) = pg_client.find_comment_by_id(parent_id).await? else {
-            return Err(ErrorKind::BadRequest
-                .with_message("Parent comment not found")
-                .with_resource("comment"));
-        };
+        let parent_comment = find_comment(&pg_client, parent_id).await?;
 
         // Verify parent comment is on the same file
         if parent_comment.file_id != path_params.file_id {
@@ -74,11 +64,9 @@ async fn post_comment(
 
     let comment = pg_client.create_comment(new_comment).await?;
 
-    tracing::debug!(
+    tracing::info!(
         target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        file_id = path_params.file_id.to_string(),
-        comment_id = comment.id.to_string(),
+        comment_id = %comment.id,
         "Comment created successfully",
     );
 
@@ -86,22 +74,23 @@ async fn post_comment(
 }
 
 /// Returns all comments for a file.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        file_id = %path_params.file_id,
+    )
+)]
 async fn list_comments(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Comments>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing file comments");
+
     // Verify file exists
-    let Some(_file) = pg_client
-        .find_document_file_by_id(path_params.file_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("File not found: {}", path_params.file_id))
-            .with_resource("file"));
-    };
+    let _ = find_file(&pg_client, path_params.file_id).await?;
 
     let comments = pg_client
         .find_comments_by_file(path_params.file_id, pagination.into())
@@ -109,10 +98,8 @@ async fn list_comments(
 
     tracing::debug!(
         target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        file_id = path_params.file_id.to_string(),
         comment_count = comments.len(),
-        "Listed file comments"
+        "File comments listed successfully",
     );
 
     Ok((
@@ -122,36 +109,27 @@ async fn list_comments(
 }
 
 /// Updates a comment by ID.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        file_id = %path_params.file_id,
+        comment_id = %path_params.comment_id,
+    )
+)]
 async fn update_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateCommentRequest>,
 ) -> Result<(StatusCode, Json<Comment>)> {
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        comment_id = path_params.comment_id.to_string(),
-        "Updating comment",
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating comment");
 
     // Verify file exists
-    let Some(_file) = pg_client
-        .find_document_file_by_id(path_params.file_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("File not found: {}", path_params.file_id))
-            .with_resource("file"));
-    };
+    let _ = find_file(&pg_client, path_params.file_id).await?;
 
     // Fetch comment and verify ownership
-    let Some(existing_comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Comment not found: {}", path_params.comment_id))
-            .with_resource("comment"));
-    };
+    let existing_comment = find_comment(&pg_client, path_params.comment_id).await?;
 
     // Verify comment belongs to the file in the path
     if existing_comment.file_id != path_params.file_id {
@@ -176,46 +154,32 @@ async fn update_comment(
         .update_comment(path_params.comment_id, update_data)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        comment_id = path_params.comment_id.to_string(),
-        "Comment updated successfully",
-    );
+    tracing::info!(target: TRACING_TARGET, "Comment updated successfully");
 
     Ok((StatusCode::OK, Json(comment.into())))
 }
 
 /// Deletes a comment by ID.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        file_id = %path_params.file_id,
+        comment_id = %path_params.comment_id,
+    )
+)]
 async fn delete_comment(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        comment_id = path_params.comment_id.to_string(),
-        "Comment deletion requested",
-    );
+    tracing::warn!(target: TRACING_TARGET, "Comment deletion requested");
 
     // Verify file exists
-    let Some(_file) = pg_client
-        .find_document_file_by_id(path_params.file_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("File not found: {}", path_params.file_id))
-            .with_resource("file"));
-    };
+    let _ = find_file(&pg_client, path_params.file_id).await?;
 
     // Fetch comment and verify ownership
-    let Some(existing_comment) = pg_client.find_comment_by_id(path_params.comment_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Comment not found: {}", path_params.comment_id))
-            .with_resource("comment"));
-    };
+    let existing_comment = find_comment(&pg_client, path_params.comment_id).await?;
 
     // Verify comment belongs to the file in the path
     if existing_comment.file_id != path_params.file_id {
@@ -233,14 +197,39 @@ async fn delete_comment(
 
     pg_client.delete_comment(path_params.comment_id).await?;
 
-    tracing::warn!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        comment_id = path_params.comment_id.to_string(),
-        "Comment deleted successfully",
-    );
+    tracing::warn!(target: TRACING_TARGET, "Comment deleted successfully");
 
     Ok(StatusCode::OK)
+}
+
+/// Finds a file by ID or returns NotFound error.
+async fn find_file(
+    pg_client: &PgClient,
+    file_id: uuid::Uuid,
+) -> Result<nvisy_postgres::model::DocumentFile> {
+    pg_client
+        .find_document_file_by_id(file_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("File not found")
+                .with_resource("file")
+        })
+}
+
+/// Finds a comment by ID or returns NotFound error.
+async fn find_comment(
+    pg_client: &PgClient,
+    comment_id: uuid::Uuid,
+) -> Result<nvisy_postgres::model::DocumentComment> {
+    pg_client
+        .find_comment_by_id(comment_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Comment not found")
+                .with_resource("comment")
+        })
 }
 
 /// Returns a [`Router`] with all comment-related routes.

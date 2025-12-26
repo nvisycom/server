@@ -27,7 +27,9 @@ mod constants {
 /// Returns whether a timestamp is within the specified duration from now.
 pub fn is_within_duration(timestamp: Timestamp, duration: Span) -> bool {
     let now = Timestamp::now();
-    now.since(timestamp).map(|s| s.total(Unit::Second).ok() <= duration.total(Unit::Second).ok()).unwrap_or(false)
+    now.since(timestamp)
+        .map(|s| s.total(Unit::Second).ok() <= duration.total(Unit::Second).ok())
+        .unwrap_or(false)
 }
 
 /// Trait for models that have creation timestamps.

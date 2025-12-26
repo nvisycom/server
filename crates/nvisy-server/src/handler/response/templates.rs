@@ -1,8 +1,8 @@
 //! Project template response types.
 
 use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents a project template.

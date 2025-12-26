@@ -70,7 +70,8 @@ impl QdrantClient {
             "Creating new Qdrant client"
         );
 
-        let mut builder = Qdrant::from_url(&config.qdrant_url).api_key(config.qdrant_api_key.as_str());
+        let mut builder =
+            Qdrant::from_url(&config.qdrant_url).api_key(config.qdrant_api_key.as_str());
 
         if let Some(connect_timeout) = config.connect_timeout() {
             builder.set_connect_timeout(connect_timeout);

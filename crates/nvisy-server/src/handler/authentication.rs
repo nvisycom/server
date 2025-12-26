@@ -28,7 +28,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
 
 /// Creates a new authentication header.
-#[tracing::instrument(skip_all)]
 fn create_auth_header(
     auth_secret_keys: SessionKeys,
     account_model: &Account,
@@ -39,7 +38,7 @@ fn create_auth_header(
     Ok(auth_header)
 }
 
-/// Creates a new account API token.
+/// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
     State(pg_client): State<PgClient>,
@@ -49,12 +48,7 @@ async fn login(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        email = %request.email_address,
-        ip_address = %ip_address,
-        "login attempt"
-    );
+    tracing::info!(target: TRACING_TARGET, "Login attempt");
 
     let normalized_email = request.email_address.to_lowercase();
     let account = pg_client.find_account_by_email(&normalized_email).await?;
@@ -81,19 +75,13 @@ async fn login(
         {
             tracing::error!(
                 target: TRACING_TARGET,
-                account_id = acc.id.to_string(),
+                account_id = %acc.id,
                 error = %e,
-                "failed to record failed login attempt"
+                "Failed to record failed login attempt"
             );
         }
 
-        tracing::warn!(
-            target: TRACING_TARGET,
-            email = %normalized_email,
-            account_exists = account.is_some(),
-            password_valid = password_valid,
-            "login failed"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Login failed");
 
         return Err(ErrorKind::NotFound.into_error());
     }
@@ -107,9 +95,9 @@ async fn login(
     {
         tracing::error!(
             target: TRACING_TARGET,
-            account_id = account.id.to_string(),
+            account_id = %account.id,
             error = %e,
-            "failed to record successful login"
+            "Failed to record successful login"
         );
     }
 
@@ -136,16 +124,15 @@ async fn login(
 
     tracing::info!(
         target: TRACING_TARGET,
-        token_id = auth_claims.token_id.to_string(),
-        account_id = auth_claims.account_id.to_string(),
-        email = %normalized_email,
-        "login successful: API token created"
+        token_id = %auth_claims.token_id,
+        account_id = %auth_claims.account_id,
+        "Login successful",
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
-/// Creates a new account and API token.
+/// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
@@ -157,13 +144,7 @@ async fn signup(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        email = %request.email_address,
-        display_name = %request.display_name,
-        ip_address = %ip_address,
-        "signup attempt"
-    );
+    tracing::info!(target: TRACING_TARGET, "Signup attempt");
 
     let normalized_email = request.email_address.to_lowercase();
 
@@ -182,28 +163,23 @@ async fn signup(
 
     // Check if email already exists
     if pg_client.email_exists(&normalized_email).await? {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            email = %normalized_email,
-            "signup failed: email already exists"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
         return Err(ErrorKind::Conflict.into_error());
     }
 
     let new_account = NewAccount {
         display_name: request.display_name,
-        email_address: normalized_email.clone(),
+        email_address: normalized_email,
         password_hash,
         ..Default::default()
     };
 
     let account = pg_client.create_account(new_account).await?;
+
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = account.id.to_string(),
-        email = %account.email_address,
-        display_name = %account.display_name,
-        "account created"
+        account_id = %account.id,
+        "Account created",
     );
 
     let new_token = NewAccountApiToken {
@@ -233,26 +209,27 @@ async fn signup(
 
     tracing::info!(
         target: TRACING_TARGET,
-        token_id = auth_claims.token_id.to_string(),
-        account_id = auth_claims.account_id.to_string(),
-        "signup successful: API token created"
+        token_id = %auth_claims.token_id,
+        account_id = %auth_claims.account_id,
+        "Signup successful",
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
-/// Deletes an API token by its ID (from the Authorization header).
-#[tracing::instrument(skip_all)]
+/// Deletes an API token by its ID (logout).
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        token_id = %auth_claims.token_id,
+    )
+)]
 async fn logout(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        token_id = auth_claims.token_id.to_string(),
-        account_id = auth_claims.account_id.to_string(),
-        "logout attempt"
-    );
+    tracing::info!(target: TRACING_TARGET, "Logout requested");
 
     // Verify API token exists before attempting to delete
     let token_exists = pg_client
@@ -261,12 +238,7 @@ async fn logout(
         .is_some();
 
     if !token_exists {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            token_id = auth_claims.token_id.to_string(),
-            account_id = auth_claims.account_id.to_string(),
-            "logout attempted on non-existent API token"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent API token");
         return Ok(StatusCode::OK); // Consider it successful if token doesn't exist
     }
 
@@ -274,19 +246,9 @@ async fn logout(
     let deleted = pg_client.delete_token(auth_claims.token_id).await?;
 
     if deleted {
-        tracing::info!(
-            target: TRACING_TARGET,
-            token_id = auth_claims.token_id.to_string(),
-            account_id = auth_claims.account_id.to_string(),
-            "logout successful: API token deleted"
-        );
+        tracing::info!(target: TRACING_TARGET, "Logout successful");
     } else {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            token_id = auth_claims.token_id.to_string(),
-            account_id = auth_claims.account_id.to_string(),
-            "logout completed but API token was not found for deletion"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Logout completed but API token was not found");
     }
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
@@ -295,7 +257,7 @@ async fn logout(
             tracing::debug!(
                 target: TRACING_TARGET_CLEANUP,
                 error = %e,
-                "failed to cleanup expired sessions during logout"
+                "Failed to cleanup expired sessions during logout"
             );
         }
     });
@@ -314,4 +276,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/auth/signup", post(signup))
         .api_route("/auth/logout", post(logout))
 }
-

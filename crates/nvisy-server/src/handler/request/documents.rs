@@ -1,6 +1,7 @@
 //! Document request types.
 
 use jiff::Timestamp;
+use nvisy_postgres::model::{NewDocument, UpdateDocument as UpdateDocumentModel};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -41,6 +42,20 @@ pub struct CreateDocument {
     pub requires_approval: Option<bool>,
 }
 
+impl CreateDocument {
+    /// Converts this request into a database model.
+    pub fn into_model(self, project_id: Uuid, account_id: Uuid) -> NewDocument {
+        NewDocument {
+            project_id,
+            account_id,
+            display_name: Some(self.display_name),
+            description: self.description,
+            tags: Some(self.tags.into_iter().map(Some).collect()),
+            ..Default::default()
+        }
+    }
+}
+
 /// Request payload for updating a document.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
@@ -71,6 +86,18 @@ pub struct UpdateDocument {
 
     /// Updated approval requirement.
     pub requires_approval: Option<bool>,
+}
+
+impl UpdateDocument {
+    /// Converts this request into a database model.
+    pub fn into_model(self) -> UpdateDocumentModel {
+        UpdateDocumentModel {
+            display_name: self.display_name,
+            description: self.description,
+            tags: self.tags.map(|t| t.into_iter().map(Some).collect()),
+            ..Default::default()
+        }
+    }
 }
 
 /// Request payload for document search.

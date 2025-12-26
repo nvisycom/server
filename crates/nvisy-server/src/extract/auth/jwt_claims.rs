@@ -20,7 +20,7 @@ use crate::handler::{ErrorKind, Result};
 
 /// JWT claims for authentication tokens.
 ///
-/// This structure contains both RFC 7519 standard JWT claims and nvisy-specific claims.
+/// This structure contains both RFC 7519 standard JWT claims and service-specific claims.
 /// All timestamps use RFC 3339 format for consistency and interoperability.
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

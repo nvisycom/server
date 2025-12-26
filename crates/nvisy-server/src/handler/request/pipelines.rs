@@ -1,7 +1,7 @@
 //! Project pipeline request types.
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Request body for creating a project pipeline.
 #[must_use]
@@ -22,4 +22,3 @@ pub struct CreatePipeline {
 
 /// Request body for updating a project pipeline.
 pub type UpdatePipeline = CreatePipeline;
-

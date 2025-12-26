@@ -3,9 +3,9 @@
 //! This module provides payload structures and utilities for conversation collections,
 //! including point definitions, message types, and conversation-specific metadata.
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::SearchResult;
 use crate::error::{Error, Result};
@@ -290,9 +290,7 @@ impl ConversationPoint {
 
         let conversation_id = payload
             .get_string("conversation_id")
-            .ok_or_else(|| {
-                Error::invalid_input().with_message("Missing conversation_id")
-            })?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing conversation_id"))?
             .to_string();
 
         let message_type = match payload.get_string("message_type") {
@@ -306,9 +304,7 @@ impl ConversationPoint {
                 custom => MessageType::Custom(custom.to_string()),
             },
             None => {
-                return Err(
-                    Error::invalid_input().with_message("Missing message_type")
-                );
+                return Err(Error::invalid_input().with_message("Missing message_type"));
             }
         };
 
@@ -319,9 +315,7 @@ impl ConversationPoint {
 
         let participant_id = payload
             .get_string("participant_id")
-            .ok_or_else(|| {
-                Error::invalid_input().with_message("Missing participant_id")
-            })?
+            .ok_or_else(|| Error::invalid_input().with_message("Missing participant_id"))?
             .to_string();
 
         let participant_role = payload

@@ -11,9 +11,8 @@ use axum_extra::headers::UserAgent;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use jiff::Timestamp;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewAccountApiToken, UpdateAccountApiToken};
+use nvisy_postgres::model::UpdateAccountApiToken;
 use nvisy_postgres::query::{AccountApiTokenRepository, Pagination as QueryPagination};
-use nvisy_postgres::types::ApiTokenType;
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, Pagination, UpdateApiToken};
@@ -23,92 +22,42 @@ use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for API token operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::api_tokens";
+const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 
 /// Creates a new API token for the authenticated account.
 ///
 /// Returns the token with full access and refresh tokens. These are only shown once.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<CreateApiToken>,
 ) -> Result<(StatusCode, Json<ApiTokenWithSecret>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        name = %request.name,
-        has_description = request.description.is_some(),
-        expires = ?request.expires,
-        "creating API token"
-    );
+    tracing::info!(target: TRACING_TARGET, "Creating API token");
 
-    // Sanitize and validate input
-    let sanitized_name = request.name.trim().to_string();
-    if sanitized_name.is_empty() {
-        return Err(ErrorKind::BadRequest
-            .with_resource("api_token")
-            .with_message("Token name cannot be empty or whitespace only"));
-    }
-
-    // Get expiration timestamp from TokenExpiration enum
-    let expires_at = request.expires.to_expiry_timestamp();
-
-    // Convert IP address to IpNet for storage
-    let ip_net = match ip_address {
-        std::net::IpAddr::V4(ipv4) => IpNet::V4(
-            Ipv4Net::new(ipv4, 32)
-                .map_err(|_| ErrorKind::BadRequest.with_message("Invalid IPv4 address"))?,
-        ),
-        std::net::IpAddr::V6(ipv6) => IpNet::V6(
-            Ipv6Net::new(ipv6, 128)
-                .map_err(|_| ErrorKind::BadRequest.with_message("Invalid IPv6 address"))?,
-        ),
-    };
-
-    let new_token = NewAccountApiToken {
-        account_id: auth_claims.account_id,
-        name: sanitized_name.clone(),
-        description: request.description,
-        region_code: None,
-        country_code: None,
-        city_name: None,
-        ip_address: ip_net,
-        user_agent: user_agent.to_string(),
-        device_id: None,
-        session_type: Some(ApiTokenType::Api),
-        is_remembered: Some(true),
-        expired_at: expires_at.map(Into::into),
-    };
-
+    let new_token =
+        request.into_model(auth_state.account_id, ip_address, user_agent.to_string())?;
     let token = pg_client.create_token(new_token).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        token_preview = %token.access_seq_short(),
-        name = %sanitized_name,
-        expires_at = ?expires_at,
-        "API token created"
+        token_id = %token.access_seq_short(),
+        "API token created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(token.into())))
 }
 
 /// Lists API tokens for the authenticated account.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_api_tokens(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<ApiTokens>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        "listing API tokens"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Listing API tokens");
 
     // Validate pagination parameters
     if let Some(limit) = pagination.limit {
@@ -125,88 +74,49 @@ async fn list_api_tokens(
         }
     }
 
-    let pagination = QueryPagination::from(pagination);
-
     let tokens = pg_client
-        .list_account_tokens(auth_claims.account_id, pagination)
+        .list_account_tokens(auth_state.account_id, QueryPagination::from(pagination))
         .await?;
 
     let api_tokens: ApiTokens = tokens.into_iter().map(ApiToken::from).collect();
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
         count = api_tokens.len(),
-        "API tokens listed"
+        "API tokens listed successfully",
     );
 
     Ok((StatusCode::OK, Json(api_tokens)))
 }
 
 /// Gets a specific API token by access token.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn read_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(access_token): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        access_token = %access_token,
-        "reading API token"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Reading API token");
 
-    let Some(token) = pg_client.find_token_by_access_token(access_token).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    };
+    let token = find_account_token(&pg_client, auth_state.account_id, access_token).await?;
 
-    // Ensure the token belongs to the authenticated account
-    if token.account_id != auth_claims.account_id {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    }
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        token_preview = %token.access_seq_short(),
-        "API token retrieved"
-    );
+    tracing::debug!(target: TRACING_TARGET, "API token retrieved successfully");
 
     Ok((StatusCode::OK, Json(token.into())))
 }
 
 /// Updates an existing API token.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn update_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(access_token): Path<Uuid>,
     ValidateJson(request): ValidateJson<UpdateApiToken>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        access_token = %access_token,
-        "updating API token"
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating API token");
 
-    // First, verify the token exists and belongs to the authenticated account
-    let Some(existing_token) = pg_client.find_token_by_access_token(access_token).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    };
-
-    if existing_token.account_id != auth_claims.account_id {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    }
+    // Verify the token exists and belongs to the authenticated account
+    let _ = find_account_token(&pg_client, auth_state.account_id, access_token).await?;
 
     let update_token = UpdateAccountApiToken {
         last_used_at: Some(Timestamp::now().into()),
@@ -217,42 +127,22 @@ async fn update_api_token(
 
     let updated_token = pg_client.update_token(access_token, update_token).await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        token_preview = %existing_token.access_seq_short(),
-        "API token updated"
-    );
+    tracing::info!(target: TRACING_TARGET, "API token updated successfully");
 
     Ok((StatusCode::OK, Json(updated_token.into())))
 }
 
 /// Revokes (soft deletes) an API token.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn revoke_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(access_token): Path<Uuid>,
 ) -> Result<StatusCode> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        access_token = %access_token,
-        "revoking API token"
-    );
+    tracing::warn!(target: TRACING_TARGET, "Revoking API token");
 
-    // First, verify the token exists and belongs to the authenticated account
-    let Some(existing_token) = pg_client.find_token_by_access_token(access_token).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    };
-
-    if existing_token.account_id != auth_claims.account_id {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    }
+    // Verify the token exists and belongs to the authenticated account
+    let _ = find_account_token(&pg_client, auth_state.account_id, access_token).await?;
 
     let deleted = pg_client.delete_token(access_token).await?;
 
@@ -262,14 +152,46 @@ async fn revoke_api_token(
             .with_message("API token is already revoked"));
     }
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        token_preview = %existing_token.access_seq_short(),
-        "API token revoked"
-    );
+    tracing::warn!(target: TRACING_TARGET, "API token revoked successfully");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Finds an API token and verifies it belongs to the specified account.
+async fn find_account_token(
+    pg_client: &PgClient,
+    account_id: Uuid,
+    access_token: Uuid,
+) -> Result<nvisy_postgres::model::AccountApiToken> {
+    let Some(token) = pg_client.find_token_by_access_token(access_token).await? else {
+        return Err(ErrorKind::NotFound
+            .with_resource("api_token")
+            .with_message("API token not found"));
+    };
+
+    if token.account_id != account_id {
+        return Err(ErrorKind::NotFound
+            .with_resource("api_token")
+            .with_message("API token not found"));
+    }
+
+    Ok(token)
+}
+
+/// Converts an IP address to an IpNet for storage.
+pub(crate) fn ip_to_net(ip: std::net::IpAddr) -> Result<IpNet> {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            Ok(IpNet::V4(Ipv4Net::new(ipv4, 32).map_err(|_| {
+                ErrorKind::BadRequest.with_message("Invalid IPv4 address")
+            })?))
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            Ok(IpNet::V6(Ipv6Net::new(ipv6, 128).map_err(|_| {
+                ErrorKind::BadRequest.with_message("Invalid IPv6 address")
+            })?))
+        }
+    }
 }
 
 /// Returns routes for API token management.

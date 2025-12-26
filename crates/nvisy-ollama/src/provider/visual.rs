@@ -1,7 +1,8 @@
 //! VLM (Vision Language Model) provider implementation and payload traits.
 
+use jiff::Timestamp;
 use nvisy_core::vlm::{BoxedStream, Request, Response, VlmProvider};
-use nvisy_core::{ServiceHealth, SharedContext};
+use nvisy_core::{ServiceHealth, SharedContext, UsageStats};
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
 use ollama_rs::generation::images::Image;
@@ -39,15 +40,17 @@ where
 {
     async fn process_vlm(
         &self,
-        _context: &SharedContext,
+        context: &SharedContext,
         request: &Request<Req>,
     ) -> nvisy_core::Result<Response<Resp>> {
         let model = self.vlm_model();
+        let started_at = Timestamp::now();
 
         tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             request_id = %request.request_id,
             model = %model,
+            image_count = request.images.len(),
             "Processing VLM request"
         );
 
@@ -63,24 +66,53 @@ where
 
         let chat_request = ChatMessageRequest::new(model.to_string(), vec![message]);
 
-        let response = self
-            .ollama()
-            .send_chat_messages(chat_request)
-            .await
-            .map_err(|e| {
-                nvisy_core::Error::external_error().with_message(format!("Ollama VLM error: {}", e))
-            })?;
+        let result = self.ollama().send_chat_messages(chat_request).await;
 
-        let text = response.message.content;
+        let ended_at = Timestamp::now();
+        let processing_time = ended_at.duration_since(started_at);
 
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            request_id = %request.request_id,
-            response_len = text.len(),
-            "VLM request processed"
-        );
+        match result {
+            Ok(response) => {
+                let text = response.message.content;
 
-        Ok(Response::new(request.request_id, Resp::from_text(text)))
+                // Estimate tokens from prompt + response length
+                let tokens = ((prompt.len() + text.len()) / 4) as u32;
+                // Count images as runs
+                let runs = request.images.len().max(1) as u32;
+
+                context
+                    .record(UsageStats::success(tokens, runs, processing_time))
+                    .await;
+
+                tracing::debug!(
+                    target: TRACING_TARGET_CLIENT,
+                    request_id = %request.request_id,
+                    response_len = text.len(),
+                    tokens = tokens,
+                    runs = runs,
+                    processing_time_ms = processing_time.as_millis(),
+                    "VLM request processed"
+                );
+
+                Ok(Response::new(request.request_id, Resp::from_text(text)))
+            }
+            Err(e) => {
+                context
+                    .record(UsageStats::failure(0, processing_time))
+                    .await;
+
+                tracing::error!(
+                    target: TRACING_TARGET_CLIENT,
+                    request_id = %request.request_id,
+                    error = %e,
+                    processing_time_ms = processing_time.as_millis(),
+                    "VLM request failed"
+                );
+
+                Err(nvisy_core::Error::external_error()
+                    .with_message(format!("Ollama VLM error: {}", e)))
+            }
+        }
     }
 
     async fn process_vlm_stream(

@@ -1,19 +1,4 @@
 //! WebSocket handler for real-time project communication via NATS.
-//!
-//! This module provides WebSocket endpoints for managing real-time communication
-//! within a single project using NATS JetStream for distributed pub/sub. It handles:
-//! - Document updates and collaborative editing
-//! - Member presence tracking
-//! - Project notifications
-//! - Real-time synchronization across multiple server instances
-//!
-//! # Architecture
-//!
-//! - Each WebSocket connection creates a unique NATS consumer
-//! - Messages are published to `PROJECT_EVENTS.{project_id}` subject
-//! - Permissions are checked per-event, not at connection time
-//! - Echo prevention: messages aren't sent back to the sender
-//! - Automatic cleanup on disconnect
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -723,30 +708,6 @@ async fn handle_project_websocket(
 }
 
 /// Establishes a WebSocket connection for a project.
-///
-/// This endpoint upgrades an HTTP connection to a WebSocket for real-time
-/// communication within a project using NATS JetStream for distributed pub/sub.
-/// Clients must be authenticated and have at least read access to the project.
-///
-/// # Security
-///
-/// - Requires valid JWT authentication
-/// - Verifies user has `ViewDocuments` permission for initial connection
-/// - Checks permissions per-event during the connection lifecycle
-/// - Validates project existence before upgrading connection
-/// - Enforces message size limits to prevent DoS attacks
-///
-/// # Connection Lifecycle
-///
-/// 1. Client sends upgrade request with Authorization header
-/// 2. Server validates authentication and project access
-/// 3. Connection is upgraded to WebSocket
-/// 4. Server fetches account details and creates unique NATS consumer
-/// 5. Server publishes `Join` message to NATS stream
-/// 6. Two concurrent tasks handle sending and receiving
-/// 7. Messages are distributed via NATS with per-event permission checking
-/// 8. Server publishes `Leave` message on disconnect
-/// 9. Connection closed gracefully with timeout and metrics logged
 #[tracing::instrument(skip_all, fields(
     account_id = %auth_claims.account_id,
     project_id = %path_params.project_id
@@ -801,4 +762,3 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new().api_route("/projects/:project_id/ws/", get(project_websocket_handler))
 }
-

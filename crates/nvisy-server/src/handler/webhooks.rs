@@ -9,41 +9,39 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewProjectWebhook, UpdateProjectWebhook};
 use nvisy_postgres::query::{Pagination, ProjectWebhookRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
-    CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateProjectWebhookRequest,
-    WebhookPathParams,
+    CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
 };
 use crate::handler::response::{Webhook, WebhookWithSecret, Webhooks};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project webhook operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::project_webhook";
+const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
 
 /// Creates a new project webhook.
 ///
 /// Returns the webhook with secret. The secret is only shown once at creation.
-#[tracing::instrument(skip_all)]
+/// Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn create_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(payload): ValidateJson<CreateWebhook>,
+    ValidateJson(request): ValidateJson<CreateWebhook>,
 ) -> Result<(StatusCode, Json<WebhookWithSecret>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        display_name = payload.display_name,
-        "Creating project webhook"
-    );
+    tracing::info!(target: TRACING_TARGET, "Creating project webhook");
 
-    // Verify user has permission to manage webhooks
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -51,51 +49,36 @@ async fn create_webhook(
         )
         .await?;
 
-    // Convert events to Vec<Option<String>> as expected by the model
-    let events: Vec<Option<String>> = payload.events.into_iter().map(Some).collect();
-
-    // Create the webhook
-    let new_webhook = NewProjectWebhook {
-        project_id: path_params.project_id,
-        display_name: payload.display_name,
-        description: payload.description,
-        url: payload.url,
-        secret: payload.secret,
-        events,
-        headers: payload.headers,
-        status: None,
-        max_failures: payload.max_failures,
-        created_by: auth_claims.account_id,
-    };
-
+    let new_webhook = request.into_model(path_params.project_id, auth_state.account_id);
     let webhook = pg_client.create_project_webhook(new_webhook).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
-        webhook_id = webhook.id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Webhook created successfully"
+        webhook_id = %webhook.id,
+        "Webhook created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(webhook.into())))
 }
 
 /// Lists all webhooks for a project.
-#[tracing::instrument(skip_all)]
+///
+/// Returns all configured webhooks without secrets. Requires `ViewIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn list_webhooks(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<Webhooks>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Listing project webhooks"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Listing project webhooks");
 
-    // Verify user has permission to view webhooks
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -109,26 +92,34 @@ async fn list_webhooks(
 
     let webhooks: Webhooks = webhooks.into_iter().map(Into::into).collect();
 
+    tracing::debug!(
+        target: TRACING_TARGET,
+        webhook_count = webhooks.len(),
+        "Project webhooks listed successfully",
+    );
+
     Ok((StatusCode::OK, Json(webhooks)))
 }
 
 /// Retrieves a specific project webhook.
-#[tracing::instrument(skip_all)]
+///
+/// Returns webhook details without secret. Requires `ViewIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        webhook_id = %path_params.webhook_id,
+    )
+)]
 async fn read_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        webhook_id = path_params.webhook_id.to_string(),
-        "Reading project webhook"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Reading project webhook");
 
-    // Verify user has permission to view webhooks
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -136,43 +127,33 @@ async fn read_webhook(
         )
         .await?;
 
-    let Some(webhook) = pg_client
-        .find_project_webhook_by_id(path_params.webhook_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    };
+    let webhook = find_project_webhook(&pg_client, &path_params).await?;
 
-    // Verify the webhook belongs to the specified project
-    if webhook.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    }
+    tracing::debug!(target: TRACING_TARGET, "Project webhook retrieved successfully");
 
     Ok((StatusCode::OK, Json(webhook.into())))
 }
 
 /// Updates a project webhook.
-#[tracing::instrument(skip_all)]
+///
+/// Updates webhook configuration. Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        webhook_id = %path_params.webhook_id,
+    )
+)]
 async fn update_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
-    ValidateJson(payload): ValidateJson<UpdateProjectWebhookRequest>,
+    ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        webhook_id = path_params.webhook_id.to_string(),
-        "Updating project webhook"
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating project webhook");
 
-    // Verify user has permission to manage webhooks
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -181,68 +162,37 @@ async fn update_webhook(
         .await?;
 
     // Verify webhook exists and belongs to the project
-    let Some(existing_webhook) = pg_client
-        .find_project_webhook_by_id(path_params.webhook_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    };
+    let _ = find_project_webhook(&pg_client, &path_params).await?;
 
-    if existing_webhook.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    }
-
-    // Convert events to Vec<Option<String>> if provided
-    let events = payload.events.map(|e| e.into_iter().map(Some).collect());
-
-    // Update the webhook
-    let update_data = UpdateProjectWebhook {
-        display_name: payload.display_name,
-        description: payload.description,
-        url: payload.url,
-        secret: payload.secret.map(Some),
-        events,
-        headers: payload.headers,
-        status: None,
-        max_failures: payload.max_failures,
-        ..Default::default()
-    };
-
+    let update_data = request.into_model();
     let webhook = pg_client
         .update_project_webhook(path_params.webhook_id, update_data)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        webhook_id = path_params.webhook_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Webhook updated successfully"
-    );
+    tracing::info!(target: TRACING_TARGET, "Webhook updated successfully");
 
     Ok((StatusCode::OK, Json(webhook.into())))
 }
 
 /// Deletes a project webhook.
-#[tracing::instrument(skip_all)]
+///
+/// Permanently removes the webhook. Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        webhook_id = %path_params.webhook_id,
+    )
+)]
 async fn delete_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<StatusCode> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        webhook_id = path_params.webhook_id.to_string(),
-        "Deleting project webhook"
-    );
+    tracing::warn!(target: TRACING_TARGET, "Deleting project webhook");
 
-    // Verify user has permission to manage webhooks
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -251,33 +201,38 @@ async fn delete_webhook(
         .await?;
 
     // Verify webhook exists and belongs to the project
-    let Some(existing_webhook) = pg_client
-        .find_project_webhook_by_id(path_params.webhook_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    };
-
-    if existing_webhook.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!("Webhook not found: {}", path_params.webhook_id))
-            .with_resource("webhook"));
-    }
+    let _ = find_project_webhook(&pg_client, &path_params).await?;
 
     pg_client
         .delete_project_webhook(path_params.webhook_id)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        webhook_id = path_params.webhook_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Webhook deleted successfully"
-    );
+    tracing::warn!(target: TRACING_TARGET, "Webhook deleted successfully");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Finds a webhook by ID and verifies it belongs to the specified project.
+async fn find_project_webhook(
+    pg_client: &PgClient,
+    path_params: &WebhookPathParams,
+) -> Result<nvisy_postgres::model::ProjectWebhook> {
+    let Some(webhook) = pg_client
+        .find_project_webhook_by_id(path_params.webhook_id)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_message("Webhook not found")
+            .with_resource("webhook"));
+    };
+
+    if webhook.project_id != path_params.project_id {
+        return Err(ErrorKind::NotFound
+            .with_message("Webhook not found")
+            .with_resource("webhook"));
+    }
+
+    Ok(webhook)
 }
 
 /// Returns routes for project webhook management.

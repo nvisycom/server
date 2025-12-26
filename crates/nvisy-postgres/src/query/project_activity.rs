@@ -335,7 +335,8 @@ impl ProjectActivityRepository for PgClient {
             .into_boxed();
 
         if let Some(time_window) = hours {
-            let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
+            let cutoff_time =
+                jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
             query = query.filter(created_at.gt(cutoff_time));
         }
 
@@ -359,7 +360,8 @@ impl ProjectActivityRepository for PgClient {
         let mut conn = self.get_connection().await?;
 
         let results = if let Some(time_window) = hours {
-            let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
+            let cutoff_time =
+                jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
             project_activities
                 .filter(project_id.eq(proj_id))
                 .filter(account_id.is_not_null())
@@ -397,7 +399,8 @@ impl ProjectActivityRepository for PgClient {
         let mut conn = self.get_connection().await?;
 
         let results = if let Some(time_window) = hours {
-            let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
+            let cutoff_time =
+                jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
             project_activities
                 .filter(project_id.eq(proj_id))
                 .filter(created_at.gt(cutoff_time))
@@ -473,7 +476,8 @@ impl ProjectActivityRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let cutoff_date = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(days_to_keep));
+        let cutoff_date =
+            jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(days_to_keep));
 
         let deleted_count = diesel::delete(project_activities)
             .filter(created_at.lt(cutoff_date))

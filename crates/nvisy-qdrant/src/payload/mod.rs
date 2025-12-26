@@ -126,20 +126,22 @@ pub mod validation {
         })?;
 
         if let Some(min_val) = min
-            && value < min_val {
-                return Err(Error::invalid_input().with_message(format!(
-                    "Field {} value {} is below minimum {}",
-                    field_name, value, min_val
-                )));
-            }
+            && value < min_val
+        {
+            return Err(Error::invalid_input().with_message(format!(
+                "Field {} value {} is below minimum {}",
+                field_name, value, min_val
+            )));
+        }
 
         if let Some(max_val) = max
-            && value > max_val {
-                return Err(Error::invalid_input().with_message(format!(
-                    "Field {} value {} exceeds maximum {}",
-                    field_name, value, max_val
-                )));
-            }
+            && value > max_val
+        {
+            return Err(Error::invalid_input().with_message(format!(
+                "Field {} value {} exceeds maximum {}",
+                field_name, value, max_val
+            )));
+        }
 
         Ok(value)
     }

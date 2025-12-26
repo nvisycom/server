@@ -1,7 +1,7 @@
 //! Project template request types.
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Request body for creating a project template.
 #[must_use]

@@ -9,7 +9,6 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewProjectIntegration, UpdateProjectIntegration};
 use nvisy_postgres::query::ProjectIntegrationRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
@@ -22,26 +21,29 @@ use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project integration operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::project_integration";
+const TRACING_TARGET: &str = "nvisy_server::handler::integrations";
 
 /// Creates a new project integration.
-#[tracing::instrument(skip_all)]
+///
+/// Creates an integration with an external service. Requires `ManageIntegrations`
+/// permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        integration_type = ?request.integration_type,
+    )
+)]
 async fn create_integration(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(payload): ValidateJson<CreateProjectIntegration>,
+    ValidateJson(request): ValidateJson<CreateProjectIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_name = payload.integration_name,
-        "Creating project integration"
-    );
+    tracing::info!(target: TRACING_TARGET, "Creating project integration");
 
-    // Verify user has permission to manage integrations
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -50,57 +52,45 @@ async fn create_integration(
         .await?;
 
     // Check if integration name is already used in this project
-    let name_exists = pg_client
-        .is_integration_name_unique(path_params.project_id, &payload.integration_name, None)
+    let name_is_unique = pg_client
+        .is_integration_name_unique(path_params.project_id, &request.integration_name, None)
         .await?;
 
-    if !name_exists {
+    if !name_is_unique {
         return Err(ErrorKind::Conflict.with_message("Integration name already exists in project"));
     }
 
-    // Create the integration
-    let new_integration = NewProjectIntegration {
-        project_id: path_params.project_id,
-        integration_name: payload.integration_name,
-        description: payload.description,
-        integration_type: payload.integration_type,
-        metadata: payload.metadata,
-        credentials: payload.credentials,
-        is_active: payload.is_active,
-        last_sync_at: None,
-        sync_status: None,
-        created_by: auth_claims.account_id,
-    };
-
+    let new_integration = request.into_model(path_params.project_id, auth_state.account_id);
     let integration = pg_client.create_integration(new_integration).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
-        integration_id = integration.id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Integration created successfully"
+        integration_id = %integration.id,
+        "Integration created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(integration.into())))
 }
 
 /// Lists all integrations for a project.
-#[tracing::instrument(skip_all)]
+///
+/// Returns all configured integrations. Requires `ViewIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn list_integrations(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(_pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Integrations>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Listing project integrations"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Listing project integrations");
 
-    // Verify user has permission to view integrations
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -112,31 +102,36 @@ async fn list_integrations(
         .list_project_integrations(path_params.project_id)
         .await?;
 
-    let integrations: Integrations = integrations
-        .into_iter()
-        .map(|integration| integration.into())
-        .collect();
+    let integrations: Integrations = integrations.into_iter().map(Into::into).collect();
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        integration_count = integrations.len(),
+        "Project integrations listed successfully",
+    );
 
     Ok((StatusCode::OK, Json(integrations)))
 }
 
 /// Retrieves a specific project integration.
-#[tracing::instrument(skip_all)]
+///
+/// Returns integration details. Requires `ViewIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        integration_id = %path_params.integration_id,
+    )
+)]
 async fn read_integration(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Reading project integration"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Reading project integration");
 
-    // Verify user has permission to view integrations
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -144,49 +139,33 @@ async fn read_integration(
         )
         .await?;
 
-    let Some(integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
+    let integration = find_project_integration(&pg_client, &path_params).await?;
 
-    // Verify the integration belongs to the specified project
-    if integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
+    tracing::debug!(target: TRACING_TARGET, "Project integration retrieved successfully");
 
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
 /// Updates a project integration.
-#[tracing::instrument(skip_all)]
+///
+/// Updates integration configuration. Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        integration_id = %path_params.integration_id,
+    )
+)]
 async fn update_integration(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(payload): ValidateJson<UpdateProjectIntegrationRequest>,
+    ValidateJson(request): ValidateJson<UpdateProjectIntegrationRequest>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Updating project integration"
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating project integration");
 
-    // Verify user has permission to manage integrations
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -194,33 +173,13 @@ async fn update_integration(
         )
         .await?;
 
-    // Verify integration exists and belongs to the project
-    let Some(existing_integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
+    let existing = find_project_integration(&pg_client, &path_params).await?;
 
-    if existing_integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
-
-    // Check if new name conflicts with existing integrations (if name is being changed)
-    if let Some(ref new_name) = payload.integration_name
-        && new_name != &existing_integration.integration_name
+    // Check if new name conflicts with existing integrations
+    if let Some(ref new_name) = request.integration_name
+        && new_name != &existing.integration_name
     {
-        let name_exists = pg_client
+        let name_is_unique = pg_client
             .is_integration_name_unique(
                 path_params.project_id,
                 new_name,
@@ -228,57 +187,43 @@ async fn update_integration(
             )
             .await?;
 
-        if !name_exists {
+        if !name_is_unique {
             return Err(
                 ErrorKind::Conflict.with_message("Integration name already exists in project")
             );
         }
     }
 
-    // Update the integration
-    let update_data = UpdateProjectIntegration {
-        integration_name: payload.integration_name,
-        description: payload.description,
-        integration_type: payload.integration_type,
-        metadata: payload.metadata,
-        credentials: payload.credentials,
-        is_active: payload.is_active,
-        last_sync_at: None,
-        sync_status: None,
-    };
-
+    let update_data = request.into_model();
     let integration = pg_client
         .update_integration(path_params.integration_id, update_data)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        integration_id = path_params.integration_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Integration updated successfully"
-    );
+    tracing::info!(target: TRACING_TARGET, "Integration updated successfully");
 
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
 /// Updates integration credentials.
-#[tracing::instrument(skip_all)]
+///
+/// Updates only the authentication credentials. Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        integration_id = %path_params.integration_id,
+    )
+)]
 async fn update_integration_credentials(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(payload): ValidateJson<UpdateIntegrationCredentials>,
+    ValidateJson(request): ValidateJson<UpdateIntegrationCredentials>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Updating integration credentials"
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating integration credentials");
 
-    // Verify user has permission to manage integrations
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -287,55 +232,40 @@ async fn update_integration_credentials(
         .await?;
 
     // Verify integration exists and belongs to the project
-    let Some(existing_integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
-
-    if existing_integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
+    let _ = find_project_integration(&pg_client, &path_params).await?;
 
     let integration = pg_client
         .update_integration_auth(
             path_params.integration_id,
-            payload.credentials,
-            auth_claims.account_id,
+            request.credentials,
+            auth_state.account_id,
         )
         .await?;
+
+    tracing::info!(target: TRACING_TARGET, "Integration credentials updated successfully");
 
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
 /// Deletes a project integration.
-#[tracing::instrument(skip_all)]
+///
+/// Permanently removes the integration. Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        integration_id = %path_params.integration_id,
+    )
+)]
 async fn delete_integration(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<StatusCode> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        integration_id = path_params.integration_id.to_string(),
-        "Deleting project integration"
-    );
+    tracing::warn!(target: TRACING_TARGET, "Deleting project integration");
 
-    // Verify user has permission to manage integrations
-    auth_claims
+    auth_state
         .authorize_project(
             &pg_client,
             path_params.project_id,
@@ -344,39 +274,38 @@ async fn delete_integration(
         .await?;
 
     // Verify integration exists and belongs to the project
-    let Some(existing_integration) = pg_client
-        .find_integration_by_id(path_params.integration_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    };
-
-    if existing_integration.project_id != path_params.project_id {
-        return Err(ErrorKind::NotFound
-            .with_message(format!(
-                "Integration not found: {}",
-                path_params.integration_id
-            ))
-            .with_resource("integration"));
-    }
+    let _ = find_project_integration(&pg_client, &path_params).await?;
 
     pg_client
         .delete_integration(path_params.integration_id)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        integration_id = path_params.integration_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Integration deleted successfully"
-    );
+    tracing::warn!(target: TRACING_TARGET, "Integration deleted successfully");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Finds an integration by ID and verifies it belongs to the specified project.
+async fn find_project_integration(
+    pg_client: &PgClient,
+    path_params: &IntegrationPathParams,
+) -> Result<nvisy_postgres::model::ProjectIntegration> {
+    let Some(integration) = pg_client
+        .find_integration_by_id(path_params.integration_id)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_message("Integration not found")
+            .with_resource("integration"));
+    };
+
+    if integration.project_id != path_params.project_id {
+        return Err(ErrorKind::NotFound
+            .with_message("Integration not found")
+            .with_resource("integration"));
+    }
+
+    Ok(integration)
 }
 
 /// Returns routes for project integration management.

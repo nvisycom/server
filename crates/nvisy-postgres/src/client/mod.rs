@@ -6,8 +6,8 @@
 
 pub(crate) mod custom_hooks;
 pub mod migrate;
-mod pg_config;
 mod pg_client;
+mod pg_config;
 
 use deadpool::managed::{Object, Pool};
 use diesel_async::AsyncPgConnection;
@@ -16,8 +16,8 @@ pub use migrate::{
     MigrationResult, MigrationStatus, PgClientMigrationExt, get_applied_migrations,
     get_migration_status, run_pending_migrations, verify_schema_integrity,
 };
-pub use pg_config::PgConfig;
 pub use pg_client::{PgClient, PgPoolStatus};
+pub use pg_config::PgConfig;
 
 /// Type alias for the connection pool used throughout the application.
 pub type ConnectionPool = Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;

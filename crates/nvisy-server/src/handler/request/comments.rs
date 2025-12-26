@@ -1,7 +1,7 @@
 //! Document comment request types.
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 

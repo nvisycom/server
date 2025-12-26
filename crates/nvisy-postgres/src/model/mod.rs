@@ -22,8 +22,6 @@ pub mod project_run;
 pub mod project_template;
 pub mod project_webhook;
 
-// Re-export core PostgreSQL model types
-
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
 pub use account_action_token::{

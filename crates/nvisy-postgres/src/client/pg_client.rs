@@ -227,7 +227,10 @@ impl std::fmt::Debug for PgClient {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")
             .field("database_url", &self.inner.config.database_url_masked())
-            .field("pool_max_connections", &self.inner.config.postgres_max_connections)
+            .field(
+                "pool_max_connections",
+                &self.inner.config.postgres_max_connections,
+            )
             .field("pool_current_size", &pool_status.size)
             .field("pool_available", &pool_status.available)
             .field("pool_waiting", &pool_status.waiting)
@@ -235,7 +238,10 @@ impl std::fmt::Debug for PgClient {
                 "connection_timeout_secs",
                 &self.inner.config.postgres_connection_timeout_secs,
             )
-            .field("idle_timeout_secs", &self.inner.config.postgres_idle_timeout_secs)
+            .field(
+                "idle_timeout_secs",
+                &self.inner.config.postgres_idle_timeout_secs,
+            )
             .finish()
     }
 }

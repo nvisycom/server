@@ -1,8 +1,8 @@
 //! Search-related types and utilities for Qdrant operations.
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::types::{Payload, Point, PointId, PointVectors};

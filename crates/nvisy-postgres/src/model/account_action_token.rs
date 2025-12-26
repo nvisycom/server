@@ -181,7 +181,12 @@ impl AccountActionToken {
 
     /// Returns whether the token is stale (created more than recommended duration ago but not expired).
     pub fn is_stale(&self) -> bool {
-        !self.is_expired() && self.creation_age().total(jiff::Unit::Second).ok() > self.recommended_expiry_duration().total(jiff::Unit::Second).ok()
+        !self.is_expired()
+            && self.creation_age().total(jiff::Unit::Second).ok()
+                > self
+                    .recommended_expiry_duration()
+                    .total(jiff::Unit::Second)
+                    .ok()
     }
 
     /// Returns whether the token is from a suspicious source.

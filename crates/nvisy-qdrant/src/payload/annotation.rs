@@ -3,9 +3,9 @@
 //! This module provides payload structures and utilities for annotation collections,
 //! including point definitions, coordinate systems, and annotation types.
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::SearchResult;
 use crate::error::{Error, Result};
@@ -395,9 +395,10 @@ impl AnnotationPoint {
                     for item in arr {
                         if let serde_json::Value::Array(pair) = item
                             && pair.len() == 2
-                                && let (Some(px), Some(py)) = (pair[0].as_f64(), pair[1].as_f64()) {
-                                    coords.push((px, py));
-                                }
+                            && let (Some(px), Some(py)) = (pair[0].as_f64(), pair[1].as_f64())
+                        {
+                            coords.push((px, py));
+                        }
                     }
                     if coords.is_empty() {
                         None

@@ -110,7 +110,8 @@ impl PgConfig {
     /// Returns the connection timeout as a Duration.
     #[inline]
     pub fn connection_timeout(&self) -> Option<Duration> {
-        self.postgres_connection_timeout_secs.map(Duration::from_secs)
+        self.postgres_connection_timeout_secs
+            .map(Duration::from_secs)
     }
 
     /// Returns the idle timeout as a Duration.
@@ -210,7 +211,9 @@ impl PgConfig {
         }
 
         // Basic URL validation
-        if !self.postgres_url.starts_with("postgres://") && !self.postgres_url.starts_with("postgresql://") {
+        if !self.postgres_url.starts_with("postgres://")
+            && !self.postgres_url.starts_with("postgresql://")
+        {
             tracing::warn!(target: TRACING_TARGET_CONNECTION, "Database URL may not be a PostgreSQL URL");
         }
 

@@ -20,7 +20,29 @@ use crate::service::{HealthCache, ServiceState};
 const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 
 /// Returns system health status.
-#[tracing::instrument(skip_all, fields(authenticated = auth_state.is_some()))]
+///
+/// This endpoint provides health information about the API server and its
+/// dependencies. The response includes the current status, timestamp, and
+/// application version.
+///
+/// # Behavior
+///
+/// - **Unauthenticated requests**: Always return cached health status for performance
+/// - **Authenticated requests**: Perform real-time health check unless `use_cache` is true
+/// - **Administrator requests**: Can force real-time checks even when caching is preferred
+///
+/// # Response Codes
+///
+/// - `200 OK` - System is healthy
+/// - `503 Service Unavailable` - System is unhealthy
+#[tracing::instrument(
+    skip_all,
+    fields(
+        authenticated = auth_state.is_some(),
+        is_administrator = auth_state.as_ref().map(|a| a.is_administrator).unwrap_or(false),
+        account_id = auth_state.as_ref().map(|a| a.account_id.to_string()),
+    )
+)]
 async fn health_status(
     State(service_state): State<ServiceState>,
     State(health_service): State<HealthCache>,
@@ -29,21 +51,46 @@ async fn health_status(
     request: Option<Json<CheckHealth>>,
 ) -> Result<(StatusCode, Json<MonitorStatus>)> {
     let Json(request) = request.unwrap_or_default();
+
     let is_authenticated = auth_state.is_some();
+    let is_administrator = auth_state
+        .as_ref()
+        .is_some_and(|auth| auth.is_administrator);
+    let account_id = auth_state.as_ref().map(|auth| auth.account_id);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        authenticated = is_authenticated,
+        ?account_id,
+        is_authenticated,
+        is_administrator,
         version = %version,
-        "health status check requested"
+        use_cache = request.use_cache,
+        timeout_ms = request.timeout.unwrap_or(5000),
+        "Health status check requested"
     );
 
-    // Get cached health status or perform new check
-    let explicitly_cached = request.use_cache.is_some_and(|c| c);
-    let is_healthy = if is_authenticated && !explicitly_cached {
-        health_service.is_healthy(&service_state).await
+    // Determine whether to use cached or real-time health check
+    // - Unauthenticated: always use cache (fast response for load balancers)
+    // - Authenticated non-admin: use cache if explicitly requested, otherwise real-time
+    // - Administrator: real-time check unless explicitly cached
+    let use_cached = if !is_authenticated {
+        true
     } else {
+        request.use_cache.unwrap_or(false)
+    };
+
+    let is_healthy = if use_cached {
+        tracing::trace!(
+            target: TRACING_TARGET,
+            "Using cached health status"
+        );
         health_service.get_cached_health()
+    } else {
+        tracing::trace!(
+            target: TRACING_TARGET,
+            "Performing real-time health check"
+        );
+        health_service.is_healthy(&service_state).await
     };
 
     let status = if is_healthy {
@@ -52,24 +99,27 @@ async fn health_status(
         ServiceStatus::Unhealthy
     };
 
-    let response = MonitorStatus {
-        checked_at: Timestamp::now(),
-        status,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-
     let status_code = if is_healthy {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
 
+    let response = MonitorStatus {
+        checked_at: Timestamp::now(),
+        status,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+
     tracing::info!(
         target: TRACING_TARGET,
-        authenticated = is_authenticated,
-        is_healthy = is_healthy,
+        ?account_id,
+        is_authenticated,
+        is_administrator,
+        is_healthy,
+        used_cache = use_cached,
         status_code = status_code.as_u16(),
-        "health status response prepared"
+        "Health status response"
     );
 
     Ok((status_code, Json(response)))
