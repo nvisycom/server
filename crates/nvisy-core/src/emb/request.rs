@@ -1,263 +1,250 @@
 //! Request types for embedding operations.
 //!
-//! The `Request<Req>` type is a generic wrapper that allows embedding implementations
-//! to define their own request payload types while maintaining a consistent
-//! interface for common metadata like request IDs and options.
+//! This module provides `Request` for single-content embedding operations
+//! and `BatchRequest` for processing multiple inputs in one call.
+
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Response;
 use crate::types::{Chat, Content, Document};
 
-/// Generic request for embedding operations.
-///
-/// This wrapper type provides common metadata and configuration while allowing
-/// implementations to define their own specific request payload type.
-///
-/// # Type Parameters
-///
-/// * `Req` - The implementation-specific request payload type
-///
-/// # Example
-///
-/// ```rust,ignore
-/// #[derive(Debug, Clone)]
-/// struct MyEmbeddingPayload {
-///     custom_field: String,
-/// }
-///
-/// let request = Request::new(MyEmbeddingPayload {
-///     custom_field: "value".to_string(),
-/// });
-/// ```
+/// Request for a single embedding operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Request<Req> {
+pub struct Request {
     /// Unique identifier for this request.
     pub request_id: Uuid,
-    /// Implementation-specific request payload.
-    pub payload: Req,
-    /// Processing options.
-    pub options: RequestOptions,
+    /// Account identifier associated with this request.
+    pub account_id: Option<Uuid>,
+    /// The content to generate an embedding for.
+    pub content: Content,
+    /// Custom tags for categorization and filtering.
+    pub tags: HashSet<String>,
+    /// Whether to normalize the resulting embedding to unit length.
+    pub normalize: bool,
 }
 
-/// Processing options for embedding requests.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestOptions {
-    /// The number of dimensions the resulting output embeddings should have.
-    pub dimensions: Option<u32>,
-    /// The format to return embeddings in.
-    pub encoding_format: EncodingFormat,
-    /// A unique identifier representing your end-user.
-    pub user: Option<String>,
-}
-
-impl Default for RequestOptions {
-    fn default() -> Self {
+impl Request {
+    /// Create a new embedding request with the given content.
+    pub fn new(content: Content) -> Self {
         Self {
-            dimensions: None,
-            encoding_format: EncodingFormat::Float,
-            user: None,
+            request_id: Uuid::now_v7(),
+            account_id: None,
+            content,
+            tags: HashSet::new(),
+            normalize: false,
         }
     }
-}
 
-/// Format for returned embeddings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum EncodingFormat {
-    /// Return embeddings as floating point numbers.
-    #[default]
-    Float,
-    /// Return embeddings as base64-encoded strings.
-    Base64,
-}
+    /// Create a new embedding request from text.
+    pub fn from_text(text: impl Into<String>) -> Self {
+        Self::new(Content::text(text))
+    }
 
-impl<Req> Request<Req> {
-    /// Create a new embedding request with the given payload.
-    pub fn new(payload: Req) -> Self {
-        Self {
-            request_id: Uuid::new_v4(),
-            payload,
-            options: RequestOptions::default(),
-        }
+    /// Create a new embedding request from a document.
+    pub fn from_document(document: Document) -> Self {
+        Self::new(Content::document(document))
+    }
+
+    /// Create a new embedding request from a chat.
+    pub fn from_chat(chat: Chat) -> Self {
+        Self::new(Content::chat(chat))
     }
 
     /// Create a new embedding request with a specific request ID.
-    pub fn with_request_id(request_id: Uuid, payload: Req) -> Self {
-        Self {
-            request_id,
-            payload,
-            options: RequestOptions::default(),
-        }
-    }
-
-    /// Create a new request with custom options.
-    pub fn with_options(payload: Req, options: RequestOptions) -> Self {
-        Self {
-            request_id: Uuid::new_v4(),
-            payload,
-            options,
-        }
-    }
-
-    /// Set the number of dimensions for the output embeddings.
-    pub fn with_dimensions(mut self, dimensions: u32) -> Self {
-        self.options.dimensions = Some(dimensions);
+    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
+        self.request_id = request_id;
         self
     }
 
-    /// Set the encoding format for the embeddings.
-    pub fn with_encoding_format(mut self, format: EncodingFormat) -> Self {
-        self.options.encoding_format = format;
+    /// Set the account ID for this request.
+    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
+        self.account_id = Some(account_id);
         self
     }
 
-    /// Set the user identifier for the request.
-    pub fn with_user(mut self, user: impl Into<String>) -> Self {
-        self.options.user = Some(user.into());
+    /// Add a tag to this request.
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.insert(tag.into());
         self
     }
 
-    /// Validate the request parameters.
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(dimensions) = self.options.dimensions
-            && dimensions == 0
-        {
-            return Err("Dimensions must be greater than 0".to_string());
-        }
+    /// Set tags for this request.
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(|t| t.into()).collect();
+        self
+    }
 
-        Ok(())
+    /// Enable normalization of the embedding to unit length.
+    pub fn with_normalize(mut self, normalize: bool) -> Self {
+        self.normalize = normalize;
+        self
+    }
+
+    /// Check if the request has a specific tag.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.contains(tag)
+    }
+
+    /// Get the text content if this is a text request.
+    pub fn as_text(&self) -> Option<&str> {
+        self.content.as_text()
+    }
+
+    /// Create a response for this request with the given embedding.
+    pub fn reply(&self, embedding: Vec<f32>) -> Response {
+        Response::new(self.request_id, embedding)
     }
 }
 
-/// Standard embedding request using Content inputs.
-///
-/// This is a convenience type for embedding operations that work directly with
-/// Content inputs, providing a standard interface while maintaining compatibility
-/// with the generic Request type.
+/// Batch request for multiple embedding operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContentEmbeddingRequest {
-    /// The input(s) to generate embeddings for.
-    pub inputs: Vec<Content>,
+pub struct BatchRequest {
+    /// Unique identifier for this batch request.
+    pub batch_id: Uuid,
+    /// Account identifier associated with this batch.
+    pub account_id: Option<Uuid>,
+    /// The contents to generate embeddings for.
+    pub contents: Vec<Content>,
+    /// Custom tags for categorization and filtering.
+    pub tags: HashSet<String>,
+    /// Whether to normalize the resulting embeddings to unit length.
+    pub normalize: bool,
 }
 
-impl ContentEmbeddingRequest {
-    /// Creates a new content embedding request.
+impl BatchRequest {
+    /// Create a new batch request.
     pub fn new() -> Self {
-        Self { inputs: Vec::new() }
+        Self {
+            batch_id: Uuid::now_v7(),
+            account_id: None,
+            contents: Vec::new(),
+            tags: HashSet::new(),
+            normalize: false,
+        }
     }
 
-    /// Creates a new content embedding request from inputs.
-    pub fn from_inputs(inputs: Vec<Content>) -> Self {
-        Self { inputs }
+    /// Create a new batch request from contents.
+    pub fn from_contents(contents: Vec<Content>) -> Self {
+        Self {
+            batch_id: Uuid::now_v7(),
+            account_id: None,
+            contents,
+            tags: HashSet::new(),
+            normalize: false,
+        }
     }
 
-    /// Adds a single input to the request.
-    pub fn with_input(mut self, input: Content) -> Self {
-        self.inputs.push(input);
+    /// Set the account ID for this batch.
+    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
+        self.account_id = Some(account_id);
         self
     }
 
-    /// Adds a text input to the request.
+    /// Add a content item to the batch.
+    pub fn with_content(mut self, content: Content) -> Self {
+        self.contents.push(content);
+        self
+    }
+
+    /// Add a text input to the batch.
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
-        self.inputs.push(Content::text(text));
+        self.contents.push(Content::text(text));
         self
     }
 
-    /// Adds a document input to the request.
+    /// Add a document input to the batch.
     pub fn with_document(mut self, document: Document) -> Self {
-        self.inputs.push(Content::document(document));
+        self.contents.push(Content::document(document));
         self
     }
 
-    /// Adds a chat input to the request.
+    /// Add a chat input to the batch.
     pub fn with_chat(mut self, chat: Chat) -> Self {
-        self.inputs.push(Content::chat(chat));
+        self.contents.push(Content::chat(chat));
         self
     }
 
-    /// Returns the total number of inputs in this request.
-    pub fn input_count(&self) -> usize {
-        self.inputs.len()
+    /// Add a tag to this batch request.
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.insert(tag.into());
+        self
     }
 
-    /// Returns true if this request contains any text inputs.
-    pub fn has_text_inputs(&self) -> bool {
-        self.inputs.iter().any(|input| input.is_text())
+    /// Set tags for this batch request.
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(|t| t.into()).collect();
+        self
     }
 
-    /// Returns true if this request contains any document inputs.
-    pub fn has_document_inputs(&self) -> bool {
-        self.inputs.iter().any(|input| input.is_document())
+    /// Enable normalization of embeddings to unit length.
+    pub fn with_normalize(mut self, normalize: bool) -> Self {
+        self.normalize = normalize;
+        self
     }
 
-    /// Returns true if this request contains any chat inputs.
-    pub fn has_chat_inputs(&self) -> bool {
-        self.inputs.iter().any(|input| input.is_chat())
+    /// Check if the batch request has a specific tag.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.contains(tag)
     }
 
-    /// Estimates the total size of all inputs for rate limiting.
+    /// Returns the number of contents in this batch.
+    pub fn len(&self) -> usize {
+        self.contents.len()
+    }
+
+    /// Returns true if this batch has no contents.
+    pub fn is_empty(&self) -> bool {
+        self.contents.is_empty()
+    }
+
+    /// Convert this batch request into individual requests.
+    ///
+    /// Each request gets a unique ID generated at conversion time.
+    pub fn into_requests(self) -> Vec<Request> {
+        self.contents
+            .into_iter()
+            .map(|content| Request {
+                request_id: Uuid::now_v7(),
+                account_id: self.account_id,
+                content,
+                tags: self.tags.clone(),
+                normalize: self.normalize,
+            })
+            .collect()
+    }
+
+    /// Create individual requests from this batch.
+    ///
+    /// Returns a `Vec<Request>` with stable request IDs. Unlike an iterator,
+    /// calling this method multiple times will generate different IDs each time,
+    /// but within a single call, IDs are stable.
+    pub fn iter_requests(&self) -> Vec<Request> {
+        self.contents
+            .iter()
+            .cloned()
+            .map(|content| Request {
+                request_id: Uuid::now_v7(),
+                account_id: self.account_id,
+                content,
+                tags: self.tags.clone(),
+                normalize: self.normalize,
+            })
+            .collect()
+    }
+
+    /// Estimates the total size of all contents for rate limiting.
     pub fn estimated_total_size(&self) -> usize {
-        self.inputs.iter().map(|input| input.estimated_size()).sum()
-    }
-
-    /// Validates the request parameters.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.inputs.is_empty() {
-            return Err("Request must contain at least one input".to_string());
-        }
-
-        if self.inputs.len() > 2048 {
-            return Err("Too many inputs in batch request".to_string());
-        }
-
-        for (i, input) in self.inputs.iter().enumerate() {
-            if let Err(err) = self.validate_input(input) {
-                return Err(format!("Input {}: {}", i, err));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn validate_input(&self, input: &Content) -> Result<(), String> {
-        match input {
-            Content::Text { text } => {
-                if text.is_empty() {
-                    return Err("Text input cannot be empty".to_string());
-                }
-                if text.len() > 1_000_000 {
-                    return Err("Text input too long".to_string());
-                }
-            }
-            Content::Document { document } => {
-                if document.is_empty() {
-                    return Err("Document cannot be empty".to_string());
-                }
-                if document.size() > 10_000_000 {
-                    return Err("Document too large".to_string());
-                }
-                if let Err(err) = document.validate() {
-                    return Err(format!("Document validation failed: {}", err));
-                }
-            }
-            Content::Chat { chat } => {
-                if chat.message_count() == 0 {
-                    return Err("Chat cannot be empty".to_string());
-                }
-                if chat.estimated_size() > 10_000_000 {
-                    return Err("Chat too large".to_string());
-                }
-                if let Err(err) = chat.validate() {
-                    return Err(format!("Chat validation failed: {}", err));
-                }
-            }
-        }
-        Ok(())
+        self.contents
+            .iter()
+            .map(|content| content.estimated_size())
+            .sum()
     }
 }
 
-impl Default for ContentEmbeddingRequest {
+impl Default for BatchRequest {
     fn default() -> Self {
         Self::new()
     }
@@ -271,57 +258,111 @@ mod tests {
 
     #[test]
     fn test_request_creation() {
-        let request = Request::new(());
+        let request = Request::from_text("Hello, world!");
 
         assert!(!request.request_id.is_nil());
-        assert_eq!(request.options.dimensions, None);
-        assert_eq!(request.options.encoding_format, EncodingFormat::Float);
+        assert!(request.account_id.is_none());
+        assert!(request.tags.is_empty());
+        assert!(!request.normalize);
+        assert_eq!(request.as_text(), Some("Hello, world!"));
     }
 
     #[test]
-    fn test_request_with_options() {
-        let request = Request::new(())
-            .with_dimensions(512)
-            .with_encoding_format(EncodingFormat::Base64)
-            .with_user("test-user");
+    fn test_request_with_account_id() {
+        let account_id = Uuid::new_v4();
+        let request = Request::from_text("test").with_account_id(account_id);
 
-        assert_eq!(request.options.dimensions, Some(512));
-        assert_eq!(request.options.encoding_format, EncodingFormat::Base64);
-        assert_eq!(request.options.user, Some("test-user".to_string()));
+        assert_eq!(request.account_id, Some(account_id));
     }
 
     #[test]
-    fn test_content_embedding_request() {
+    fn test_request_with_tags() {
+        let request = Request::from_text("test")
+            .with_tag("category:test")
+            .with_tag("priority:high");
+
+        assert_eq!(request.tags.len(), 2);
+        assert!(request.has_tag("category:test"));
+        assert!(request.has_tag("priority:high"));
+        assert!(!request.has_tag("unknown"));
+    }
+
+    #[test]
+    fn test_request_with_tags_iter() {
+        let request = Request::from_text("test").with_tags(["tag1", "tag2", "tag3"]);
+
+        assert_eq!(request.tags.len(), 3);
+    }
+
+    #[test]
+    fn test_request_duplicate_tags() {
+        let request = Request::from_text("test")
+            .with_tag("duplicate")
+            .with_tag("duplicate")
+            .with_tag("unique");
+
+        // HashSet deduplicates
+        assert_eq!(request.tags.len(), 2);
+    }
+
+    #[test]
+    fn test_request_with_normalize() {
+        let request = Request::from_text("test").with_normalize(true);
+
+        assert!(request.normalize);
+    }
+
+    #[test]
+    fn test_request_reply() {
+        let request = Request::from_text("test");
+        let embedding = vec![0.1, 0.2, 0.3];
+
+        let response = request.reply(embedding.clone());
+
+        assert_eq!(response.request_id, request.request_id);
+        assert_eq!(response.embedding, embedding);
+    }
+
+    #[test]
+    fn test_batch_request() {
         let document = Document::new(Bytes::from("Hello, world!")).with_content_type("text/plain");
 
-        let payload = ContentEmbeddingRequest::new()
+        let batch = BatchRequest::new()
             .with_text("Test text")
             .with_document(document);
 
-        assert_eq!(payload.input_count(), 2);
-        assert!(payload.has_text_inputs());
-        assert!(payload.has_document_inputs());
+        assert_eq!(batch.len(), 2);
+        assert!(!batch.is_empty());
     }
 
     #[test]
-    fn test_content_embedding_request_validation() {
-        let empty_request = ContentEmbeddingRequest::new();
-        assert!(empty_request.validate().is_err());
+    fn test_batch_request_with_account_id() {
+        let account_id = Uuid::new_v4();
+        let batch = BatchRequest::new()
+            .with_account_id(account_id)
+            .with_text("First")
+            .with_text("Second");
 
-        let valid_request = ContentEmbeddingRequest::new().with_text("Hello");
-        assert!(valid_request.validate().is_ok());
+        let requests = batch.into_requests();
+
+        assert_eq!(requests[0].account_id, Some(account_id));
+        assert_eq!(requests[1].account_id, Some(account_id));
     }
 
     #[test]
-    fn test_empty_text_validation() {
-        let request = ContentEmbeddingRequest::new().with_text("");
-        assert!(request.validate().is_err());
-    }
+    fn test_batch_request_into_requests() {
+        let batch = BatchRequest::new()
+            .with_text("First")
+            .with_text("Second")
+            .with_tag("batch")
+            .with_normalize(true);
 
-    #[test]
-    fn test_empty_document_validation() {
-        let empty_document = Document::new(Bytes::new());
-        let request = ContentEmbeddingRequest::new().with_document(empty_document);
-        assert!(request.validate().is_err());
+        let requests = batch.into_requests();
+
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].has_tag("batch"));
+        assert!(requests[0].normalize);
+        assert!(requests[1].has_tag("batch"));
+        assert!(requests[1].normalize);
     }
 }

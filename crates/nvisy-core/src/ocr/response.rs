@@ -10,8 +10,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::context::UsageStats;
-use crate::types::{Annotation, AnnotationType, BoundingBox, Document, TextSpan};
+use crate::types::{Annotation, AnnotationType, BoundingBox, Document, TextSpan, Timing};
 
 /// Generic response from an OCR operation.
 ///
@@ -21,24 +20,6 @@ use crate::types::{Annotation, AnnotationType, BoundingBox, Document, TextSpan};
 /// # Type Parameters
 ///
 /// * `Resp` - The implementation-specific response payload type
-///
-/// # Example
-///
-/// ```rust
-/// #[derive(Debug, Clone)]
-/// struct MyOcrResponse {
-///     text: String,
-///     confidence: f32,
-/// }
-///
-/// let response = Response::new(
-///     request_id,
-///     MyOcrResponse {
-///         text: "extracted text".to_string(),
-///         confidence: 0.95,
-///     }
-/// );
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response<Resp> {
     /// Unique identifier for this response.
@@ -47,12 +28,8 @@ pub struct Response<Resp> {
     pub request_id: Uuid,
     /// Implementation-specific response payload.
     pub payload: Resp,
-    /// Processing time in milliseconds.
-    pub processing_time_ms: Option<u64>,
-    /// When this response was generated.
-    pub timestamp: Timestamp,
-    /// Usage statistics for this operation.
-    pub usage: UsageStats,
+    /// Timing information for the operation.
+    pub timing: Option<Timing>,
     /// Additional metadata about the processing.
     pub metadata: HashMap<String, serde_json::Value>,
 }
@@ -61,32 +38,29 @@ impl<Resp> Response<Resp> {
     /// Create a new OCR response with the given payload.
     pub fn new(request_id: Uuid, payload: Resp) -> Self {
         Self {
-            response_id: Uuid::new_v4(),
+            response_id: Uuid::now_v7(),
             request_id,
             payload,
-            processing_time_ms: None,
-            timestamp: Timestamp::now(),
-            usage: UsageStats::default(),
+            timing: None,
             metadata: HashMap::new(),
         }
     }
 
-    /// Set the processing time.
-    pub fn with_processing_time(mut self, ms: u64) -> Self {
-        self.processing_time_ms = Some(ms);
-        self
-    }
-
-    /// Set usage statistics.
-    pub fn with_usage(mut self, usage: UsageStats) -> Self {
-        self.usage = usage;
+    /// Set timing information.
+    pub fn with_timing(mut self, started_at: Timestamp, ended_at: Timestamp) -> Self {
+        self.timing = Some(Timing::new(started_at, ended_at));
         self
     }
 
     /// Add metadata to this response.
-    pub fn with_metadata(mut self, key: String, value: serde_json::Value) -> Self {
-        self.metadata.insert(key, value);
+    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata.insert(key.into(), value);
         self
+    }
+
+    /// Get the processing time as a signed duration.
+    pub fn processing_time(&self) -> Option<jiff::SignedDuration> {
+        self.timing.map(|t| t.duration())
     }
 }
 
@@ -101,10 +75,42 @@ pub struct BatchResponse<Resp> {
     pub batch_id: Uuid,
     /// Individual responses in the batch.
     pub responses: Vec<Response<Resp>>,
-    /// Overall processing statistics.
-    pub batch_stats: BatchStats,
-    /// When the batch was processed.
-    pub timestamp: Timestamp,
+}
+
+impl<Resp> BatchResponse<Resp> {
+    /// Create a new batch response.
+    pub fn new(responses: Vec<Response<Resp>>) -> Self {
+        Self {
+            batch_id: Uuid::now_v7(),
+            responses,
+        }
+    }
+
+    /// Get the earliest start time from all responses.
+    pub fn started_at(&self) -> Option<Timestamp> {
+        self.responses
+            .iter()
+            .filter_map(|r| r.timing.map(|t| t.started_at))
+            .min()
+    }
+
+    /// Get the latest end time from all responses.
+    pub fn ended_at(&self) -> Option<Timestamp> {
+        self.responses
+            .iter()
+            .filter_map(|r| r.timing.map(|t| t.ended_at))
+            .max()
+    }
+
+    /// Get the number of responses.
+    pub fn len(&self) -> usize {
+        self.responses.len()
+    }
+
+    /// Check if the batch is empty.
+    pub fn is_empty(&self) -> bool {
+        self.responses.is_empty()
+    }
 }
 
 /// Statistics for a batch OCR operation.

@@ -108,23 +108,6 @@ impl<Req> Request<Req> {
         self.options.dpi = Some(dpi);
         self
     }
-
-    /// Validate the request parameters.
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(threshold) = self.options.confidence_threshold
-            && !(0.0..=1.0).contains(&threshold)
-        {
-            return Err("Confidence threshold must be between 0.0 and 1.0".to_string());
-        }
-
-        if let Some(dpi) = self.options.dpi
-            && !(50..=1200).contains(&dpi)
-        {
-            return Err("DPI must be between 50 and 1200".to_string());
-        }
-
-        Ok(())
-    }
 }
 
 /// Standard OCR request using Document input.
@@ -132,7 +115,7 @@ impl<Req> Request<Req> {
 /// This is a convenience type for OCR operations that work directly with Document inputs,
 /// providing a standard interface while maintaining compatibility with the generic Request type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentOcrRequest {
+pub struct DocumentRequest {
     /// The document to process.
     pub document: Document,
     /// Optional region of interest within the document.
@@ -176,7 +159,7 @@ impl BoundingBox {
     }
 }
 
-impl DocumentOcrRequest {
+impl DocumentRequest {
     /// Create a new document OCR request.
     pub fn new(document: Document) -> Self {
         Self {
@@ -198,37 +181,6 @@ impl DocumentOcrRequest {
         self
     }
 
-    /// Validate the request.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.document.is_empty() {
-            return Err("Document cannot be empty".to_string());
-        }
-
-        // Validate content type
-        if let Some(content_type) = self.document.content_type()
-            && !content_type.starts_with("image/")
-            && content_type != "application/pdf"
-        {
-            return Err("Document content type must be an image or PDF".to_string());
-        }
-
-        // Validate region if specified
-        if let Some(region) = &self.region
-            && !region.is_valid()
-        {
-            return Err("Invalid bounding box region".to_string());
-        }
-
-        // Validate language code if specified
-        if let Some(lang) = &self.language
-            && lang.len() != 2
-        {
-            return Err("Language must be a 2-character ISO 639-1 code".to_string());
-        }
-
-        Ok(())
-    }
-
     /// Check if this request has a specific region of interest.
     pub fn has_region(&self) -> bool {
         self.region.is_some()
@@ -243,6 +195,11 @@ impl DocumentOcrRequest {
     pub fn document_size(&self) -> usize {
         self.document.size()
     }
+
+    /// Check if the document is empty.
+    pub fn is_empty(&self) -> bool {
+        self.document.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -256,7 +213,7 @@ mod tests {
     fn test_document_ocr_request_creation() {
         let document = Document::new(Bytes::from("test content")).with_content_type("image/png");
 
-        let request = DocumentOcrRequest::new(document.clone());
+        let request = DocumentRequest::new(document.clone());
 
         assert_eq!(request.document.size(), 12);
         assert!(!request.has_region());
@@ -270,7 +227,7 @@ mod tests {
             Document::new(Bytes::from("test image data")).with_content_type("image/jpeg");
 
         let bbox = BoundingBox::new(10.0, 20.0, 100.0, 50.0);
-        let request = DocumentOcrRequest::new(document)
+        let request = DocumentRequest::new(document)
             .with_region(bbox)
             .with_language("en");
 
@@ -290,78 +247,26 @@ mod tests {
     }
 
     #[test]
-    fn test_request_validation_success() {
+    fn test_request_is_empty() {
+        let empty_document = Document::new(Bytes::new()).with_content_type("image/png");
+        let request = DocumentRequest::new(empty_document);
+        assert!(request.is_empty());
+
         let document =
             Document::new(Bytes::from(vec![0x89, 0x50, 0x4E, 0x47])).with_content_type("image/png");
-
-        let request = DocumentOcrRequest::new(document);
-        assert!(request.validate().is_ok());
+        let request = DocumentRequest::new(document);
+        assert!(!request.is_empty());
     }
 
     #[test]
-    fn test_request_validation_empty_document() {
-        let document = Document::new(Bytes::new()).with_content_type("image/png");
+    fn test_request_options() {
+        let request = Request::new(())
+            .with_confidence_threshold(0.8)
+            .with_dpi(300)
+            .with_layout_preservation(false);
 
-        let request = DocumentOcrRequest::new(document);
-        let result = request.validate();
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Document cannot be empty"));
-    }
-
-    #[test]
-    fn test_request_validation_unsupported_content_type() {
-        let document = Document::new(Bytes::from("test content")).with_content_type("text/plain");
-
-        let request = DocumentOcrRequest::new(document);
-        let result = request.validate();
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must be an image or PDF"));
-    }
-
-    #[test]
-    fn test_request_validation_invalid_region() {
-        let document =
-            Document::new(Bytes::from("test content")).with_content_type("application/pdf");
-
-        let invalid_bbox = BoundingBox::new(0.0, 0.0, -10.0, 50.0);
-        let request = DocumentOcrRequest::new(document).with_region(invalid_bbox);
-
-        let result = request.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid bounding box"));
-    }
-
-    #[test]
-    fn test_request_validation_invalid_language() {
-        let document = Document::new(Bytes::from("test content")).with_content_type("image/png");
-
-        let request = DocumentOcrRequest::new(document).with_language("invalid");
-
-        let result = request.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("2-character ISO 639-1 code"));
-    }
-
-    #[test]
-    fn test_request_options_validation() {
-        let mut request = Request::new(());
-
-        // Test valid confidence threshold
-        request = request.with_confidence_threshold(0.8);
-        assert!(request.validate().is_ok());
-
-        // Test invalid confidence threshold
-        request = request.with_confidence_threshold(1.5);
-        assert!(request.validate().is_err());
-
-        // Test valid DPI
-        request = Request::new(()).with_dpi(300);
-        assert!(request.validate().is_ok());
-
-        // Test invalid DPI
-        request = request.with_dpi(2000);
-        assert!(request.validate().is_err());
+        assert_eq!(request.options.confidence_threshold, Some(0.8));
+        assert_eq!(request.options.dpi, Some(300));
+        assert!(!request.options.preserve_layout);
     }
 }

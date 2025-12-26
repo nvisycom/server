@@ -16,35 +16,39 @@ use crate::error::{Error, Result};
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct QdrantConfig {
     /// Qdrant cluster endpoint (e.g., "http://localhost:6334")
+    #[cfg_attr(feature = "config", arg(long = "qdrant-url", env = "QDRANT_URL"))]
+    pub qdrant_url: String,
+
+    /// API key for authentication
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "qdrant-api-key", env = "QDRANT_API_KEY")
+    )]
+    pub qdrant_api_key: String,
+
+    /// Connection timeout in seconds (optional)
     #[cfg_attr(
         feature = "config",
         arg(
-            long,
-            env = "QDRANT_CLUSTER_ENDPOINT",
-            default_value = "http://localhost:6334"
+            long = "qdrant-connect-timeout-secs",
+            env = "QDRANT_CONNECT_TIMEOUT_SECS"
         )
     )]
-    pub url: String,
-
-    /// API key for authentication
-    #[cfg_attr(feature = "config", arg(long, env = "QDRANT_API_KEY"))]
-    pub api_key: String,
-
-    /// Connection timeout in seconds (optional)
-    #[cfg_attr(feature = "config", arg(long, env = "QDRANT_CONNECT_TIMEOUT_SECS"))]
-    pub connect_timeout_secs: Option<u64>,
+    pub qdrant_connect_timeout_secs: Option<u64>,
 
     /// Request timeout in seconds (optional)
-    #[cfg_attr(feature = "config", arg(long, env = "QDRANT_TIMEOUT_SECS"))]
-    pub timeout_secs: Option<u64>,
-
-    /// Maximum number of concurrent connections
-    #[cfg_attr(feature = "config", arg(long, env = "QDRANT_POOL_SIZE"))]
-    pub pool_size: Option<usize>,
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "qdrant-timeout-secs", env = "QDRANT_TIMEOUT_SECS")
+    )]
+    pub qdrant_timeout_secs: Option<u64>,
 
     /// Enable keep-alive while idle
-    #[cfg_attr(feature = "config", arg(long, env = "QDRANT_KEEP_ALIVE"))]
-    pub keep_alive: Option<bool>,
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "qdrant-keep-alive", env = "QDRANT_KEEP_ALIVE")
+    )]
+    pub qdrant_keep_alive: Option<bool>,
 }
 
 impl QdrantConfig {
@@ -56,25 +60,24 @@ impl QdrantConfig {
     /// * `api_key` - The API key for authentication
     pub fn new(url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
-            url: url.into(),
-            api_key: api_key.into(),
-            connect_timeout_secs: None,
-            timeout_secs: None,
-            pool_size: None,
-            keep_alive: None,
+            qdrant_url: url.into(),
+            qdrant_api_key: api_key.into(),
+            qdrant_connect_timeout_secs: None,
+            qdrant_timeout_secs: None,
+            qdrant_keep_alive: None,
         }
     }
 
     /// Returns the connection timeout as a Duration, if set.
     #[inline]
     pub fn connect_timeout(&self) -> Option<Duration> {
-        self.connect_timeout_secs.map(Duration::from_secs)
+        self.qdrant_connect_timeout_secs.map(Duration::from_secs)
     }
 
     /// Returns the request timeout as a Duration, if set.
     #[inline]
     pub fn timeout(&self) -> Option<Duration> {
-        self.timeout_secs.map(Duration::from_secs)
+        self.qdrant_timeout_secs.map(Duration::from_secs)
     }
 
     /// Returns the user-agent string for the Qdrant client.
@@ -89,57 +92,47 @@ impl QdrantConfig {
 
     /// Set the API key for authentication.
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
-        self.api_key = api_key.into();
+        self.qdrant_api_key = api_key.into();
         self
     }
 
     /// Set the connection timeout in seconds.
     pub fn with_connect_timeout_secs(mut self, secs: u64) -> Self {
-        self.connect_timeout_secs = Some(secs);
+        self.qdrant_connect_timeout_secs = Some(secs);
         self
     }
 
     /// Set the request timeout in seconds.
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
-        self.timeout_secs = Some(secs);
-        self
-    }
-
-    /// Set the connection pool size.
-    pub fn with_pool_size(mut self, size: usize) -> Self {
-        self.pool_size = Some(size);
+        self.qdrant_timeout_secs = Some(secs);
         self
     }
 
     /// Enable or disable keep-alive while idle.
     pub fn with_keep_alive(mut self, enable: bool) -> Self {
-        self.keep_alive = Some(enable);
+        self.qdrant_keep_alive = Some(enable);
         self
     }
 
     /// Get the base URL without path.
     pub fn base_url(&self) -> &str {
-        &self.url
+        &self.qdrant_url
     }
 
     /// Validate the configuration.
     pub fn validate(&self) -> Result<()> {
-        if self.url.is_empty() {
+        if self.qdrant_url.is_empty() {
             return Err(Error::configuration().with_message("URL cannot be empty"));
         }
 
-        if !self.url.starts_with("http://") && !self.url.starts_with("https://") {
+        if !self.qdrant_url.starts_with("http://") && !self.qdrant_url.starts_with("https://") {
             return Err(
                 Error::configuration().with_message("URL must start with http:// or https://")
             );
         }
 
-        if self.api_key.is_empty() {
+        if self.qdrant_api_key.is_empty() {
             return Err(Error::configuration().with_message("API key cannot be empty"));
-        }
-
-        if self.pool_size.is_some_and(|pool_size| pool_size == 0) {
-            return Err(Error::configuration().with_message("Pool size must be greater than zero"));
         }
 
         Ok(())
@@ -149,12 +142,11 @@ impl QdrantConfig {
 impl Default for QdrantConfig {
     fn default() -> Self {
         Self {
-            url: "http://localhost:6334".to_string(),
-            api_key: String::new(),
-            connect_timeout_secs: None,
-            timeout_secs: None,
-            pool_size: None,
-            keep_alive: None,
+            qdrant_url: "http://localhost:6334".to_string(),
+            qdrant_api_key: String::new(),
+            qdrant_connect_timeout_secs: None,
+            qdrant_timeout_secs: None,
+            qdrant_keep_alive: None,
         }
     }
 }
@@ -166,8 +158,8 @@ mod tests {
     #[test]
     fn test_config_creation() {
         let config = QdrantConfig::new("http://localhost:6334", "test-api-key");
-        assert_eq!(config.url, "http://localhost:6334");
-        assert_eq!(config.api_key, "test-api-key");
+        assert_eq!(config.qdrant_url, "http://localhost:6334");
+        assert_eq!(config.qdrant_api_key, "test-api-key");
         assert_eq!(config.connect_timeout(), None);
         assert_eq!(config.timeout(), None);
     }
@@ -192,11 +184,6 @@ mod tests {
         // Empty API key
         let empty_api_key = QdrantConfig::new("http://localhost:6334", "");
         assert!(empty_api_key.validate().is_err());
-
-        // Invalid pool size
-        let mut invalid_pool = QdrantConfig::new("http://localhost:6334", "key");
-        invalid_pool.pool_size = Some(0);
-        assert!(invalid_pool.validate().is_err());
     }
 
     #[test]

@@ -6,18 +6,16 @@
 
 use futures_util::Stream;
 
-pub mod context;
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use context::{Context, ProcessingOptions};
-pub use request::{BoundingBox, DocumentOcrRequest, Request, RequestOptions};
+pub use request::{DocumentRequest, Request, RequestOptions};
 pub use response::{BatchResponse, BatchStats, OcrResult, Response, TextExtraction};
 pub use service::OcrService;
 
-use crate::types::ServiceHealth;
-pub use crate::{Error, ErrorKind, Result};
+use crate::types::{ServiceHealth, SharedContext};
+use crate::{Error, Result};
 
 /// Type alias for a boxed OCR service with specific request and response types.
 pub type BoxedOcrProvider<Req, Resp> = Box<dyn OcrProvider<Req, Resp> + Send + Sync>;
@@ -47,12 +45,17 @@ pub trait OcrProvider<Req, Resp>: Send + Sync {
     ///
     /// # Parameters
     ///
+    /// * `context` - OCR shared context with session information and usage tracking
     /// * `request` - OCR request containing the image/document and processing options
     ///
     /// # Returns
     ///
     /// Returns a `Response<Resp>` containing the extracted text, regions, and metadata.
-    async fn process_ocr(&self, request: Request<Req>) -> Result<Response<Resp>>;
+    async fn process_ocr(
+        &self,
+        context: &SharedContext,
+        request: Request<Req>,
+    ) -> Result<Response<Resp>>;
 
     /// Process an image or document with OCR using streaming responses.
     ///
@@ -61,6 +64,7 @@ pub trait OcrProvider<Req, Resp>: Send + Sync {
     ///
     /// # Parameters
     ///
+    /// * `context` - OCR shared context with session information and usage tracking
     /// * `request` - OCR request containing the image/document and processing options
     ///
     /// # Returns
@@ -68,6 +72,7 @@ pub trait OcrProvider<Req, Resp>: Send + Sync {
     /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
     async fn process_ocr_stream(
         &self,
+        context: &SharedContext,
         request: Request<Req>,
     ) -> Result<BoxedStream<Response<Resp>>>;
 

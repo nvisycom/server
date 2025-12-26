@@ -9,18 +9,17 @@ use super::{OlemCredentials, OlmConfig};
 use crate::TRACING_TARGET_CLIENT;
 use crate::error::{Error, Result};
 
-/// OCR client for interacting with OLMo v2 OCR services
+/// OCR client for interacting with OLMo v2 OCR services.
 ///
 /// The client handles authentication, request batching, and connection pooling
 /// for optimal performance when processing documents.
 ///
 /// # Examples
 ///
-/// ```rust
-/// use nvisy_olmocr2::client::{OlmClient, OlmConfig, OlemCredentials};
+/// ```rust,ignore
+/// use nvisy_olmocr2::{OlmClient, OlmConfig, OlemCredentials};
 /// use std::time::Duration;
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = OlmConfig::builder()
 ///     .with_base_url("https://api.olmo.ai/v2")?
 ///     .with_timeout(Duration::from_secs(30))
@@ -28,8 +27,6 @@ use crate::error::{Error, Result};
 ///
 /// let credentials = OlemCredentials::api_key("your-api-key");
 /// let client = OlmClient::new(config, credentials).await?;
-/// # Ok(())
-/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct OlmClient {
@@ -39,7 +36,7 @@ pub struct OlmClient {
 }
 
 impl OlmClient {
-    /// Create a new OCR client with the given configuration and credentials
+    /// Create a new OCR client with the given configuration and credentials.
     ///
     /// # Arguments
     ///
@@ -70,9 +67,6 @@ impl OlmClient {
             credentials,
         };
 
-        // Verify connection by making a health check
-        client.health_check().await?;
-
         tracing::info!(
             target: TRACING_TARGET_CLIENT,
             "OCR client created successfully"
@@ -81,7 +75,7 @@ impl OlmClient {
         Ok(client)
     }
 
-    /// Create a new OCR client with default configuration
+    /// Create a new OCR client with default configuration.
     ///
     /// # Arguments
     ///
@@ -98,7 +92,7 @@ impl OlmClient {
         Self::new(config, credentials).await
     }
 
-    /// Perform a health check against the OCR service
+    /// Perform a health check against the OCR service.
     ///
     /// This method verifies that the service is accessible and the credentials are valid.
     pub async fn health_check(&self) -> Result<()> {
@@ -143,12 +137,17 @@ impl OlmClient {
         }
     }
 
-    /// Get the client configuration
+    /// Get the client configuration.
     pub fn config(&self) -> &OlmConfig {
         &self.config
     }
 
-    /// Get the client credentials (for debugging/logging purposes only)
+    /// Get the HTTP client for making requests.
+    pub(crate) fn http_client(&self) -> &HttpClient {
+        &self.http_client
+    }
+
+    /// Get the credentials type (for debugging/logging purposes only).
     pub fn credentials_type(&self) -> &'static str {
         match &self.credentials {
             OlemCredentials::ApiKey(_) => "api_key",
@@ -158,8 +157,11 @@ impl OlmClient {
         }
     }
 
-    /// Add authentication headers to a request
-    fn add_auth_headers(&self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    /// Add authentication headers to a request.
+    pub(crate) fn add_auth_headers(
+        &self,
+        mut request: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
         match &self.credentials {
             OlemCredentials::ApiKey(key) => {
                 request = request.header("X-API-Key", key);
@@ -175,23 +177,5 @@ impl OlmClient {
             }
         }
         request
-    }
-
-    /// Create a new request builder with base configuration
-    pub(crate) fn request(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-    ) -> Result<reqwest::RequestBuilder> {
-        let url = self
-            .config
-            .base_url
-            .join(path)
-            .map_err(|e| Error::invalid_config(format!("Invalid request URL: {}", e)))?;
-
-        let request = self.http_client.request(method, url);
-        let request = self.add_auth_headers(request);
-
-        Ok(request)
     }
 }

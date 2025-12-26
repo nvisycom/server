@@ -12,12 +12,11 @@ use crate::server::{ServerResult, shutdown_signal};
 
 /// Starts an HTTP server with enhanced lifecycle management.
 pub async fn serve_http(app: Router, server_config: ServerConfig) -> ServerResult<()> {
-    let service_name = "http-server";
-    let server_addr = server_config.server_addr();
+    let server_addr = server_config.socket_addr();
     let shutdown_timeout = server_config.shutdown_timeout();
     let shutdown_signal = shutdown_signal(shutdown_timeout);
 
-    serve_with_shutdown(&server_config, service_name, move || async move {
+    serve_with_shutdown(&server_config, move || async move {
         let listener = TcpListener::bind(server_addr).await?;
 
         tracing::info!(

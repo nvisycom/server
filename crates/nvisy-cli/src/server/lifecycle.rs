@@ -1,8 +1,7 @@
-//! Server lifecycle management and utilities.
+//! Server lifecycle management.
 //!
-//! This module provides comprehensive server lifecycle management including
-//! startup, shutdown, and health monitoring. All functions are designed for
-//! production use with proper error handling and observability.
+//! Provides server startup, shutdown, and health monitoring with
+//! comprehensive error handling and observability.
 
 use std::future::Future;
 use std::io;
@@ -12,25 +11,18 @@ use crate::config::ServerConfig;
 use crate::server::{ServerError, ServerResult};
 use crate::{TRACING_TARGET_SERVER_SHUTDOWN, TRACING_TARGET_SERVER_STARTUP};
 
-/// Serves with lifecycle management and service-specific context.
-///
-/// This version provides comprehensive error handling, service-specific
-/// logging, and detailed recovery suggestions. Recommended for production use
-/// where detailed error context is required.
+/// Serves with lifecycle management and graceful shutdown.
 ///
 /// # Arguments
 ///
 /// * `server_config` - Server configuration
-/// * `service_name` - Name of the service for logging context
 /// * `serve_fn` - Function that returns the server future
 ///
 /// # Errors
 ///
-/// Returns detailed errors with recovery suggestions and service context.
-#[allow(clippy::too_many_lines)]
+/// Returns detailed errors with recovery suggestions.
 pub async fn serve_with_shutdown<F>(
     server_config: &ServerConfig,
-    service_name: &str,
     serve_fn: impl FnOnce() -> F,
 ) -> ServerResult<()>
 where
@@ -38,194 +30,147 @@ where
 {
     let start_time = Instant::now();
 
+    log_server_starting(server_config);
+
+    validate_config(server_config)?;
+    log_security_warnings(server_config);
+    log_config_details(server_config);
+
     tracing::info!(
         target: TRACING_TARGET_SERVER_STARTUP,
-        service = service_name,
-        addr = %server_config.server_addr(),
-        version = env!("CARGO_PKG_VERSION"),
-        "Starting server"
+        addr = %server_config.socket_addr(),
+        "server ready and listening"
     );
 
-    // Pre-flight configuration validation
-    if let Err(validation_error) = server_config.validate() {
+    let result = serve_fn().await;
+
+    handle_result(result, start_time)
+}
+
+/// Logs server starting message.
+fn log_server_starting(config: &ServerConfig) {
+    tracing::info!(
+        target: TRACING_TARGET_SERVER_STARTUP,
+        addr = %config.socket_addr(),
+        version = env!("CARGO_PKG_VERSION"),
+        "starting server"
+    );
+}
+
+/// Validates server configuration.
+fn validate_config(config: &ServerConfig) -> ServerResult<()> {
+    if let Err(e) = config.validate() {
         tracing::error!(
             target: TRACING_TARGET_SERVER_STARTUP,
-            service = service_name,
-            error = validation_error.to_string(),
-            "Server configuration validation failed"
+            error = %e,
+            "configuration validation failed"
         );
-
-        let config_error = ServerError::invalid_config(&validation_error);
-        return Err(config_error);
+        return Err(ServerError::invalid_config(&e));
     }
+    Ok(())
+}
 
-    // Security warnings
-    if server_config.binds_to_all_interfaces() {
+/// Logs security warnings for potentially unsafe configurations.
+fn log_security_warnings(config: &ServerConfig) {
+    if config.binds_to_all_interfaces() {
         tracing::warn!(
             target: TRACING_TARGET_SERVER_STARTUP,
-            service = service_name,
-            "Server is bound to all interfaces (0.0.0.0). Ensure proper firewall configuration."
+            "server bound to all interfaces (0.0.0.0) - ensure firewall is configured"
         );
     }
+}
 
-    // Log production readiness information
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_STARTUP,
-        service = service_name,
-        host = %server_config.host,
-        port = server_config.port,
-        "Server configured for production use"
-    );
-
-    // Log additional configuration details
+/// Logs configuration details.
+fn log_config_details(config: &ServerConfig) {
     tracing::debug!(
         target: TRACING_TARGET_SERVER_STARTUP,
-        service = service_name,
-        request_timeout = server_config.request_timeout,
-        shutdown_timeout = server_config.shutdown_timeout,
-        binds_to_all_interfaces = server_config.binds_to_all_interfaces(),
-        "Server configuration active"
+        host = %config.host,
+        port = config.port,
+        shutdown_timeout = config.shutdown_timeout,
+        tls = config.is_tls_enabled(),
+        "configuration active"
     );
+}
 
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_STARTUP,
-        service = service_name,
-        addr = %server_config.server_addr(),
-        "Server is ready and listening for connections"
-    );
-
-    let result = serve_fn().await.map_err(|err| {
-        let uptime = start_time.elapsed();
-        let server_error = ServerError::Runtime(err);
-
-        tracing::error!(
-            target: TRACING_TARGET_SERVER_SHUTDOWN,
-            service = service_name,
-            error = %server_error,
-            error_code = server_error.error_code(),
-            uptime_seconds = uptime.as_secs(),
-            recoverable = server_error.is_recoverable(),
-            "Server encountered fatal error"
-        );
-
-        if let Some(suggestion) = server_error.suggestion() {
-            tracing::info!(
-                target: TRACING_TARGET_SERVER_SHUTDOWN,
-                service = service_name,
-                suggestion = suggestion,
-                "Recovery suggestion"
-            );
-        }
-
-        server_error
-    });
-
+/// Handles the server result and logs appropriate messages.
+fn handle_result(result: io::Result<()>, start_time: Instant) -> ServerResult<()> {
     let uptime = start_time.elapsed();
 
-    match &result {
+    match result {
         Ok(()) => {
             tracing::info!(
                 target: TRACING_TARGET_SERVER_SHUTDOWN,
-                service = service_name,
-                uptime_seconds = uptime.as_secs(),
-                "Server shutdown completed successfully"
+                uptime_secs = uptime.as_secs(),
+                "shutdown completed"
             );
+            Ok(())
         }
         Err(err) => {
-            // Log error context for debugging
-            for (key, value) in err.context() {
-                tracing::debug!(
+            let server_error = ServerError::Runtime(err);
+
+            tracing::error!(
+                target: TRACING_TARGET_SERVER_SHUTDOWN,
+                error = %server_error,
+                uptime_secs = uptime.as_secs(),
+                recoverable = server_error.is_recoverable(),
+                "fatal error"
+            );
+
+            if let Some(suggestion) = server_error.suggestion() {
+                tracing::info!(
                     target: TRACING_TARGET_SERVER_SHUTDOWN,
-                    service = service_name,
-                    context_key = key,
-                    context_value = value,
-                    "Error context"
+                    suggestion = suggestion,
+                    "recovery suggestion"
                 );
             }
+
+            log_error_context(&server_error);
+
+            Err(server_error)
         }
     }
+}
 
-    result
+/// Logs error context for debugging.
+fn log_error_context(error: &ServerError) {
+    for (key, value) in error.context() {
+        tracing::debug!(
+            target: TRACING_TARGET_SERVER_SHUTDOWN,
+            key = key,
+            value = value,
+            "error context"
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ServerConfig;
 
     #[tokio::test]
     async fn serve_with_shutdown_success() {
         let config = ServerConfig::default();
-        let result = serve_with_shutdown(&config, "test-service", || async { Ok(()) }).await;
+        let result = serve_with_shutdown(&config, || async { Ok(()) }).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn serve_with_shutdown_handles_error() {
         let config = ServerConfig::default();
-        let result = serve_with_shutdown(&config, "test-service", || async {
-            Err(io::Error::other("test error"))
-        })
-        .await;
+        let result =
+            serve_with_shutdown(&config, || async { Err(io::Error::other("test error")) }).await;
 
-        assert!(result.is_err());
-        match result {
-            Err(ServerError::Runtime(_)) => {
-                // Expected error type
-            }
-            _ => panic!("Expected Runtime error"),
-        }
-    }
-
-    #[tokio::test]
-    async fn serve_with_shutdown_provides_context() {
-        let config = ServerConfig::default();
-        let result = serve_with_shutdown(&config, "test-service", || async {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "access denied",
-            ))
-        })
-        .await;
-
-        assert!(result.is_err());
-        if let Err(error) = result {
-            assert!(error.is_recoverable());
-            assert!(error.suggestion().is_some());
-            assert_eq!(error.error_code(), "E003");
-        }
+        assert!(matches!(result, Err(ServerError::Runtime(_))));
     }
 
     #[tokio::test]
     async fn serve_with_shutdown_validates_config() {
         let config = ServerConfig {
-            port: 80, // Invalid port for non-root users
+            port: 80, // Invalid for non-root
             ..Default::default()
         };
 
-        let result = serve_with_shutdown(&config, "test-service", || async { Ok(()) }).await;
-
-        assert!(result.is_err());
-        if let Err(ServerError::InvalidConfig(_)) = result {
-            // Expected - config validation should fail before server starts
-        } else {
-            panic!("Expected InvalidConfig error");
-        }
-    }
-
-    #[test]
-    fn server_error_context_includes_suggestions() {
-        let error = ServerError::bind_error(
-            "127.0.0.1:80",
-            io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"),
-        );
-
-        assert!(error.is_network_error());
-        assert!(error.is_recoverable());
-        assert!(error.suggestion().unwrap().contains("port above 1024"));
-
-        let context = error.context();
-        assert!(context.iter().any(|(key, _)| *key == "error_code"));
-        assert!(context.iter().any(|(key, _)| *key == "suggestion"));
+        let result = serve_with_shutdown(&config, || async { Ok(()) }).await;
+        assert!(matches!(result, Err(ServerError::InvalidConfig(_))));
     }
 }

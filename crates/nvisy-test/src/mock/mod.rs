@@ -30,15 +30,15 @@ pub fn create_mock_services() -> AiServices {
 
 /// Creates a mock embedding service.
 fn create_embedding_service() -> EmbeddingService {
-    EmbeddingService::new(Box::new(MockEmbeddingProvider::default()))
+    EmbeddingService::new(MockEmbeddingProvider::default())
 }
 
 /// Creates a mock OCR service.
 fn create_optical_service() -> OcrService {
-    OcrService::new(Box::new(MockOpticalProvider::default()))
+    OcrService::new(MockOpticalProvider::default())
 }
 
 /// Creates a mock VLM service.
 fn create_language_service() -> VlmService {
-    VlmService::new(Box::new(MockLanguageProvider::default()))
+    VlmService::new(MockLanguageProvider::default())
 }

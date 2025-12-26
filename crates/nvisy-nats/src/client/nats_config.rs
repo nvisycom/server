@@ -11,84 +11,40 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "config", derive(Args))]
 pub struct NatsConfig {
     /// NATS server URL (comma-separated for clustering)
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "NATS_URL", default_value = "nats://127.0.0.1:4222")
-    )]
-    pub url: String,
+    #[cfg_attr(feature = "config", arg(long = "nats-url", env = "NATS_URL"))]
+    pub nats_url: String,
 
-    /// Authentication token (required)
-    #[cfg_attr(
-        feature = "config",
-        arg(id = "nats_token", long = "nats-token", env = "NATS_TOKEN")
-    )]
-    pub token: String,
+    /// Authentication token
+    #[cfg_attr(feature = "config", arg(long = "nats-token", env = "NATS_TOKEN"))]
+    pub nats_token: String,
 
     /// Client connection name for debugging and monitoring
     #[cfg_attr(
         feature = "config",
-        arg(
-            id = "nats_client_name",
-            long = "nats-client-name",
-            env = "NATS_CLIENT_NAME"
-        )
+        arg(long = "nats-client-name", env = "NATS_CLIENT_NAME")
     )]
-    pub name: Option<String>,
+    pub nats_client_name: Option<String>,
 
-    /// Maximum time to wait for initial connection in seconds (optional)
+    /// Connection timeout in seconds (optional)
     #[cfg_attr(
         feature = "config",
-        arg(
-            id = "nats_connect_timeout_secs",
-            long = "nats-connect-timeout-secs",
-            env = "NATS_CONNECT_TIMEOUT_SECS"
-        )
+        arg(long = "nats-connect-timeout-secs", env = "NATS_CONNECT_TIMEOUT_SECS")
     )]
-    pub connect_timeout_secs: Option<u64>,
+    pub nats_connect_timeout_secs: Option<u64>,
 
-    /// Default timeout for request-reply operations in seconds (optional)
+    /// Request timeout in seconds (optional)
     #[cfg_attr(
         feature = "config",
-        arg(
-            id = "nats_request_timeout_secs",
-            long = "nats-request-timeout-secs",
-            env = "NATS_REQUEST_TIMEOUT_SECS"
-        )
+        arg(long = "nats-request-timeout-secs", env = "NATS_REQUEST_TIMEOUT_SECS")
     )]
-    pub request_timeout_secs: Option<u64>,
+    pub nats_request_timeout_secs: Option<u64>,
 
     /// Maximum number of reconnection attempts (0 = unlimited)
     #[cfg_attr(
         feature = "config",
-        arg(
-            id = "nats_max_reconnects",
-            long = "nats-max-reconnects",
-            env = "NATS_MAX_RECONNECTS"
-        )
+        arg(long = "nats-max-reconnects", env = "NATS_MAX_RECONNECTS")
     )]
-    pub max_reconnects: Option<usize>,
-
-    /// Delay between reconnection attempts in seconds
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            id = "nats_reconnect_delay_secs",
-            long = "nats-reconnect-delay-secs",
-            env = "NATS_RECONNECT_DELAY_SECS"
-        )
-    )]
-    pub reconnect_delay_secs: Option<u64>,
-
-    /// Interval for sending ping messages in seconds
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            id = "nats_ping_interval_secs",
-            long = "nats-ping-interval-secs",
-            env = "NATS_PING_INTERVAL_SECS"
-        )
-    )]
-    pub ping_interval_secs: Option<u64>,
+    pub nats_max_reconnects: Option<usize>,
 }
 
 // Default values
@@ -101,118 +57,96 @@ impl NatsConfig {
     /// Create a new configuration with a single server URL and token.
     pub fn new(server_url: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
-            url: server_url.into(),
-            token: token.into(),
-            name: None,
-            connect_timeout_secs: None,
-            request_timeout_secs: None,
-            max_reconnects: None,
-            reconnect_delay_secs: None,
-            ping_interval_secs: None,
+            nats_url: server_url.into(),
+            nats_token: token.into(),
+            nats_client_name: None,
+            nats_connect_timeout_secs: None,
+            nats_request_timeout_secs: None,
+            nats_max_reconnects: None,
         }
     }
 
     /// Returns the client name, using the default if not set.
     #[inline]
     pub fn name(&self) -> &str {
-        self.name.as_deref().unwrap_or(DEFAULT_NAME)
+        self.nats_client_name.as_deref().unwrap_or(DEFAULT_NAME)
     }
 
     /// Returns the server URLs as a vector (splits comma-separated URLs).
     pub fn servers(&self) -> Vec<&str> {
-        self.url.split(',').map(str::trim).collect()
+        self.nats_url.split(',').map(str::trim).collect()
     }
 
     /// Returns the connection timeout as a Duration, if set.
     #[inline]
     pub fn connect_timeout(&self) -> Option<Duration> {
-        self.connect_timeout_secs.map(Duration::from_secs)
+        self.nats_connect_timeout_secs.map(Duration::from_secs)
     }
 
     /// Returns the request timeout as a Duration, if set.
     #[inline]
     pub fn request_timeout(&self) -> Option<Duration> {
-        self.request_timeout_secs.map(Duration::from_secs)
+        self.nats_request_timeout_secs.map(Duration::from_secs)
     }
 
     /// Returns the reconnect delay as a Duration.
     #[inline]
     pub fn reconnect_delay(&self) -> Duration {
-        Duration::from_secs(
-            self.reconnect_delay_secs
-                .unwrap_or(DEFAULT_RECONNECT_DELAY_SECS),
-        )
+        Duration::from_secs(DEFAULT_RECONNECT_DELAY_SECS)
     }
 
     /// Returns the ping interval as a Duration.
     #[inline]
     pub fn ping_interval(&self) -> Duration {
-        Duration::from_secs(
-            self.ping_interval_secs
-                .unwrap_or(DEFAULT_PING_INTERVAL_SECS),
-        )
+        Duration::from_secs(DEFAULT_PING_INTERVAL_SECS)
     }
 
     /// Returns the max reconnects as Option (0 means unlimited).
     #[inline]
     pub fn max_reconnects_option(&self) -> Option<usize> {
-        let max = self.max_reconnects.unwrap_or(DEFAULT_MAX_RECONNECTS);
+        let max = self.nats_max_reconnects.unwrap_or(DEFAULT_MAX_RECONNECTS);
         if max == 0 { None } else { Some(max) }
     }
 
     /// Set server URL(s).
     #[must_use]
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
-        self.url = url.into();
+        self.nats_url = url.into();
         self
     }
 
     /// Set the authentication token.
     #[must_use]
     pub fn with_token(mut self, token: impl Into<String>) -> Self {
-        self.token = token.into();
+        self.nats_token = token.into();
         self
     }
 
     /// Set the client connection name.
     #[must_use]
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
+        self.nats_client_name = Some(name.into());
         self
     }
 
     /// Set the connection timeout in seconds.
     #[must_use]
     pub fn with_connect_timeout_secs(mut self, secs: u64) -> Self {
-        self.connect_timeout_secs = Some(secs);
+        self.nats_connect_timeout_secs = Some(secs);
         self
     }
 
     /// Set the request timeout in seconds.
     #[must_use]
     pub fn with_request_timeout_secs(mut self, secs: u64) -> Self {
-        self.request_timeout_secs = Some(secs);
+        self.nats_request_timeout_secs = Some(secs);
         self
     }
 
     /// Set maximum reconnection attempts (0 for unlimited).
     #[must_use]
     pub fn with_max_reconnects(mut self, max_reconnects: usize) -> Self {
-        self.max_reconnects = Some(max_reconnects);
-        self
-    }
-
-    /// Set the delay between reconnection attempts in seconds.
-    #[must_use]
-    pub fn with_reconnect_delay_secs(mut self, secs: u64) -> Self {
-        self.reconnect_delay_secs = Some(secs);
-        self
-    }
-
-    /// Set the ping interval in seconds.
-    #[must_use]
-    pub fn with_ping_interval_secs(mut self, secs: u64) -> Self {
-        self.ping_interval_secs = Some(secs);
+        self.nats_max_reconnects = Some(max_reconnects);
         self
     }
 
@@ -233,7 +167,7 @@ impl NatsConfig {
             }
         }
 
-        if self.token.is_empty() {
+        if self.nats_token.is_empty() {
             return Err("Token cannot be empty".to_string());
         }
 
@@ -249,7 +183,7 @@ mod tests {
     fn test_new_config() {
         let config = NatsConfig::new("nats://localhost:4222", "my-token");
         assert_eq!(config.servers(), vec!["nats://localhost:4222"]);
-        assert_eq!(config.token, "my-token");
+        assert_eq!(config.nats_token, "my-token");
         assert_eq!(config.name(), "nvisy-nats");
         assert_eq!(config.connect_timeout(), None);
         assert_eq!(config.request_timeout(), None);

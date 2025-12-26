@@ -50,7 +50,7 @@ dependencies = [
  "cfg-if",
  "http",
  "indexmap 2.12.1",
- "schemars",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "serde_qs",
@@ -2604,7 +2604,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "jiff",
- "schemars",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -2625,7 +2625,7 @@ dependencies = [
  "futures",
  "hex",
  "jiff",
- "schemars",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "sha2",
@@ -2642,16 +2642,17 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "clap",
  "derive_builder",
  "futures",
+ "jiff",
  "nvisy-core",
- "reqwest",
+ "ollama-rs",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
- "url",
  "uuid",
 ]
 
@@ -2660,6 +2661,7 @@ name = "nvisy-olmocr2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64",
  "bytes",
  "chrono",
@@ -2668,6 +2670,7 @@ dependencies = [
  "futures",
  "jiff",
  "mime",
+ "nvisy-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -2693,7 +2696,7 @@ dependencies = [
  "ipnet",
  "jiff",
  "jiff-diesel",
- "schemars",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "strum",
@@ -2714,7 +2717,7 @@ dependencies = [
  "futures",
  "jiff",
  "qdrant-client",
- "schemars",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -2751,7 +2754,7 @@ dependencies = [
  "nvisy-test",
  "rand 0.10.0-rc.5",
  "regex",
- "schemars",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "sha2",
@@ -2778,6 +2781,7 @@ dependencies = [
  "async-trait",
  "clap",
  "futures",
+ "jiff",
  "nvisy-core",
  "serde",
 ]
@@ -2789,6 +2793,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "ollama-rs"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db28711700d24a94bf78ce6a9df3bf55dc07c1bf68376574706ce2653ee3f5fc"
+dependencies = [
+ "async-stream",
+ "log",
+ "reqwest",
+ "schemars 1.2.0",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "thiserror 2.0.17",
+ "url",
 ]
 
 [[package]]
@@ -3699,10 +3720,23 @@ dependencies = [
  "indexmap 2.12.1",
  "jiff",
  "ref-cast",
- "schemars_derive",
+ "schemars_derive 0.9.0",
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "schemars"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54e910108742c57a770f492731f99be216a52fadd361b06c8fb59d74ccc267d2"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive 1.2.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3710,6 +3744,18 @@ name = "schemars_derive"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5016d94c77c6d32f0b8e08b781f7dc8a90c2007d4e77472cc2807bc10a8438fe"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4908ad288c5035a8eb12cfdf0d49270def0a268ee162b75eeee0f85d155a7c45"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3848,6 +3894,7 @@ version = "1.0.147"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6af14725505314343e673e9ecb7cd7e8a36aa9791eb936235a3567cc31447ae4"
 dependencies = [
+ "indexmap 2.12.1",
  "itoa",
  "memchr",
  "serde",
@@ -4065,6 +4112,12 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stringprep"

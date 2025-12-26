@@ -29,7 +29,7 @@ schema = ["dep:schemars"]
 
 [dependencies]
 # Async runtime
-tokio = { workspace = true, features = ["macros", "time"] }
+tokio = { workspace = true, features = ["macros", "time", "sync"] }
 futures-util = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 

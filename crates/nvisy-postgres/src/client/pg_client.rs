@@ -81,10 +81,10 @@ impl PgClient {
         let mut manager_config = ManagerConfig::default();
         manager_config.custom_setup = Box::new(custom_hooks::setup_callback);
         let manager =
-            AsyncDieselConnectionManager::new_with_config(&config.url, manager_config);
+            AsyncDieselConnectionManager::new_with_config(&config.postgres_url, manager_config);
 
         let pool = Pool::builder(manager)
-            .max_size(config.max_connections as usize)
+            .max_size(config.postgres_max_connections as usize)
             .wait_timeout(config.connection_timeout())
             .create_timeout(config.connection_timeout())
             .recycle_timeout(config.idle_timeout())
@@ -156,9 +156,9 @@ impl PgClient {
 
         tracing::info!(
             target: TRACING_TARGET_CONNECTION,
-            max_connections = this.inner.config.max_connections,
-            connection_timeout_secs = this.inner.config.connection_timeout_secs,
-            idle_timeout_secs = this.inner.config.idle_timeout_secs,
+            max_connections = this.inner.config.postgres_max_connections,
+            connection_timeout_secs = this.inner.config.postgres_connection_timeout_secs,
+            idle_timeout_secs = this.inner.config.postgres_idle_timeout_secs,
             "Database client initialized successfully"
         );
 
@@ -227,15 +227,15 @@ impl std::fmt::Debug for PgClient {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")
             .field("database_url", &self.inner.config.database_url_masked())
-            .field("pool_max_connections", &self.inner.config.max_connections)
+            .field("pool_max_connections", &self.inner.config.postgres_max_connections)
             .field("pool_current_size", &pool_status.size)
             .field("pool_available", &pool_status.available)
             .field("pool_waiting", &pool_status.waiting)
             .field(
                 "connection_timeout_secs",
-                &self.inner.config.connection_timeout_secs,
+                &self.inner.config.postgres_connection_timeout_secs,
             )
-            .field("idle_timeout_secs", &self.inner.config.idle_timeout_secs)
+            .field("idle_timeout_secs", &self.inner.config.postgres_idle_timeout_secs)
             .finish()
     }
 }

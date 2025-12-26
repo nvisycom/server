@@ -1,9 +1,12 @@
 //! Mock OCR provider for testing.
 
+use std::time::Instant;
+
 #[cfg(feature = "config")]
 use clap::Args;
+use jiff::SignedDuration;
 use nvisy_core::ocr::{BoxedStream, OcrProvider, Request, Response};
-use nvisy_core::{Result, ServiceHealth};
+use nvisy_core::{Result, ServiceHealth, SharedContext, UsageStats};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the mock OCR provider.
@@ -35,12 +38,28 @@ where
     Req: Send + Sync + 'static,
     Resp: Send + Sync + Default + 'static,
 {
-    async fn process_ocr(&self, request: Request<Req>) -> Result<Response<Resp>> {
-        Ok(Response::new(request.request_id, Resp::default()))
+    async fn process_ocr(
+        &self,
+        context: &SharedContext,
+        request: Request<Req>,
+    ) -> Result<Response<Resp>> {
+        let start = Instant::now();
+
+        let response = Response::new(request.request_id, Resp::default());
+
+        // Record usage stats
+        let processing_time = SignedDuration::try_from(start.elapsed()).unwrap_or_default();
+        let runs = 1u32; // Mock assumes 1 page per request
+        context
+            .record(UsageStats::success(0, runs, processing_time))
+            .await;
+
+        Ok(response)
     }
 
     async fn process_ocr_stream(
         &self,
+        _context: &SharedContext,
         _request: Request<Req>,
     ) -> Result<BoxedStream<Response<Resp>>> {
         Ok(Box::new(futures::stream::empty()))

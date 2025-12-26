@@ -60,17 +60,17 @@ impl QdrantClient {
     /// # Errors
     ///
     /// Returns an error if the configuration is invalid or client creation fails.
-    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(url = %config.url))]
+    #[tracing::instrument(skip_all, target = TRACING_TARGET_CLIENT, fields(url = %config.qdrant_url))]
     pub fn new(config: QdrantConfig) -> Result<Self> {
         config.validate()?;
 
         tracing::info!(
             target: TRACING_TARGET_CLIENT,
-            url = %config.url,
+            url = %config.qdrant_url,
             "Creating new Qdrant client"
         );
 
-        let mut builder = Qdrant::from_url(&config.url).api_key(config.api_key.as_str());
+        let mut builder = Qdrant::from_url(&config.qdrant_url).api_key(config.qdrant_api_key.as_str());
 
         if let Some(connect_timeout) = config.connect_timeout() {
             builder.set_connect_timeout(connect_timeout);
@@ -80,7 +80,7 @@ impl QdrantClient {
             builder.set_timeout(timeout);
         }
 
-        if let Some(keep_alive) = config.keep_alive {
+        if let Some(keep_alive) = config.qdrant_keep_alive {
             builder.set_keep_alive_while_idle(keep_alive);
         }
 
@@ -88,7 +88,7 @@ impl QdrantClient {
             tracing::error!(
                 target: TRACING_TARGET_CLIENT,
                 error = %e,
-                url = %config.url,
+                url = %config.qdrant_url,
                 "Failed to create Qdrant client"
             );
             Error::connection().with_source(Box::new(e))
@@ -98,7 +98,7 @@ impl QdrantClient {
 
         tracing::info!(
             target: TRACING_TARGET_CLIENT,
-            url = %inner.config.url,
+            url = %inner.config.qdrant_url,
             "Qdrant client created successfully"
         );
 

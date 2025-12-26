@@ -4,6 +4,7 @@
 //! kinds of data including text, documents, and chat conversations. This type
 //! is used across embedding requests, messages, and other content-based operations.
 
+use derive_more::From;
 use serde::{Deserialize, Serialize};
 
 use super::{Chat, Document};
@@ -33,20 +34,23 @@ use super::{Chat, Document};
 /// let content = Content::document(doc);
 /// assert!(content.is_document());
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, From)]
 #[serde(tag = "type", content = "content")]
 pub enum Content {
     /// Plain text content.
     #[serde(rename = "text")]
-    Text { text: String },
+    #[from]
+    Text(String),
 
     /// Document content with metadata and binary data.
     #[serde(rename = "document")]
-    Document { document: Document },
+    #[from]
+    Document(Document),
 
     /// Chat conversation content.
     #[serde(rename = "chat")]
-    Chat { chat: Chat },
+    #[from]
+    Chat(Chat),
 }
 
 impl Content {
@@ -64,7 +68,7 @@ impl Content {
     /// let content = Content::text("Hello, world!");
     /// ```
     pub fn text(text: impl Into<String>) -> Self {
-        Self::Text { text: text.into() }
+        Self::Text(text.into())
     }
 
     /// Creates document content.
@@ -83,7 +87,7 @@ impl Content {
     /// let content = Content::document(doc);
     /// ```
     pub fn document(document: Document) -> Self {
-        Self::Document { document }
+        Self::Document(document)
     }
 
     /// Creates chat content.
@@ -101,7 +105,7 @@ impl Content {
     /// let content = Content::chat(chat);
     /// ```
     pub fn chat(chat: Chat) -> Self {
-        Self::Chat { chat }
+        Self::Chat(chat)
     }
 
     /// Returns `true` if this content is text.
@@ -115,7 +119,7 @@ impl Content {
     /// assert!(content.is_text());
     /// ```
     pub fn is_text(&self) -> bool {
-        matches!(self, Self::Text { .. })
+        matches!(self, Self::Text(_))
     }
 
     /// Returns `true` if this content is a document.
@@ -131,7 +135,7 @@ impl Content {
     /// assert!(content.is_document());
     /// ```
     pub fn is_document(&self) -> bool {
-        matches!(self, Self::Document { .. })
+        matches!(self, Self::Document(_))
     }
 
     /// Returns `true` if this content is a chat.
@@ -146,7 +150,7 @@ impl Content {
     /// assert!(content.is_chat());
     /// ```
     pub fn is_chat(&self) -> bool {
-        matches!(self, Self::Chat { .. })
+        matches!(self, Self::Chat(_))
     }
 
     /// Returns the text content if this is text content.
@@ -161,7 +165,7 @@ impl Content {
     /// ```
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Self::Text { text } => Some(text),
+            Self::Text(text) => Some(text),
             _ => None,
         }
     }
@@ -180,7 +184,7 @@ impl Content {
     /// ```
     pub fn as_document(&self) -> Option<&Document> {
         match self {
-            Self::Document { document } => Some(document),
+            Self::Document(document) => Some(document),
             _ => None,
         }
     }
@@ -198,7 +202,7 @@ impl Content {
     /// ```
     pub fn as_chat(&self) -> Option<&Chat> {
         match self {
-            Self::Chat { chat } => Some(chat),
+            Self::Chat(chat) => Some(chat),
             _ => None,
         }
     }
@@ -215,7 +219,7 @@ impl Content {
     /// ```
     pub fn into_text(self) -> Option<String> {
         match self {
-            Self::Text { text } => Some(text),
+            Self::Text(text) => Some(text),
             _ => None,
         }
     }
@@ -234,7 +238,7 @@ impl Content {
     /// ```
     pub fn into_document(self) -> Option<Document> {
         match self {
-            Self::Document { document } => Some(document),
+            Self::Document(document) => Some(document),
             _ => None,
         }
     }
@@ -252,7 +256,7 @@ impl Content {
     /// ```
     pub fn into_chat(self) -> Option<Chat> {
         match self {
-            Self::Chat { chat } => Some(chat),
+            Self::Chat(chat) => Some(chat),
             _ => None,
         }
     }
@@ -273,11 +277,9 @@ impl Content {
     /// ```
     pub fn estimated_size(&self) -> usize {
         match self {
-            Self::Text { text } => text.len(),
-            Self::Document { document } => {
-                document.data().len() + document.estimated_metadata_size()
-            }
-            Self::Chat { chat } => chat.estimated_size(),
+            Self::Text(text) => text.len(),
+            Self::Document(document) => document.data().len() + document.estimated_metadata_size(),
+            Self::Chat(chat) => chat.estimated_size(),
         }
     }
 
@@ -297,48 +299,30 @@ impl Content {
     /// ```
     pub fn display_summary(&self) -> String {
         match self {
-            Self::Text { text } => {
+            Self::Text(text) => {
                 if text.len() <= 50 {
                     format!("text({})", text)
                 } else {
                     format!("text({}...)", &text[..47])
                 }
             }
-            Self::Document { document } => {
+            Self::Document(document) => {
                 format!(
                     "document({}, {} bytes)",
                     document.content_type().unwrap_or("unknown"),
                     document.data().len()
                 )
             }
-            Self::Chat { chat } => {
+            Self::Chat(chat) => {
                 format!("chat({} messages)", chat.message_count())
             }
         }
     }
 }
 
-impl From<String> for Content {
-    fn from(text: String) -> Self {
-        Self::text(text)
-    }
-}
-
 impl From<&str> for Content {
     fn from(text: &str) -> Self {
-        Self::text(text)
-    }
-}
-
-impl From<Document> for Content {
-    fn from(document: Document) -> Self {
-        Self::document(document)
-    }
-}
-
-impl From<Chat> for Content {
-    fn from(chat: Chat) -> Self {
-        Self::chat(chat)
+        Self::Text(text.to_string())
     }
 }
 

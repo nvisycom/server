@@ -37,5 +37,8 @@ async-trait = { workspace = true, features = [] }
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 
+# Time handling
+jiff = { workspace = true, features = [] }
+
 # CLI (optional)
 clap = { workspace = true, features = ["derive", "env"], optional = true }

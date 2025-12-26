@@ -104,7 +104,9 @@ where
 #[cfg_attr(feature = "config", derive(Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct CorsConfig {
-    /// List of allowed CORS origins. If empty, defaults to localhost origins for development.
+    /// List of allowed CORS origins.
+    ///
+    /// If empty, defaults to localhost origins for development.
     #[cfg_attr(
         feature = "config",
         arg(long, env = "CORS_ORIGINS", value_delimiter = ',')

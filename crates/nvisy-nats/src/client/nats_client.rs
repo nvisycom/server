@@ -62,12 +62,12 @@ impl NatsClient {
     /// Create a new NATS client and connect
     #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
-        tracing::info!("Connecting to NATS servers: {}", config.url);
+        tracing::info!("Connecting to NATS servers: {}", config.nats_url);
 
         let mut connect_opts = ConnectOptions::new()
             .name(config.name())
             .ping_interval(config.ping_interval())
-            .token(config.token.clone());
+            .token(config.nats_token.clone());
 
         // Set connection timeout if specified
         if let Some(timeout) = config.connect_timeout() {
@@ -91,7 +91,7 @@ impl NatsClient {
         let connect_timeout = config.connect_timeout().unwrap_or(Duration::from_secs(30));
         let client = timeout(
             connect_timeout,
-            async_nats::connect_with_options(&config.url, connect_opts),
+            async_nats::connect_with_options(&config.nats_url, connect_opts),
         )
         .await
         .map_err(|_| Error::Timeout {

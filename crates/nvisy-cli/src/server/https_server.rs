@@ -19,8 +19,7 @@ pub async fn serve_https(
     cert_path: impl AsRef<Path>,
     key_path: impl AsRef<Path>,
 ) -> ServerResult<()> {
-    let service_name = "https-server";
-    let server_addr = server_config.server_addr();
+    let server_addr = server_config.socket_addr();
     let shutdown_timeout = server_config.shutdown_timeout();
     let cert_path = cert_path.as_ref();
     let key_path = key_path.as_ref();
@@ -28,7 +27,7 @@ pub async fn serve_https(
     // Pre-validate TLS files before starting lifecycle
     validate_tls_files(cert_path, key_path)?;
 
-    serve_with_shutdown(&server_config, service_name, move || async move {
+    serve_with_shutdown(&server_config, move || async move {
         let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
             .await
             .map_err(|e| {
