@@ -321,12 +321,10 @@ impl ProjectTemplateRepository for PgClient {
         let search_pattern = format!("%{}%", search_term);
 
         let mut query = project_templates
-            .filter(
-                diesel::BoolExpressionMethods::or(
-                    display_name.ilike(&search_pattern),
-                    description.ilike(&search_pattern)
-                ),
-            )
+            .filter(diesel::BoolExpressionMethods::or(
+                display_name.ilike(&search_pattern),
+                description.ilike(&search_pattern),
+            ))
             .filter(deleted_at.is_null())
             .into_boxed();
 

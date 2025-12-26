@@ -16,44 +16,53 @@ use crate::{PgClient, PgError, PgResult, schema};
 /// Handles comment lifecycle management including creation, threading, replies,
 /// and mention tracking.
 pub trait DocumentCommentRepository {
+    /// Creates a new document comment.
     fn create_comment(
         &self,
         new_comment: NewDocumentComment,
     ) -> impl Future<Output = PgResult<DocumentComment>> + Send;
 
+    /// Finds a comment by its unique identifier.
     fn find_comment_by_id(
         &self,
         comment_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentComment>>> + Send;
 
+    /// Finds all comments for a specific file.
     fn find_comments_by_file(
         &self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
+    /// Finds all comments created by a specific account.
     fn find_comments_by_account(
         &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
+    /// Finds comments where an account was mentioned or replied to.
     fn find_comments_mentioning_account(
         &self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
+    /// Updates a comment with new content and metadata.
     fn update_comment(
         &self,
         comment_id: Uuid,
         updates: UpdateDocumentComment,
     ) -> impl Future<Output = PgResult<DocumentComment>> + Send;
 
+    /// Soft deletes a comment by setting the deletion timestamp.
     fn delete_comment(&self, comment_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
+    /// Counts total active comments for a file.
     fn count_comments_by_file(&self, file_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
 
+    /// Checks if an account owns a specific comment.
     fn check_comment_ownership(
         &self,
         comment_id: Uuid,
@@ -77,12 +86,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comment)
     }
 
-    /// Finds a comment by its unique identifier.
-    ///
-    /// Retrieves a specific comment using its UUID, automatically excluding
-    /// soft-deleted comments. This is the primary method for accessing
-    /// individual comments for viewing, editing, moderation, and threading
-    /// operations within collaborative workflows.
     async fn find_comment_by_id(&self, comment_id: Uuid) -> PgResult<Option<DocumentComment>> {
         let mut conn = self.get_connection().await?;
 
@@ -100,10 +103,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comment)
     }
 
-    /// Finds all comments associated with a specific file.
-    ///
-    /// Retrieves comments targeted at a specific file, enabling file-specific
-    /// discussions and focused feedback on particular content elements.
     async fn find_comments_by_file(
         &self,
         file_id: Uuid,
@@ -127,10 +126,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comments)
     }
 
-    /// Finds all comments created by a specific account.
-    ///
-    /// Retrieves a user's complete comment history, enabling user activity
-    /// tracking, contribution analysis, and personal comment management.
     async fn find_comments_by_account(
         &self,
         account_id: Uuid,
@@ -154,10 +149,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comments)
     }
 
-    /// Finds all comments where a specific account was mentioned or replied to.
-    ///
-    /// Retrieves comments that directly reference or respond to a specific
-    /// account, enabling mention tracking and notification workflows.
     async fn find_comments_mentioning_account(
         &self,
         account_id: Uuid,
@@ -181,10 +172,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comments)
     }
 
-    /// Updates a comment with new content and metadata.
-    ///
-    /// Applies partial updates to an existing comment using the provided
-    /// update structure. Only fields set to `Some(value)` will be modified.
     async fn update_comment(
         &self,
         comment_id: Uuid,
@@ -204,10 +191,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(comment)
     }
 
-    /// Soft deletes a comment by setting the deletion timestamp.
-    ///
-    /// Marks a comment as deleted without permanently removing it from the
-    /// database. This preserves discussion context for audit purposes.
     async fn delete_comment(&self, comment_id: Uuid) -> PgResult<()> {
         let mut conn = self.get_connection().await?;
 
@@ -222,10 +205,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(())
     }
 
-    /// Counts total active comments for a specific file.
-    ///
-    /// Calculates the total number of active comments associated with a
-    /// file, providing discussion activity metrics and engagement indicators.
     async fn count_comments_by_file(&self, file_id: Uuid) -> PgResult<i64> {
         let mut conn = self.get_connection().await?;
 
@@ -242,10 +221,6 @@ impl DocumentCommentRepository for PgClient {
         Ok(count)
     }
 
-    /// Checks if an account owns a specific comment.
-    ///
-    /// Validates whether a user account is the original creator of a comment,
-    /// supporting comment editing permissions and access control.
     async fn check_comment_ownership(&self, comment_id: Uuid, account_id: Uuid) -> PgResult<bool> {
         let mut conn = self.get_connection().await?;
 

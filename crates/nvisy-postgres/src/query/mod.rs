@@ -10,40 +10,40 @@
 //! to provide consistent, bounded pagination across the system.
 
 pub mod account;
-pub mod account_action_tokens;
-pub mod account_api_tokens;
-pub mod account_notifications;
+pub mod account_action_token;
+pub mod account_api_token;
+pub mod account_notification;
 
 pub mod document;
-pub mod document_annotations;
-pub mod document_comments;
-pub mod document_files;
+pub mod document_annotation;
+pub mod document_comment;
+pub mod document_file;
 
 pub mod project;
 pub mod project_activity;
 pub mod project_integration;
 pub mod project_invite;
 pub mod project_member;
-pub mod project_pipelines;
-pub mod project_runs;
-pub mod project_templates;
-pub mod project_webhooks;
+pub mod project_pipeline;
+pub mod project_run;
+pub mod project_template;
+pub mod project_webhook;
 
 pub use account::AccountRepository;
-pub use account_action_tokens::AccountActionTokenRepository;
-pub use account_api_tokens::AccountApiTokenRepository;
-pub use account_notifications::AccountNotificationRepository;
+pub use account_action_token::AccountActionTokenRepository;
+pub use account_api_token::AccountApiTokenRepository;
+pub use account_notification::AccountNotificationRepository;
 pub use document::DocumentRepository;
-pub use document_comments::DocumentCommentRepository;
-pub use document_files::DocumentFileRepository;
+pub use document_comment::DocumentCommentRepository;
+pub use document_file::DocumentFileRepository;
 pub use project::ProjectRepository;
 pub use project_activity::ProjectActivityRepository;
 pub use project_integration::ProjectIntegrationRepository;
 pub use project_invite::ProjectInviteRepository;
 pub use project_member::ProjectMemberRepository;
-pub use project_pipelines::ProjectPipelineRepository;
-pub use project_templates::ProjectTemplateRepository;
-pub use project_webhooks::ProjectWebhookRepository;
+pub use project_pipeline::ProjectPipelineRepository;
+pub use project_template::ProjectTemplateRepository;
+pub use project_webhook::ProjectWebhookRepository;
 use serde::{Deserialize, Serialize};
 
 /// Pagination parameters for database queries.
