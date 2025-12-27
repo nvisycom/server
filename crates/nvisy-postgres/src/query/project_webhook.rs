@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectWebhook, ProjectWebhook, UpdateProjectWebhook};
 use crate::types::WebhookStatus;
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for project webhook database operations.
 ///
@@ -19,91 +20,90 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait ProjectWebhookRepository {
     /// Creates a new project webhook.
     fn create_project_webhook(
-        &self,
+        &mut self,
         new_webhook: NewProjectWebhook,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Finds a project webhook by ID.
     fn find_project_webhook_by_id(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<ProjectWebhook>>> + Send;
 
     /// Lists all webhooks for a project.
     fn list_project_webhooks(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectWebhook>>> + Send;
 
     /// Lists active webhooks for a project.
     fn list_active_project_webhooks(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectWebhook>>> + Send;
 
     /// Finds webhooks subscribed to a specific event.
     fn find_webhooks_for_event(
-        &self,
+        &mut self,
         project_id: Uuid,
         event: &str,
     ) -> impl Future<Output = PgResult<Vec<ProjectWebhook>>> + Send;
 
     /// Updates a project webhook.
     fn update_project_webhook(
-        &self,
+        &mut self,
         webhook_id: Uuid,
         changes: UpdateProjectWebhook,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Soft deletes a project webhook.
-    fn delete_project_webhook(&self, webhook_id: Uuid)
+    fn delete_project_webhook(&mut self, webhook_id: Uuid)
     -> impl Future<Output = PgResult<()>> + Send;
 
     /// Records a successful webhook delivery.
     fn record_webhook_success(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Records a failed webhook delivery.
     fn record_webhook_failure(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Resets the failure count for a webhook.
     fn reset_webhook_failures(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Pauses a webhook.
     fn pause_webhook(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Resumes a paused webhook.
     fn resume_webhook(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 }
 
-impl ProjectWebhookRepository for PgClient {
+impl ProjectWebhookRepository for PgConnection {
     async fn create_project_webhook(
-        &self,
+        &mut self,
         new_webhook: NewProjectWebhook,
     ) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks;
 
-        let mut conn = self.get_connection().await?;
         let webhook = diesel::insert_into(project_webhooks::table)
             .values(&new_webhook)
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
@@ -111,17 +111,16 @@ impl ProjectWebhookRepository for PgClient {
     }
 
     async fn find_project_webhook_by_id(
-        &self,
+        &mut self,
         webhook_id: Uuid,
     ) -> PgResult<Option<ProjectWebhook>> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhook = project_webhooks
             .filter(id.eq(webhook_id))
             .filter(deleted_at.is_null())
             .select(ProjectWebhook::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -130,13 +129,12 @@ impl ProjectWebhookRepository for PgClient {
     }
 
     async fn list_project_webhooks(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectWebhook>> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhooks = project_webhooks
             .filter(project_id.eq(proj_id))
             .filter(deleted_at.is_null())
@@ -144,7 +142,7 @@ impl ProjectWebhookRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -152,13 +150,12 @@ impl ProjectWebhookRepository for PgClient {
     }
 
     async fn list_active_project_webhooks(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectWebhook>> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhooks = project_webhooks
             .filter(project_id.eq(proj_id))
             .filter(status.eq(WebhookStatus::Active))
@@ -167,7 +164,7 @@ impl ProjectWebhookRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -175,20 +172,19 @@ impl ProjectWebhookRepository for PgClient {
     }
 
     async fn find_webhooks_for_event(
-        &self,
+        &mut self,
         proj_id: Uuid,
         event: &str,
     ) -> PgResult<Vec<ProjectWebhook>> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhooks = project_webhooks
             .filter(project_id.eq(proj_id))
             .filter(status.eq(WebhookStatus::Active))
             .filter(events.contains(vec![Some(event.to_string())]))
             .filter(deleted_at.is_null())
             .select(ProjectWebhook::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -196,43 +192,40 @@ impl ProjectWebhookRepository for PgClient {
     }
 
     async fn update_project_webhook(
-        &self,
+        &mut self,
         webhook_id: Uuid,
         changes: UpdateProjectWebhook,
     ) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhook = diesel::update(project_webhooks)
             .filter(id.eq(webhook_id))
             .set(&changes)
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(webhook)
     }
 
-    async fn delete_project_webhook(&self, webhook_id: Uuid) -> PgResult<()> {
+    async fn delete_project_webhook(&mut self, webhook_id: Uuid) -> PgResult<()> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         diesel::update(project_webhooks)
             .filter(id.eq(webhook_id))
             .set(deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(())
     }
 
-    async fn record_webhook_success(&self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
+    async fn record_webhook_success(&mut self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks::dsl::*;
 
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
-        let mut conn = self.get_connection().await?;
         let webhook = diesel::update(project_webhooks)
             .filter(id.eq(webhook_id))
             .set((
@@ -242,24 +235,23 @@ impl ProjectWebhookRepository for PgClient {
                 status.eq(WebhookStatus::Active),
             ))
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(webhook)
     }
 
-    async fn record_webhook_failure(&self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
+    async fn record_webhook_failure(&mut self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks::dsl::*;
 
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
-        let mut conn = self.get_connection().await?;
 
         // First get the current webhook to check failure count
         let current = project_webhooks
             .filter(id.eq(webhook_id))
             .select(ProjectWebhook::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .map_err(PgError::from)?;
 
@@ -279,52 +271,49 @@ impl ProjectWebhookRepository for PgClient {
                 status.eq(new_status),
             ))
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(webhook)
     }
 
-    async fn reset_webhook_failures(&self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
+    async fn reset_webhook_failures(&mut self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhook = diesel::update(project_webhooks)
             .filter(id.eq(webhook_id))
             .set((failure_count.eq(0), status.eq(WebhookStatus::Active)))
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(webhook)
     }
 
-    async fn pause_webhook(&self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
+    async fn pause_webhook(&mut self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhook = diesel::update(project_webhooks)
             .filter(id.eq(webhook_id))
             .set(status.eq(WebhookStatus::Paused))
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(webhook)
     }
 
-    async fn resume_webhook(&self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
+    async fn resume_webhook(&mut self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {
         use schema::project_webhooks::dsl::*;
 
-        let mut conn = self.get_connection().await?;
         let webhook = diesel::update(project_webhooks)
             .filter(id.eq(webhook_id))
             .set(status.eq(WebhookStatus::Active))
             .returning(ProjectWebhook::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 

@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for account API token database operations.
 ///
@@ -18,32 +19,32 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait AccountApiTokenRepository {
     /// Creates a new API token for programmatic access.
     fn create_token(
-        &self,
+        &mut self,
         new_token: NewAccountApiToken,
     ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
 
     /// Finds an active token by its access token sequence.
     fn find_token_by_access_token(
-        &self,
+        &mut self,
         access_token: Uuid,
     ) -> impl Future<Output = PgResult<Option<AccountApiToken>>> + Send;
 
     /// Finds an active token by its refresh token sequence.
     fn find_token_by_refresh_token(
-        &self,
+        &mut self,
         refresh_token: Uuid,
     ) -> impl Future<Output = PgResult<Option<AccountApiToken>>> + Send;
 
     /// Updates a token's properties with new values.
     fn update_token(
-        &self,
+        &mut self,
         access_token: Uuid,
         updates: UpdateAccountApiToken,
     ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
 
     /// Updates the token's last used timestamp.
     fn touch_token(
-        &self,
+        &mut self,
         access_token: Uuid,
     ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
 
@@ -51,31 +52,31 @@ pub trait AccountApiTokenRepository {
     ///
     /// Creates new UUIDs for both sequences and extends expiration by 7 days.
     fn refresh_token(
-        &self,
+        &mut self,
         refresh_token: Uuid,
     ) -> impl Future<Output = PgResult<AccountApiToken>> + Send;
 
     /// Soft deletes a token. Returns true if deleted, false if not found.
-    fn delete_token(&self, access_token: Uuid) -> impl Future<Output = PgResult<bool>> + Send;
+    fn delete_token(&mut self, access_token: Uuid) -> impl Future<Output = PgResult<bool>> + Send;
 
     /// Soft deletes all active tokens for an account.
     ///
     /// Returns the count of deleted tokens.
     fn delete_all_tokens_for_account(
-        &self,
+        &mut self,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<i64>> + Send;
 
     /// Lists active, unexpired tokens for an account.
     fn list_account_tokens(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
 
     /// Lists all non-deleted tokens for an account including expired ones.
     fn list_all_account_tokens(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
@@ -83,28 +84,26 @@ pub trait AccountApiTokenRepository {
     /// Soft-deletes all expired tokens system-wide.
     ///
     /// Returns the count of affected tokens.
-    fn cleanup_expired_tokens(&self) -> impl Future<Output = PgResult<i64>> + Send;
+    fn cleanup_expired_tokens(&mut self) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
-impl AccountApiTokenRepository for PgClient {
-    async fn create_token(&self, new_token: NewAccountApiToken) -> PgResult<AccountApiToken> {
-        let mut conn = self.get_connection().await?;
+impl AccountApiTokenRepository for PgConnection {
+    async fn create_token(&mut self, new_token: NewAccountApiToken) -> PgResult<AccountApiToken> {
 
         use schema::account_api_tokens;
 
         diesel::insert_into(account_api_tokens::table)
             .values(&new_token)
             .returning(AccountApiToken::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)
     }
 
     async fn find_token_by_access_token(
-        &self,
+        &mut self,
         access_token: Uuid,
     ) -> PgResult<Option<AccountApiToken>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -112,17 +111,16 @@ impl AccountApiTokenRepository for PgClient {
             .filter(dsl::access_seq.eq(access_token))
             .filter(dsl::deleted_at.is_null())
             .select(AccountApiToken::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)
     }
 
     async fn find_token_by_refresh_token(
-        &self,
+        &mut self,
         refresh_token: Uuid,
     ) -> PgResult<Option<AccountApiToken>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -130,30 +128,29 @@ impl AccountApiTokenRepository for PgClient {
             .filter(dsl::refresh_seq.eq(refresh_token))
             .filter(dsl::deleted_at.is_null())
             .select(AccountApiToken::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)
     }
 
     async fn update_token(
-        &self,
+        &mut self,
         access_token: Uuid,
         updates: UpdateAccountApiToken,
     ) -> PgResult<AccountApiToken> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(account_api_tokens::table.filter(dsl::access_seq.eq(access_token)))
             .set(&updates)
             .returning(AccountApiToken::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn touch_token(&self, access_token: Uuid) -> PgResult<AccountApiToken> {
+    async fn touch_token(&mut self, access_token: Uuid) -> PgResult<AccountApiToken> {
         self.update_token(
             access_token,
             UpdateAccountApiToken {
@@ -164,8 +161,7 @@ impl AccountApiTokenRepository for PgClient {
         .await
     }
 
-    async fn refresh_token(&self, refresh_token: Uuid) -> PgResult<AccountApiToken> {
-        let mut conn = self.get_connection().await?;
+    async fn refresh_token(&mut self, refresh_token: Uuid) -> PgResult<AccountApiToken> {
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -181,28 +177,26 @@ impl AccountApiTokenRepository for PgClient {
                 dsl::last_used_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
             ))
             .returning(AccountApiToken::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn delete_token(&self, access_token: Uuid) -> PgResult<bool> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_token(&mut self, access_token: Uuid) -> PgResult<bool> {
 
         use schema::account_api_tokens::{self, dsl};
 
         let rows_affected =
             diesel::update(account_api_tokens::table.filter(dsl::access_seq.eq(access_token)))
                 .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-                .execute(&mut conn)
+                .execute(self)
                 .await
                 .map_err(PgError::from)?;
 
         Ok(rows_affected > 0)
     }
 
-    async fn delete_all_tokens_for_account(&self, account_id: Uuid) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_all_tokens_for_account(&mut self, account_id: Uuid) -> PgResult<i64> {
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -212,18 +206,17 @@ impl AccountApiTokenRepository for PgClient {
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-        .execute(&mut conn)
+        .execute(self)
         .await
         .map_err(PgError::from)
         .map(|rows| rows as i64)
     }
 
     async fn list_account_tokens(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -235,17 +228,16 @@ impl AccountApiTokenRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountApiToken::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)
     }
 
     async fn list_all_account_tokens(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -256,13 +248,12 @@ impl AccountApiTokenRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountApiToken::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn cleanup_expired_tokens(&self) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
+    async fn cleanup_expired_tokens(&mut self) -> PgResult<i64> {
 
         use schema::account_api_tokens::{self, dsl};
 
@@ -272,7 +263,7 @@ impl AccountApiTokenRepository for PgClient {
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-        .execute(&mut conn)
+        .execute(self)
         .await
         .map_err(PgError::from)
         .map(|rows| rows as i64)

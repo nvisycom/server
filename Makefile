@@ -8,6 +8,9 @@ endif
 # Environment variables.
 EXPOSED_PORT ?= 3000
 
+# PostgreSQL connection URL for diesel CLI.
+POSTGRES_URL ?= postgresql://postgres:postgres@localhost:5432/postgres
+
 # Migration directories and files.
 SCHEMA_OUTPUT = ./crates/nvisy-postgres/src/schema.rs
 MIGRATIONS_IN_DIR = ./migrations
@@ -88,6 +91,10 @@ generate-migrations: ## Regenerates the Postgres migrations and database schema.
 
 .PHONY: clear-migrations
 clear-migrations: ## Reverts all database migrations.
+	$(call make-log,Deleting copied migrations...)
+	@rm -rf $(MIGRATIONS_OUT_DIR)
+	$(call make-log,Copied migrations deleted.)
+
 	$(call make-log,Reverting all migrations...)
 	@while DATABASE_URL=$(POSTGRES_URL) diesel migration list | grep -q "\\[X\\]"; do \
 		$(call shell-log,Reverting migration...); \

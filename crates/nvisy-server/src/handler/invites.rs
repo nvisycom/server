@@ -6,16 +6,14 @@
 //! lifecycle management.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewProjectInvite, NewProjectMember};
+use nvisy_postgres::model::NewProjectMember;
 use nvisy_postgres::query::{
     Pagination as PgPagination, ProjectInviteRepository, ProjectMemberRepository,
 };
 use nvisy_postgres::types::InviteStatus;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
     CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, Pagination,
     ProjectPathParams, ReplyInvite,
@@ -41,7 +39,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::invites";
     )
 )]
 async fn send_invite(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInvite>,
@@ -49,18 +47,14 @@ async fn send_invite(
     tracing::info!(target: TRACING_TARGET, "Creating project invitation");
 
     auth_state
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::InviteMembers,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
         .await?;
 
     // Check if user is already a member
-    if pg_client
+    if conn
         .find_project_member(path_params.project_id, auth_state.account_id)
         .await?
-        .is_some_and(|m| m.is_active)
+        .is_some()
     {
         return Err(ErrorKind::Conflict
             .with_message("User is already a member of this project")
@@ -68,7 +62,7 @@ async fn send_invite(
     }
 
     // Check for existing pending invites
-    let all_invites = pg_client
+    let all_invites = conn
         .list_user_invites(
             None,
             PgPagination {
@@ -88,19 +82,13 @@ async fn send_invite(
             .with_resource("project_invite"));
     }
 
-    let expires_at = request.expires.to_expiry_timestamp();
-
-    let new_invite = NewProjectInvite {
-        project_id: path_params.project_id,
-        invitee_id: None,
-        invited_role: Some(request.invited_role),
-        expires_at: expires_at.map(Into::into),
-        created_by: auth_state.account_id,
-        updated_by: auth_state.account_id,
-        ..Default::default()
-    };
-
-    let project_invite = pg_client.create_project_invite(new_invite).await?;
+    let project_invite = conn
+        .create_project_invite(request.into_model(
+            path_params.project_id,
+            None,
+            auth_state.account_id,
+        ))
+        .await?;
     let response = Invite::from(project_invite);
 
     tracing::info!(
@@ -124,7 +112,7 @@ async fn send_invite(
     )
 )]
 async fn list_invites(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
@@ -132,10 +120,10 @@ async fn list_invites(
     tracing::debug!(target: TRACING_TARGET, "Listing project invitations");
 
     auth_state
-        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
         .await?;
 
-    let project_invites = pg_client
+    let project_invites = conn
         .list_project_invites(path_params.project_id, pagination.into())
         .await?;
 
@@ -163,22 +151,17 @@ async fn list_invites(
     )
 )]
 async fn cancel_invite(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Cancelling project invitation");
 
     auth_state
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::InviteMembers,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
         .await?;
 
-    pg_client
-        .cancel_invite(path_params.invite_id, auth_state.account_id)
+    conn.cancel_invite(path_params.invite_id, auth_state.account_id)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Project invitation cancelled successfully");
@@ -201,14 +184,14 @@ async fn cancel_invite(
     )
 )]
 async fn reply_to_invite(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
     tracing::info!(target: TRACING_TARGET, "Responding to project invitation");
 
-    let Some(invite) = pg_client.find_invite_by_id(path_params.invite_id).await? else {
+    let Some(invite) = conn.find_invite_by_id(path_params.invite_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project_invite")
             .with_message("Invitation not found"));
@@ -229,14 +212,14 @@ async fn reply_to_invite(
     }
 
     let project_invite = if request.accept_invite {
-        let accepted = pg_client
+        let accepted = conn
             .accept_invite(path_params.invite_id, auth_state.account_id)
             .await?;
 
         tracing::info!(target: TRACING_TARGET, "Invitation accepted");
         accepted
     } else {
-        let declined = pg_client
+        let declined = conn
             .reject_invite(path_params.invite_id, auth_state.account_id)
             .await?;
 
@@ -261,7 +244,7 @@ async fn reply_to_invite(
     )
 )]
 async fn generate_invite_code(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<GenerateInviteCode>,
@@ -269,26 +252,12 @@ async fn generate_invite_code(
     tracing::info!(target: TRACING_TARGET, "Generating invite code");
 
     auth_state
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::InviteMembers,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
         .await?;
 
-    let expires_at = request.expires.to_expiry_timestamp();
-
-    let new_invite = NewProjectInvite {
-        project_id: path_params.project_id,
-        invitee_id: None,
-        invited_role: Some(request.role),
-        expires_at: expires_at.map(Into::into),
-        created_by: auth_state.account_id,
-        updated_by: auth_state.account_id,
-        ..Default::default()
-    };
-
-    let project_invite = pg_client.create_project_invite(new_invite).await?;
+    let project_invite = conn
+        .create_project_invite(request.into_model(path_params.project_id, auth_state.account_id))
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -309,16 +278,13 @@ async fn generate_invite_code(
 /// invite code was generated.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn join_via_invite_code(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<InviteCodePathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::info!(target: TRACING_TARGET, "Attempting to join project via invite code");
 
-    let Some(invite) = pg_client
-        .find_invite_by_token(&path_params.invite_code)
-        .await?
-    else {
+    let Some(invite) = conn.find_invite_by_token(&path_params.invite_code).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("invite_code")
             .with_message("Invalid invite code"));
@@ -331,26 +297,23 @@ async fn join_via_invite_code(
     }
 
     // Check if user is already a member
-    if pg_client
+    if conn
         .find_project_member(invite.project_id, auth_state.account_id)
         .await?
-        .is_some_and(|m| m.is_active)
+        .is_some()
     {
         return Err(ErrorKind::Conflict
             .with_message("You are already a member of this project")
             .with_resource("project_member"));
     }
 
-    let new_member = NewProjectMember {
-        project_id: invite.project_id,
-        account_id: auth_state.account_id,
-        member_role: invite.invited_role,
-        created_by: auth_state.account_id,
-        updated_by: auth_state.account_id,
-        ..Default::default()
-    };
+    let new_member = NewProjectMember::new(
+        invite.project_id,
+        auth_state.account_id,
+        invite.invited_role,
+    );
 
-    let project_member = pg_client.add_project_member(new_member).await?;
+    let project_member = conn.add_project_member(new_member).await?;
 
     tracing::info!(
         target: TRACING_TARGET,

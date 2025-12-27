@@ -130,7 +130,7 @@ impl PgConfig {
 
     /// Returns the database URL.
     #[inline]
-    pub fn get_database_url(&self) -> &str {
+    pub fn database_url(&self) -> &str {
         &self.postgres_url
     }
 

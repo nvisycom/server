@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{Document, NewDocument, UpdateDocument};
 use crate::types::DocumentStatus;
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for document database operations.
 ///
@@ -19,49 +20,49 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait DocumentRepository {
     /// Creates a new document with the provided metadata.
     fn create_document(
-        &self,
+        &mut self,
         new_document: NewDocument,
     ) -> impl Future<Output = PgResult<Document>> + Send;
 
     /// Finds a document by its unique identifier.
     fn find_document_by_id(
-        &self,
+        &mut self,
         document_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Document>>> + Send;
 
     /// Finds documents associated with a specific project.
     fn find_documents_by_project(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
     /// Finds documents created by a specific account.
     fn find_documents_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
     /// Updates a document with new information and metadata.
     fn update_document(
-        &self,
+        &mut self,
         document_id: Uuid,
         updates: UpdateDocument,
     ) -> impl Future<Output = PgResult<Document>> + Send;
 
     /// Soft deletes a document by setting the deletion timestamp.
-    fn delete_document(&self, document_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_document(&mut self, document_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Lists documents with pagination support.
     fn list_documents(
-        &self,
+        &mut self,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
     /// Searches documents by name or description with optional project filtering.
     fn search_documents(
-        &self,
+        &mut self,
         search_query: &str,
         project_id: Option<Uuid>,
         pagination: Pagination,
@@ -69,30 +70,28 @@ pub trait DocumentRepository {
 
     /// Finds documents filtered by their current status.
     fn find_documents_by_status(
-        &self,
+        &mut self,
         status: DocumentStatus,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 }
 
-impl DocumentRepository for PgClient {
-    async fn create_document(&self, new_document: NewDocument) -> PgResult<Document> {
-        let mut conn = self.get_connection().await?;
+impl DocumentRepository for PgConnection {
+    async fn create_document(&mut self, new_document: NewDocument) -> PgResult<Document> {
 
         use schema::documents;
 
         let document = diesel::insert_into(documents::table)
             .values(&new_document)
             .returning(Document::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(document)
     }
 
-    async fn find_document_by_id(&self, document_id: Uuid) -> PgResult<Option<Document>> {
-        let mut conn = self.get_connection().await?;
+    async fn find_document_by_id(&mut self, document_id: Uuid) -> PgResult<Option<Document>> {
 
         use schema::documents::{self, dsl};
 
@@ -100,7 +99,7 @@ impl DocumentRepository for PgClient {
             .filter(dsl::id.eq(document_id))
             .filter(dsl::deleted_at.is_null())
             .select(Document::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -109,11 +108,10 @@ impl DocumentRepository for PgClient {
     }
 
     async fn find_documents_by_project(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::documents::{self, dsl};
 
@@ -124,7 +122,7 @@ impl DocumentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -132,11 +130,10 @@ impl DocumentRepository for PgClient {
     }
 
     async fn find_documents_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::documents::{self, dsl};
 
@@ -147,7 +144,7 @@ impl DocumentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -155,40 +152,37 @@ impl DocumentRepository for PgClient {
     }
 
     async fn update_document(
-        &self,
+        &mut self,
         document_id: Uuid,
         updates: UpdateDocument,
     ) -> PgResult<Document> {
-        let mut conn = self.get_connection().await?;
 
         use schema::documents::{self, dsl};
 
         let document = diesel::update(documents::table.filter(dsl::id.eq(document_id)))
             .set(&updates)
             .returning(Document::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(document)
     }
 
-    async fn delete_document(&self, document_id: Uuid) -> PgResult<()> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_document(&mut self, document_id: Uuid) -> PgResult<()> {
 
         use schema::documents::{self, dsl};
 
         diesel::update(documents::table.filter(dsl::id.eq(document_id)))
             .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(())
     }
 
-    async fn list_documents(&self, pagination: Pagination) -> PgResult<Vec<Document>> {
-        let mut conn = self.get_connection().await?;
+    async fn list_documents(&mut self, pagination: Pagination) -> PgResult<Vec<Document>> {
 
         use schema::documents::{self, dsl};
 
@@ -198,7 +192,7 @@ impl DocumentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -206,12 +200,11 @@ impl DocumentRepository for PgClient {
     }
 
     async fn search_documents(
-        &self,
+        &mut self,
         search_query: &str,
         project_id: Option<Uuid>,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::documents::{self, dsl};
 
@@ -233,16 +226,15 @@ impl DocumentRepository for PgClient {
             query = query.filter(dsl::project_id.eq(proj_id));
         }
 
-        let documents = query.load(&mut conn).await.map_err(PgError::from)?;
+        let documents = query.load(self).await.map_err(PgError::from)?;
         Ok(documents)
     }
 
     async fn find_documents_by_status(
-        &self,
+        &mut self,
         status: DocumentStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::documents::{self, dsl};
 
@@ -253,7 +245,7 @@ impl DocumentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(Document::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 

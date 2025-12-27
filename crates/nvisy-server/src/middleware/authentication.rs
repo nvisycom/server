@@ -130,7 +130,9 @@ async fn refresh_token(
     pg_database: PgClient,
     auth_secret_keys: SessionKeys,
 ) -> Result<AuthHeader> {
-    let current_token = pg_database
+    let mut conn = pg_database.get_connection().await?;
+
+    let current_token = conn
         .find_token_by_access_token(auth_claims.token_id)
         .await?
         .ok_or_else(|| {
@@ -140,9 +142,9 @@ async fn refresh_token(
                 .with_resource("authentication")
         })?;
 
-    let updated_token = pg_database.refresh_token(current_token.refresh_seq).await?;
+    let updated_token = conn.refresh_token(current_token.refresh_seq).await?;
 
-    let account = pg_database
+    let account = conn
         .find_account_by_id(auth_claims.account_id)
         .await?
         .ok_or_else(|| {

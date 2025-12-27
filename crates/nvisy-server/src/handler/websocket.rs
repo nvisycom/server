@@ -16,7 +16,7 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{AccountRepository, ProjectRepository};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Path, Permission};
+use crate::extract::{AuthProvider, AuthState, Path, Permission, PgPool};
 use crate::handler::request::ProjectPathParams;
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -129,7 +129,7 @@ fn validate_message_size(ctx: &WsContext, size: usize, metrics: &ConnectionMetri
 
 /// Check if the account has permission to perform the action in the message.
 async fn check_event_permission(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     ctx: &WsContext,
     msg: &ProjectWsMessage,
 ) -> Result<()> {
@@ -167,7 +167,7 @@ async fn check_event_permission(
     // Fetch project membership directly
     use nvisy_postgres::query::ProjectMemberRepository;
 
-    let member = pg_client
+    let member = conn
         .find_project_member(ctx.project_id, ctx.account_id)
         .await?;
 
@@ -205,7 +205,7 @@ async fn process_client_message(
     ctx: &WsContext,
     msg: Message,
     publisher: &ProjectEventPublisher,
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     metrics: &ConnectionMetrics,
 ) -> ControlFlow<(), ()> {
     match msg {
@@ -225,7 +225,7 @@ async fn process_client_message(
 
             match serde_json::from_str::<ProjectWsMessage>(&text) {
                 Ok(ws_msg) => {
-                    handle_client_message(ctx, ws_msg, publisher, pg_client, metrics).await;
+                    handle_client_message(ctx, ws_msg, publisher, conn, metrics).await;
                     ControlFlow::Continue(())
                 }
                 Err(e) => {
@@ -301,11 +301,11 @@ async fn handle_client_message(
     ctx: &WsContext,
     msg: ProjectWsMessage,
     publisher: &ProjectEventPublisher,
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     metrics: &ConnectionMetrics,
 ) {
     // Check permissions for this event
-    if let Err(e) = check_event_permission(pg_client, ctx, &msg).await {
+    if let Err(e) = check_event_permission(conn, ctx, &msg).await {
         tracing::warn!(
             target: TRACING_TARGET,
             connection_id = %ctx.connection_id,
@@ -411,8 +411,22 @@ async fn handle_project_websocket(
         "websocket connection established"
     );
 
+    // Get a connection for initial queries
+    let mut conn = match pg_client.get_connection().await {
+        Ok(conn) => conn,
+        Err(e) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                error = %e,
+                "failed to acquire database connection"
+            );
+            return;
+        }
+    };
+
     // Fetch account display name
-    let display_name = match pg_client.find_account_by_id(account_id).await {
+    let display_name = match conn.find_account_by_id(account_id).await {
         Ok(Some(account)) => account.display_name,
         Ok(None) => {
             tracing::error!(
@@ -522,6 +536,20 @@ async fn handle_project_websocket(
 
     // Spawn a task to receive messages from the client
     let recv_task = tokio::spawn(async move {
+        // Get a dedicated connection for the receive task
+        let mut recv_conn = match recv_pg_client.get_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    connection_id = %recv_ctx.connection_id,
+                    error = %e,
+                    "failed to acquire database connection for receive task"
+                );
+                return;
+            }
+        };
+
         while let Some(msg_result) = receiver.next().await {
             match msg_result {
                 Ok(msg) => {
@@ -529,7 +557,7 @@ async fn handle_project_websocket(
                         &recv_ctx,
                         msg,
                         &recv_publisher,
-                        &recv_pg_client,
+                        &mut recv_conn,
                         &recv_metrics,
                     )
                     .await
@@ -713,6 +741,7 @@ async fn handle_project_websocket(
     project_id = %path_params.project_id
 ))]
 async fn project_websocket_handler(
+    PgPool(mut conn): PgPool,
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     AuthState(auth_claims): AuthState,
@@ -733,11 +762,11 @@ async fn project_websocket_handler(
 
     // Check if user has minimum permission to view documents
     auth_claims
-        .authorize_project(&pg_client, project_id, Permission::ViewDocuments)
+        .authorize_project(&mut conn, project_id, Permission::ViewDocuments)
         .await?;
 
     // Verify the project exists
-    if pg_client.find_project_by_id(project_id).await?.is_none() {
+    if conn.find_project_by_id(project_id).await?.is_none() {
         return Err(ErrorKind::NotFound.with_resource("project"));
     }
 

@@ -12,21 +12,14 @@ use validator::Validate;
 pub struct UpdateMemberRole {
     /// New role for the member.
     pub role: ProjectRole,
-
-    /// Optional reason for role change.
-    #[validate(length(max = 300))]
-    pub reason: Option<String>,
 }
 
-/// Request to remove a member from the project.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveMember {
-    /// Reason for removing the member.
-    #[validate(length(min = 1, max = 300))]
-    pub reason: String,
-
-    /// Whether to notify the member about removal.
-    pub notify_member: Option<bool>,
+impl UpdateMemberRole {
+    /// Converts to database model.
+    pub fn into_model(self) -> nvisy_postgres::model::UpdateProjectMember {
+        nvisy_postgres::model::UpdateProjectMember {
+            member_role: Some(self.role),
+            ..Default::default()
+        }
+    }
 }

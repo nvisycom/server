@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
 use crate::types::NotificationType;
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for account notification database operations.
 ///
@@ -19,13 +20,13 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait AccountNotificationRepository {
     /// Creates a new notification for an account.
     fn create_notification(
-        &self,
+        &mut self,
         new_notification: NewAccountNotification,
     ) -> impl Future<Output = PgResult<AccountNotification>> + Send;
 
     /// Finds a notification by its unique identifier.
     fn find_notification_by_id(
-        &self,
+        &mut self,
         notification_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<AccountNotification>>> + Send;
 
@@ -33,14 +34,14 @@ pub trait AccountNotificationRepository {
     ///
     /// Excludes expired notifications, ordered by creation date.
     fn find_notifications_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<AccountNotification>>> + Send;
 
     /// Finds notifications filtered by type for an account.
     fn find_notifications_by_type(
-        &self,
+        &mut self,
         account_id: Uuid,
         notification_type: NotificationType,
         pagination: Pagination,
@@ -48,24 +49,24 @@ pub trait AccountNotificationRepository {
 
     /// Marks a notification as read with current timestamp.
     fn mark_as_read(
-        &self,
+        &mut self,
         notification_id: Uuid,
     ) -> impl Future<Output = PgResult<AccountNotification>> + Send;
 
     /// Marks a notification as unread by clearing read status.
     fn mark_as_unread(
-        &self,
+        &mut self,
         notification_id: Uuid,
     ) -> impl Future<Output = PgResult<AccountNotification>> + Send;
 
     /// Marks all unread notifications as read for an account.
     ///
     /// Returns the count of notifications marked as read.
-    fn mark_all_as_read(&self, account_id: Uuid) -> impl Future<Output = PgResult<usize>> + Send;
+    fn mark_all_as_read(&mut self, account_id: Uuid) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Permanently deletes a notification.
     fn delete_notification(
-        &self,
+        &mut self,
         notification_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
@@ -73,56 +74,53 @@ pub trait AccountNotificationRepository {
     ///
     /// Returns the count of deleted notifications.
     fn delete_all_notifications(
-        &self,
+        &mut self,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Deletes all expired notifications system-wide.
     ///
     /// Returns the count of deleted notifications.
-    fn delete_expired_notifications(&self) -> impl Future<Output = PgResult<usize>> + Send;
+    fn delete_expired_notifications(&mut self) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
-impl AccountNotificationRepository for PgClient {
+impl AccountNotificationRepository for PgConnection {
     async fn create_notification(
-        &self,
+        &mut self,
         new_notification: NewAccountNotification,
     ) -> PgResult<AccountNotification> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_notifications;
 
         diesel::insert_into(account_notifications::table)
             .values(&new_notification)
             .returning(AccountNotification::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)
     }
 
     async fn find_notification_by_id(
-        &self,
+        &mut self,
         notification_id: Uuid,
     ) -> PgResult<Option<AccountNotification>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_notifications::{self, dsl};
 
         account_notifications::table
             .filter(dsl::id.eq(notification_id))
             .select(AccountNotification::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)
     }
 
     async fn find_notifications_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_notifications::{self, dsl};
 
@@ -135,18 +133,17 @@ impl AccountNotificationRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountNotification::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)
     }
 
     async fn find_notifications_by_type(
-        &self,
+        &mut self,
         account_id: Uuid,
         notification_type: NotificationType,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::account_notifications::{self, dsl};
 
@@ -160,13 +157,12 @@ impl AccountNotificationRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(AccountNotification::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn mark_as_read(&self, notification_id: Uuid) -> PgResult<AccountNotification> {
-        let mut conn = self.get_connection().await?;
+    async fn mark_as_read(&mut self, notification_id: Uuid) -> PgResult<AccountNotification> {
 
         use schema::account_notifications::{self, dsl};
 
@@ -178,13 +174,12 @@ impl AccountNotificationRepository for PgClient {
         diesel::update(account_notifications::table.filter(dsl::id.eq(notification_id)))
             .set(&update_data)
             .returning(AccountNotification::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn mark_as_unread(&self, notification_id: Uuid) -> PgResult<AccountNotification> {
-        let mut conn = self.get_connection().await?;
+    async fn mark_as_unread(&mut self, notification_id: Uuid) -> PgResult<AccountNotification> {
 
         use schema::account_notifications::{self, dsl};
 
@@ -196,13 +191,12 @@ impl AccountNotificationRepository for PgClient {
         diesel::update(account_notifications::table.filter(dsl::id.eq(notification_id)))
             .set(&update_data)
             .returning(AccountNotification::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn mark_all_as_read(&self, account_id: Uuid) -> PgResult<usize> {
-        let mut conn = self.get_connection().await?;
+    async fn mark_all_as_read(&mut self, account_id: Uuid) -> PgResult<usize> {
 
         use schema::account_notifications::{self, dsl};
 
@@ -217,37 +211,34 @@ impl AccountNotificationRepository for PgClient {
                 .filter(dsl::is_read.eq(false)),
         )
         .set(&update_data)
-        .execute(&mut conn)
+        .execute(self)
         .await
         .map_err(PgError::from)
     }
 
-    async fn delete_notification(&self, notification_id: Uuid) -> PgResult<()> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_notification(&mut self, notification_id: Uuid) -> PgResult<()> {
 
         use schema::account_notifications::{self, dsl};
 
         diesel::delete(account_notifications::table.filter(dsl::id.eq(notification_id)))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(())
     }
 
-    async fn delete_all_notifications(&self, account_id: Uuid) -> PgResult<usize> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_all_notifications(&mut self, account_id: Uuid) -> PgResult<usize> {
 
         use schema::account_notifications::{self, dsl};
 
         diesel::delete(account_notifications::table.filter(dsl::account_id.eq(account_id)))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)
     }
 
-    async fn delete_expired_notifications(&self) -> PgResult<usize> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_expired_notifications(&mut self) -> PgResult<usize> {
 
         use schema::account_notifications::{self, dsl};
 
@@ -258,7 +249,7 @@ impl AccountNotificationRepository for PgClient {
                 .filter(dsl::expires_at.is_not_null())
                 .filter(dsl::expires_at.lt(now)),
         )
-        .execute(&mut conn)
+        .execute(self)
         .await
         .map_err(PgError::from)
     }

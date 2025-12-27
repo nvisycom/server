@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectInvite, ProjectInvite, UpdateProjectInvite};
 use crate::types::InviteStatus;
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for project invitation database operations.
 ///
@@ -19,89 +20,89 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait ProjectInviteRepository {
     /// Creates a new project invitation with secure token generation.
     fn create_project_invite(
-        &self,
+        &mut self,
         invite: NewProjectInvite,
     ) -> impl Future<Output = PgResult<ProjectInvite>> + Send;
 
     /// Finds an invitation by its unique token string.
     fn find_invite_by_token(
-        &self,
+        &mut self,
         token: &str,
     ) -> impl Future<Output = PgResult<Option<ProjectInvite>>> + Send;
 
     /// Finds an invitation by its unique identifier.
     fn find_invite_by_id(
-        &self,
+        &mut self,
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<ProjectInvite>>> + Send;
 
     /// Updates a project invitation with new values and status changes.
     fn update_project_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         changes: UpdateProjectInvite,
     ) -> impl Future<Output = PgResult<ProjectInvite>> + Send;
 
     /// Accepts a project invitation and marks it as successfully processed.
     fn accept_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         _acceptor_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectInvite>> + Send;
 
     /// Rejects or declines a project invitation.
     fn reject_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectInvite>> + Send;
 
     /// Cancels a project invitation before it can be used.
     fn cancel_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
     ) -> impl Future<Output = PgResult<ProjectInvite>> + Send;
 
     /// Lists all invitations for a specific project with pagination support.
     fn list_project_invites(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectInvite>>> + Send;
 
     /// Lists invitations for a specific user with pagination support.
     fn list_user_invites(
-        &self,
+        &mut self,
         user_id: Option<Uuid>,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectInvite>>> + Send;
 
     /// Performs system-wide cleanup of expired invitations.
-    fn cleanup_expired_invites(&self) -> impl Future<Output = PgResult<usize>> + Send;
+    fn cleanup_expired_invites(&mut self) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Retrieves all pending invitations for a specific project.
     fn get_pending_invites(
-        &self,
+        &mut self,
         proj_id: Uuid,
     ) -> impl Future<Output = PgResult<Vec<ProjectInvite>>> + Send;
 
     /// Finds invitations filtered by their current status.
     fn find_invites_by_status(
-        &self,
+        &mut self,
         status: InviteStatus,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectInvite>>> + Send;
 
     /// Finds invitations that are approaching their expiration time.
     fn find_expiring_invites(
-        &self,
+        &mut self,
         hours: i64,
     ) -> impl Future<Output = PgResult<Vec<ProjectInvite>>> + Send;
 
     /// Revokes an invitation through administrative action.
     fn revoke_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
         _reason: Option<String>,
@@ -109,36 +110,34 @@ pub trait ProjectInviteRepository {
 
     /// Retrieves an invitation by its unique identifier.
     fn get_invite_by_id(
-        &self,
+        &mut self,
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<ProjectInvite>>> + Send;
 }
 
-impl ProjectInviteRepository for PgClient {
-    async fn create_project_invite(&self, invite: NewProjectInvite) -> PgResult<ProjectInvite> {
+impl ProjectInviteRepository for PgConnection {
+    async fn create_project_invite(&mut self, invite: NewProjectInvite) -> PgResult<ProjectInvite> {
         use schema::project_invites;
 
-        let mut conn = self.get_connection().await?;
 
         let invite = diesel::insert_into(project_invites::table)
             .values(&invite)
             .returning(ProjectInvite::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(invite)
     }
 
-    async fn find_invite_by_token(&self, token: &str) -> PgResult<Option<ProjectInvite>> {
+    async fn find_invite_by_token(&mut self, token: &str) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invite = project_invites
             .filter(invite_token.eq(token))
             .select(ProjectInvite::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -146,15 +145,14 @@ impl ProjectInviteRepository for PgClient {
         Ok(invite)
     }
 
-    async fn find_invite_by_id(&self, invite_id: Uuid) -> PgResult<Option<ProjectInvite>> {
+    async fn find_invite_by_id(&mut self, invite_id: Uuid) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invite = project_invites
             .filter(id.eq(invite_id))
             .select(ProjectInvite::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -163,26 +161,25 @@ impl ProjectInviteRepository for PgClient {
     }
 
     async fn update_project_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         changes: UpdateProjectInvite,
     ) -> PgResult<ProjectInvite> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invite = diesel::update(project_invites)
             .filter(id.eq(invite_id))
             .set(&changes)
             .returning(ProjectInvite::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(invite)
     }
 
-    async fn accept_invite(&self, invite_id: Uuid, _acceptor_id: Uuid) -> PgResult<ProjectInvite> {
+    async fn accept_invite(&mut self, invite_id: Uuid, _acceptor_id: Uuid) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Accepted),
             responded_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
@@ -192,7 +189,7 @@ impl ProjectInviteRepository for PgClient {
         self.update_project_invite(invite_id, changes).await
     }
 
-    async fn reject_invite(&self, invite_id: Uuid, updated_by_id: Uuid) -> PgResult<ProjectInvite> {
+    async fn reject_invite(&mut self, invite_id: Uuid, updated_by_id: Uuid) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Declined),
             updated_by: Some(updated_by_id),
@@ -202,7 +199,7 @@ impl ProjectInviteRepository for PgClient {
         self.update_project_invite(invite_id, changes).await
     }
 
-    async fn cancel_invite(&self, invite_id: Uuid, updated_by_id: Uuid) -> PgResult<ProjectInvite> {
+    async fn cancel_invite(&mut self, invite_id: Uuid, updated_by_id: Uuid) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Canceled),
             updated_by: Some(updated_by_id),
@@ -213,13 +210,12 @@ impl ProjectInviteRepository for PgClient {
     }
 
     async fn list_project_invites(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invites = project_invites
             .filter(project_id.eq(proj_id))
@@ -227,7 +223,7 @@ impl ProjectInviteRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -235,13 +231,12 @@ impl ProjectInviteRepository for PgClient {
     }
 
     async fn list_user_invites(
-        &self,
+        &mut self,
         user_id: Option<Uuid>,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let mut query = project_invites.into_boxed();
 
@@ -254,17 +249,16 @@ impl ProjectInviteRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(invites)
     }
 
-    async fn cleanup_expired_invites(&self) -> PgResult<usize> {
+    async fn cleanup_expired_invites(&mut self) -> PgResult<usize> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
@@ -272,17 +266,16 @@ impl ProjectInviteRepository for PgClient {
             .filter(expires_at.lt(now))
             .filter(invite_status.eq(InviteStatus::Pending))
             .set(invite_status.eq(InviteStatus::Expired))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(updated_count)
     }
 
-    async fn get_pending_invites(&self, proj_id: Uuid) -> PgResult<Vec<ProjectInvite>> {
+    async fn get_pending_invites(&mut self, proj_id: Uuid) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invites = project_invites
             .filter(project_id.eq(proj_id))
@@ -290,7 +283,7 @@ impl ProjectInviteRepository for PgClient {
             .filter(expires_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
             .select(ProjectInvite::as_select())
             .order(created_at.desc())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -298,13 +291,12 @@ impl ProjectInviteRepository for PgClient {
     }
 
     async fn find_invites_by_status(
-        &self,
+        &mut self,
         status: InviteStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invites = project_invites
             .filter(invite_status.eq(status))
@@ -312,17 +304,16 @@ impl ProjectInviteRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(invites)
     }
 
-    async fn find_expiring_invites(&self, hours: i64) -> PgResult<Vec<ProjectInvite>> {
+    async fn find_expiring_invites(&mut self, hours: i64) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let expiry_threshold =
             jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().hours(hours));
@@ -335,7 +326,7 @@ impl ProjectInviteRepository for PgClient {
             ))
             .select(ProjectInvite::as_select())
             .order(expires_at.asc())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -343,7 +334,7 @@ impl ProjectInviteRepository for PgClient {
     }
 
     async fn revoke_invite(
-        &self,
+        &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
         _reason: Option<String>,
@@ -357,15 +348,14 @@ impl ProjectInviteRepository for PgClient {
         self.update_project_invite(invite_id, changes).await
     }
 
-    async fn get_invite_by_id(&self, invite_id: Uuid) -> PgResult<Option<ProjectInvite>> {
+    async fn get_invite_by_id(&mut self, invite_id: Uuid) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let invite = project_invites
             .filter(id.eq(invite_id))
             .select(ProjectInvite::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;

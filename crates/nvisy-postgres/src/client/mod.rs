@@ -16,7 +16,7 @@ pub use migrate::{
     MigrationResult, MigrationStatus, PgClientMigrationExt, get_applied_migrations,
     get_migration_status, run_pending_migrations, verify_schema_integrity,
 };
-pub use pg_client::{PgClient, PgPoolStatus};
+pub use pg_client::{PgClient, PgConn, PgPoolStatus};
 pub use pg_config::PgConfig;
 
 /// Type alias for the connection pool used throughout the application.

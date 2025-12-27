@@ -53,6 +53,7 @@ serde_json = { workspace = true, features = [] }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
+derive_more = { workspace = true, features = ["deref", "deref_mut"] }
 
 # Data types
 jiff = { workspace = true, features = ["serde"] }

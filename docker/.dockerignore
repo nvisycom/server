@@ -1,5 +1,3 @@
-# Docker Build Context Exclusions
-
 # Git
 .git/
 .gitignore
@@ -68,14 +66,17 @@ clippy.toml
 deny.toml
 diesel.toml
 
-# Logs and temp files
+# Logs
 logs/
 *.log
-tmp/
-temp/
-*.tmp
+*.log*
+
+# Backup and temporary files
 *.bak
 *.backup
+*.tmp
+tmp/
+temp/
 
 # OS files
 .DS_Store

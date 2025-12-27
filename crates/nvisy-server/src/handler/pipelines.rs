@@ -5,11 +5,10 @@
 //! Currently a stub implementation pending database schema.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
+
+use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission};
 use crate::handler::request::{CreatePipeline, PipelinePathParams, ProjectPathParams};
 use crate::handler::response::{Pipeline, Pipelines};
 use crate::handler::{ErrorKind, Result};
@@ -29,7 +28,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
     )
 )]
 async fn list_project_pipelines(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_state): AuthState,
 ) -> Result<(StatusCode, Json<Pipelines>)> {
@@ -37,7 +36,7 @@ async fn list_project_pipelines(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewPipelines,
         )
@@ -67,7 +66,7 @@ async fn list_project_pipelines(
     )
 )]
 async fn get_project_pipeline(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_state): AuthState,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
@@ -75,7 +74,7 @@ async fn get_project_pipeline(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewPipelines,
         )
@@ -98,7 +97,7 @@ async fn get_project_pipeline(
     )
 )]
 async fn create_project_pipeline(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_state): AuthState,
     Json(_request): Json<CreatePipeline>,
@@ -107,7 +106,7 @@ async fn create_project_pipeline(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManagePipelines,
         )
@@ -131,7 +130,7 @@ async fn create_project_pipeline(
     )
 )]
 async fn update_project_pipeline(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_state): AuthState,
     Json(_request): Json<CreatePipeline>,
@@ -140,7 +139,7 @@ async fn update_project_pipeline(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManagePipelines,
         )
@@ -164,7 +163,7 @@ async fn update_project_pipeline(
     )
 )]
 async fn delete_project_pipeline(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_state): AuthState,
 ) -> Result<StatusCode> {
@@ -172,7 +171,7 @@ async fn delete_project_pipeline(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManagePipelines,
         )

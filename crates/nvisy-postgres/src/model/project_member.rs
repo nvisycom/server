@@ -32,8 +32,6 @@ pub struct ProjectMember {
     pub notify_comments: bool,
     /// Whether member receives mention notifications.
     pub notify_mentions: bool,
-    /// Whether the membership is active.
-    pub is_active: bool,
     /// Last time member accessed the project.
     pub last_accessed_at: Option<Timestamp>,
     /// Account that created this membership.
@@ -71,12 +69,36 @@ pub struct NewProjectMember {
     pub notify_comments: bool,
     /// Notify mentions.
     pub notify_mentions: bool,
-    /// Is active.
-    pub is_active: bool,
     /// Created by.
     pub created_by: Uuid,
     /// Updated by.
     pub updated_by: Uuid,
+}
+
+impl NewProjectMember {
+    /// Creates a new project membership with the specified role.
+    pub fn new(project_id: Uuid, account_id: Uuid, role: ProjectRole) -> Self {
+        Self {
+            project_id,
+            account_id,
+            member_role: role,
+            created_by: account_id,
+            updated_by: account_id,
+            ..Default::default()
+        }
+    }
+
+    /// Creates a new owner membership for a project.
+    ///
+    /// The owner is automatically set as an Admin with all notifications enabled.
+    pub fn new_owner(project_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            notify_updates: true,
+            notify_comments: true,
+            notify_mentions: true,
+            ..Self::new(project_id, account_id, ProjectRole::Admin)
+        }
+    }
 }
 
 /// Data for updating a project member.
@@ -100,8 +122,6 @@ pub struct UpdateProjectMember {
     pub notify_comments: Option<bool>,
     /// Notify mentions.
     pub notify_mentions: Option<bool>,
-    /// Is active.
-    pub is_active: Option<bool>,
     /// Last accessed at.
     pub last_accessed_at: Option<Timestamp>,
     /// Updated by.
@@ -109,11 +129,6 @@ pub struct UpdateProjectMember {
 }
 
 impl ProjectMember {
-    /// Returns whether the membership is currently active.
-    pub fn is_active_member(&self) -> bool {
-        self.is_active
-    }
-
     /// Returns whether the member has admin privileges.
     pub fn is_admin(&self) -> bool {
         matches!(self.member_role, ProjectRole::Admin)
@@ -209,32 +224,27 @@ impl ProjectMember {
 
     /// Returns whether the member can perform administrative actions.
     pub fn can_administrate(&self) -> bool {
-        self.is_active && self.is_admin()
+        self.is_admin()
     }
 
     /// Returns whether the member can modify project settings.
     pub fn can_modify_settings(&self) -> bool {
-        self.is_active && self.is_admin()
+        self.is_admin()
     }
 
     /// Returns whether the member can delete the project.
     pub fn can_delete_project(&self) -> bool {
-        self.is_active && self.is_admin()
+        self.is_admin()
     }
 
     /// Returns whether the member can be promoted to the given role.
     pub fn can_be_promoted_to(&self, role: ProjectRole) -> bool {
-        self.is_active && role > self.member_role
+        role > self.member_role
     }
 
     /// Returns whether the member can be demoted to the given role.
     pub fn can_be_demoted_to(&self, role: ProjectRole) -> bool {
-        self.is_active && role < self.member_role
-    }
-
-    /// Returns whether the membership can be removed.
-    pub fn can_be_removed(&self) -> bool {
-        true // Any member can be removed by an admin
+        role < self.member_role
     }
 }
 

@@ -8,14 +8,13 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
 
 use super::request::{Login, Signup};
 use super::response::AuthToken;
-use crate::extract::{
+use crate::extract::{PgPool, 
     AuthClaims, AuthHeader, AuthState, ClientIp, Json, TypedHeader, ValidateJson,
 };
 use crate::handler::{ErrorKind, Result};
@@ -41,7 +40,7 @@ fn create_auth_header(
 /// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(auth_keys): State<SessionKeys>,
     ClientIp(ip_address): ClientIp,
@@ -51,7 +50,7 @@ async fn login(
     tracing::info!(target: TRACING_TARGET, "Login attempt");
 
     let normalized_email = request.email_address.to_lowercase();
-    let account = pg_client.find_account_by_email(&normalized_email).await?;
+    let account = conn.find_account_by_email(&normalized_email).await?;
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
@@ -71,7 +70,7 @@ async fn login(
     if !login_successful {
         // Record failed login attempt for existing accounts
         if let Some(ref acc) = account
-            && let Err(e) = pg_client.record_failed_login(acc.id).await
+            && let Err(e) = conn.record_failed_login(acc.id).await
         {
             tracing::error!(
                 target: TRACING_TARGET,
@@ -89,7 +88,7 @@ async fn login(
     let account = account.unwrap(); // Safe because we verified above
 
     // Record successful login
-    if let Err(e) = pg_client
+    if let Err(e) = conn
         .record_successful_login(account.id, ip_address.into())
         .await
     {
@@ -110,7 +109,7 @@ async fn login(
         ..Default::default()
     };
 
-    let account_api_token = pg_client.create_token(new_token).await?;
+    let account_api_token = conn.create_token(new_token).await?;
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
@@ -136,7 +135,7 @@ async fn login(
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     State(auth_keys): State<SessionKeys>,
@@ -162,7 +161,7 @@ async fn signup(
         .map_err(|_| ErrorKind::InternalServerError.into_error())?;
 
     // Check if email already exists
-    if pg_client.email_exists(&normalized_email).await? {
+    if conn.email_exists(&normalized_email).await? {
         tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
         return Err(ErrorKind::Conflict.into_error());
     }
@@ -174,7 +173,7 @@ async fn signup(
         ..Default::default()
     };
 
-    let account = pg_client.create_account(new_account).await?;
+    let account = conn.create_account(new_account).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -190,7 +189,7 @@ async fn signup(
         session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
-    let account_api_token = pg_client.create_token(new_token).await?;
+    let account_api_token = conn.create_token(new_token).await?;
 
     // Extract values before moving account
     let display_name = account.display_name.clone();
@@ -226,13 +225,13 @@ async fn signup(
     )
 )]
 async fn logout(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Logout requested");
 
     // Verify API token exists before attempting to delete
-    let token_exists = pg_client
+    let token_exists = conn
         .find_token_by_access_token(auth_claims.token_id)
         .await?
         .is_some();
@@ -243,7 +242,7 @@ async fn logout(
     }
 
     // Delete the API token
-    let deleted = pg_client.delete_token(auth_claims.token_id).await?;
+    let deleted = conn.delete_token(auth_claims.token_id).await?;
 
     if deleted {
         tracing::info!(target: TRACING_TARGET, "Logout successful");
@@ -253,7 +252,7 @@ async fn logout(
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
     tokio::spawn(async move {
-        if let Err(e) = pg_client.cleanup_expired_tokens().await {
+        if let Err(e) = conn.cleanup_expired_tokens().await {
             tracing::debug!(
                 target: TRACING_TARGET_CLEANUP,
                 error = %e,

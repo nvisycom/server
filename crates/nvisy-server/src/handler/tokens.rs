@@ -5,19 +5,18 @@
 //! practices with proper authorization, input validation, and audit logging.
 
 use aide::axum::ApiRouter;
-use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use jiff::Timestamp;
-use nvisy_postgres::PgClient;
+
 use nvisy_postgres::model::UpdateAccountApiToken;
 use nvisy_postgres::query::{AccountApiTokenRepository, Pagination as QueryPagination};
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, Pagination, UpdateApiToken};
 use super::response::{ApiToken, ApiTokenWithSecret, ApiTokens};
-use crate::extract::{AuthState, ClientIp, Json, TypedHeader, ValidateJson};
+use crate::extract::{PgPool, AuthState, ClientIp, Json, Path, Query, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -29,7 +28,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 /// Returns the token with full access and refresh tokens. These are only shown once.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_api_token(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
@@ -39,7 +38,7 @@ async fn create_api_token(
 
     let new_token =
         request.into_model(auth_state.account_id, ip_address, user_agent.to_string())?;
-    let token = pg_client.create_token(new_token).await?;
+    let token = conn.create_token(new_token).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -53,7 +52,7 @@ async fn create_api_token(
 /// Lists API tokens for the authenticated account.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_api_tokens(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<ApiTokens>)> {
@@ -74,7 +73,7 @@ async fn list_api_tokens(
         }
     }
 
-    let tokens = pg_client
+    let tokens = conn
         .list_account_tokens(auth_state.account_id, QueryPagination::from(pagination))
         .await?;
 
@@ -92,13 +91,13 @@ async fn list_api_tokens(
 /// Gets a specific API token by access token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn read_api_token(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(access_token): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading API token");
 
-    let token = find_account_token(&pg_client, auth_state.account_id, access_token).await?;
+    let token = find_account_token(&mut conn, auth_state.account_id, access_token).await?;
 
     tracing::debug!(target: TRACING_TARGET, "API token retrieved successfully");
 
@@ -108,7 +107,7 @@ async fn read_api_token(
 /// Updates an existing API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn update_api_token(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(access_token): Path<Uuid>,
     ValidateJson(request): ValidateJson<UpdateApiToken>,
@@ -116,7 +115,7 @@ async fn update_api_token(
     tracing::info!(target: TRACING_TARGET, "Updating API token");
 
     // Verify the token exists and belongs to the authenticated account
-    let _ = find_account_token(&pg_client, auth_state.account_id, access_token).await?;
+    let _ = find_account_token(&mut conn, auth_state.account_id, access_token).await?;
 
     let update_token = UpdateAccountApiToken {
         last_used_at: Some(Timestamp::now().into()),
@@ -125,7 +124,7 @@ async fn update_api_token(
         ..Default::default()
     };
 
-    let updated_token = pg_client.update_token(access_token, update_token).await?;
+    let updated_token = conn.update_token(access_token, update_token).await?;
 
     tracing::info!(target: TRACING_TARGET, "API token updated successfully");
 
@@ -135,16 +134,16 @@ async fn update_api_token(
 /// Revokes (soft deletes) an API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn revoke_api_token(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(access_token): Path<Uuid>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Revoking API token");
 
     // Verify the token exists and belongs to the authenticated account
-    let _ = find_account_token(&pg_client, auth_state.account_id, access_token).await?;
+    let _ = find_account_token(&mut conn, auth_state.account_id, access_token).await?;
 
-    let deleted = pg_client.delete_token(access_token).await?;
+    let deleted = conn.delete_token(access_token).await?;
 
     if !deleted {
         return Err(ErrorKind::BadRequest
@@ -159,11 +158,11 @@ async fn revoke_api_token(
 
 /// Finds an API token and verifies it belongs to the specified account.
 async fn find_account_token(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     account_id: Uuid,
     access_token: Uuid,
 ) -> Result<nvisy_postgres::model::AccountApiToken> {
-    let Some(token) = pg_client.find_token_by_access_token(access_token).await? else {
+    let Some(token) = conn.find_token_by_access_token(access_token).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")
             .with_message("API token not found"));

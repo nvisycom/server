@@ -11,7 +11,8 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectActivity, ProjectActivity};
 use crate::types::ActivityType;
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
@@ -36,27 +37,27 @@ pub struct LogEntityActivityParams {
 pub trait ProjectActivityRepository {
     /// Logs a new activity in the project activity log.
     fn log_activity(
-        &self,
+        &mut self,
         activity: NewProjectActivity,
     ) -> impl Future<Output = PgResult<ProjectActivity>> + Send;
 
     /// Lists activities for a specific project with pagination support.
     fn list_project_activity(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectActivity>>> + Send;
 
     /// Gets recent activities across all projects for a specific user.
     fn get_user_recent_activity(
-        &self,
+        &mut self,
         user_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectActivity>>> + Send;
 
     /// Gets activities of a specific type within a project.
     fn get_activity_by_type(
-        &self,
+        &mut self,
         proj_id: Uuid,
         activity_type_filter: ActivityType,
         pagination: Pagination,
@@ -64,42 +65,42 @@ pub trait ProjectActivityRepository {
 
     /// Gets recent activities for a user within a specified time window.
     fn get_recent_user_activity(
-        &self,
+        &mut self,
         user_id: Uuid,
         hours: i64,
     ) -> impl Future<Output = PgResult<Vec<ProjectActivity>>> + Send;
 
     /// Gets all activities for a project with pagination support.
     fn get_activities_by_project(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectActivity>>> + Send;
 
     /// Logs integration-related activity using standardized parameters.
     fn log_integration_activity(
-        &self,
+        &mut self,
         project_id: Uuid,
         params: LogEntityActivityParams,
     ) -> impl Future<Output = PgResult<ProjectActivity>> + Send;
 
     /// Logs project member-related activity using standardized parameters.
     fn log_member_activity(
-        &self,
+        &mut self,
         project_id: Uuid,
         params: LogEntityActivityParams,
     ) -> impl Future<Output = PgResult<ProjectActivity>> + Send;
 
     /// Logs document-related activity using standardized parameters.
     fn log_document_activity(
-        &self,
+        &mut self,
         project_id: Uuid,
         params: LogEntityActivityParams,
     ) -> impl Future<Output = PgResult<ProjectActivity>> + Send;
 
     /// Gets the most active users in a project ranked by activity count.
     fn get_most_active_users(
-        &self,
+        &mut self,
         proj_id: Uuid,
         hours: Option<i64>,
         limit: i64,
@@ -107,21 +108,21 @@ pub trait ProjectActivityRepository {
 
     /// Gets a breakdown of activities by type for analytical reporting.
     fn get_activity_type_breakdown(
-        &self,
+        &mut self,
         proj_id: Uuid,
         hours: Option<i64>,
     ) -> impl Future<Output = PgResult<Vec<(ActivityType, i64)>>> + Send;
 
     /// Gets system-generated activities that have no associated user account.
     fn get_system_activities(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectActivity>>> + Send;
 
     /// Gets activities originating from a specific IP address for security analysis.
     fn get_activities_by_ip(
-        &self,
+        &mut self,
         proj_id: Uuid,
         ip_addr: IpNet,
         pagination: Pagination,
@@ -129,21 +130,20 @@ pub trait ProjectActivityRepository {
 
     /// Cleans up old activity logs to manage database size and performance.
     fn cleanup_old_activities(
-        &self,
+        &mut self,
         days_to_keep: i64,
     ) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
-impl ProjectActivityRepository for PgClient {
-    async fn log_activity(&self, activity: NewProjectActivity) -> PgResult<ProjectActivity> {
+impl ProjectActivityRepository for PgConnection {
+    async fn log_activity(&mut self, activity: NewProjectActivity) -> PgResult<ProjectActivity> {
         use schema::project_activities;
 
-        let mut conn = self.get_connection().await?;
 
         let activity = diesel::insert_into(project_activities::table)
             .values(&activity)
             .returning(ProjectActivity::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
@@ -151,13 +151,12 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn list_project_activity(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -165,7 +164,7 @@ impl ProjectActivityRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -173,13 +172,12 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_user_recent_activity(
-        &self,
+        &mut self,
         user_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let activities = project_activities
             .filter(account_id.eq(user_id))
@@ -187,7 +185,7 @@ impl ProjectActivityRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -195,14 +193,13 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_activity_by_type(
-        &self,
+        &mut self,
         proj_id: Uuid,
         activity_type_filter: ActivityType,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -211,7 +208,7 @@ impl ProjectActivityRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -219,13 +216,12 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_recent_user_activity(
-        &self,
+        &mut self,
         user_id: Uuid,
         hours: i64,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
 
@@ -235,7 +231,7 @@ impl ProjectActivityRepository for PgClient {
             .select(ProjectActivity::as_select())
             .order(created_at.desc())
             .limit(50)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -243,13 +239,12 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_activities_by_project(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -257,7 +252,7 @@ impl ProjectActivityRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -265,7 +260,7 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn log_integration_activity(
-        &self,
+        &mut self,
         project_id: Uuid,
         params: LogEntityActivityParams,
     ) -> PgResult<ProjectActivity> {
@@ -283,7 +278,7 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn log_member_activity(
-        &self,
+        &mut self,
         project_id: Uuid,
         params: LogEntityActivityParams,
     ) -> PgResult<ProjectActivity> {
@@ -301,7 +296,7 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn log_document_activity(
-        &self,
+        &mut self,
         project_id: Uuid,
         params: LogEntityActivityParams,
     ) -> PgResult<ProjectActivity> {
@@ -319,14 +314,13 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_most_active_users(
-        &self,
+        &mut self,
         proj_id: Uuid,
         hours: Option<i64>,
         limit: i64,
     ) -> PgResult<Vec<(Option<Uuid>, i64)>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let results = if let Some(time_window) = hours {
             let cutoff_time =
@@ -339,7 +333,7 @@ impl ProjectActivityRepository for PgClient {
                 .select((account_id, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
                 .limit(limit)
-                .load::<(Option<Uuid>, i64)>(&mut conn)
+                .load::<(Option<Uuid>, i64)>(self)
                 .await
                 .map_err(PgError::from)?
         } else {
@@ -350,7 +344,7 @@ impl ProjectActivityRepository for PgClient {
                 .select((account_id, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
                 .limit(limit)
-                .load::<(Option<Uuid>, i64)>(&mut conn)
+                .load::<(Option<Uuid>, i64)>(self)
                 .await
                 .map_err(PgError::from)?
         };
@@ -359,13 +353,12 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_activity_type_breakdown(
-        &self,
+        &mut self,
         proj_id: Uuid,
         hours: Option<i64>,
     ) -> PgResult<Vec<(ActivityType, i64)>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let results = if let Some(time_window) = hours {
             let cutoff_time =
@@ -376,7 +369,7 @@ impl ProjectActivityRepository for PgClient {
                 .group_by(activity_type)
                 .select((activity_type, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
-                .load::<(ActivityType, i64)>(&mut conn)
+                .load::<(ActivityType, i64)>(self)
                 .await
                 .map_err(PgError::from)?
         } else {
@@ -385,7 +378,7 @@ impl ProjectActivityRepository for PgClient {
                 .group_by(activity_type)
                 .select((activity_type, diesel::dsl::count(id)))
                 .order(diesel::dsl::count(id).desc())
-                .load::<(ActivityType, i64)>(&mut conn)
+                .load::<(ActivityType, i64)>(self)
                 .await
                 .map_err(PgError::from)?
         };
@@ -394,13 +387,12 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_system_activities(
-        &self,
+        &mut self,
         proj_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -409,7 +401,7 @@ impl ProjectActivityRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -417,14 +409,13 @@ impl ProjectActivityRepository for PgClient {
     }
 
     async fn get_activities_by_ip(
-        &self,
+        &mut self,
         proj_id: Uuid,
         ip_addr: IpNet,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -433,24 +424,23 @@ impl ProjectActivityRepository for PgClient {
             .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(activities)
     }
 
-    async fn cleanup_old_activities(&self, days_to_keep: i64) -> PgResult<usize> {
+    async fn cleanup_old_activities(&mut self, days_to_keep: i64) -> PgResult<usize> {
         use schema::project_activities::dsl::*;
 
-        let mut conn = self.get_connection().await?;
 
         let cutoff_date =
             jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(days_to_keep));
 
         let deleted_count = diesel::delete(project_activities)
             .filter(created_at.lt(cutoff_date))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 

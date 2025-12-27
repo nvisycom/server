@@ -1,2 +1,13 @@
-# Local data directories
+# IDE and Editors
+.vs/
+.vscode/
+.idea/
+.fleet/
+.zed/
+
+# Local data
 data/
+
+# Other
+.ignore*/
+LLM.md

@@ -6,12 +6,11 @@
 //! authorization and follow role-based access control principles.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
+
 use nvisy_postgres::query::{Pagination, ProjectWebhookRepository};
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
     CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
 };
@@ -34,7 +33,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
     )
 )]
 async fn create_webhook(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateWebhook>,
@@ -43,14 +42,14 @@ async fn create_webhook(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
     let new_webhook = request.into_model(path_params.project_id, auth_state.account_id);
-    let webhook = pg_client.create_project_webhook(new_webhook).await?;
+    let webhook = conn.create_project_webhook(new_webhook).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -72,7 +71,7 @@ async fn create_webhook(
     )
 )]
 async fn list_webhooks(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<Webhooks>)> {
@@ -80,13 +79,13 @@ async fn list_webhooks(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewIntegrations,
         )
         .await?;
 
-    let webhooks = pg_client
+    let webhooks = conn
         .list_project_webhooks(path_params.project_id, Pagination::default())
         .await?;
 
@@ -113,7 +112,7 @@ async fn list_webhooks(
     )
 )]
 async fn read_webhook(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
@@ -121,13 +120,13 @@ async fn read_webhook(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewIntegrations,
         )
         .await?;
 
-    let webhook = find_project_webhook(&pg_client, &path_params).await?;
+    let webhook = find_project_webhook(&mut conn, &path_params).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Project webhook retrieved successfully");
 
@@ -146,7 +145,7 @@ async fn read_webhook(
     )
 )]
 async fn update_webhook(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
@@ -155,17 +154,17 @@ async fn update_webhook(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
     // Verify webhook exists and belongs to the project
-    let _ = find_project_webhook(&pg_client, &path_params).await?;
+    let _ = find_project_webhook(&mut conn, &path_params).await?;
 
     let update_data = request.into_model();
-    let webhook = pg_client
+    let webhook = conn
         .update_project_webhook(path_params.webhook_id, update_data)
         .await?;
 
@@ -186,7 +185,7 @@ async fn update_webhook(
     )
 )]
 async fn delete_webhook(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<StatusCode> {
@@ -194,16 +193,16 @@ async fn delete_webhook(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
     // Verify webhook exists and belongs to the project
-    let _ = find_project_webhook(&pg_client, &path_params).await?;
+    let _ = find_project_webhook(&mut conn, &path_params).await?;
 
-    pg_client
+    conn
         .delete_project_webhook(path_params.webhook_id)
         .await?;
 
@@ -214,10 +213,10 @@ async fn delete_webhook(
 
 /// Finds a webhook by ID and verifies it belongs to the specified project.
 async fn find_project_webhook(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     path_params: &WebhookPathParams,
 ) -> Result<nvisy_postgres::model::ProjectWebhook> {
-    let Some(webhook) = pg_client
+    let Some(webhook) = conn
         .find_project_webhook_by_id(path_params.webhook_id)
         .await?
     else {

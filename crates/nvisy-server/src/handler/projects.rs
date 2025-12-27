@@ -5,12 +5,12 @@
 //! with role-based access control.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
+use nvisy_postgres::PgError;
+use nvisy_postgres::model::{NewProjectMember, Project as ProjectModel, ProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{CreateProject, Pagination, ProjectPathParams, UpdateProject};
 use crate::handler::response::{Project, Projects};
 use crate::handler::{ErrorKind, Result};
@@ -25,15 +25,24 @@ const TRACING_TARGET: &str = "nvisy_server::handler::projects";
 /// granting full management permissions.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_project(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     ValidateJson(request): ValidateJson<CreateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
     tracing::info!(target: TRACING_TARGET, "Creating new project");
 
     let new_project = request.into_model(auth_state.account_id);
-    let (project, _membership) = pg_client
-        .create_project_with_admin(new_project, auth_state.account_id)
+    let creator_id = auth_state.account_id;
+
+    let (project, _membership) = conn
+        .transaction(|conn| {
+            Box::pin(async move {
+                let project = conn.create_project(new_project).await?;
+                let new_member = NewProjectMember::new_owner(project.id, creator_id);
+                let member = conn.add_project_member(new_member).await?;
+                Ok::<(ProjectModel, ProjectMember), PgError>((project, member))
+            })
+        })
         .await?;
 
     let response = Project::from_model(project);
@@ -53,11 +62,11 @@ async fn create_project(
 /// in each project.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_projects(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Projects>)> {
-    let project_memberships = pg_client
+    let project_memberships = conn
         .list_user_projects_with_details(auth_state.account_id, pagination.into())
         .await?;
 
@@ -86,15 +95,15 @@ async fn list_projects(
     )
 )]
 async fn read_project(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<Project>)> {
     auth_state
-        .authorize_project(&pg_client, path_params.project_id, Permission::ViewProject)
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewProject)
         .await?;
 
-    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
+    let Some(project) = conn.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
@@ -117,7 +126,7 @@ async fn read_project(
     )
 )]
 async fn update_project(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<UpdateProject>,
@@ -125,15 +134,11 @@ async fn update_project(
     tracing::info!(target: TRACING_TARGET, "Updating project");
 
     auth_state
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::UpdateProject,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
         .await?;
 
     let update_data = request.into_model();
-    let project = pg_client
+    let project = conn
         .update_project(path_params.project_id, update_data)
         .await?;
 
@@ -155,22 +160,18 @@ async fn update_project(
     )
 )]
 async fn delete_project(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Project deletion requested");
 
     auth_state
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::DeleteProject,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
         .await?;
 
     // Verify project exists before deletion
-    if pg_client
+    if conn
         .find_project_by_id(path_params.project_id)
         .await?
         .is_none()
@@ -180,7 +181,7 @@ async fn delete_project(
             .with_resource("project"));
     }
 
-    pg_client.delete_project(path_params.project_id).await?;
+    conn.delete_project(path_params.project_id).await?;
 
     tracing::warn!(target: TRACING_TARGET, "Project deleted successfully");
 

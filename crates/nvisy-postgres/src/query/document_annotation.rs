@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation};
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for document annotation database operations.
 ///
@@ -18,33 +19,33 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait DocumentAnnotationRepository {
     /// Creates a new document annotation.
     fn create_annotation(
-        &self,
+        &mut self,
         new_annotation: NewDocumentAnnotation,
     ) -> impl Future<Output = PgResult<DocumentAnnotation>> + Send;
 
     /// Finds an annotation by its unique identifier.
     fn find_annotation_by_id(
-        &self,
+        &mut self,
         annotation_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentAnnotation>>> + Send;
 
     /// Finds all annotations for a specific document file.
     fn find_annotations_by_file(
-        &self,
+        &mut self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
     /// Finds all annotations created by a specific account.
     fn find_annotations_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
     /// Finds annotations of a specific type for a document file.
     fn find_annotations_by_type(
-        &self,
+        &mut self,
         file_id: Uuid,
         annotation_type: &str,
         pagination: Pagination,
@@ -52,41 +53,40 @@ pub trait DocumentAnnotationRepository {
 
     /// Updates an annotation with new content or metadata.
     fn update_annotation(
-        &self,
+        &mut self,
         annotation_id: Uuid,
         updates: UpdateDocumentAnnotation,
     ) -> impl Future<Output = PgResult<DocumentAnnotation>> + Send;
 
     /// Soft deletes an annotation by setting the deletion timestamp.
-    fn delete_annotation(&self, annotation_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_annotation(&mut self, annotation_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Finds annotations created within the last 7 days.
     fn find_recent_annotations(
-        &self,
+        &mut self,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
     /// Checks if an account owns a specific annotation.
     fn check_annotation_ownership(
-        &self,
+        &mut self,
         annotation_id: Uuid,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
 }
 
-impl DocumentAnnotationRepository for PgClient {
+impl DocumentAnnotationRepository for PgConnection {
     async fn create_annotation(
-        &self,
+        &mut self,
         new_annotation: NewDocumentAnnotation,
     ) -> PgResult<DocumentAnnotation> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations;
 
         let annotation = diesel::insert_into(document_annotations::table)
             .values(&new_annotation)
             .returning(DocumentAnnotation::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
@@ -94,10 +94,9 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn find_annotation_by_id(
-        &self,
+        &mut self,
         annotation_id: Uuid,
     ) -> PgResult<Option<DocumentAnnotation>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -105,7 +104,7 @@ impl DocumentAnnotationRepository for PgClient {
             .filter(dsl::id.eq(annotation_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentAnnotation::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -114,11 +113,10 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn find_annotations_by_file(
-        &self,
+        &mut self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -129,7 +127,7 @@ impl DocumentAnnotationRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentAnnotation::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -137,11 +135,10 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn find_annotations_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -152,7 +149,7 @@ impl DocumentAnnotationRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentAnnotation::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -160,12 +157,11 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn find_annotations_by_type(
-        &self,
+        &mut self,
         file_id: Uuid,
         annotation_type: &str,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -177,7 +173,7 @@ impl DocumentAnnotationRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentAnnotation::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -185,11 +181,10 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn update_annotation(
-        &self,
+        &mut self,
         annotation_id: Uuid,
         updates: UpdateDocumentAnnotation,
     ) -> PgResult<DocumentAnnotation> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -197,21 +192,20 @@ impl DocumentAnnotationRepository for PgClient {
             diesel::update(document_annotations::table.filter(dsl::id.eq(annotation_id)))
                 .set(&updates)
                 .returning(DocumentAnnotation::as_returning())
-                .get_result(&mut conn)
+                .get_result(self)
                 .await
                 .map_err(PgError::from)?;
 
         Ok(annotation)
     }
 
-    async fn delete_annotation(&self, annotation_id: Uuid) -> PgResult<()> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_annotation(&mut self, annotation_id: Uuid) -> PgResult<()> {
 
         use schema::document_annotations::{self, dsl};
 
         diesel::update(document_annotations::table.filter(dsl::id.eq(annotation_id)))
             .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 
@@ -219,10 +213,9 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn find_recent_annotations(
-        &self,
+        &mut self,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -235,7 +228,7 @@ impl DocumentAnnotationRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentAnnotation::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -243,11 +236,10 @@ impl DocumentAnnotationRepository for PgClient {
     }
 
     async fn check_annotation_ownership(
-        &self,
+        &mut self,
         annotation_id: Uuid,
         account_id: Uuid,
     ) -> PgResult<bool> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_annotations::{self, dsl};
 
@@ -256,7 +248,7 @@ impl DocumentAnnotationRepository for PgClient {
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 

@@ -223,7 +223,7 @@ CREATE INDEX document_files_document_status_idx
 
 CREATE INDEX document_files_processing_queue_idx
     ON document_files (processing_status, processing_priority DESC, created_at ASC)
-    WHERE processing_status IN ('pending', 'retry') AND deleted_at IS NULL;
+    WHERE processing_status = 'pending' AND deleted_at IS NULL;
 
 CREATE INDEX document_files_hash_dedup_idx
     ON document_files (file_hash_sha256, file_size_bytes)
@@ -439,7 +439,7 @@ SELECT
     EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - df.created_at)) AS queue_time_seconds
 FROM document_files df
     JOIN documents d ON df.document_id = d.id
-WHERE df.processing_status IN ('pending', 'retry', 'processing')
+WHERE df.processing_status IN ('pending', 'processing')
     AND df.deleted_at IS NULL
     AND d.deleted_at IS NULL
 ORDER BY df.processing_priority DESC, df.created_at ASC;

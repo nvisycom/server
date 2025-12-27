@@ -14,12 +14,12 @@ use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
-use nvisy_postgres::PgClient;
+
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::{DocumentFileRepository, Pagination, ProjectRepository};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
+use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
 use crate::handler::request::{
     DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ProjectPathParams,
     UpdateFile as UpdateFileRequest,
@@ -36,11 +36,11 @@ const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
 /// Finds a file by ID within a project or returns NotFound error.
 async fn find_project_file(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     project_id: Uuid,
     file_id: Uuid,
 ) -> Result<DocumentFile> {
-    pg_client
+    conn
         .find_project_file(project_id, file_id)
         .await?
         .ok_or_else(|| {
@@ -59,7 +59,7 @@ async fn find_project_file(
     )
 )]
 async fn upload_file(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
@@ -70,11 +70,11 @@ async fn upload_file(
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_project(&pg_client, path_params.project_id, Permission::UploadFiles)
+        .authorize_project(&mut conn, path_params.project_id, Permission::UploadFiles)
         .await?;
 
     // Load project keep_for_sec setting
-    let project_keep_for_sec = pg_client
+    let project_keep_for_sec = conn
         .find_project_by_id(path_params.project_id)
         .await?
         .and_then(|p| p.keep_for_sec);
@@ -168,7 +168,7 @@ async fn upload_file(
         };
 
         // Insert file record into database
-        let created_file = pg_client
+        let created_file = conn
             .create_document_file(file_record)
             .await
             .map_err(|err| {
@@ -200,7 +200,7 @@ async fn upload_file(
             );
 
             // Best effort cleanup - delete the orphan database record
-            if let Err(cleanup_err) = pg_client.delete_document_file(file_id).await {
+            if let Err(cleanup_err) = conn.delete_document_file(file_id).await {
                 tracing::error!(
                     target: TRACING_TARGET,
                     error = %cleanup_err,
@@ -297,7 +297,7 @@ async fn upload_file(
     )
 )]
 async fn update_file(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
@@ -306,14 +306,14 @@ async fn update_file(
     tracing::info!(target: TRACING_TARGET, "Updating file");
 
     auth_claims
-        .authorize_project(&pg_client, path_params.project_id, Permission::UpdateFiles)
+        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateFiles)
         .await?;
 
-    let _file = find_project_file(&pg_client, path_params.project_id, path_params.file_id).await?;
+    let _file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
 
     let updates = request.into_model();
 
-    let updated_file = pg_client
+    let updated_file = conn
         .update_document_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
@@ -345,7 +345,7 @@ async fn update_file(
     )
 )]
 async fn download_file(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
@@ -356,13 +356,13 @@ async fn download_file(
 
     auth_claims
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::DownloadFiles,
         )
         .await?;
 
-    let file = find_project_file(&pg_client, path_params.project_id, path_params.file_id).await?;
+    let file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
 
     // Create object key from storage path
     let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
@@ -436,7 +436,7 @@ async fn download_file(
     )
 )]
 async fn delete_file(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     _version: Version,
@@ -444,10 +444,10 @@ async fn delete_file(
     tracing::warn!(target: TRACING_TARGET, "File deletion requested");
 
     auth_claims
-        .authorize_project(&pg_client, path_params.project_id, Permission::DeleteFiles)
+        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteFiles)
         .await?;
 
-    let _file = find_project_file(&pg_client, path_params.project_id, path_params.file_id).await?;
+    let _file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
 
     // Soft delete by setting deleted_at timestamp
     let updates = UpdateDocumentFile {
@@ -455,7 +455,7 @@ async fn delete_file(
         ..Default::default()
     };
 
-    pg_client
+    conn
         .update_document_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
@@ -479,7 +479,7 @@ async fn delete_file(
     )
 )]
 async fn download_multiple_files(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
     State(archive): State<ArchiveService>,
     Path(path_params): Path<ProjectPathParams>,
@@ -490,7 +490,7 @@ async fn download_multiple_files(
 
     auth_claims
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::DownloadFiles,
         )
@@ -499,7 +499,7 @@ async fn download_multiple_files(
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Batch fetch all requested files that belong to this project
-    let files = pg_client
+    let files = conn
         .find_document_files_by_ids(&request.file_ids)
         .await?;
 
@@ -581,7 +581,7 @@ async fn download_multiple_files(
 async fn download_archived_files(
     Path(path_params): Path<ProjectPathParams>,
     AuthState(auth_claims): AuthState,
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
     State(archive): State<ArchiveService>,
     Json(request): Json<DownloadArchivedFilesRequest>,
@@ -590,7 +590,7 @@ async fn download_archived_files(
 
     auth_claims
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::DownloadFiles,
         )
@@ -601,10 +601,10 @@ async fn download_archived_files(
     // Determine which files to download
     let files = if let Some(specific_ids) = request.file_ids {
         // Batch fetch specific files
-        pg_client.find_document_files_by_ids(&specific_ids).await?
+        conn.find_document_files_by_ids(&specific_ids).await?
     } else {
         // Get all project files using the project-scoped query
-        pg_client
+        conn
             .find_document_files_by_project(path_params.project_id, Pagination::default())
             .await?
     };

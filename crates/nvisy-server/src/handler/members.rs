@@ -6,17 +6,12 @@
 //! role-based access control principles.
 
 use aide::axum::ApiRouter;
-use axum::Json;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::UpdateProjectMember;
-use nvisy_postgres::query::{
-    Pagination as PgPagination, ProjectMemberRepository, ProjectRepository,
-};
+
+use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::{ProjectRole, ProjectVisibility};
 
-use crate::extract::{AuthProvider, AuthState, Path, Permission, ValidateJson};
+use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{MemberPathParams, Pagination, ProjectPathParams, UpdateMemberRole};
 use crate::handler::response::{Member, Members};
 use crate::handler::{ErrorKind, Result};
@@ -37,7 +32,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
     )
 )]
 async fn list_members(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
@@ -45,10 +40,10 @@ async fn list_members(
     tracing::debug!(target: TRACING_TARGET, "Listing project members");
 
     auth_state
-        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
         .await?;
 
-    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
+    let Some(project) = conn.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project")
             .with_message("Project not found"));
@@ -59,7 +54,7 @@ async fn list_members(
         tracing::debug!(target: TRACING_TARGET, "Project is private, returning empty list");
         Vec::new()
     } else {
-        let project_members = pg_client
+        let project_members = conn
             .list_project_members(path_params.project_id, pagination.into())
             .await?;
 
@@ -88,17 +83,17 @@ async fn list_members(
     )
 )]
 async fn get_member(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving project member details");
 
     auth_state
-        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
         .await?;
 
-    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
+    let Some(project) = conn.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project")
             .with_message("Project not found"));
@@ -110,7 +105,7 @@ async fn get_member(
             .with_message("Cannot view members of a private project"));
     }
 
-    let Some(project_member) = pg_client
+    let Some(project_member) = conn
         .find_project_member(path_params.project_id, path_params.account_id)
         .await?
     else {
@@ -142,7 +137,7 @@ async fn get_member(
     )
 )]
 async fn delete_member(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<StatusCode> {
@@ -150,7 +145,7 @@ async fn delete_member(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::RemoveMembers,
         )
@@ -162,25 +157,21 @@ async fn delete_member(
             .with_message("Cannot remove yourself. Use the leave project endpoint instead."));
     }
 
-    let Some(member_to_remove) = pg_client
+    let Some(member_to_remove) = conn
         .find_project_member(path_params.project_id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("project_member"));
     };
 
-    // Prevent removing the last admin
+    // Admins cannot be removed, they can only leave
     if member_to_remove.member_role == ProjectRole::Admin {
-        let admin_count = count_active_admins(&pg_client, path_params.project_id).await?;
-
-        if admin_count <= 1 {
-            return Err(ErrorKind::BadRequest
-                .with_message("Cannot remove last admin")
-                .with_context("Promote another member to admin first"));
-        }
+        return Err(ErrorKind::BadRequest
+            .with_message("Cannot remove an admin")
+            .with_context("Admins can only leave the project themselves"));
     }
 
-    pg_client
+    conn
         .remove_project_member(path_params.project_id, path_params.account_id)
         .await?;
 
@@ -204,7 +195,7 @@ async fn delete_member(
     )
 )]
 async fn update_member(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMemberRole>,
@@ -212,7 +203,7 @@ async fn update_member(
     tracing::info!(target: TRACING_TARGET, "Updating project member role");
 
     auth_state
-        .authorize_project(&pg_client, path_params.project_id, Permission::ManageRoles)
+        .authorize_project(&mut conn, path_params.project_id, Permission::ManageRoles)
         .await?;
 
     // Prevent self-role-update
@@ -222,31 +213,26 @@ async fn update_member(
             .with_context("Ask another admin to update your role"));
     }
 
-    let Some(current_member) = pg_client
+    let Some(current_member) = conn
         .find_project_member(path_params.project_id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("project_member"));
     };
 
-    // Prevent demoting the last admin
+    // Admins cannot be demoted, they can only leave
     if current_member.member_role == ProjectRole::Admin && request.role != ProjectRole::Admin {
-        let admin_count = count_active_admins(&pg_client, path_params.project_id).await?;
-
-        if admin_count <= 1 {
-            return Err(ErrorKind::BadRequest
-                .with_message("Cannot demote last admin")
-                .with_context("Promote another member to admin first"));
-        }
+        return Err(ErrorKind::BadRequest
+            .with_message("Cannot demote an admin")
+            .with_context("Admins can only leave the project themselves"));
     }
 
-    let changes = UpdateProjectMember {
-        member_role: Some(request.role),
-        ..Default::default()
-    };
-
-    let updated_member = pg_client
-        .update_project_member(path_params.project_id, path_params.account_id, changes)
+    let updated_member = conn
+        .update_project_member(
+            path_params.project_id,
+            path_params.account_id,
+            request.into_model(),
+        )
         .await?;
 
     tracing::info!(
@@ -258,25 +244,41 @@ async fn update_member(
     Ok((StatusCode::OK, Json(updated_member.into())))
 }
 
-/// Counts the number of active admins in a project.
-async fn count_active_admins(
-    pg_client: &PgClient,
-    project_id: uuid::Uuid,
-) -> Result<usize, nvisy_postgres::PgError> {
-    let all_members = pg_client
-        .list_project_members(
-            project_id,
-            PgPagination {
-                limit: 1000,
-                offset: 0,
-            },
-        )
+/// Leaves a project.
+///
+/// Allows a member to voluntarily leave a project. This action cannot be undone.
+/// The member will lose all access to the project and its resources.
+/// The last admin cannot leave - they must transfer ownership first.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
+async fn leave_project(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<ProjectPathParams>,
+) -> Result<StatusCode> {
+    tracing::warn!(target: TRACING_TARGET, "Member leaving project");
+
+    let Some(_member) = conn
+        .find_project_member(path_params.project_id, auth_state.account_id)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_resource("project_member")
+            .with_message("You are not a member of this project"));
+    };
+
+    conn
+        .remove_project_member(path_params.project_id, auth_state.account_id)
         .await?;
 
-    Ok(all_members
-        .iter()
-        .filter(|m| m.member_role == ProjectRole::Admin && m.is_active)
-        .count())
+    tracing::warn!(target: TRACING_TARGET, "Member left project successfully");
+
+    Ok(StatusCode::OK)
 }
 
 /// Returns a [`Router`] with all project member related routes.
@@ -287,6 +289,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route("/projects/:project_id/members/", get(list_members))
+        .api_route("/projects/:project_id/members/leave", post(leave_project))
         .api_route(
             "/projects/:project_id/members/:account_id/",
             get(get_member),

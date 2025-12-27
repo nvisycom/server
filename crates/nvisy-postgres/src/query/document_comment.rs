@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for document comment database operations.
 ///
@@ -18,73 +19,71 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait DocumentCommentRepository {
     /// Creates a new document comment.
     fn create_comment(
-        &self,
+        &mut self,
         new_comment: NewDocumentComment,
     ) -> impl Future<Output = PgResult<DocumentComment>> + Send;
 
     /// Finds a comment by its unique identifier.
     fn find_comment_by_id(
-        &self,
+        &mut self,
         comment_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentComment>>> + Send;
 
     /// Finds all comments for a specific file.
     fn find_comments_by_file(
-        &self,
+        &mut self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
     /// Finds all comments created by a specific account.
     fn find_comments_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
     /// Finds comments where an account was mentioned or replied to.
     fn find_comments_mentioning_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
     /// Updates a comment with new content and metadata.
     fn update_comment(
-        &self,
+        &mut self,
         comment_id: Uuid,
         updates: UpdateDocumentComment,
     ) -> impl Future<Output = PgResult<DocumentComment>> + Send;
 
     /// Soft deletes a comment by setting the deletion timestamp.
-    fn delete_comment(&self, comment_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_comment(&mut self, comment_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Checks if an account owns a specific comment.
     fn check_comment_ownership(
-        &self,
+        &mut self,
         comment_id: Uuid,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
 }
 
-impl DocumentCommentRepository for PgClient {
-    async fn create_comment(&self, new_comment: NewDocumentComment) -> PgResult<DocumentComment> {
-        let mut conn = self.get_connection().await?;
+impl DocumentCommentRepository for PgConnection {
+    async fn create_comment(&mut self, new_comment: NewDocumentComment) -> PgResult<DocumentComment> {
 
         use schema::document_comments;
 
         let comment = diesel::insert_into(document_comments::table)
             .values(&new_comment)
             .returning(DocumentComment::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(comment)
     }
 
-    async fn find_comment_by_id(&self, comment_id: Uuid) -> PgResult<Option<DocumentComment>> {
-        let mut conn = self.get_connection().await?;
+    async fn find_comment_by_id(&mut self, comment_id: Uuid) -> PgResult<Option<DocumentComment>> {
 
         use schema::document_comments::{self, dsl};
 
@@ -92,7 +91,7 @@ impl DocumentCommentRepository for PgClient {
             .filter(dsl::id.eq(comment_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentComment::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -101,11 +100,10 @@ impl DocumentCommentRepository for PgClient {
     }
 
     async fn find_comments_by_file(
-        &self,
+        &mut self,
         file_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_comments::{self, dsl};
 
@@ -116,7 +114,7 @@ impl DocumentCommentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -124,11 +122,10 @@ impl DocumentCommentRepository for PgClient {
     }
 
     async fn find_comments_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_comments::{self, dsl};
 
@@ -139,7 +136,7 @@ impl DocumentCommentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -147,11 +144,10 @@ impl DocumentCommentRepository for PgClient {
     }
 
     async fn find_comments_mentioning_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_comments::{self, dsl};
 
@@ -162,7 +158,7 @@ impl DocumentCommentRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentComment::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -170,40 +166,37 @@ impl DocumentCommentRepository for PgClient {
     }
 
     async fn update_comment(
-        &self,
+        &mut self,
         comment_id: Uuid,
         updates: UpdateDocumentComment,
     ) -> PgResult<DocumentComment> {
-        let mut conn = self.get_connection().await?;
 
         use schema::document_comments::{self, dsl};
 
         let comment = diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
             .set(&updates)
             .returning(DocumentComment::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(comment)
     }
 
-    async fn delete_comment(&self, comment_id: Uuid) -> PgResult<()> {
-        let mut conn = self.get_connection().await?;
+    async fn delete_comment(&mut self, comment_id: Uuid) -> PgResult<()> {
 
         use schema::document_comments::{self, dsl};
 
         diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
             .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-            .execute(&mut conn)
+            .execute(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(())
     }
 
-    async fn check_comment_ownership(&self, comment_id: Uuid, account_id: Uuid) -> PgResult<bool> {
-        let mut conn = self.get_connection().await?;
+    async fn check_comment_ownership(&mut self, comment_id: Uuid, account_id: Uuid) -> PgResult<bool> {
 
         use schema::document_comments::{self, dsl};
 
@@ -212,7 +205,7 @@ impl DocumentCommentRepository for PgClient {
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .count()
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 

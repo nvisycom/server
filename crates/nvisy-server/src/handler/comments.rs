@@ -4,13 +4,11 @@
 //! Supports threaded conversations and @mentions.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::NewDocumentComment;
+
 use nvisy_postgres::query::{DocumentCommentRepository, DocumentFileRepository};
 
-use crate::extract::{AuthState, Json, Path, ValidateJson};
+use crate::extract::{PgPool, AuthState, Json, Path, ValidateJson};
 use crate::handler::request::{
     CreateDocumentComment, FileCommentPathParams, FilePathParams, Pagination,
     UpdateDocumentComment as UpdateCommentRequest,
@@ -31,7 +29,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::comments";
     )
 )]
 async fn post_comment(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
@@ -39,11 +37,11 @@ async fn post_comment(
     tracing::info!(target: TRACING_TARGET, "Creating comment");
 
     // Verify file exists
-    let _ = find_file(&pg_client, path_params.file_id).await?;
+    let _ = find_file(&mut conn, path_params.file_id).await?;
 
     // Validate parent comment if provided
     if let Some(parent_id) = request.parent_comment_id {
-        let parent_comment = find_comment(&pg_client, parent_id).await?;
+        let parent_comment = find_comment(&mut conn, parent_id).await?;
 
         // Verify parent comment is on the same file
         if parent_comment.file_id != path_params.file_id {
@@ -53,16 +51,9 @@ async fn post_comment(
         }
     }
 
-    let new_comment = NewDocumentComment {
-        file_id: path_params.file_id,
-        account_id: auth_claims.account_id,
-        parent_comment_id: request.parent_comment_id,
-        reply_to_account_id: request.reply_to_account_id,
-        content: request.content.clone(),
-        ..Default::default()
-    };
-
-    let comment = pg_client.create_comment(new_comment).await?;
+    let comment = conn
+        .create_comment(request.into_model(auth_claims.account_id, path_params.file_id))
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -82,7 +73,7 @@ async fn post_comment(
     )
 )]
 async fn list_comments(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     Json(pagination): Json<Pagination>,
@@ -90,9 +81,9 @@ async fn list_comments(
     tracing::debug!(target: TRACING_TARGET, "Listing file comments");
 
     // Verify file exists
-    let _ = find_file(&pg_client, path_params.file_id).await?;
+    let _ = find_file(&mut conn, path_params.file_id).await?;
 
-    let comments = pg_client
+    let comments = conn
         .find_comments_by_file(path_params.file_id, pagination.into())
         .await?;
 
@@ -118,7 +109,7 @@ async fn list_comments(
     )
 )]
 async fn update_comment(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateCommentRequest>,
@@ -126,10 +117,10 @@ async fn update_comment(
     tracing::info!(target: TRACING_TARGET, "Updating comment");
 
     // Verify file exists
-    let _ = find_file(&pg_client, path_params.file_id).await?;
+    let _ = find_file(&mut conn, path_params.file_id).await?;
 
     // Fetch comment and verify ownership
-    let existing_comment = find_comment(&pg_client, path_params.comment_id).await?;
+    let existing_comment = find_comment(&mut conn, path_params.comment_id).await?;
 
     // Verify comment belongs to the file in the path
     if existing_comment.file_id != path_params.file_id {
@@ -145,13 +136,8 @@ async fn update_comment(
             .with_resource("comment"));
     }
 
-    let update_data = nvisy_postgres::model::UpdateDocumentComment {
-        content: request.content,
-        ..Default::default()
-    };
-
-    let comment = pg_client
-        .update_comment(path_params.comment_id, update_data)
+    let comment = conn
+        .update_comment(path_params.comment_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Comment updated successfully");
@@ -169,17 +155,17 @@ async fn update_comment(
     )
 )]
 async fn delete_comment(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Comment deletion requested");
 
     // Verify file exists
-    let _ = find_file(&pg_client, path_params.file_id).await?;
+    let _ = find_file(&mut conn, path_params.file_id).await?;
 
     // Fetch comment and verify ownership
-    let existing_comment = find_comment(&pg_client, path_params.comment_id).await?;
+    let existing_comment = find_comment(&mut conn, path_params.comment_id).await?;
 
     // Verify comment belongs to the file in the path
     if existing_comment.file_id != path_params.file_id {
@@ -195,7 +181,7 @@ async fn delete_comment(
             .with_resource("comment"));
     }
 
-    pg_client.delete_comment(path_params.comment_id).await?;
+    conn.delete_comment(path_params.comment_id).await?;
 
     tracing::warn!(target: TRACING_TARGET, "Comment deleted successfully");
 
@@ -204,10 +190,10 @@ async fn delete_comment(
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     file_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::DocumentFile> {
-    pg_client
+    conn
         .find_document_file_by_id(file_id)
         .await?
         .ok_or_else(|| {
@@ -219,10 +205,10 @@ async fn find_file(
 
 /// Finds a comment by ID or returns NotFound error.
 async fn find_comment(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     comment_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::DocumentComment> {
-    pg_client
+    conn
         .find_comment_by_id(comment_id)
         .await?
         .ok_or_else(|| {

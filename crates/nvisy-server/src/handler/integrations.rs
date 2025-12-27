@@ -6,15 +6,14 @@
 //! and follow role-based access control principles.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
+
 use nvisy_postgres::query::ProjectIntegrationRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
     CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
-    UpdateIntegrationCredentials, UpdateProjectIntegration as UpdateProjectIntegrationRequest,
+    UpdateIntegrationCredentials, UpdateProjectIntegration,
 };
 use crate::handler::response::{Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
@@ -36,7 +35,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::integrations";
     )
 )]
 async fn create_integration(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateProjectIntegration>,
@@ -45,14 +44,14 @@ async fn create_integration(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
     // Check if integration name is already used in this project
-    let name_is_unique = pg_client
+    let name_is_unique = conn
         .is_integration_name_unique(path_params.project_id, &request.integration_name, None)
         .await?;
 
@@ -61,7 +60,7 @@ async fn create_integration(
     }
 
     let new_integration = request.into_model(path_params.project_id, auth_state.account_id);
-    let integration = pg_client.create_integration(new_integration).await?;
+    let integration = conn.create_integration(new_integration).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -83,7 +82,7 @@ async fn create_integration(
     )
 )]
 async fn list_integrations(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(_pagination): Json<Pagination>,
@@ -92,13 +91,13 @@ async fn list_integrations(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewIntegrations,
         )
         .await?;
 
-    let integrations = pg_client
+    let integrations = conn
         .list_project_integrations(path_params.project_id)
         .await?;
 
@@ -125,7 +124,7 @@ async fn list_integrations(
     )
 )]
 async fn read_integration(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<(StatusCode, Json<Integration>)> {
@@ -133,13 +132,13 @@ async fn read_integration(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewIntegrations,
         )
         .await?;
 
-    let integration = find_project_integration(&pg_client, &path_params).await?;
+    let integration = find_project_integration(&mut conn, &path_params).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Project integration retrieved successfully");
 
@@ -158,28 +157,28 @@ async fn read_integration(
     )
 )]
 async fn update_integration(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(request): ValidateJson<UpdateProjectIntegrationRequest>,
+    ValidateJson(request): ValidateJson<UpdateProjectIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::info!(target: TRACING_TARGET, "Updating project integration");
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
-    let existing = find_project_integration(&pg_client, &path_params).await?;
+    let existing = find_project_integration(&mut conn, &path_params).await?;
 
     // Check if new name conflicts with existing integrations
     if let Some(ref new_name) = request.integration_name
         && new_name != &existing.integration_name
     {
-        let name_is_unique = pg_client
+        let name_is_unique = conn
             .is_integration_name_unique(
                 path_params.project_id,
                 new_name,
@@ -194,13 +193,11 @@ async fn update_integration(
         }
     }
 
-    let update_data = request.into_model();
-    let integration = pg_client
-        .update_integration(path_params.integration_id, update_data)
+    let integration = conn
+        .update_integration(path_params.integration_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Integration updated successfully");
-
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
@@ -216,7 +213,7 @@ async fn update_integration(
     )
 )]
 async fn update_integration_credentials(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateIntegrationCredentials>,
@@ -225,16 +222,16 @@ async fn update_integration_credentials(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
     // Verify integration exists and belongs to the project
-    let _ = find_project_integration(&pg_client, &path_params).await?;
+    let _ = find_project_integration(&mut conn, &path_params).await?;
 
-    let integration = pg_client
+    let integration = conn
         .update_integration_auth(
             path_params.integration_id,
             request.credentials,
@@ -259,7 +256,7 @@ async fn update_integration_credentials(
     )
 )]
 async fn delete_integration(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<StatusCode> {
@@ -267,16 +264,16 @@ async fn delete_integration(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
     // Verify integration exists and belongs to the project
-    let _ = find_project_integration(&pg_client, &path_params).await?;
+    let _ = find_project_integration(&mut conn, &path_params).await?;
 
-    pg_client
+    conn
         .delete_integration(path_params.integration_id)
         .await?;
 
@@ -287,10 +284,10 @@ async fn delete_integration(
 
 /// Finds an integration by ID and verifies it belongs to the specified project.
 async fn find_project_integration(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     path_params: &IntegrationPathParams,
 ) -> Result<nvisy_postgres::model::ProjectIntegration> {
-    let Some(integration) = pg_client
+    let Some(integration) = conn
         .find_integration_by_id(path_params.integration_id)
         .await?
     else {

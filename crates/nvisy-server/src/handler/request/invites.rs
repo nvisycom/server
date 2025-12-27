@@ -3,6 +3,7 @@
 use nvisy_postgres::types::ProjectRole;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use validator::Validate;
 
 /// Request payload for creating a new project invite.
@@ -22,6 +23,26 @@ pub struct CreateInvite {
     /// When the invitation expires.
     #[serde(default)]
     pub expires: InviteExpiration,
+}
+
+impl CreateInvite {
+    /// Converts to database model.
+    pub fn into_model(
+        self,
+        project_id: Uuid,
+        invitee_id: Option<Uuid>,
+        created_by: Uuid,
+    ) -> nvisy_postgres::model::NewProjectInvite {
+        nvisy_postgres::model::NewProjectInvite {
+            project_id,
+            invitee_id,
+            invited_role: Some(self.invited_role),
+            expires_at: self.expires.to_expiry_timestamp().map(Into::into),
+            created_by,
+            updated_by: created_by,
+            ..Default::default()
+        }
+    }
 }
 
 /// Request to respond to a project invitation.
@@ -79,4 +100,23 @@ pub struct GenerateInviteCode {
     /// When the invite code expires.
     #[serde(default)]
     pub expires: InviteExpiration,
+}
+
+impl GenerateInviteCode {
+    /// Converts to database model.
+    pub fn into_model(
+        self,
+        project_id: Uuid,
+        created_by: Uuid,
+    ) -> nvisy_postgres::model::NewProjectInvite {
+        nvisy_postgres::model::NewProjectInvite {
+            project_id,
+            invitee_id: None,
+            invited_role: Some(self.role),
+            expires_at: self.expires.to_expiry_timestamp().map(Into::into),
+            created_by,
+            updated_by: created_by,
+            ..Default::default()
+        }
+    }
 }

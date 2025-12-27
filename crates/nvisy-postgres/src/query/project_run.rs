@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectRun, ProjectRun, UpdateProjectRun};
 use crate::types::IntegrationStatus;
-use crate::{PgClient, PgError, PgResult, schema};
+use crate::{PgError, PgResult, schema};
+use crate::PgConnection;
 
 /// Repository for project run database operations.
 ///
@@ -19,33 +20,33 @@ use crate::{PgClient, PgError, PgResult, schema};
 pub trait ProjectRunRepository {
     /// Creates a new project run with the provided configuration.
     fn create_run(
-        &self,
+        &mut self,
         new_run: NewProjectRun,
     ) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
     /// Finds a run by its unique identifier.
     fn find_run_by_id(
-        &self,
+        &mut self,
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<ProjectRun>>> + Send;
 
     /// Finds all runs for a project ordered by creation time.
     fn find_runs_by_project(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
 
     /// Finds all runs for a specific integration.
     fn find_runs_by_integration(
-        &self,
+        &mut self,
         integration_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
 
     /// Finds runs matching a specific status for a project.
     fn find_runs_by_status(
-        &self,
+        &mut self,
         project_id: Uuid,
         status: IntegrationStatus,
         pagination: Pagination,
@@ -53,7 +54,7 @@ pub trait ProjectRunRepository {
 
     /// Finds runs of a specific type for a project.
     fn find_runs_by_type(
-        &self,
+        &mut self,
         project_id: Uuid,
         run_type: &str,
         pagination: Pagination,
@@ -61,14 +62,14 @@ pub trait ProjectRunRepository {
 
     /// Finds all runs triggered by a specific account.
     fn find_runs_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
 
     /// Finds all failed runs for a project.
     fn find_failed_runs(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
@@ -77,30 +78,30 @@ pub trait ProjectRunRepository {
     ///
     /// Optionally filtered by project.
     fn find_in_progress_runs(
-        &self,
+        &mut self,
         project_id: Option<Uuid>,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
 
     /// Finds runs created within the last 7 days for a project.
     fn find_recent_runs(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
 
     /// Updates a run with new status, results, or metadata.
     fn update_run(
-        &self,
+        &mut self,
         run_id: Uuid,
         updates: UpdateProjectRun,
     ) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
     /// Marks a run as started with current timestamp.
-    fn mark_run_started(&self, run_id: Uuid) -> impl Future<Output = PgResult<ProjectRun>> + Send;
+    fn mark_run_started(&mut self, run_id: Uuid) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
     /// Marks a run as completed with final status and results.
     fn mark_run_completed(
-        &self,
+        &mut self,
         run_id: Uuid,
         status: IntegrationStatus,
         result_summary: Option<String>,
@@ -108,44 +109,42 @@ pub trait ProjectRunRepository {
 
     /// Marks a run as failed with error details.
     fn mark_run_failed(
-        &self,
+        &mut self,
         run_id: Uuid,
         error_details: serde_json::Value,
     ) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
     /// Finds runs exceeding a duration threshold in milliseconds.
     fn find_long_running_runs(
-        &self,
+        &mut self,
         min_duration_ms: i32,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<ProjectRun>>> + Send;
 }
 
-impl ProjectRunRepository for PgClient {
-    async fn create_run(&self, new_run: NewProjectRun) -> PgResult<ProjectRun> {
-        let mut conn = self.get_connection().await?;
+impl ProjectRunRepository for PgConnection {
+    async fn create_run(&mut self, new_run: NewProjectRun) -> PgResult<ProjectRun> {
 
         use schema::project_runs;
 
         let run = diesel::insert_into(project_runs::table)
             .values(&new_run)
             .returning(ProjectRun::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(run)
     }
 
-    async fn find_run_by_id(&self, run_id: Uuid) -> PgResult<Option<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
+    async fn find_run_by_id(&mut self, run_id: Uuid) -> PgResult<Option<ProjectRun>> {
 
         use schema::project_runs::{self, dsl};
 
         let run = project_runs::table
             .filter(dsl::id.eq(run_id))
             .select(ProjectRun::as_select())
-            .first(&mut conn)
+            .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
@@ -154,11 +153,10 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_runs_by_project(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -168,7 +166,7 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -176,11 +174,10 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_runs_by_integration(
-        &self,
+        &mut self,
         integration_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -190,7 +187,7 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -198,12 +195,11 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_runs_by_status(
-        &self,
+        &mut self,
         project_id: Uuid,
         status: IntegrationStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -214,7 +210,7 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -222,12 +218,11 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_runs_by_type(
-        &self,
+        &mut self,
         project_id: Uuid,
         run_type: &str,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -238,7 +233,7 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -246,11 +241,10 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_runs_by_account(
-        &self,
+        &mut self,
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -260,7 +254,7 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -268,11 +262,10 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_failed_runs(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -283,15 +276,14 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(runs)
     }
 
-    async fn find_in_progress_runs(&self, project_id: Option<Uuid>) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
+    async fn find_in_progress_runs(&mut self, project_id: Option<Uuid>) -> PgResult<Vec<ProjectRun>> {
 
         use schema::project_runs::{self, dsl};
 
@@ -307,7 +299,7 @@ impl ProjectRunRepository for PgClient {
         let runs = query
             .order(dsl::started_at.desc())
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
@@ -315,11 +307,10 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_recent_runs(
-        &self,
+        &mut self,
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -332,30 +323,28 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(runs)
     }
 
-    async fn update_run(&self, run_id: Uuid, updates: UpdateProjectRun) -> PgResult<ProjectRun> {
-        let mut conn = self.get_connection().await?;
+    async fn update_run(&mut self, run_id: Uuid, updates: UpdateProjectRun) -> PgResult<ProjectRun> {
 
         use schema::project_runs::{self, dsl};
 
         let run = diesel::update(project_runs::table.filter(dsl::id.eq(run_id)))
             .set(&updates)
             .returning(ProjectRun::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(run)
     }
 
-    async fn mark_run_started(&self, run_id: Uuid) -> PgResult<ProjectRun> {
-        let mut conn = self.get_connection().await?;
+    async fn mark_run_started(&mut self, run_id: Uuid) -> PgResult<ProjectRun> {
 
         use schema::project_runs::{self, dsl};
 
@@ -365,7 +354,7 @@ impl ProjectRunRepository for PgClient {
                 dsl::run_status.eq(IntegrationStatus::Executing),
             ))
             .returning(ProjectRun::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
@@ -373,19 +362,18 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn mark_run_completed(
-        &self,
+        &mut self,
         run_id: Uuid,
         status: IntegrationStatus,
         result_summary: Option<String>,
     ) -> PgResult<ProjectRun> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
         let run = project_runs::table
             .filter(dsl::id.eq(run_id))
             .select(ProjectRun::as_select())
-            .first::<ProjectRun>(&mut conn)
+            .first::<ProjectRun>(self)
             .await
             .map_err(PgError::from)?;
 
@@ -403,7 +391,7 @@ impl ProjectRunRepository for PgClient {
                 dsl::result_summary.eq(result_summary),
             ))
             .returning(ProjectRun::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
@@ -411,18 +399,17 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn mark_run_failed(
-        &self,
+        &mut self,
         run_id: Uuid,
         error_details: serde_json::Value,
     ) -> PgResult<ProjectRun> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
         let run = project_runs::table
             .filter(dsl::id.eq(run_id))
             .select(ProjectRun::as_select())
-            .first::<ProjectRun>(&mut conn)
+            .first::<ProjectRun>(self)
             .await
             .map_err(PgError::from)?;
 
@@ -440,7 +427,7 @@ impl ProjectRunRepository for PgClient {
                 dsl::error_details.eq(Some(error_details)),
             ))
             .returning(ProjectRun::as_returning())
-            .get_result(&mut conn)
+            .get_result(self)
             .await
             .map_err(PgError::from)?;
 
@@ -448,11 +435,10 @@ impl ProjectRunRepository for PgClient {
     }
 
     async fn find_long_running_runs(
-        &self,
+        &mut self,
         min_duration_ms: i32,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-        let mut conn = self.get_connection().await?;
 
         use schema::project_runs::{self, dsl};
 
@@ -463,7 +449,7 @@ impl ProjectRunRepository for PgClient {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(ProjectRun::as_select())
-            .load(&mut conn)
+            .load(self)
             .await
             .map_err(PgError::from)?;
 

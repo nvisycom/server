@@ -7,12 +7,12 @@
 use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::model;
 use nvisy_postgres::query::AccountRepository;
-use nvisy_postgres::{PgClient, model};
 
 use super::request::UpdateAccount;
 use super::response::Account;
-use crate::extract::{AuthState, Json, ValidateJson};
+use crate::extract::{AuthState, Json, PgPool, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
@@ -25,12 +25,12 @@ const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
     fields(account_id = %auth_claims.account_id)
 )]
 async fn get_own_account(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading account");
 
-    let account = find_account(&pg_client, auth_claims.account_id).await?;
+    let account = find_account(&mut conn, auth_claims.account_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Account retrieved successfully");
 
@@ -43,7 +43,7 @@ async fn get_own_account(
     fields(account_id = %auth_claims.account_id)
 )]
 async fn update_own_account(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
@@ -51,7 +51,7 @@ async fn update_own_account(
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::info!(target: TRACING_TARGET, "Updating account");
 
-    let current_account = find_account(&pg_client, auth_claims.account_id).await?;
+    let current_account = find_account(&mut conn, auth_claims.account_id).await?;
 
     // Validate password strength if password is being updated
     let password_hash = if let Some(ref password) = request.password {
@@ -89,7 +89,7 @@ async fn update_own_account(
 
     // Check if email already exists for another account
     if let Some(ref email) = normalized_email
-        && pg_client.email_exists(email).await?
+        && conn.email_exists(email).await?
         && current_account.email_address != *email
     {
         tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
@@ -107,7 +107,7 @@ async fn update_own_account(
         ..Default::default()
     };
 
-    let account = pg_client
+    let account = conn
         .update_account(auth_claims.account_id, update_account)
         .await?;
 
@@ -122,15 +122,15 @@ async fn update_own_account(
     fields(account_id = %auth_claims.account_id)
 )]
 async fn delete_own_account(
-    State(pg_client): State<PgClient>,
+    mut conn: PgPool,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Account deletion requested");
 
     // Verify account exists
-    let _ = find_account(&pg_client, auth_claims.account_id).await?;
+    let _ = find_account(&mut conn, auth_claims.account_id).await?;
 
-    pg_client.delete_account(auth_claims.account_id).await?;
+    conn.delete_account(auth_claims.account_id).await?;
 
     tracing::warn!(target: TRACING_TARGET, "Account deleted successfully");
 
@@ -139,17 +139,14 @@ async fn delete_own_account(
 
 /// Finds an account by ID or returns NotFound error.
 async fn find_account(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     account_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::Account> {
-    pg_client
-        .find_account_by_id(account_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Account not found")
-                .with_resource("account")
-        })
+    conn.find_account_by_id(account_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("Account not found")
+            .with_resource("account")
+    })
 }
 
 /// Returns a [`Router`] with all related routes.

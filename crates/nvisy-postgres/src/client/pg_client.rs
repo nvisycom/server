@@ -1,9 +1,12 @@
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
 use deadpool::managed::{Hook, Pool};
-use diesel_async::RunQueryDsl;
+use derive_more::{Deref, DerefMut};
 use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig};
+use diesel_async::scoped_futures::ScopedBoxFuture;
+use diesel_async::{AsyncConnection, RunQueryDsl};
 
 use super::custom_hooks;
 use crate::{
@@ -167,13 +170,14 @@ impl PgClient {
 
     /// Gets a connection from the pool.
     ///
+    /// Returns a [`PgConn`] wrapper that implements all repository traits.
     /// This method will wait up to the configured timeout for an available connection.
     ///
     /// # Errors
     ///
     /// Returns an error if no connection is available within the timeout period.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
-    pub async fn get_connection(&self) -> PgResult<PooledConnection> {
+    pub async fn get_connection(&self) -> PgResult<PgConn> {
         tracing::debug!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
 
         let start = std::time::Instant::now();
@@ -197,6 +201,14 @@ impl PgClient {
         }
 
         tracing::debug!(target: TRACING_TARGET_CONNECTION, elapsed = ?elapsed, "Connection acquired successfully");
+        Ok(PgConn::new(conn))
+    }
+
+    /// Gets a raw pooled connection from the pool.
+    ///
+    /// This is intended for internal use by the migration module.
+    pub(crate) async fn get_pooled_connection(&self) -> PgResult<PooledConnection> {
+        let conn = self.inner.pool.get().await.map_err(PgError::from)?;
         Ok(conn)
     }
 
@@ -243,5 +255,74 @@ impl std::fmt::Debug for PgClient {
                 &self.inner.config.postgres_idle_timeout_secs,
             )
             .finish()
+    }
+}
+
+/// A wrapper around a pooled database connection.
+///
+/// `PgConn` owns a connection obtained from the connection pool and implements
+/// all repository traits (e.g., [`AccountRepository`], [`ProjectRepository`])
+/// via [`Deref`] to the underlying [`AsyncPgConnection`].
+/// When dropped, the connection is automatically returned to the pool.
+///
+/// # Usage
+///
+/// Obtain a `PgConn` from [`PgClient::get_connection`] and use it to execute
+/// database operations through the repository traits.
+///
+/// ```ignore
+/// let mut conn = pg_client.get_connection().await?;
+/// let account = conn.find_account_by_id(account_id).await?;
+/// ```
+///
+/// [`AccountRepository`]: crate::query::AccountRepository
+/// [`ProjectRepository`]: crate::query::ProjectRepository
+/// [`PgClient::get_connection`]: crate::PgClient::get_connection
+/// [`AsyncPgConnection`]: crate::PgConnection
+#[derive(Deref, DerefMut)]
+pub struct PgConn {
+    #[deref]
+    #[deref_mut]
+    conn: PooledConnection,
+}
+
+impl PgConn {
+    /// Creates a new connection wrapper from a pooled connection.
+    pub fn new(conn: PooledConnection) -> Self {
+        Self { conn }
+    }
+
+    /// Executes the given function within a database transaction.
+    ///
+    /// If the function returns `Ok`, the transaction is committed.
+    /// If the function returns `Err`, the transaction is rolled back.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// conn.transaction(|conn| {
+    ///     Box::pin(async move {
+    ///         // Perform multiple database operations
+    ///         diesel::insert_into(table).values(&data).execute(conn).await?;
+    ///         diesel::update(other_table).set(&changes).execute(conn).await?;
+    ///         Ok(result)
+    ///     })
+    /// }).await?;
+    /// ```
+    pub async fn transaction<'a, T, E, F>(&mut self, f: F) -> Result<T, E>
+    where
+        F: for<'r> FnOnce(&'r mut PooledConnection) -> ScopedBoxFuture<'a, 'r, Result<T, E>>
+            + Send
+            + 'a,
+        T: Send + 'a,
+        E: From<diesel::result::Error> + Send + 'a,
+    {
+        self.conn.transaction(f).await
+    }
+}
+
+impl fmt::Debug for PgConn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PgConn").finish_non_exhaustive()
     }
 }

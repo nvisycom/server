@@ -66,12 +66,12 @@ impl PgClientMigrationExt for PgClient {
     }
 
     async fn get_migration_status(&self) -> PgResult<MigrationStatus> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = self.get_pooled_connection().await?;
         get_migration_status(&mut conn).await
     }
 
     async fn verify_schema_integrity(&self) -> PgResult<()> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = self.get_pooled_connection().await?;
         verify_schema_integrity(&mut conn).await
     }
 }

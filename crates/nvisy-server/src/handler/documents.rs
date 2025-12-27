@@ -8,10 +8,10 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
-use nvisy_postgres::PgClient;
+
 use nvisy_postgres::query::DocumentRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
 use crate::handler::request::{
     CreateDocument, DocumentPathParams, Pagination, ProjectPathParams, UpdateDocument,
 };
@@ -33,7 +33,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::documents";
     )
 )]
 async fn create_document(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateDocument>,
@@ -42,14 +42,14 @@ async fn create_document(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::CreateDocuments,
         )
         .await?;
 
     let new_document = request.into_model(path_params.project_id, auth_state.account_id);
-    let document = pg_client.create_document(new_document).await?;
+    let document = conn.create_document(new_document).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -71,7 +71,7 @@ async fn create_document(
     )
 )]
 async fn get_all_documents(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
@@ -80,13 +80,13 @@ async fn get_all_documents(
 
     auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ViewDocuments,
         )
         .await?;
 
-    let documents = pg_client
+    let documents = conn
         .find_documents_by_project(path_params.project_id, pagination.into())
         .await?;
 
@@ -112,7 +112,7 @@ async fn get_all_documents(
     )
 )]
 async fn get_document(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<Document>)> {
@@ -120,13 +120,13 @@ async fn get_document(
 
     auth_state
         .authorize_document(
-            &pg_client,
+            &mut conn,
             path_params.document_id,
             Permission::ViewDocuments,
         )
         .await?;
 
-    let document = find_document(&pg_client, path_params.document_id).await?;
+    let document = find_document(&mut conn, path_params.document_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Document retrieved successfully");
 
@@ -144,7 +144,7 @@ async fn get_document(
     )
 )]
 async fn update_document(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocument>,
@@ -153,17 +153,17 @@ async fn update_document(
 
     auth_state
         .authorize_document(
-            &pg_client,
+            &mut conn,
             path_params.document_id,
             Permission::UpdateDocuments,
         )
         .await?;
 
     // Verify document exists
-    let _ = find_document(&pg_client, path_params.document_id).await?;
+    let _ = find_document(&mut conn, path_params.document_id).await?;
 
     let update_data = request.into_model();
-    let document = pg_client
+    let document = conn
         .update_document(path_params.document_id, update_data)
         .await?;
 
@@ -183,7 +183,7 @@ async fn update_document(
     )
 )]
 async fn delete_document(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(_nats_client): State<NatsClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
@@ -192,16 +192,16 @@ async fn delete_document(
 
     auth_state
         .authorize_document(
-            &pg_client,
+            &mut conn,
             path_params.document_id,
             Permission::DeleteDocuments,
         )
         .await?;
 
     // Verify document exists
-    let _ = find_document(&pg_client, path_params.document_id).await?;
+    let _ = find_document(&mut conn, path_params.document_id).await?;
 
-    pg_client.delete_document(path_params.document_id).await?;
+    conn.delete_document(path_params.document_id).await?;
 
     tracing::warn!(target: TRACING_TARGET, "Document deleted successfully");
 
@@ -210,10 +210,10 @@ async fn delete_document(
 
 /// Finds a document by ID or returns NotFound error.
 async fn find_document(
-    pg_client: &PgClient,
+    conn: &mut nvisy_postgres::PgConn,
     document_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::Document> {
-    pg_client
+    conn
         .find_document_by_id(document_id)
         .await?
         .ok_or_else(|| {
