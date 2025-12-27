@@ -93,17 +93,6 @@ pub trait ProjectMemberRepository {
         role: ProjectRole,
     ) -> impl Future<Output = PgResult<Vec<ProjectMember>>> + Send;
 
-    /// Counts total active members in a project.
-    fn get_member_count(&self, proj_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Counts active members grouped by role.
-    ///
-    /// Returns a tuple of (admins, editors, viewers).
-    fn get_member_count_by_role(
-        &self,
-        proj_id: Uuid,
-    ) -> impl Future<Output = PgResult<(i64, i64, i64)>> + Send;
-
     /// Checks if a user has any access to a project.
     fn check_project_access(
         &self,
@@ -330,56 +319,6 @@ impl ProjectMemberRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(members)
-    }
-
-    async fn get_member_count(&self, proj_id: Uuid) -> PgResult<i64> {
-        use schema::project_members::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count: i64 = project_members
-            .filter(project_id.eq(proj_id))
-            .filter(is_active.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn get_member_count_by_role(&self, proj_id: Uuid) -> PgResult<(i64, i64, i64)> {
-        use schema::project_members::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        let admin_count: i64 = project_members
-            .filter(project_id.eq(proj_id))
-            .filter(member_role.eq(ProjectRole::Admin))
-            .filter(is_active.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let editor_count: i64 = project_members
-            .filter(project_id.eq(proj_id))
-            .filter(member_role.eq(ProjectRole::Editor))
-            .filter(is_active.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let viewer_count: i64 = project_members
-            .filter(project_id.eq(proj_id))
-            .filter(member_role.eq(ProjectRole::Viewer))
-            .filter(is_active.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok((admin_count, editor_count, viewer_count))
     }
 
     async fn check_project_access(&self, proj_id: Uuid, user_id: Uuid) -> PgResult<bool> {

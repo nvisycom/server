@@ -60,19 +60,6 @@ pub trait DocumentAnnotationRepository {
     /// Soft deletes an annotation by setting the deletion timestamp.
     fn delete_annotation(&self, annotation_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Counts total active annotations for a file.
-    fn count_annotations_by_file(
-        &self,
-        file_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Counts annotations of a specific type for a file.
-    fn count_annotations_by_type(
-        &self,
-        file_id: Uuid,
-        annotation_type: &str,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
     /// Finds annotations created within the last 7 days.
     fn find_recent_annotations(
         &self,
@@ -229,43 +216,6 @@ impl DocumentAnnotationRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(())
-    }
-
-    async fn count_annotations_by_file(&self, file_id: Uuid) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::document_annotations::{self, dsl};
-
-        let count = document_annotations::table
-            .filter(dsl::document_file_id.eq(file_id))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn count_annotations_by_type(
-        &self,
-        file_id: Uuid,
-        annotation_type: &str,
-    ) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::document_annotations::{self, dsl};
-
-        let count = document_annotations::table
-            .filter(dsl::document_file_id.eq(file_id))
-            .filter(dsl::annotation_type.eq(annotation_type))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn find_recent_annotations(

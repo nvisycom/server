@@ -61,12 +61,6 @@ pub trait ProjectWebhookRepository {
     fn delete_project_webhook(&self, webhook_id: Uuid)
     -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Counts total webhooks for a project.
-    fn count_project_webhooks(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
     /// Records a successful webhook delivery.
     fn record_webhook_success(
         &self,
@@ -232,21 +226,6 @@ impl ProjectWebhookRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(())
-    }
-
-    async fn count_project_webhooks(&self, proj_id: Uuid) -> PgResult<i64> {
-        use schema::project_webhooks::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count = project_webhooks
-            .filter(project_id.eq(proj_id))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn record_webhook_success(&self, webhook_id: Uuid) -> PgResult<ProjectWebhook> {

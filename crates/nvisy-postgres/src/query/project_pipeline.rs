@@ -77,18 +77,6 @@ pub trait ProjectPipelineRepository {
         pipeline_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Counts total pipelines for a project.
-    fn count_project_pipelines(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Counts active pipelines for a project.
-    fn count_active_project_pipelines(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
     /// Sets a pipeline as the default for its type in a project.
     fn set_pipeline_as_default(
         &self,
@@ -293,37 +281,6 @@ impl ProjectPipelineRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(())
-    }
-
-    async fn count_project_pipelines(&self, proj_id: Uuid) -> PgResult<i64> {
-        use schema::project_pipelines::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count = project_pipelines
-            .filter(project_id.eq(proj_id))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn count_active_project_pipelines(&self, proj_id: Uuid) -> PgResult<i64> {
-        use schema::project_pipelines::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count = project_pipelines
-            .filter(project_id.eq(proj_id))
-            .filter(is_active.eq(true))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn set_pipeline_as_default(&self, pipeline_id: Uuid) -> PgResult<ProjectPipeline> {

@@ -59,9 +59,6 @@ pub trait DocumentCommentRepository {
     /// Soft deletes a comment by setting the deletion timestamp.
     fn delete_comment(&self, comment_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Counts total active comments for a file.
-    fn count_comments_by_file(&self, file_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
-
     /// Checks if an account owns a specific comment.
     fn check_comment_ownership(
         &self,
@@ -203,22 +200,6 @@ impl DocumentCommentRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(())
-    }
-
-    async fn count_comments_by_file(&self, file_id: Uuid) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::document_comments::{self, dsl};
-
-        let count = document_comments::table
-            .filter(dsl::file_id.eq(file_id))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn check_comment_ownership(&self, comment_id: Uuid, account_id: Uuid) -> PgResult<bool> {

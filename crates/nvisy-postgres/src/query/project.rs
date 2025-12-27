@@ -90,17 +90,6 @@ pub trait ProjectRepository {
         search_tags: &[String],
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Project>>> + Send;
-
-    /// Gets project statistics: member count, pending invites, and activity count.
-    ///
-    /// Returns a tuple of (member_count, pending_invites, activity_count).
-    fn get_project_stats(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<(i64, i64, i64)>> + Send;
-
-    /// Counts total non-deleted projects created by a user.
-    fn get_user_project_count(&self, user_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
 impl ProjectRepository for PgClient {
@@ -348,46 +337,5 @@ impl ProjectRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(project_list)
-    }
-
-    async fn get_project_stats(&self, project_id: Uuid) -> PgResult<(i64, i64, i64)> {
-        use schema::{project_invites, project_members};
-
-        let mut conn = self.get_connection().await?;
-
-        let member_count: i64 = project_members::table
-            .filter(project_members::project_id.eq(project_id))
-            .filter(project_members::is_active.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let pending_invites: i64 = project_invites::table
-            .filter(project_invites::project_id.eq(project_id))
-            .filter(project_invites::invite_status.eq(crate::types::InviteStatus::Pending))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let activity_count: i64 = 0;
-
-        Ok((member_count, pending_invites, activity_count))
-    }
-
-    async fn get_user_project_count(&self, user_id: Uuid) -> PgResult<i64> {
-        use schema::projects::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count: i64 = projects
-            .filter(created_by.eq(user_id))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 }

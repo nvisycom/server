@@ -97,7 +97,7 @@ anyhow = { workspace = true, features = [] }
 clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 [dev-dependencies]
-# Internal crates (with config feature for ServiceConfig::default in tests)
+# Internal crates
 nvisy-test = { workspace = true, features = [] }
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }

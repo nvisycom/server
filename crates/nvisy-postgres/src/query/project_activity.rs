@@ -97,13 +97,6 @@ pub trait ProjectActivityRepository {
         params: LogEntityActivityParams,
     ) -> impl Future<Output = PgResult<ProjectActivity>> + Send;
 
-    /// Gets activity count statistics for a project within an optional time window.
-    fn get_activity_stats(
-        &self,
-        proj_id: Uuid,
-        hours: Option<i64>,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
     /// Gets the most active users in a project ranked by activity count.
     fn get_most_active_users(
         &self,
@@ -323,30 +316,6 @@ impl ProjectActivityRepository for PgClient {
         };
 
         self.log_activity(activity).await
-    }
-
-    async fn get_activity_stats(&self, proj_id: Uuid, hours: Option<i64>) -> PgResult<i64> {
-        use schema::project_activities::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        let mut query = project_activities
-            .filter(project_id.eq(proj_id))
-            .into_boxed();
-
-        if let Some(time_window) = hours {
-            let cutoff_time =
-                jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
-            query = query.filter(created_at.gt(cutoff_time));
-        }
-
-        let count: i64 = query
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn get_most_active_users(

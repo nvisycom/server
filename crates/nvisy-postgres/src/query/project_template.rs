@@ -95,21 +95,6 @@ pub trait ProjectTemplateRepository {
         template_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Counts total public templates.
-    fn count_public_templates(&self) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Counts templates by category.
-    fn count_templates_by_category(
-        &self,
-        category: String,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Counts templates created by a specific account.
-    fn count_templates_by_creator(
-        &self,
-        creator_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
     /// Checks if a template exists with the given name.
     fn template_name_exists(
         &self,
@@ -390,51 +375,6 @@ impl ProjectTemplateRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(())
-    }
-
-    async fn count_public_templates(&self) -> PgResult<i64> {
-        use schema::project_templates::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count = project_templates
-            .filter(is_public.eq(true))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn count_templates_by_category(&self, template_category: String) -> PgResult<i64> {
-        use schema::project_templates::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count = project_templates
-            .filter(category.eq(template_category))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn count_templates_by_creator(&self, creator_id: Uuid) -> PgResult<i64> {
-        use schema::project_templates::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-        let count = project_templates
-            .filter(created_by.eq(creator_id))
-            .filter(deleted_at.is_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn template_name_exists(

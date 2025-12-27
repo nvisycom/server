@@ -113,25 +113,6 @@ pub trait ProjectRunRepository {
         error_details: serde_json::Value,
     ) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
-    /// Counts total runs for a project.
-    fn count_runs_by_project(&self, project_id: Uuid)
-    -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Counts runs by status for a project.
-    fn count_runs_by_status(
-        &self,
-        project_id: Uuid,
-        status: IntegrationStatus,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Gets run statistics for a project.
-    ///
-    /// Returns a tuple of (total, successful, failed, in_progress).
-    fn get_run_stats(
-        &self,
-        project_id: Uuid,
-    ) -> impl Future<Output = PgResult<(i64, i64, i64, i64)>> + Send;
-
     /// Finds runs exceeding a duration threshold in milliseconds.
     fn find_long_running_runs(
         &self,
@@ -464,82 +445,6 @@ impl ProjectRunRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(run)
-    }
-
-    async fn count_runs_by_project(&self, project_id: Uuid) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::project_runs::{self, dsl};
-
-        let count = project_runs::table
-            .filter(dsl::project_id.eq(project_id))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn count_runs_by_status(
-        &self,
-        project_id: Uuid,
-        status: IntegrationStatus,
-    ) -> PgResult<i64> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::project_runs::{self, dsl};
-
-        let count = project_runs::table
-            .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::run_status.eq(status))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn get_run_stats(&self, project_id: Uuid) -> PgResult<(i64, i64, i64, i64)> {
-        let mut conn = self.get_connection().await?;
-
-        use schema::project_runs::{self, dsl};
-
-        let total = project_runs::table
-            .filter(dsl::project_id.eq(project_id))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let successful = project_runs::table
-            .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::completed_at.is_not_null())
-            .filter(dsl::run_status.ne(IntegrationStatus::Failed))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let failed = project_runs::table
-            .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::run_status.eq(IntegrationStatus::Failed))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        let in_progress = project_runs::table
-            .filter(dsl::project_id.eq(project_id))
-            .filter(dsl::started_at.is_not_null())
-            .filter(dsl::completed_at.is_null())
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok((total, successful, failed, in_progress))
     }
 
     async fn find_long_running_runs(

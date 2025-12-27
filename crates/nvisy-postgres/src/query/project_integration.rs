@@ -93,12 +93,6 @@ pub trait ProjectIntegrationRepository {
         proj_id: Option<Uuid>,
     ) -> impl Future<Output = PgResult<Vec<ProjectIntegration>>> + Send;
 
-    /// Gets comprehensive integration statistics for a project.
-    fn get_integration_stats(
-        &self,
-        proj_id: Uuid,
-    ) -> impl Future<Output = PgResult<(i64, i64, i64, i64)>> + Send;
-
     /// Updates the authentication credentials for an integration.
     fn update_integration_auth(
         &self,
@@ -358,50 +352,6 @@ impl ProjectIntegrationRepository for PgClient {
             .map_err(PgError::from)?;
 
         Ok(integrations)
-    }
-
-    async fn get_integration_stats(&self, proj_id: Uuid) -> PgResult<(i64, i64, i64, i64)> {
-        use schema::project_integrations::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        // Count total integrations
-        let total_count: i64 = project_integrations
-            .filter(project_id.eq(proj_id))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Count active integrations
-        let active_count: i64 = project_integrations
-            .filter(project_id.eq(proj_id))
-            .filter(is_active.eq(true))
-            .filter(sync_status.eq(Some(IntegrationStatus::Executing)))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Count failed integrations
-        let failed_count: i64 = project_integrations
-            .filter(project_id.eq(proj_id))
-            .filter(sync_status.eq(Some(IntegrationStatus::Failed)))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        // Count pending integrations
-        let pending_count: i64 = project_integrations
-            .filter(project_id.eq(proj_id))
-            .filter(sync_status.eq(Some(IntegrationStatus::Pending)))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok((total_count, active_count, failed_count, pending_count))
     }
 
     async fn update_integration_auth(
