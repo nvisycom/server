@@ -460,28 +460,28 @@ impl Annotation {
             ));
         }
 
-        if let Some(confidence) = self.confidence {
-            if !(0.0..=1.0).contains(&confidence) {
-                return Err(TypeError::ValidationFailed(
-                    "Confidence must be between 0.0 and 1.0".to_string(),
-                ));
-            }
+        if let Some(confidence) = self.confidence
+            && !(0.0..=1.0).contains(&confidence)
+        {
+            return Err(TypeError::ValidationFailed(
+                "Confidence must be between 0.0 and 1.0".to_string(),
+            ));
         }
 
-        if let Some(span) = &self.text_span {
-            if span.is_empty() {
-                return Err(TypeError::ValidationFailed(
-                    "Text span cannot be empty".to_string(),
-                ));
-            }
+        if let Some(span) = &self.text_span
+            && span.is_empty()
+        {
+            return Err(TypeError::ValidationFailed(
+                "Text span cannot be empty".to_string(),
+            ));
         }
 
-        if let Some(bbox) = &self.bounding_box {
-            if bbox.width <= 0.0 || bbox.height <= 0.0 {
-                return Err(TypeError::ValidationFailed(
-                    "Bounding box dimensions must be positive".to_string(),
-                ));
-            }
+        if let Some(bbox) = &self.bounding_box
+            && (bbox.width <= 0.0 || bbox.height <= 0.0)
+        {
+            return Err(TypeError::ValidationFailed(
+                "Bounding box dimensions must be positive".to_string(),
+            ));
         }
 
         Ok(())

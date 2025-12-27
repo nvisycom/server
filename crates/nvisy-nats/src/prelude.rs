@@ -16,7 +16,7 @@
 //! ```
 
 // Client types
-pub use crate::client::{NatsClient, NatsConfig, NatsConnection, NatsCredentials, NatsTlsConfig};
+pub use crate::client::{NatsClient, NatsConfig, NatsConnection};
 // Key-Value store types
 pub use crate::kv::{
     ApiToken, ApiTokenStore, ApiTokenType, CacheStats, CacheStore, KvEntry, KvStore, KvValue,

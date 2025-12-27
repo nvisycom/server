@@ -106,7 +106,7 @@ impl ProjectRun {
 
     /// Returns whether the run has failed.
     pub fn has_failed(&self) -> bool {
-        matches!(self.run_status, IntegrationStatus::Failure)
+        matches!(self.run_status, IntegrationStatus::Failed)
     }
 
     /// Returns whether the run is complete (either failed or finished).

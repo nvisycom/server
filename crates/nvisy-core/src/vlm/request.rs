@@ -238,92 +238,6 @@ impl<Req> Request<Req> {
         self
     }
 
-    /// Validate the request.
-    pub fn validate(&self) -> Result<()> {
-        if self.prompt.trim().is_empty() {
-            return Err(Error::invalid_input());
-        }
-
-        // Check image count limits
-        if self.images.len() > 10 {
-            return Err(Error::invalid_input());
-        }
-
-        // Check document count limits
-        if self.documents.len() > 20 {
-            return Err(Error::invalid_input());
-        }
-
-        // Check message count limits
-        if self.messages.len() > 100 {
-            return Err(Error::invalid_input());
-        }
-
-        // Validate each image
-        for image in &self.images {
-            if image.data.is_empty() {
-                return Err(Error::invalid_input());
-            }
-
-            if image.mime_type.is_empty() {
-                return Err(Error::invalid_input());
-            }
-
-            // Check for supported image formats
-            let supported_formats = [
-                "image/jpeg",
-                "image/jpg",
-                "image/png",
-                "image/webp",
-                "image/gif",
-            ];
-
-            if !supported_formats.contains(&image.mime_type.as_str()) {
-                return Err(Error::invalid_input().with_message("Unsupported image format"));
-            }
-
-            // Check image size (rough estimate from base64)
-            if image.estimated_size() > 20 * 1024 * 1024 {
-                return Err(Error::invalid_input());
-            }
-        }
-
-        // Validate each document
-        for document in &self.documents {
-            if document.is_empty() {
-                return Err(Error::invalid_input());
-            }
-
-            // Check document size
-            if document.size() > 50 * 1024 * 1024 {
-                return Err(Error::invalid_input());
-            }
-        }
-
-        // Validate messages
-        for message in &self.messages {
-            if message.content.trim().is_empty() && message.content_parts.is_empty() {
-                return Err(Error::invalid_input());
-            }
-        }
-
-        // Check temperature range
-        if let Some(temp) = self.options.temperature
-            && (!(0.0..=2.0).contains(&temp))
-        {
-            return Err(Error::invalid_input());
-        }
-
-        // Check max tokens
-        if let Some(max_tokens) = self.options.max_tokens
-            && (max_tokens == 0 || max_tokens > 8192)
-        {
-            return Err(Error::invalid_input());
-        }
-
-        Ok(())
-    }
-
     /// Check if this request has images.
     pub fn has_images(&self) -> bool {
         !self.images.is_empty()
@@ -450,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vlm_request_validation_success() {
+    fn test_vlm_request_with_options() {
         let document = Document::new(Bytes::from("Valid content")).with_content_type("text/plain");
         let image = ImageInput::from_bytes(vec![1, 2, 3, 4], "image/jpeg".to_string()).unwrap();
 
@@ -460,71 +374,10 @@ mod tests {
             .with_max_tokens(100)
             .with_temperature(0.7);
 
-        assert!(request.validate().is_ok());
-    }
-
-    #[test]
-    fn test_vlm_request_validation_empty_prompt() {
-        let request = Request::new("   ".to_string(), ());
-        let result = request.validate();
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_vlm_request_validation_too_many_images() {
-        let mut request = Request::new("Test prompt".to_string(), ());
-
-        // Add more than 10 images
-        for i in 0..11 {
-            let image = ImageInput::from_bytes(vec![i as u8], "image/jpeg".to_string()).unwrap();
-            request = request.add_image(image);
-        }
-
-        let result = request.validate();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_vlm_request_validation_too_many_documents() {
-        let mut request = Request::new("Test prompt".to_string(), ());
-
-        // Add more than 20 documents
-        for i in 0..21 {
-            let document =
-                Document::new(Bytes::from(format!("Doc {}", i))).with_content_type("text/plain");
-            request = request.add_document(document);
-        }
-
-        let result = request.validate();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_vlm_request_validation_large_document() {
-        let large_content = "x".repeat(51 * 1024 * 1024); // 51MB
-        let document = Document::new(Bytes::from(large_content)).with_content_type("text/plain");
-
-        let request = Request::new("Test prompt".to_string(), ()).add_document(document);
-
-        let result = request.validate();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_vlm_request_validation_invalid_temperature() {
-        let request = Request::new("Test prompt".to_string(), ()).with_temperature(3.0); // Invalid temperature > 2.0
-
-        let result = request.validate();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_vlm_request_validation_invalid_max_tokens() {
-        let request = Request::new("Test prompt".to_string(), ()).with_max_tokens(0); // Invalid max_tokens
-
-        let result = request.validate();
-        assert!(result.is_err());
+        assert_eq!(request.options.max_tokens, Some(100));
+        assert_eq!(request.options.temperature, Some(0.7));
+        assert!(request.has_documents());
+        assert!(request.has_images());
     }
 
     #[test]

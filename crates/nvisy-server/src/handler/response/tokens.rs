@@ -3,12 +3,13 @@
 use jiff::Timestamp;
 use nvisy_postgres::model::AccountApiToken;
 use nvisy_postgres::types::ApiTokenType;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// API token response structure.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiToken {
     /// Shortened access token identifier for display.
     pub access_token_preview: String,
@@ -41,10 +42,12 @@ pub struct ApiToken {
     pub last_used_at: Option<Timestamp>,
 }
 
-/// Response when creating a new API token (includes actual tokens).
+/// Response when creating a new API token (includes actual tokens, shown only once).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ApiTokenCreated {
-    /// The newly created API token details.
+#[serde(rename_all = "camelCase")]
+pub struct ApiTokenWithSecret {
+    /// Base API token information.
+    #[serde(flatten)]
     pub api_token: ApiToken,
 
     /// Full access token (only shown once at creation).
@@ -52,35 +55,6 @@ pub struct ApiTokenCreated {
 
     /// Full refresh token (only shown once at creation).
     pub refresh_token: Uuid,
-}
-
-/// Paginated list of API tokens.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ApiTokenList {
-    /// List of API tokens.
-    pub api_tokens: Vec<ApiToken>,
-
-    /// Total number of API tokens matching the query.
-    pub total_count: i64,
-
-    /// Current page number (0-based).
-    pub page: i64,
-
-    /// Number of items per page.
-    pub page_size: i64,
-
-    /// Whether there are more pages available.
-    pub has_more: bool,
-}
-
-/// Simple success response for operations like revoke/delete.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ApiTokenOperation {
-    /// Success message.
-    pub message: String,
-
-    /// Timestamp of the operation.
-    pub timestamp: Timestamp,
 }
 
 impl From<AccountApiToken> for ApiToken {
@@ -100,7 +74,7 @@ impl From<AccountApiToken> for ApiToken {
     }
 }
 
-impl ApiTokenCreated {
+impl ApiTokenWithSecret {
     /// Creates a new response for a created API token.
     pub fn new(token: AccountApiToken) -> Self {
         let access_token = token.access_seq;
@@ -114,22 +88,12 @@ impl ApiTokenCreated {
     }
 }
 
-impl ApiTokenOperation {
-    /// Creates a success response with a custom message.
-    pub fn success(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            timestamp: Timestamp::now(),
-        }
-    }
-
-    /// Creates a response for successful API token revocation.
-    pub fn revoked() -> Self {
-        Self::success("API token has been revoked successfully")
-    }
-
-    /// Creates a response for successful API token update.
-    pub fn updated() -> Self {
-        Self::success("API token has been updated successfully")
+impl From<AccountApiToken> for ApiTokenWithSecret {
+    #[inline]
+    fn from(token: AccountApiToken) -> Self {
+        Self::new(token)
     }
 }
+
+/// Response for listing API tokens.
+pub type ApiTokens = Vec<ApiToken>;

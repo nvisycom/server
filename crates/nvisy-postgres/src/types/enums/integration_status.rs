@@ -27,9 +27,9 @@ pub enum IntegrationStatus {
     Executing,
 
     /// Integration has encountered an error or failure
-    #[db_rename = "failure"]
-    #[serde(rename = "failure")]
-    Failure,
+    #[db_rename = "failed"]
+    #[serde(rename = "failed")]
+    Failed,
 }
 
 impl IntegrationStatus {
@@ -48,16 +48,13 @@ impl IntegrationStatus {
     /// Returns whether the integration has failed.
     #[inline]
     pub fn has_failed(self) -> bool {
-        matches!(self, IntegrationStatus::Failure)
+        matches!(self, IntegrationStatus::Failed)
     }
 
     /// Returns whether the integration can be activated.
     #[inline]
     pub fn can_activate(self) -> bool {
-        matches!(
-            self,
-            IntegrationStatus::Pending | IntegrationStatus::Failure
-        )
+        matches!(self, IntegrationStatus::Pending | IntegrationStatus::Failed)
     }
 
     /// Returns whether the integration can be configured.

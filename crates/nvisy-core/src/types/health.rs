@@ -11,11 +11,15 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use jiff::Timestamp;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Represents the operational status of a service.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
 pub enum ServiceStatus {
     /// Service is operating normally
     #[default]

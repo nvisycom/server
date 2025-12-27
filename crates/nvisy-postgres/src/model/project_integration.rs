@@ -147,7 +147,7 @@ pub struct UpdateProjectIntegration {
 impl ProjectIntegration {
     /// Returns whether the integration is currently in an error state.
     pub fn has_error(&self) -> bool {
-        matches!(self.sync_status, Some(IntegrationStatus::Failure))
+        matches!(self.sync_status, Some(IntegrationStatus::Failed))
     }
 
     /// Returns whether the integration is waiting for initial setup completion.

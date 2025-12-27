@@ -10,5 +10,6 @@ pub mod middleware;
 #[doc(hidden)]
 pub mod prelude;
 pub mod service;
+pub mod utility;
 
-pub use crate::error::{BoxedError, ErrorKind, Result, Error};
+pub use crate::error::{BoxedError, Error, ErrorKind, Result};

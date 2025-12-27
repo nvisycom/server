@@ -132,19 +132,18 @@ impl ConversationCollection for QdrantClient {
     }
 
     async fn delete_collection(&self) -> Result<()> {
-        self.delete_collection(Self::CONVERSATION_COLLECTION, None)
-            .await
+        self.delete_collection(Self::CONVERSATION_COLLECTION).await
     }
 
     async fn insert_conversation(&self, conversation: ConversationPoint) -> Result<()> {
         let point: Point = conversation.into();
-        self.upsert_point(Self::CONVERSATION_COLLECTION, point, true)
+        self.upsert_point(Self::CONVERSATION_COLLECTION, point)
             .await
     }
 
     async fn insert_conversations(&self, conversations: Vec<ConversationPoint>) -> Result<()> {
         let points: Vec<Point> = conversations.into_iter().map(|c| c.into()).collect();
-        self.upsert_points(Self::CONVERSATION_COLLECTION, points, true)
+        self.upsert_points(Self::CONVERSATION_COLLECTION, points)
             .await
     }
 
@@ -584,7 +583,7 @@ impl ConversationCollection for QdrantClient {
             let now = jiff::Timestamp::now().to_string();
             point.payload = point.payload.with("updated_at", now);
 
-            self.upsert_point(Self::CONVERSATION_COLLECTION, point, true)
+            self.upsert_point(Self::CONVERSATION_COLLECTION, point)
                 .await
         } else {
             Err(Error::not_found().with_message(format!("Conversation with ID {:?} not found", id)))
@@ -592,18 +591,16 @@ impl ConversationCollection for QdrantClient {
     }
 
     async fn delete_conversation(&self, id: PointId) -> Result<()> {
-        self.delete_points(Self::CONVERSATION_COLLECTION, vec![id], true)
+        self.delete_points(Self::CONVERSATION_COLLECTION, vec![id])
             .await
     }
 
     async fn delete_conversations(&self, ids: Vec<PointId>) -> Result<()> {
-        self.delete_points(Self::CONVERSATION_COLLECTION, ids, true)
-            .await
+        self.delete_points(Self::CONVERSATION_COLLECTION, ids).await
     }
 
     async fn delete_point(&self, id: PointId) -> Result<()> {
-        self.delete_point(Self::CONVERSATION_COLLECTION, id, true)
-            .await
+        self.delete_point(Self::CONVERSATION_COLLECTION, id).await
     }
 
     async fn archive_conversation(&self, id: PointId) -> Result<()> {

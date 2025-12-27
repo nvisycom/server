@@ -7,22 +7,19 @@
 
 use futures_util::Stream;
 
-pub mod context;
-
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use context::{Context, ProcessingOptions};
 pub use request::{ImageInput, Request, RequestOptions, VlmInput};
 pub use response::{
     ColorInfo, DetectedObject, EmotionalAnalysis, FontProperties, ImageProperties, Response,
     ResponseMetadata, SceneCategory, TextRegion, Usage, VisualAnalysis, VlmResponseChunk,
 };
-pub use service::Service as VlmService;
+pub use service::VlmService;
 
-use crate::types::ServiceHealth;
-pub use crate::{Error, ErrorKind, Result};
+use crate::types::{ServiceHealth, SharedContext};
+use crate::{Error, Result};
 
 /// Type alias for a boxed VLM service with specific request and response types.
 pub type BoxedVlmProvider<Req, Resp> = Box<dyn VlmProvider<Req, Resp> + Send + Sync>;
@@ -49,12 +46,17 @@ pub trait VlmProvider<Req, Resp>: Send + Sync {
     ///
     /// # Parameters
     ///
+    /// * `context` - VLM shared context with session information and usage tracking
     /// * `request` - VLM request containing images, text prompts, and configuration
     ///
     /// # Returns
     ///
     /// Returns a complete `Response<Resp>` with the model's output.
-    async fn process_vlm(&self, request: &Request<Req>) -> Result<Response<Resp>>;
+    async fn process_vlm(
+        &self,
+        context: &SharedContext,
+        request: &Request<Req>,
+    ) -> Result<Response<Resp>>;
 
     /// Process a request with streaming response.
     ///
@@ -63,6 +65,7 @@ pub trait VlmProvider<Req, Resp>: Send + Sync {
     ///
     /// # Parameters
     ///
+    /// * `context` - VLM shared context with session information and usage tracking
     /// * `request` - VLM request containing images, text prompts, and configuration
     ///
     /// # Returns
@@ -70,6 +73,7 @@ pub trait VlmProvider<Req, Resp>: Send + Sync {
     /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
     async fn process_vlm_stream(
         &self,
+        context: &SharedContext,
         request: &Request<Req>,
     ) -> Result<BoxedStream<Response<Resp>>>;
 

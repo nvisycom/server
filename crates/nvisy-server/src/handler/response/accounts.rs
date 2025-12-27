@@ -2,8 +2,8 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents an account.

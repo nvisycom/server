@@ -9,10 +9,8 @@ use std::sync::Arc;
 
 use jsonwebtoken::{DecodingKey, EncodingKey};
 
-use crate::service::{Result, Error};
-
-/// Logging target for authentication key operations.
-const TRACING_TARGET_AUTH_KEYS: &str = "nvisy_server::service::auth_keys";
+use crate::service::{Error, Result};
+use crate::utility::tracing_targets::SESSION_KEYS as TRACING_TARGET;
 
 /// Default name for the decoding key file.
 const DECODING_KEY_FILE: &str = "public.pem";
@@ -132,7 +130,7 @@ impl SessionKeys {
         config.validate()?;
 
         tracing::info!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             decoding_key_path = %config.decoding_key_path().display(),
             encoding_key_path = %config.encoding_key_path().display(),
             "loading authentication secret keys",
@@ -145,7 +143,7 @@ impl SessionKeys {
         let encoding_key = Self::load_encoding_key(&config).await?;
 
         tracing::info!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             "authentication secret keys loaded successfully",
         );
 
@@ -230,7 +228,7 @@ impl SessionKeys {
         let header = Header::new(Algorithm::EdDSA);
         let token = encode(&header, &claims, self.encoding_key()).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 error = %e,
                 "key validation failed during encoding",
             );
@@ -244,7 +242,7 @@ impl SessionKeys {
 
         decode::<TestClaims>(&token, self.decoding_key(), &validation).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 error = %e,
                 "key validation failed during decoding",
             );
@@ -252,7 +250,7 @@ impl SessionKeys {
         })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             "key validation successful",
         );
 
@@ -264,14 +262,14 @@ impl SessionKeys {
         let path = config.decoding_key_path();
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             "loading decoding key from file",
         );
 
         let pem_data = tokio::fs::read(path).await.map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to read decoding key file",
@@ -281,7 +279,7 @@ impl SessionKeys {
 
         let key = DecodingKey::from_ed_pem(&pem_data).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to parse decoding key PEM data",
@@ -290,7 +288,7 @@ impl SessionKeys {
         })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             key_size_bytes = pem_data.len(),
             "decoding key loaded successfully",
@@ -304,14 +302,14 @@ impl SessionKeys {
         let path = config.encoding_key_path();
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             "loading encoding key from file",
         );
 
         let pem_data = tokio::fs::read(path).await.map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to read encoding key file",
@@ -322,7 +320,7 @@ impl SessionKeys {
 
         let key = EncodingKey::from_ed_pem(&pem_data).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to parse encoding key PEM data",
@@ -332,7 +330,7 @@ impl SessionKeys {
         })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             key_size_bytes = pem_data.len(),
             "encoding key loaded successfully",

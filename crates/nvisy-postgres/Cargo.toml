@@ -27,6 +27,10 @@ default = []
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
+# CLI configuration support: enables clap derives for config types
+# This allows config types to be used with command-line argument parsing
+config = ["dep:clap"]
+
 [dependencies]
 # Async runtime
 tokio = { workspace = true, features = [] }
@@ -59,3 +63,6 @@ bigdecimal = { workspace = true, features = ["serde"] }
 
 # OpenAPI documentation (optional)
 schemars = { workspace = true, features = [], optional = true }
+
+# CLI (optional)
+clap = { workspace = true, features = ["derive", "env"], optional = true }

@@ -1,3 +1,8 @@
+//! Enhanced path parameter extractor with improved error handling.
+//!
+//! This module provides [`Path`], an enhanced version of [`axum::extract::Path`]
+//! with better error messages and OpenAPI documentation support.
+
 use axum::extract::rejection::PathRejection;
 use axum::extract::{FromRequestParts, OptionalFromRequestParts, Path as AxumPath};
 use axum::http::request::Parts;

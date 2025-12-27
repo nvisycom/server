@@ -17,6 +17,7 @@ pub mod invite_status;
 pub mod project_role;
 pub mod project_status;
 pub mod project_visibility;
+pub mod webhook_status;
 
 // Document-related enumerations
 pub mod content_segmentation;
@@ -40,3 +41,4 @@ pub use project_status::ProjectStatus;
 pub use project_visibility::ProjectVisibility;
 pub use require_mode::RequireMode;
 pub use virus_scan_status::VirusScanStatus;
+pub use webhook_status::WebhookStatus;

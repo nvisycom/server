@@ -1,7 +1,4 @@
-//! Virus scan status enumeration for security scanning results.
-//! Virus scan status enumeration for file security scanning.
-
-use std::cmp::Ordering;
+//! Virus scan status enumeration for file security scanning results.
 
 use diesel_derive_enum::DbEnum;
 #[cfg(feature = "schema")]
@@ -80,29 +77,5 @@ impl VirusScanStatus {
     #[inline]
     pub fn requires_review(self) -> bool {
         matches!(self, VirusScanStatus::Suspicious | VirusScanStatus::Unknown)
-    }
-
-    /// Returns the security level (1 = safe, 4 = dangerous).
-    #[inline]
-    pub fn security_level(self) -> u8 {
-        match self {
-            VirusScanStatus::Clean => 1,
-            VirusScanStatus::Pending => 2,
-            VirusScanStatus::Unknown => 2,
-            VirusScanStatus::Suspicious => 3,
-            VirusScanStatus::Infected => 4,
-        }
-    }
-}
-
-impl PartialOrd for VirusScanStatus {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for VirusScanStatus {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.security_level().cmp(&other.security_level())
     }
 }

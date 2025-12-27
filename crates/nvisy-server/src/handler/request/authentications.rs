@@ -1,7 +1,7 @@
 //! Authentication request types.
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 /// Request payload for login.

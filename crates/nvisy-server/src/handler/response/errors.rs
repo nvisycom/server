@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
 use schemars::JsonSchema;
+use serde::Serialize;
 use validator::ValidationErrors;
 
 /// Error category for better error handling and logging.

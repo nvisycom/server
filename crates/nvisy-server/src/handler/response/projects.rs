@@ -3,8 +3,8 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::ProjectRole;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Project response.
@@ -51,7 +51,7 @@ impl Project {
             max_members: project.max_members,
             max_storage: project.max_storage,
             enable_comments: project.enable_comments,
-            member_role: ProjectRole::Owner,
+            member_role: ProjectRole::Admin,
             created_at: project.created_at.into(),
             updated_at: project.updated_at.into(),
         }

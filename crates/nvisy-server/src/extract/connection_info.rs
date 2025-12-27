@@ -14,9 +14,12 @@ use axum::extract::connect_info::Connected;
 use axum::serve::IncomingStream;
 use tokio::net::TcpListener;
 
-/// Wrapper around [`axum_client_ip::ClientIp`] that implements [`aide::OperationInput`].
+/// Client IP address extractor with OpenAPI support.
 ///
-/// This allows the extractor to be used with aide's OpenAPI generation.
+/// This is a wrapper around [`axum_client_ip::ClientIp`] that adds
+/// [`aide::OperationInput`] implementation for OpenAPI schema generation.
+/// It extracts the client's IP address from the request, handling proxy
+/// headers like `X-Forwarded-For` when configured.
 #[derive(Debug, Clone, Copy)]
 pub struct ClientIp(pub IpAddr);
 

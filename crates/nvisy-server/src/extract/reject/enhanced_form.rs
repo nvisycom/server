@@ -1,8 +1,15 @@
+//! Enhanced form data extractor with improved error handling.
+//!
+//! This module provides [`Form`], an enhanced version of [`axum::Form`] with
+//! better error messages and OpenAPI documentation support.
+
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form as AxumForm, FromRequest, OptionalFromRequest, Request};
 use derive_more::{Deref, DerefMut, From};
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
+use crate::extract::Query;
 use crate::handler::{Error, ErrorKind};
 
 /// Enhanced form data extractor with improved error handling.
@@ -182,4 +189,23 @@ fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     }
 
     None
+}
+
+impl<T> aide::OperationInput for Form<T>
+where
+    T: JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        Query::<T>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        Query::<T>::inferred_early_responses(ctx, operation)
+    }
 }

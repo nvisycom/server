@@ -324,7 +324,8 @@ impl ProjectInviteRepository for PgClient {
 
         let mut conn = self.get_connection().await?;
 
-        let expiry_threshold = jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().hours(hours));
+        let expiry_threshold =
+            jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().hours(hours));
 
         let invites = project_invites
             .filter(invite_status.eq(InviteStatus::Pending))

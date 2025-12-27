@@ -68,31 +68,4 @@ impl InviteStatus {
             InviteStatus::Canceled | InviteStatus::Expired | InviteStatus::Revoked
         )
     }
-
-    /// Returns whether this invitation resulted in successful project membership.
-    #[inline]
-    pub fn is_successful(self) -> bool {
-        matches!(self, InviteStatus::Accepted)
-    }
-
-    /// Returns whether this invitation was rejected or failed.
-    #[inline]
-    pub fn is_failed(self) -> bool {
-        matches!(
-            self,
-            InviteStatus::Declined
-                | InviteStatus::Canceled
-                | InviteStatus::Expired
-                | InviteStatus::Revoked
-        )
-    }
-
-    /// Returns whether the invitation can be resent or recreated.
-    #[inline]
-    pub fn can_be_resent(self) -> bool {
-        matches!(
-            self,
-            InviteStatus::Declined | InviteStatus::Expired | InviteStatus::Revoked
-        )
-    }
 }

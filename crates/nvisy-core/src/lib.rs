@@ -15,6 +15,6 @@ pub use error::{BoxedError, Error, ErrorKind, Result};
 pub use services::AiServices;
 pub use types::{
     Annotation, AnnotationRelation, AnnotationSet, AnnotationType, BoundingBox, Chat, Content,
-    Document, DocumentId, DocumentMetadata, Message, MessageRole, RelationType, ServiceHealth,
-    ServiceStatus, TextSpan,
+    Context, Document, DocumentId, DocumentMetadata, Message, MessageRole, RelationType,
+    ServiceHealth, ServiceStatus, SharedContext, TextSpan, Timing, UsageStats,
 };

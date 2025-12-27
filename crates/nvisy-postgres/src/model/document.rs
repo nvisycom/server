@@ -89,22 +89,12 @@ impl Document {
 
     /// Returns whether the document can be edited.
     pub fn is_editable(&self) -> bool {
-        self.status.is_editable()
-    }
-
-    /// Returns whether the document is read-only.
-    pub fn is_read_only(&self) -> bool {
-        self.status.is_read_only()
+        self.status.is_draft()
     }
 
     /// Returns whether the document is currently being processed.
     pub fn is_processing(&self) -> bool {
         self.status.is_processing()
-    }
-
-    /// Returns whether the document is available for normal use.
-    pub fn is_available(&self) -> bool {
-        self.status.is_available()
     }
 
     /// Returns whether the document is in a completed state.
@@ -117,19 +107,14 @@ impl Document {
         self.status.is_draft()
     }
 
+    /// Returns whether the document is ready for use.
+    pub fn is_ready(&self) -> bool {
+        self.status.is_ready()
+    }
+
     /// Returns whether the document is archived.
     pub fn is_archived(&self) -> bool {
         self.status.is_archived()
-    }
-
-    /// Returns whether the document has encountered an error.
-    pub fn has_error(&self) -> bool {
-        self.status.has_error()
-    }
-
-    /// Returns whether the document is locked.
-    pub fn is_locked(&self) -> bool {
-        self.status.is_locked()
     }
 
     /// Returns whether the document is deleted.
@@ -137,34 +122,19 @@ impl Document {
         self.deleted_at.is_some()
     }
 
-    /// Returns whether the document can be processed.
-    pub fn can_be_processed(&self) -> bool {
-        self.status.can_be_processed()
-    }
-
-    /// Returns whether the document can be unlocked.
-    pub fn can_be_unlocked(&self) -> bool {
-        self.status.can_be_unlocked()
-    }
-
     /// Returns whether the document can be archived.
     pub fn can_be_archived(&self) -> bool {
-        self.status.can_be_archived()
+        self.status.is_ready()
     }
 
     /// Returns whether the document can be restored from archive.
     pub fn can_be_restored(&self) -> bool {
-        self.status.can_be_restored()
+        self.status.is_archived()
     }
 
     /// Returns whether files can be added to this document.
     pub fn allows_file_uploads(&self) -> bool {
-        self.status.allows_file_uploads()
-    }
-
-    /// Returns whether the document status indicates a stable state.
-    pub fn is_stable(&self) -> bool {
-        self.status.is_stable()
+        self.status.is_draft()
     }
 
     /// Returns whether the document has tags.
@@ -213,17 +183,17 @@ impl Document {
 
     /// Returns whether the document allows comments.
     pub fn allows_comments(&self) -> bool {
-        !self.is_deleted() && !self.status.is_locked()
+        !self.is_deleted() && self.status.is_ready()
     }
 
     /// Returns whether the document can be shared.
     pub fn can_be_shared(&self) -> bool {
-        self.is_available() && !self.is_deleted()
+        self.status.is_ready() && !self.is_deleted()
     }
 
-    /// Returns whether the document needs attention (has error or is processing too long).
+    /// Returns whether the document needs attention (processing too long).
     pub fn needs_attention(&self) -> bool {
-        self.has_error() || (self.is_processing() && !self.is_recently_updated())
+        self.is_processing() && !self.is_recently_updated()
     }
 
     /// Returns the document's display name or a default.

@@ -113,28 +113,4 @@ impl ActionTokenType {
             ActionTokenType::ImportData | ActionTokenType::ExportData
         )
     }
-
-    /// Returns the default expiration time in seconds for this token action.
-    #[inline]
-    pub fn default_expiration_seconds(self) -> u32 {
-        match self {
-            // Short-lived tokens for sensitive operations
-            ActionTokenType::LoginVerification => 300, // 5 minutes
-            ActionTokenType::Enable2fa | ActionTokenType::Disable2fa => 300, // 5 minutes
-
-            // Medium-lived tokens for account operations
-            ActionTokenType::ActivateAccount => 3600, // 1 hour
-            ActionTokenType::UpdateEmail => 3600,     // 1 hour
-            ActionTokenType::ResetPassword => 3600,   // 1 hour
-            ActionTokenType::ChangePassword => 1800,  // 30 minutes
-
-            // Longer-lived tokens for data operations
-            ActionTokenType::ImportData => 7200, // 2 hours
-            ActionTokenType::ExportData => 7200, // 2 hours
-
-            // Administrative tokens
-            ActionTokenType::DeactivateAccount => 1800, // 30 minutes
-            ActionTokenType::ApiAccess => 86400,        // 24 hours
-        }
-    }
 }

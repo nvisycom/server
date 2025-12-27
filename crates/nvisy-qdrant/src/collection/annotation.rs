@@ -113,19 +113,17 @@ impl AnnotationCollection for QdrantClient {
     }
 
     async fn delete_collection(&self) -> Result<()> {
-        self.delete_collection(Self::ANNOTATION_COLLECTION, None)
-            .await
+        self.delete_collection(Self::ANNOTATION_COLLECTION).await
     }
 
     async fn insert_annotation(&self, annotation: AnnotationPoint) -> Result<()> {
         let point: Point = annotation.into();
-        self.upsert_point(Self::ANNOTATION_COLLECTION, point, true)
-            .await
+        self.upsert_point(Self::ANNOTATION_COLLECTION, point).await
     }
 
     async fn insert_annotations(&self, annotations: Vec<AnnotationPoint>) -> Result<()> {
         let points: Vec<Point> = annotations.into_iter().map(|a| a.into()).collect();
-        self.upsert_points(Self::ANNOTATION_COLLECTION, points, true)
+        self.upsert_points(Self::ANNOTATION_COLLECTION, points)
             .await
     }
 
@@ -296,18 +294,16 @@ impl AnnotationCollection for QdrantClient {
     }
 
     async fn delete_annotation(&self, id: PointId) -> Result<()> {
-        self.delete_points(Self::ANNOTATION_COLLECTION, vec![id], true)
+        self.delete_points(Self::ANNOTATION_COLLECTION, vec![id])
             .await
     }
 
     async fn delete_annotations(&self, ids: Vec<PointId>) -> Result<()> {
-        self.delete_points(Self::ANNOTATION_COLLECTION, ids, true)
-            .await
+        self.delete_points(Self::ANNOTATION_COLLECTION, ids).await
     }
 
     async fn delete_point(&self, id: PointId) -> Result<()> {
-        self.delete_point(Self::ANNOTATION_COLLECTION, id, true)
-            .await
+        self.delete_point(Self::ANNOTATION_COLLECTION, id).await
     }
 
     async fn update_annotation_payload(
@@ -329,8 +325,7 @@ impl AnnotationCollection for QdrantClient {
             point.payload = point.payload.with("updated_at", now);
 
             // Upsert the updated point
-            self.upsert_point(Self::ANNOTATION_COLLECTION, point, true)
-                .await
+            self.upsert_point(Self::ANNOTATION_COLLECTION, point).await
         } else {
             Err(Error::not_found().with_message(format!("Annotation with ID {:?} not found", id)))
         }

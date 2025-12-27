@@ -14,6 +14,7 @@ pub mod project_activities;
 pub mod project_integrations;
 pub mod project_invites;
 pub mod project_members;
+pub mod project_webhooks;
 pub mod projects;
 
 // Document-related constraint modules
@@ -43,6 +44,7 @@ pub use project_integrations::ProjectIntegrationConstraints;
 pub use project_invites::ProjectInviteConstraints;
 pub use project_members::ProjectMemberConstraints;
 pub use project_runs::ProjectRunConstraints;
+pub use project_webhooks::ProjectWebhookConstraints;
 pub use projects::ProjectConstraints;
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +68,7 @@ pub enum ConstraintViolation {
     ProjectInvite(ProjectInviteConstraints),
     ProjectActivityLog(ProjectActivitiesConstraints),
     ProjectIntegration(ProjectIntegrationConstraints),
+    ProjectWebhook(ProjectWebhookConstraints),
     ProjectRun(ProjectRunConstraints),
 
     // Document-related constraints
@@ -158,6 +161,10 @@ impl ConstraintViolation {
             if let Some(c) = ProjectIntegrationConstraints::new(constraint) {
                 return Some(ConstraintViolation::ProjectIntegration(c));
             }
+        } else if constraint.starts_with("project_webhooks_") {
+            if let Some(c) = ProjectWebhookConstraints::new(constraint) {
+                return Some(ConstraintViolation::ProjectWebhook(c));
+            }
         } else if constraint.starts_with("project_runs_") {
             if let Some(c) = ProjectRunConstraints::new(constraint) {
                 return Some(ConstraintViolation::ProjectRun(c));
@@ -204,6 +211,7 @@ impl ConstraintViolation {
             ConstraintViolation::ProjectInvite(_) => "project_invites",
             ConstraintViolation::ProjectActivityLog(_) => "project_activities",
             ConstraintViolation::ProjectIntegration(_) => "project_integrations",
+            ConstraintViolation::ProjectWebhook(_) => "project_webhooks",
             ConstraintViolation::ProjectRun(_) => "project_runs",
 
             // Document-related tables
@@ -231,6 +239,7 @@ impl ConstraintViolation {
             | ConstraintViolation::ProjectInvite(_)
             | ConstraintViolation::ProjectActivityLog(_)
             | ConstraintViolation::ProjectIntegration(_)
+            | ConstraintViolation::ProjectWebhook(_)
             | ConstraintViolation::ProjectRun(_) => "projects",
 
             ConstraintViolation::Document(_)
@@ -256,6 +265,7 @@ impl ConstraintViolation {
             ConstraintViolation::ProjectInvite(c) => c.categorize(),
             ConstraintViolation::ProjectActivityLog(c) => c.categorize(),
             ConstraintViolation::ProjectIntegration(c) => c.categorize(),
+            ConstraintViolation::ProjectWebhook(c) => c.categorize(),
             ConstraintViolation::ProjectRun(c) => c.categorize(),
 
             ConstraintViolation::Document(c) => c.categorize(),
@@ -286,6 +296,7 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::ProjectInvite(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectActivityLog(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectIntegration(c) => write!(f, "{}", c),
+            ConstraintViolation::ProjectWebhook(c) => write!(f, "{}", c),
             ConstraintViolation::ProjectRun(c) => write!(f, "{}", c),
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),

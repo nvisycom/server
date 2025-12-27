@@ -3,11 +3,9 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::{InviteStatus, ProjectRole};
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-// TODO: Add invitee emails
 
 /// Project invite with complete information.
 ///
@@ -53,3 +51,30 @@ impl From<model::ProjectInvite> for Invite {
 
 /// Response for listing project invitations.
 pub type Invites = Vec<Invite>;
+
+/// Response containing a generated shareable invite code.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteCode {
+    /// The generated invite code that can be shared.
+    pub invite_code: String,
+    /// ID of the project this invite code is for.
+    pub project_id: Uuid,
+    /// Role assigned when someone joins via this code.
+    pub role: ProjectRole,
+    /// When the invite code expires.
+    pub expires_at: Timestamp,
+}
+
+impl InviteCode {
+    /// Creates a new invite code response from a project invite.
+    pub fn from_invite(invite: &model::ProjectInvite) -> Self {
+        Self {
+            invite_code: invite.invite_token.clone(),
+            project_id: invite.project_id,
+            role: invite.invited_role,
+            expires_at: invite.expires_at.into(),
+        }
+    }
+}

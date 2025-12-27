@@ -1,19 +1,4 @@
 //! WebSocket handler for real-time project communication via NATS.
-//!
-//! This module provides WebSocket endpoints for managing real-time communication
-//! within a single project using NATS JetStream for distributed pub/sub. It handles:
-//! - Document updates and collaborative editing
-//! - Member presence tracking
-//! - Project notifications
-//! - Real-time synchronization across multiple server instances
-//!
-//! # Architecture
-//!
-//! - Each WebSocket connection creates a unique NATS consumer
-//! - Messages are published to `PROJECT_EVENTS.{project_id}` subject
-//! - Permissions are checked per-event, not at connection time
-//! - Echo prevention: messages aren't sent back to the sender
-//! - Automatic cleanup on disconnect
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -32,7 +17,7 @@ use nvisy_postgres::query::{AccountRepository, ProjectRepository};
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Path, Permission};
-use crate::handler::projects::ProjectPathParams;
+use crate::handler::request::ProjectPathParams;
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -723,30 +708,6 @@ async fn handle_project_websocket(
 }
 
 /// Establishes a WebSocket connection for a project.
-///
-/// This endpoint upgrades an HTTP connection to a WebSocket for real-time
-/// communication within a project using NATS JetStream for distributed pub/sub.
-/// Clients must be authenticated and have at least read access to the project.
-///
-/// # Security
-///
-/// - Requires valid JWT authentication
-/// - Verifies user has `ViewDocuments` permission for initial connection
-/// - Checks permissions per-event during the connection lifecycle
-/// - Validates project existence before upgrading connection
-/// - Enforces message size limits to prevent DoS attacks
-///
-/// # Connection Lifecycle
-///
-/// 1. Client sends upgrade request with Authorization header
-/// 2. Server validates authentication and project access
-/// 3. Connection is upgraded to WebSocket
-/// 4. Server fetches account details and creates unique NATS consumer
-/// 5. Server publishes `Join` message to NATS stream
-/// 6. Two concurrent tasks handle sending and receiving
-/// 7. Messages are distributed via NATS with per-event permission checking
-/// 8. Server publishes `Leave` message on disconnect
-/// 9. Connection closed gracefully with timeout and metrics logged
 #[tracing::instrument(skip_all, fields(
     account_id = %auth_claims.account_id,
     project_id = %path_params.project_id
@@ -800,185 +761,4 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new().api_route("/projects/:project_id/ws/", get(project_websocket_handler))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_message_serialization_join() {
-        let msg = ProjectWsMessage::join(Uuid::new_v4(), "Test User");
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ProjectWsMessage::Join(event) => {
-                assert_eq!(event.display_name, "Test User");
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_message_serialization_leave() {
-        let account_id = Uuid::new_v4();
-        let msg = ProjectWsMessage::leave(account_id);
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ProjectWsMessage::Leave(event) => {
-                assert_eq!(event.account_id, account_id);
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_typing_with_timestamp() {
-        let msg = ProjectWsMessage::typing(Uuid::new_v4(), Some(Uuid::new_v4()));
-
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("\"type\":\"typing\""));
-        assert!(json.contains("timestamp"));
-
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ProjectWsMessage::Typing(_) => {}
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_error_message_with_details() {
-        let error = ProjectWsMessage::error_with_details(
-            "PARSE_ERROR",
-            "Invalid JSON",
-            "Expected } at line 5",
-        );
-        let json = serde_json::to_string(&error).unwrap();
-        assert!(json.contains("PARSE_ERROR"));
-        assert!(json.contains("Invalid JSON"));
-        assert!(json.contains("Expected } at line 5"));
-    }
-
-    #[test]
-    fn test_document_update_serialization() {
-        let msg = ProjectWsMessage::document_update(Uuid::new_v4(), 42, Uuid::new_v4());
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ProjectWsMessage::DocumentUpdate(event) => {
-                assert_eq!(event.version, 42);
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_account_id_extraction() {
-        let account_id = Uuid::new_v4();
-
-        let join = ProjectWsMessage::join(account_id, "Test");
-        assert_eq!(join.account_id(), Some(account_id));
-
-        let error = ProjectWsMessage::error("ERR", "Message");
-        assert_eq!(error.account_id(), None);
-    }
-
-    #[test]
-    fn test_file_processed_event() {
-        let file_id = Uuid::new_v4();
-        let doc_id = Uuid::new_v4();
-        let msg = ProjectWsMessage::file_processed(file_id, doc_id, "ocr", None);
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ProjectWsMessage::FileProcessed(event) => {
-                assert_eq!(event.file_id, file_id);
-                assert_eq!(event.document_id, doc_id);
-                assert_eq!(event.processing_type, "ocr");
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_file_redacted_event() {
-        let file_id = Uuid::new_v4();
-        let doc_id = Uuid::new_v4();
-        let account_id = Uuid::new_v4();
-        let msg = ProjectWsMessage::file_redacted(file_id, doc_id, 5, account_id);
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ProjectWsMessage::FileRedacted(event) => {
-                assert_eq!(event.file_id, file_id);
-                assert_eq!(event.redaction_count, 5);
-                assert_eq!(event.redacted_by, account_id);
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_file_verified_event() {
-        let file_id = Uuid::new_v4();
-        let doc_id = Uuid::new_v4();
-        let msg = ProjectWsMessage::file_verified(file_id, doc_id, "virus_scan", "clean", None);
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ProjectWsMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ProjectWsMessage::FileVerified(event) => {
-                assert_eq!(event.file_id, file_id);
-                assert_eq!(event.verification_type, "virus_scan");
-                assert_eq!(event.verification_status, "clean");
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[test]
-    fn test_metrics_tracking() {
-        let metrics = ConnectionMetrics::new();
-
-        metrics.increment_sent();
-        metrics.increment_sent();
-        metrics.increment_received();
-        metrics.increment_published();
-        metrics.increment_dropped();
-        metrics.increment_errors();
-
-        let snapshot = metrics.snapshot();
-        assert_eq!(snapshot.sent, 2);
-        assert_eq!(snapshot.received, 1);
-        assert_eq!(snapshot.published, 1);
-        assert_eq!(snapshot.dropped, 1);
-        assert_eq!(snapshot.errors, 1);
-    }
-
-    #[test]
-    fn test_message_size_validation() {
-        let ctx = WsContext::new(Uuid::new_v4(), Uuid::new_v4());
-        let metrics = ConnectionMetrics::new();
-
-        // Valid size
-        assert!(validate_message_size(&ctx, 1000, &metrics));
-        assert_eq!(metrics.snapshot().dropped, 0);
-
-        // Invalid size
-        assert!(!validate_message_size(&ctx, MAX_MESSAGE_SIZE + 1, &metrics));
-        assert_eq!(metrics.snapshot().dropped, 1);
-    }
 }

@@ -1,20 +1,19 @@
 //! Application state and dependency injection.
 
-mod archive;
 mod cache;
+mod compression;
 mod config;
 mod security;
 
 use nvisy_core::AiServices;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
+use nvisy_qdrant::QdrantClient;
 
-pub use crate::service::archive::{ArchiveFormat, ArchiveService};
 pub use crate::service::cache::HealthCache;
+pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
-pub use crate::service::security::{
-    AuthKeysConfig, PasswordHasher, PasswordStrength, RateLimitKey, RateLimiter, SessionKeys,
-};
+pub use crate::service::security::{AuthKeysConfig, PasswordHasher, PasswordStrength, SessionKeys};
 // Re-export error types from crate root for convenience
 pub use crate::{Error, Result};
 
@@ -29,6 +28,7 @@ pub struct ServiceState {
     // External services:
     pub pg_client: PgClient,
     pub nats_client: NatsClient,
+    pub qdrant_client: QdrantClient,
     pub ai_services: AiServices,
 
     // Internal services:
@@ -50,6 +50,7 @@ impl ServiceState {
         let service_state = Self {
             pg_client: service_config.connect_postgres().await?,
             nats_client: service_config.connect_nats().await?,
+            qdrant_client: service_config.connect_qdrant().await?,
             ai_services,
 
             auth_hasher: PasswordHasher::new(),
@@ -76,6 +77,7 @@ macro_rules! impl_di {
 // External services:
 impl_di!(pg_client: PgClient);
 impl_di!(nats_client: NatsClient);
+impl_di!(qdrant_client: QdrantClient);
 impl_di!(ai_services: AiServices);
 
 // Internal services:

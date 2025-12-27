@@ -1,35 +1,34 @@
+name: nvisy
+
 services:
-  # PostgreSQL Database
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: nvisy-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-nvisy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-nvisy}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nvisy} -d ${POSTGRES_DB:-nvisy}"]
+      interval: 5s
       timeout: 5s
       retries: 5
       start_period: 10s
     networks:
-      - nvisy-network
+      - nvisy
 
-  # NATS with JetStream and KV
   nats:
-    image: nats:2.12-alpine
+    image: nats:2.12.3-alpine
     container_name: nvisy-nats
     restart: unless-stopped
     ports:
-      - "${NATS_CLIENT_PORT:-4222}:4222" # Client connections
-      - "${NATS_HTTP_PORT:-8222}:8222" # HTTP monitoring
-      - "${NATS_ROUTE_PORT:-6222}:6222" # Cluster routing
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
     command:
       - "--jetstream"
       - "--store_dir=/data"
@@ -40,58 +39,57 @@ services:
     volumes:
       - nats_data:/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
-      interval: 10s
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
       timeout: 5s
       retries: 5
       start_period: 5s
     networks:
-      - nvisy-network
+      - nvisy
 
-  # Nvisy API Server
+  qdrant:
+    image: qdrant/qdrant:v1.16
+    container_name: nvisy-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__HTTP_PORT: 6333
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - nvisy
+
   server:
     build:
-      context: .
-      dockerfile: Dockerfile
-      cache_from:
-        - nvisy/server:latest
-    image: nvisy/server:latest
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: nvisy/server:${VERSION:-latest}
     container_name: nvisy-server
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:8080"
+      - "${SERVER_PORT:-8080}:8080"
     environment:
-      # Server configuration
-      HOST: ${HOST:-0.0.0.0}
-      PORT: ${PORT:-8080}
+      HOST: 0.0.0.0
+      PORT: 8080
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-30}
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-30}
-
-      # Database configuration
-      POSTGRES_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-nvisy}
-
-      # Auth configuration
-      AUTH_PUBLIC_PEM_FILEPATH: ${AUTH_PUBLIC_PEM_FILEPATH:-./public.pem}
-      AUTH_PRIVATE_PEM_FILEPATH: ${AUTH_PRIVATE_PEM_FILEPATH:-./private.pem}
-
-      # NATS configuration
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-nvisy}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-nvisy}
       NATS_URL: nats://nats:4222
-      NATS_CLIENT_NAME: ${NATS_CLIENT_NAME:-nvisy-api}
-
-      # PaddleX API
-      PADDLEX_API_KEY: ${PADDLEX_API_KEY}
-      PADDLEX_BASE_URL: ${PADDLEX_BASE_URL:-http://paddlex:8080/api/v1/}
-
-      # OpenRouter API
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1/}
-
-      # CORS configuration
+      QDRANT_CLUSTER_ENDPOINT: http://qdrant:6334
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      AUTH_PUBLIC_PEM: ${AUTH_PUBLIC_PEM:-}
+      AUTH_PRIVATE_PEM: ${AUTH_PRIVATE_PEM:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       CORS_MAX_AGE: ${CORS_MAX_AGE:-3600}
-      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
-
-      # Logging
       RUST_LOG: ${RUST_LOG:-info}
       RUST_BACKTRACE: ${RUST_BACKTRACE:-0}
     depends_on:
@@ -99,21 +97,16 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      qdrant:
+        condition: service_healthy
     networks:
-      - nvisy-network
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/nvisy-server", "--health-check"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      - nvisy
 
 volumes:
   postgres_data:
-    driver: local
   nats_data:
-    driver: local
+  qdrant_data:
 
 networks:
-  nvisy-network:
+  nvisy:
     driver: bridge

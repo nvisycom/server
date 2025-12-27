@@ -35,5 +35,5 @@ pub mod object;
 pub mod prelude;
 pub mod stream;
 
-pub use client::{NatsClient, NatsConfig, NatsConnection, NatsCredentials, NatsTlsConfig};
+pub use client::{NatsClient, NatsConfig, NatsConnection};
 pub use error::{Error, Result};

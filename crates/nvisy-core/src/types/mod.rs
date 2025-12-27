@@ -5,18 +5,22 @@
 
 mod annotation;
 mod content;
+mod context;
 mod document;
 mod health;
 mod message;
+mod timing;
 
 pub use annotation::{
     Annotation, AnnotationRelation, AnnotationSet, AnnotationType, BoundingBox, RelationType,
     TextSpan,
 };
 pub use content::Content;
+pub use context::{Context, SharedContext, UsageStats};
 pub use document::{Document, DocumentId, DocumentMetadata};
 pub use health::{ServiceHealth, ServiceStatus};
 pub use message::{Chat, Message, MessageRole};
+pub use timing::Timing;
 
 /// Result type alias for operations in the types module.
 pub type Result<T, E = TypeError> = std::result::Result<T, E>;

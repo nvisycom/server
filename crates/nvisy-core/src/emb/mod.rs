@@ -1,64 +1,120 @@
 //! Embeddings service abstractions.
 //!
-//! This module provides foundational abstractions for embedding services in the Nvisy ecosystem.
-//! It defines core traits and types for text and multimodal embedding operations without depending
-//! on any concrete implementations.
+//! This module provides traits and types for generating embeddings from text,
+//! documents, and other content. It supports single and batch embedding operations.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use nvisy_core::emb::{EmbeddingProvider, EmbeddingService, Request};
+//! use nvisy_core::types::SharedContext;
+//!
+//! // Create a service with your provider
+//! let service = EmbeddingService::new(my_provider);
+//!
+//! // Generate an embedding
+//! let request = Request::from_text("Hello, world!");
+//! let response = service.generate_embedding(&request).await?;
+//!
+//! println!("Embedding dimensions: {}", response.dimensions());
+//! ```
 
-pub mod context;
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use context::Context;
-pub use request::{EmbeddingRequest, EncodingFormat};
-pub use response::{EmbeddingData, EmbeddingResponse, EmbeddingUsage};
+pub use request::{BatchRequest, Request};
+pub use response::{BatchResponse, EncodingFormat, Response};
 pub use service::EmbeddingService;
 
-use crate::types::ServiceHealth;
-pub use crate::{Error, ErrorKind, Result};
-
-/// Type alias for a boxed embedding service with specific request and response types.
-pub type BoxedEmbeddingProvider<Req, Resp> = Box<dyn EmbeddingProvider<Req, Resp> + Send + Sync>;
+use crate::Result;
+use crate::types::{ServiceHealth, SharedContext};
 
 /// Tracing target for embedding operations.
-pub const TRACING_TARGET: &str = "nvisy_core::emb";
+pub const TRACING_TARGET: &str = "nvisy_core::embedding";
 
-/// Core trait for embedding service operations.
+/// Core trait for embedding operations.
 ///
-/// This trait is generic over request (`Req`) and response (`Resp`) types,
-/// allowing implementations to define their own specific data structures
-/// while maintaining a consistent interface.
+/// Implement this trait to create custom embedding providers. The trait provides
+/// a default batch implementation that processes requests concurrently.
 ///
-/// # Type Parameters
+/// # Example
 ///
-/// * `Req` - The request payload type specific to the embedding implementation
-/// * `Resp` - The response payload type specific to the embedding implementation
+/// ```rust,ignore
+/// use nvisy_core::emb::{EmbeddingProvider, Request, Response};
+/// use nvisy_core::types::{ServiceHealth, SharedContext};
+/// use nvisy_core::Result;
+///
+/// struct MyProvider;
+///
+/// #[async_trait::async_trait]
+/// impl EmbeddingProvider for MyProvider {
+///     async fn generate_embedding(
+///         &self,
+///         context: &SharedContext,
+///         request: &Request,
+///     ) -> Result<Response> {
+///         let embedding = vec![0.1, 0.2, 0.3]; // Your embedding logic
+///         Ok(request.reply(embedding))
+///     }
+///
+///     async fn health_check(&self) -> Result<ServiceHealth> {
+///         Ok(ServiceHealth::healthy())
+///     }
+/// }
+/// ```
 #[async_trait::async_trait]
-pub trait EmbeddingProvider<Req, Resp>: Send + Sync {
-    /// Generates embeddings for the provided input.
-    ///
-    /// This method takes an [`EmbeddingRequest`] containing the input text/images
-    /// and model configuration, and returns an [`EmbeddingResponse`] with the
-    /// generated embeddings.
+pub trait EmbeddingProvider: Send + Sync {
+    /// Generate an embedding for the provided input.
     ///
     /// # Parameters
     ///
-    /// - `request`: The embedding request containing input and configuration
+    /// * `context` - Shared context for tracking usage statistics
+    /// * `request` - The embedding request containing content to embed
     ///
     /// # Returns
     ///
-    /// A [`Result`] containing the embedding response on success, or an error
-    /// if the operation failed. The response includes the embeddings, usage
-    /// information, and metadata.
-    async fn generate_embedding(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse>;
+    /// Returns a `Response` containing the embedding vector and metadata.
+    async fn generate_embedding(
+        &self,
+        context: &SharedContext,
+        request: &Request,
+    ) -> Result<Response>;
 
-    /// Performs a health check on the embedding service.
+    /// Generate embeddings for a batch of inputs.
     ///
-    /// This method verifies that the service is reachable and properly configured.
-    /// It's typically used for monitoring and diagnostics purposes.
+    /// The default implementation processes requests concurrently using `futures::join_all`.
+    /// Providers can override this for optimized batch processing (e.g., single API call).
+    ///
+    /// # Error Handling
+    ///
+    /// Returns an error if any request in the batch fails. For partial failure tolerance,
+    /// override this method with custom logic.
+    async fn generate_embedding_batch(
+        &self,
+        context: &SharedContext,
+        request: &BatchRequest,
+    ) -> Result<BatchResponse> {
+        let requests = request.iter_requests();
+        let futures: Vec<_> = requests
+            .iter()
+            .map(|req| self.generate_embedding(context, req))
+            .collect();
+
+        let results = futures_util::future::join_all(futures).await;
+
+        let mut responses = Vec::with_capacity(results.len());
+        for result in results {
+            responses.push(result?);
+        }
+
+        Ok(BatchResponse::new(responses))
+    }
+
+    /// Perform a health check on the embedding service.
     ///
     /// # Returns
     ///
-    /// Returns service health information including status, response time, and metrics.
+    /// Returns `ServiceHealth` indicating the current status of the provider.
     async fn health_check(&self) -> Result<ServiceHealth>;
 }

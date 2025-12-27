@@ -1,14 +1,21 @@
-//! Wrapper around [`axum_extra::TypedHeader`] for aide compatibility.
+//! Typed header extractor with aide OpenAPI compatibility.
 //!
-//! This module provides a wrapper type that implements [`aide::OperationInput`]
-//! to enable usage with aide's OpenAPI generation.
+//! This module provides [`TypedHeader`], a wrapper around [`axum_extra::TypedHeader`]
+//! that implements [`aide::OperationInput`] for OpenAPI documentation generation.
 
 use axum::extract::FromRequestParts;
 use derive_more::{Deref, DerefMut, From};
 
-/// Wrapper around [`axum_extra::TypedHeader`] that implements [`aide::OperationInput`].
+/// Typed header extractor with OpenAPI support.
 ///
-/// This allows the extractor to be used with aide's OpenAPI generation.
+/// This is a thin wrapper around [`axum_extra::TypedHeader`] that adds
+/// [`aide::OperationInput`] implementation for OpenAPI schema generation.
+/// It provides type-safe access to HTTP headers with automatic parsing.
+///
+/// # Extractable Headers
+///
+/// Any type implementing [`axum_extra::headers::Header`] can be extracted,
+/// including standard headers like `Authorization`, `ContentType`, `Accept`, etc.
 #[derive(Debug, Clone, Deref, DerefMut, From)]
 pub struct TypedHeader<T>(pub T);
 

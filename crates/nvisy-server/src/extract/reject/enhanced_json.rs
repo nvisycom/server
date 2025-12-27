@@ -1,3 +1,8 @@
+//! Enhanced JSON extractor with improved error handling.
+//!
+//! This module provides [`Json`], an enhanced version of [`axum::Json`] with
+//! better error messages, size limits, and OpenAPI documentation support.
+
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Json as AxumJson, OptionalFromRequest, Request};
 use axum::response::{IntoResponse, Response};

@@ -9,9 +9,7 @@ use argon2::password_hash::{Error as ArgonError, PasswordHasher as _, PasswordVe
 use argon2::{Argon2, PasswordHash};
 
 use crate::handler::{ErrorKind, Result};
-
-/// Target identifier for password hashing service logging and error reporting.
-const TRACING_TARGER_AUTH_HASHER: &str = "nvisy_server::service::auth_hasher";
+use crate::utility::tracing_targets::PASSWORD_HASHER as TRACING_TARGET;
 
 /// Secure password hashing and verification service using Argon2id.
 ///
@@ -64,7 +62,7 @@ impl PasswordHasher {
             .hash_password(password.as_bytes())
             .map_err(|e| {
                 tracing::error!(
-                    target: TRACING_TARGER_AUTH_HASHER,
+                    target: TRACING_TARGET,
                     error = %e,
                     "password hashing operation failed"
                 );
@@ -108,7 +106,7 @@ impl PasswordHasher {
         // Parse the stored hash
         let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
             tracing::warn!(
-                target: TRACING_TARGER_AUTH_HASHER,
+                target: TRACING_TARGET,
                 error = %e,
                 "Invalid password hash format provided"
             );
@@ -125,7 +123,7 @@ impl PasswordHasher {
         {
             Ok(()) => {
                 tracing::debug!(
-                    target: TRACING_TARGER_AUTH_HASHER,
+                    target: TRACING_TARGET,
                     "Password verification successful"
                 );
 
@@ -134,7 +132,7 @@ impl PasswordHasher {
             Err(ArgonError::PasswordInvalid) => {
                 // TODO: Log account id.
                 tracing::debug!(
-                    target: TRACING_TARGER_AUTH_HASHER,
+                    target: TRACING_TARGET,
                     "Password verification failed: incorrect password provided"
                 );
 
@@ -145,7 +143,7 @@ impl PasswordHasher {
             }
             Err(e) => {
                 tracing::error!(
-                    target: TRACING_TARGER_AUTH_HASHER,
+                    target: TRACING_TARGET,
                     error = %e,
                     "Password verification system error"
                 );

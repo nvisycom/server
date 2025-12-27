@@ -17,12 +17,7 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ProjectRole"]
 pub enum ProjectRole {
-    /// Full control over the project, including deletion and all management aspects
-    #[db_rename = "owner"]
-    #[serde(rename = "owner")]
-    Owner,
-
-    /// Administrative access with project management capabilities, cannot delete project
+    /// Administrative access with full project management capabilities
     #[db_rename = "admin"]
     #[serde(rename = "admin")]
     Admin,
@@ -43,7 +38,7 @@ impl ProjectRole {
     /// Returns whether this role has administrative privileges.
     #[inline]
     pub fn is_administrator(self) -> bool {
-        matches!(self, ProjectRole::Owner | ProjectRole::Admin)
+        matches!(self, ProjectRole::Admin)
     }
 
     /// Returns the hierarchical level of this role (higher number = more permissions).
@@ -53,7 +48,6 @@ impl ProjectRole {
             ProjectRole::Viewer => 1,
             ProjectRole::Editor => 2,
             ProjectRole::Admin => 3,
-            ProjectRole::Owner => 4,
         }
     }
 

@@ -17,9 +17,9 @@ pub mod document;
 pub use annotation::AnnotationCollection;
 pub use conversation::ConversationCollection;
 pub use document::DocumentCollection;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Common search parameters used across all collection types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
