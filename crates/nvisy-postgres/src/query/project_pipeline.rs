@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{NewProjectPipeline, ProjectPipeline, UpdateProjectPipeline};
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for project pipeline database operations.
 ///
@@ -277,7 +276,6 @@ impl ProjectPipelineRepository for PgConnection {
 
     async fn set_pipeline_as_default(&mut self, pipeline_id: Uuid) -> PgResult<ProjectPipeline> {
         use schema::project_pipelines::dsl::*;
-
 
         // First, get the pipeline to know its project and type
         let pipeline = project_pipelines

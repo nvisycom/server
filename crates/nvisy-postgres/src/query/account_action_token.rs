@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{AccountActionToken, NewAccountActionToken, UpdateAccountActionToken};
 use crate::types::ActionTokenType;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account action token database operations.
 ///
@@ -64,7 +63,8 @@ pub trait AccountActionTokenRepository {
     /// Invalidates a token by marking it as used.
     ///
     /// Returns true if a token was invalidated, false if not found.
-    fn invalidate_token(&mut self, token_uuid: Uuid) -> impl Future<Output = PgResult<bool>> + Send;
+    fn invalidate_token(&mut self, token_uuid: Uuid)
+    -> impl Future<Output = PgResult<bool>> + Send;
 
     /// Lists tokens for a specific account with optional used filter.
     fn list_account_tokens(
@@ -102,8 +102,10 @@ pub trait AccountActionTokenRepository {
 }
 
 impl AccountActionTokenRepository for PgConnection {
-    async fn create_token(&mut self, new_token: NewAccountActionToken) -> PgResult<AccountActionToken> {
-
+    async fn create_token(
+        &mut self,
+        new_token: NewAccountActionToken,
+    ) -> PgResult<AccountActionToken> {
         use schema::account_action_tokens;
 
         diesel::insert_into(account_action_tokens::table)
@@ -119,7 +121,6 @@ impl AccountActionTokenRepository for PgConnection {
         token_uuid: Uuid,
         action: ActionTokenType,
     ) -> PgResult<Option<AccountActionToken>> {
-
         use schema::account_action_tokens::{self, dsl};
 
         account_action_tokens::table
@@ -139,7 +140,6 @@ impl AccountActionTokenRepository for PgConnection {
         account_id: Uuid,
         action: ActionTokenType,
     ) -> PgResult<Option<AccountActionToken>> {
-
         use schema::account_action_tokens::{self, dsl};
 
         account_action_tokens::table
@@ -160,7 +160,6 @@ impl AccountActionTokenRepository for PgConnection {
         token_uuid: Uuid,
         updates: UpdateAccountActionToken,
     ) -> PgResult<AccountActionToken> {
-
         use schema::account_action_tokens::{self, dsl};
 
         diesel::update(account_action_tokens::table.filter(dsl::action_token.eq(token_uuid)))
@@ -176,7 +175,6 @@ impl AccountActionTokenRepository for PgConnection {
         token_uuid: Uuid,
         account_id: Uuid,
     ) -> PgResult<AccountActionToken> {
-
         use schema::account_action_tokens::{self, dsl};
 
         diesel::update(
@@ -191,8 +189,11 @@ impl AccountActionTokenRepository for PgConnection {
         .map_err(PgError::from)
     }
 
-    async fn use_token(&mut self, token_uuid: Uuid, account_id: Uuid) -> PgResult<AccountActionToken> {
-
+    async fn use_token(
+        &mut self,
+        token_uuid: Uuid,
+        account_id: Uuid,
+    ) -> PgResult<AccountActionToken> {
         use schema::account_action_tokens::{self, dsl};
 
         diesel::update(
@@ -208,7 +209,6 @@ impl AccountActionTokenRepository for PgConnection {
     }
 
     async fn invalidate_token(&mut self, token_uuid: Uuid) -> PgResult<bool> {
-
         use schema::account_action_tokens::{self, dsl};
 
         let rows_affected =
@@ -227,7 +227,6 @@ impl AccountActionTokenRepository for PgConnection {
         include_used: bool,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountActionToken>> {
-
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = account_action_tokens::table
@@ -252,7 +251,6 @@ impl AccountActionTokenRepository for PgConnection {
         include_expired: bool,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountActionToken>> {
-
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = account_action_tokens::table
@@ -280,7 +278,6 @@ impl AccountActionTokenRepository for PgConnection {
         account_id: Uuid,
         action: Option<ActionTokenType>,
     ) -> PgResult<i64> {
-
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = diesel::update(
@@ -303,7 +300,6 @@ impl AccountActionTokenRepository for PgConnection {
     }
 
     async fn cleanup_expired_tokens(&mut self, account_id: Option<Uuid>) -> PgResult<i64> {
-
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = diesel::delete(

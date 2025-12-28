@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document comment database operations.
 ///
@@ -69,8 +68,10 @@ pub trait DocumentCommentRepository {
 }
 
 impl DocumentCommentRepository for PgConnection {
-    async fn create_comment(&mut self, new_comment: NewDocumentComment) -> PgResult<DocumentComment> {
-
+    async fn create_comment(
+        &mut self,
+        new_comment: NewDocumentComment,
+    ) -> PgResult<DocumentComment> {
         use schema::document_comments;
 
         let comment = diesel::insert_into(document_comments::table)
@@ -84,7 +85,6 @@ impl DocumentCommentRepository for PgConnection {
     }
 
     async fn find_comment_by_id(&mut self, comment_id: Uuid) -> PgResult<Option<DocumentComment>> {
-
         use schema::document_comments::{self, dsl};
 
         let comment = document_comments::table
@@ -104,7 +104,6 @@ impl DocumentCommentRepository for PgConnection {
         file_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
-
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -126,7 +125,6 @@ impl DocumentCommentRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
-
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -148,7 +146,6 @@ impl DocumentCommentRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentComment>> {
-
         use schema::document_comments::{self, dsl};
 
         let comments = document_comments::table
@@ -170,7 +167,6 @@ impl DocumentCommentRepository for PgConnection {
         comment_id: Uuid,
         updates: UpdateDocumentComment,
     ) -> PgResult<DocumentComment> {
-
         use schema::document_comments::{self, dsl};
 
         let comment = diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
@@ -184,7 +180,6 @@ impl DocumentCommentRepository for PgConnection {
     }
 
     async fn delete_comment(&mut self, comment_id: Uuid) -> PgResult<()> {
-
         use schema::document_comments::{self, dsl};
 
         diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
@@ -196,8 +191,11 @@ impl DocumentCommentRepository for PgConnection {
         Ok(())
     }
 
-    async fn check_comment_ownership(&mut self, comment_id: Uuid, account_id: Uuid) -> PgResult<bool> {
-
+    async fn check_comment_ownership(
+        &mut self,
+        comment_id: Uuid,
+        account_id: Uuid,
+    ) -> PgResult<bool> {
         use schema::document_comments::{self, dsl};
 
         let count: i64 = document_comments::table

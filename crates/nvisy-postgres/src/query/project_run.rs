@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectRun, ProjectRun, UpdateProjectRun};
 use crate::types::IntegrationStatus;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for project run database operations.
 ///
@@ -97,7 +96,10 @@ pub trait ProjectRunRepository {
     ) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
     /// Marks a run as started with current timestamp.
-    fn mark_run_started(&mut self, run_id: Uuid) -> impl Future<Output = PgResult<ProjectRun>> + Send;
+    fn mark_run_started(
+        &mut self,
+        run_id: Uuid,
+    ) -> impl Future<Output = PgResult<ProjectRun>> + Send;
 
     /// Marks a run as completed with final status and results.
     fn mark_run_completed(
@@ -124,7 +126,6 @@ pub trait ProjectRunRepository {
 
 impl ProjectRunRepository for PgConnection {
     async fn create_run(&mut self, new_run: NewProjectRun) -> PgResult<ProjectRun> {
-
         use schema::project_runs;
 
         let run = diesel::insert_into(project_runs::table)
@@ -138,7 +139,6 @@ impl ProjectRunRepository for PgConnection {
     }
 
     async fn find_run_by_id(&mut self, run_id: Uuid) -> PgResult<Option<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let run = project_runs::table
@@ -157,7 +157,6 @@ impl ProjectRunRepository for PgConnection {
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table
@@ -178,7 +177,6 @@ impl ProjectRunRepository for PgConnection {
         integration_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table
@@ -200,7 +198,6 @@ impl ProjectRunRepository for PgConnection {
         status: IntegrationStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table
@@ -223,7 +220,6 @@ impl ProjectRunRepository for PgConnection {
         run_type: &str,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table
@@ -245,7 +241,6 @@ impl ProjectRunRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table
@@ -266,7 +261,6 @@ impl ProjectRunRepository for PgConnection {
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table
@@ -283,8 +277,10 @@ impl ProjectRunRepository for PgConnection {
         Ok(runs)
     }
 
-    async fn find_in_progress_runs(&mut self, project_id: Option<Uuid>) -> PgResult<Vec<ProjectRun>> {
-
+    async fn find_in_progress_runs(
+        &mut self,
+        project_id: Option<Uuid>,
+    ) -> PgResult<Vec<ProjectRun>> {
         use schema::project_runs::{self, dsl};
 
         let mut query = project_runs::table
@@ -311,7 +307,6 @@ impl ProjectRunRepository for PgConnection {
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let seven_days_ago = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(7));
@@ -330,8 +325,11 @@ impl ProjectRunRepository for PgConnection {
         Ok(runs)
     }
 
-    async fn update_run(&mut self, run_id: Uuid, updates: UpdateProjectRun) -> PgResult<ProjectRun> {
-
+    async fn update_run(
+        &mut self,
+        run_id: Uuid,
+        updates: UpdateProjectRun,
+    ) -> PgResult<ProjectRun> {
         use schema::project_runs::{self, dsl};
 
         let run = diesel::update(project_runs::table.filter(dsl::id.eq(run_id)))
@@ -345,7 +343,6 @@ impl ProjectRunRepository for PgConnection {
     }
 
     async fn mark_run_started(&mut self, run_id: Uuid) -> PgResult<ProjectRun> {
-
         use schema::project_runs::{self, dsl};
 
         let run = diesel::update(project_runs::table.filter(dsl::id.eq(run_id)))
@@ -367,7 +364,6 @@ impl ProjectRunRepository for PgConnection {
         status: IntegrationStatus,
         result_summary: Option<String>,
     ) -> PgResult<ProjectRun> {
-
         use schema::project_runs::{self, dsl};
 
         let run = project_runs::table
@@ -403,7 +399,6 @@ impl ProjectRunRepository for PgConnection {
         run_id: Uuid,
         error_details: serde_json::Value,
     ) -> PgResult<ProjectRun> {
-
         use schema::project_runs::{self, dsl};
 
         let run = project_runs::table
@@ -439,7 +434,6 @@ impl ProjectRunRepository for PgConnection {
         min_duration_ms: i32,
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectRun>> {
-
         use schema::project_runs::{self, dsl};
 
         let runs = project_runs::table

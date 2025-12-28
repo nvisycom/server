@@ -8,10 +8,9 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
-
 use nvisy_postgres::query::DocumentRepository;
 
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
     CreateDocument, DocumentPathParams, Pagination, ProjectPathParams, UpdateDocument,
 };
@@ -79,11 +78,7 @@ async fn get_all_documents(
     tracing::debug!(target: TRACING_TARGET, "Listing project documents");
 
     auth_state
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::ViewDocuments,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewDocuments)
         .await?;
 
     let documents = conn
@@ -213,14 +208,11 @@ async fn find_document(
     conn: &mut nvisy_postgres::PgConn,
     document_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::Document> {
-    conn
-        .find_document_by_id(document_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Document not found")
-                .with_resource("document")
-        })
+    conn.find_document_by_id(document_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("Document not found")
+            .with_resource("document")
+    })
 }
 
 /// Returns a [`Router`] with all related routes.

@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectInvite, ProjectInvite, UpdateProjectInvite};
 use crate::types::InviteStatus;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for project invitation database operations.
 ///
@@ -119,7 +118,6 @@ impl ProjectInviteRepository for PgConnection {
     async fn create_project_invite(&mut self, invite: NewProjectInvite) -> PgResult<ProjectInvite> {
         use schema::project_invites;
 
-
         let invite = diesel::insert_into(project_invites::table)
             .values(&invite)
             .returning(ProjectInvite::as_returning())
@@ -132,7 +130,6 @@ impl ProjectInviteRepository for PgConnection {
 
     async fn find_invite_by_token(&mut self, token: &str) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let invite = project_invites
             .filter(invite_token.eq(token))
@@ -147,7 +144,6 @@ impl ProjectInviteRepository for PgConnection {
 
     async fn find_invite_by_id(&mut self, invite_id: Uuid) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let invite = project_invites
             .filter(id.eq(invite_id))
@@ -167,7 +163,6 @@ impl ProjectInviteRepository for PgConnection {
     ) -> PgResult<ProjectInvite> {
         use schema::project_invites::dsl::*;
 
-
         let invite = diesel::update(project_invites)
             .filter(id.eq(invite_id))
             .set(&changes)
@@ -179,7 +174,11 @@ impl ProjectInviteRepository for PgConnection {
         Ok(invite)
     }
 
-    async fn accept_invite(&mut self, invite_id: Uuid, _acceptor_id: Uuid) -> PgResult<ProjectInvite> {
+    async fn accept_invite(
+        &mut self,
+        invite_id: Uuid,
+        _acceptor_id: Uuid,
+    ) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Accepted),
             responded_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
@@ -189,7 +188,11 @@ impl ProjectInviteRepository for PgConnection {
         self.update_project_invite(invite_id, changes).await
     }
 
-    async fn reject_invite(&mut self, invite_id: Uuid, updated_by_id: Uuid) -> PgResult<ProjectInvite> {
+    async fn reject_invite(
+        &mut self,
+        invite_id: Uuid,
+        updated_by_id: Uuid,
+    ) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Declined),
             updated_by: Some(updated_by_id),
@@ -199,7 +202,11 @@ impl ProjectInviteRepository for PgConnection {
         self.update_project_invite(invite_id, changes).await
     }
 
-    async fn cancel_invite(&mut self, invite_id: Uuid, updated_by_id: Uuid) -> PgResult<ProjectInvite> {
+    async fn cancel_invite(
+        &mut self,
+        invite_id: Uuid,
+        updated_by_id: Uuid,
+    ) -> PgResult<ProjectInvite> {
         let changes = UpdateProjectInvite {
             invite_status: Some(InviteStatus::Canceled),
             updated_by: Some(updated_by_id),
@@ -215,7 +222,6 @@ impl ProjectInviteRepository for PgConnection {
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let invites = project_invites
             .filter(project_id.eq(proj_id))
@@ -236,7 +242,6 @@ impl ProjectInviteRepository for PgConnection {
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let mut query = project_invites.into_boxed();
 
@@ -259,7 +264,6 @@ impl ProjectInviteRepository for PgConnection {
     async fn cleanup_expired_invites(&mut self) -> PgResult<usize> {
         use schema::project_invites::dsl::*;
 
-
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         let updated_count = diesel::update(project_invites)
@@ -275,7 +279,6 @@ impl ProjectInviteRepository for PgConnection {
 
     async fn get_pending_invites(&mut self, proj_id: Uuid) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let invites = project_invites
             .filter(project_id.eq(proj_id))
@@ -297,7 +300,6 @@ impl ProjectInviteRepository for PgConnection {
     ) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
 
-
         let invites = project_invites
             .filter(invite_status.eq(status))
             .select(ProjectInvite::as_select())
@@ -313,7 +315,6 @@ impl ProjectInviteRepository for PgConnection {
 
     async fn find_expiring_invites(&mut self, hours: i64) -> PgResult<Vec<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let expiry_threshold =
             jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().hours(hours));
@@ -350,7 +351,6 @@ impl ProjectInviteRepository for PgConnection {
 
     async fn get_invite_by_id(&mut self, invite_id: Uuid) -> PgResult<Option<ProjectInvite>> {
         use schema::project_invites::dsl::*;
-
 
         let invite = project_invites
             .filter(id.eq(invite_id))

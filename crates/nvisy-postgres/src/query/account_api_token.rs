@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account API token database operations.
 ///
@@ -89,7 +88,6 @@ pub trait AccountApiTokenRepository {
 
 impl AccountApiTokenRepository for PgConnection {
     async fn create_token(&mut self, new_token: NewAccountApiToken) -> PgResult<AccountApiToken> {
-
         use schema::account_api_tokens;
 
         diesel::insert_into(account_api_tokens::table)
@@ -104,7 +102,6 @@ impl AccountApiTokenRepository for PgConnection {
         &mut self,
         access_token: Uuid,
     ) -> PgResult<Option<AccountApiToken>> {
-
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -121,7 +118,6 @@ impl AccountApiTokenRepository for PgConnection {
         &mut self,
         refresh_token: Uuid,
     ) -> PgResult<Option<AccountApiToken>> {
-
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -139,7 +135,6 @@ impl AccountApiTokenRepository for PgConnection {
         access_token: Uuid,
         updates: UpdateAccountApiToken,
     ) -> PgResult<AccountApiToken> {
-
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(account_api_tokens::table.filter(dsl::access_seq.eq(access_token)))
@@ -162,7 +157,6 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn refresh_token(&mut self, refresh_token: Uuid) -> PgResult<AccountApiToken> {
-
         use schema::account_api_tokens::{self, dsl};
 
         let new_access_seq = Uuid::new_v4();
@@ -183,7 +177,6 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn delete_token(&mut self, access_token: Uuid) -> PgResult<bool> {
-
         use schema::account_api_tokens::{self, dsl};
 
         let rows_affected =
@@ -197,7 +190,6 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn delete_all_tokens_for_account(&mut self, account_id: Uuid) -> PgResult<i64> {
-
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(
@@ -217,7 +209,6 @@ impl AccountApiTokenRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
-
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -238,7 +229,6 @@ impl AccountApiTokenRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
-
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
@@ -254,7 +244,6 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn cleanup_expired_tokens(&mut self) -> PgResult<i64> {
-
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(

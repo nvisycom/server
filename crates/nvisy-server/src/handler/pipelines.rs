@@ -7,8 +7,7 @@
 use aide::axum::ApiRouter;
 use axum::http::StatusCode;
 
-
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
 use crate::handler::request::{CreatePipeline, PipelinePathParams, ProjectPathParams};
 use crate::handler::response::{Pipeline, Pipelines};
 use crate::handler::{ErrorKind, Result};
@@ -35,11 +34,7 @@ async fn list_project_pipelines(
     tracing::debug!(target: TRACING_TARGET, "Listing project pipelines");
 
     auth_state
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::ViewPipelines,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewPipelines)
         .await?;
 
     // Stub: return empty list until database schema is implemented
@@ -73,11 +68,7 @@ async fn get_project_pipeline(
     tracing::debug!(target: TRACING_TARGET, "Reading project pipeline");
 
     auth_state
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::ViewPipelines,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewPipelines)
         .await?;
 
     // Stub: return not found until database schema is implemented

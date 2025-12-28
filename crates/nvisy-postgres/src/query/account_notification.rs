@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
 use crate::types::NotificationType;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account notification database operations.
 ///
@@ -62,7 +61,10 @@ pub trait AccountNotificationRepository {
     /// Marks all unread notifications as read for an account.
     ///
     /// Returns the count of notifications marked as read.
-    fn mark_all_as_read(&mut self, account_id: Uuid) -> impl Future<Output = PgResult<usize>> + Send;
+    fn mark_all_as_read(
+        &mut self,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Permanently deletes a notification.
     fn delete_notification(
@@ -89,7 +91,6 @@ impl AccountNotificationRepository for PgConnection {
         &mut self,
         new_notification: NewAccountNotification,
     ) -> PgResult<AccountNotification> {
-
         use schema::account_notifications;
 
         diesel::insert_into(account_notifications::table)
@@ -104,7 +105,6 @@ impl AccountNotificationRepository for PgConnection {
         &mut self,
         notification_id: Uuid,
     ) -> PgResult<Option<AccountNotification>> {
-
         use schema::account_notifications::{self, dsl};
 
         account_notifications::table
@@ -121,7 +121,6 @@ impl AccountNotificationRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
-
         use schema::account_notifications::{self, dsl};
 
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
@@ -144,7 +143,6 @@ impl AccountNotificationRepository for PgConnection {
         notification_type: NotificationType,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
-
         use schema::account_notifications::{self, dsl};
 
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
@@ -163,7 +161,6 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn mark_as_read(&mut self, notification_id: Uuid) -> PgResult<AccountNotification> {
-
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
@@ -180,7 +177,6 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn mark_as_unread(&mut self, notification_id: Uuid) -> PgResult<AccountNotification> {
-
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
@@ -197,7 +193,6 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn mark_all_as_read(&mut self, account_id: Uuid) -> PgResult<usize> {
-
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
@@ -217,7 +212,6 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn delete_notification(&mut self, notification_id: Uuid) -> PgResult<()> {
-
         use schema::account_notifications::{self, dsl};
 
         diesel::delete(account_notifications::table.filter(dsl::id.eq(notification_id)))
@@ -229,7 +223,6 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn delete_all_notifications(&mut self, account_id: Uuid) -> PgResult<usize> {
-
         use schema::account_notifications::{self, dsl};
 
         diesel::delete(account_notifications::table.filter(dsl::account_id.eq(account_id)))
@@ -239,7 +232,6 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn delete_expired_notifications(&mut self) -> PgResult<usize> {
-
         use schema::account_notifications::{self, dsl};
 
         let now = jiff_diesel::Timestamp::from(Timestamp::now());

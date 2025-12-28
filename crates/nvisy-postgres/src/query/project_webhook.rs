@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectWebhook, ProjectWebhook, UpdateProjectWebhook};
 use crate::types::WebhookStatus;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for project webhook database operations.
 ///
@@ -59,8 +58,10 @@ pub trait ProjectWebhookRepository {
     ) -> impl Future<Output = PgResult<ProjectWebhook>> + Send;
 
     /// Soft deletes a project webhook.
-    fn delete_project_webhook(&mut self, webhook_id: Uuid)
-    -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_project_webhook(
+        &mut self,
+        webhook_id: Uuid,
+    ) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Records a successful webhook delivery.
     fn record_webhook_success(

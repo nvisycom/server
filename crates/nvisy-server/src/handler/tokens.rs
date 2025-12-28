@@ -9,14 +9,13 @@ use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use jiff::Timestamp;
-
 use nvisy_postgres::model::UpdateAccountApiToken;
 use nvisy_postgres::query::{AccountApiTokenRepository, Pagination as QueryPagination};
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, Pagination, UpdateApiToken};
 use super::response::{ApiToken, ApiTokenWithSecret, ApiTokens};
-use crate::extract::{PgPool, AuthState, ClientIp, Json, Path, Query, TypedHeader, ValidateJson};
+use crate::extract::{AuthState, ClientIp, Json, Path, PgPool, Query, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 

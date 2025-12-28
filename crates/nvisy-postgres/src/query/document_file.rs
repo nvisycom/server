@@ -11,8 +11,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use crate::types::{ProcessingStatus, VirusScanStatus};
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document file database operations.
 ///
@@ -154,12 +153,14 @@ pub trait DocumentFileRepository {
     /// Soft deletes files older than the retention period.
     ///
     /// Returns the count of affected files.
-    fn purge_old_files(&mut self, retention_days: i32) -> impl Future<Output = PgResult<usize>> + Send;
+    fn purge_old_files(
+        &mut self,
+        retention_days: i32,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
 impl DocumentFileRepository for PgConnection {
     async fn create_document_file(&mut self, new_file: NewDocumentFile) -> PgResult<DocumentFile> {
-
         use schema::document_files;
 
         let file = diesel::insert_into(document_files::table)
@@ -173,7 +174,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn find_document_file_by_id(&mut self, file_id: Uuid) -> PgResult<Option<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let file = document_files::table
@@ -193,7 +193,6 @@ impl DocumentFileRepository for PgConnection {
         project_id: Uuid,
         file_id: Uuid,
     ) -> PgResult<Option<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let file = document_files::table
@@ -214,7 +213,6 @@ impl DocumentFileRepository for PgConnection {
         document_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -236,7 +234,6 @@ impl DocumentFileRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -258,7 +255,6 @@ impl DocumentFileRepository for PgConnection {
         file_id: Uuid,
         updates: UpdateDocumentFile,
     ) -> PgResult<DocumentFile> {
-
         use schema::document_files::{self, dsl};
 
         let file = diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
@@ -272,7 +268,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn delete_document_file(&mut self, file_id: Uuid) -> PgResult<()> {
-
         use schema::document_files::{self, dsl};
 
         diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
@@ -285,7 +280,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn get_pending_files(&mut self, pagination: Pagination) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -308,7 +302,6 @@ impl DocumentFileRepository for PgConnection {
         file_id: Uuid,
         status: ProcessingStatus,
     ) -> PgResult<DocumentFile> {
-
         use schema::document_files::{self, dsl};
 
         let updates = UpdateDocumentFile {
@@ -341,8 +334,10 @@ impl DocumentFileRepository for PgConnection {
         .await
     }
 
-    async fn find_document_files_by_ids(&mut self, file_ids: &[Uuid]) -> PgResult<Vec<DocumentFile>> {
-
+    async fn find_document_files_by_ids(
+        &mut self,
+        file_ids: &[Uuid],
+    ) -> PgResult<Vec<DocumentFile>> {
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -361,7 +356,6 @@ impl DocumentFileRepository for PgConnection {
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -379,7 +373,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn find_files_by_hash(&mut self, file_hash: &[u8]) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -398,7 +391,6 @@ impl DocumentFileRepository for PgConnection {
         status: ProcessingStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -420,7 +412,6 @@ impl DocumentFileRepository for PgConnection {
         scan_status: VirusScanStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -438,7 +429,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn find_failed_files(&mut self, pagination: Pagination) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -460,7 +450,6 @@ impl DocumentFileRepository for PgConnection {
         size_threshold: i64,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
-
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
@@ -478,7 +467,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn get_user_storage_usage(&mut self, account_id: Uuid) -> PgResult<BigDecimal> {
-
         use schema::document_files::{self, dsl};
 
         let usage: Option<BigDecimal> = document_files::table
@@ -493,7 +481,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn cleanup_auto_delete_files(&mut self) -> PgResult<usize> {
-
         use schema::document_files::{self, dsl};
 
         let affected = diesel::update(document_files::table)
@@ -508,7 +495,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn reset_failed_processing(&mut self, file_ids: Vec<Uuid>) -> PgResult<usize> {
-
         use schema::document_files::{self, dsl};
 
         let affected = diesel::update(document_files::table)
@@ -523,7 +509,6 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn purge_old_files(&mut self, retention_days: i32) -> PgResult<usize> {
-
         use schema::document_files::{self, dsl};
 
         let cutoff_date = jiff_diesel::Timestamp::from(

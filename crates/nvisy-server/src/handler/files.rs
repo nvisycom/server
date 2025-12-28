@@ -14,12 +14,13 @@ use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
-
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::{DocumentFileRepository, Pagination, ProjectRepository};
 use uuid::Uuid;
 
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson, Version};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson, Version,
+};
 use crate::handler::request::{
     DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ProjectPathParams,
     UpdateFile as UpdateFileRequest,
@@ -40,8 +41,7 @@ async fn find_project_file(
     project_id: Uuid,
     file_id: Uuid,
 ) -> Result<DocumentFile> {
-    conn
-        .find_project_file(project_id, file_id)
+    conn.find_project_file(project_id, file_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -355,11 +355,7 @@ async fn download_file(
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::DownloadFiles,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::DownloadFiles)
         .await?;
 
     let file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
@@ -455,8 +451,7 @@ async fn delete_file(
         ..Default::default()
     };
 
-    conn
-        .update_document_file(path_params.file_id, updates)
+    conn.update_document_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
@@ -489,19 +484,13 @@ async fn download_multiple_files(
     tracing::debug!(target: TRACING_TARGET, "Downloading multiple files as archive");
 
     auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::DownloadFiles,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::DownloadFiles)
         .await?;
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     // Batch fetch all requested files that belong to this project
-    let files = conn
-        .find_document_files_by_ids(&request.file_ids)
-        .await?;
+    let files = conn.find_document_files_by_ids(&request.file_ids).await?;
 
     // Create a map for quick lookup and verify all files belong to project
     let files_map: HashMap<Uuid, DocumentFile> = files
@@ -589,11 +578,7 @@ async fn download_archived_files(
     tracing::debug!(target: TRACING_TARGET, "Downloading archived files");
 
     auth_claims
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::DownloadFiles,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::DownloadFiles)
         .await?;
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
@@ -604,8 +589,7 @@ async fn download_archived_files(
         conn.find_document_files_by_ids(&specific_ids).await?
     } else {
         // Get all project files using the project-scoped query
-        conn
-            .find_document_files_by_project(path_params.project_id, Pagination::default())
+        conn.find_document_files_by_project(path_params.project_id, Pagination::default())
             .await?
     };
 
@@ -712,8 +696,14 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route("/documents/{document_id}/files/", post(upload_file))
-        .api_route("/documents/{document_id}/files/{file_id}", patch(update_file))
-        .api_route("/documents/{document_id}/files/{file_id}", get(download_file))
+        .api_route(
+            "/documents/{document_id}/files/{file_id}",
+            patch(update_file),
+        )
+        .api_route(
+            "/documents/{document_id}/files/{file_id}",
+            get(download_file),
+        )
         .api_route(
             "/documents/{document_id}/files/{file_id}",
             delete(delete_file),

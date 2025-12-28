@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{Document, NewDocument, UpdateDocument};
 use crate::types::DocumentStatus;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document database operations.
 ///
@@ -78,7 +77,6 @@ pub trait DocumentRepository {
 
 impl DocumentRepository for PgConnection {
     async fn create_document(&mut self, new_document: NewDocument) -> PgResult<Document> {
-
         use schema::documents;
 
         let document = diesel::insert_into(documents::table)
@@ -92,7 +90,6 @@ impl DocumentRepository for PgConnection {
     }
 
     async fn find_document_by_id(&mut self, document_id: Uuid) -> PgResult<Option<Document>> {
-
         use schema::documents::{self, dsl};
 
         let document = documents::table
@@ -112,7 +109,6 @@ impl DocumentRepository for PgConnection {
         project_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -134,7 +130,6 @@ impl DocumentRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -156,7 +151,6 @@ impl DocumentRepository for PgConnection {
         document_id: Uuid,
         updates: UpdateDocument,
     ) -> PgResult<Document> {
-
         use schema::documents::{self, dsl};
 
         let document = diesel::update(documents::table.filter(dsl::id.eq(document_id)))
@@ -170,7 +164,6 @@ impl DocumentRepository for PgConnection {
     }
 
     async fn delete_document(&mut self, document_id: Uuid) -> PgResult<()> {
-
         use schema::documents::{self, dsl};
 
         diesel::update(documents::table.filter(dsl::id.eq(document_id)))
@@ -183,7 +176,6 @@ impl DocumentRepository for PgConnection {
     }
 
     async fn list_documents(&mut self, pagination: Pagination) -> PgResult<Vec<Document>> {
-
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -205,7 +197,6 @@ impl DocumentRepository for PgConnection {
         project_id: Option<Uuid>,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-
         use schema::documents::{self, dsl};
 
         let search_pattern = format!("%{}%", search_query.to_lowercase());
@@ -235,7 +226,6 @@ impl DocumentRepository for PgConnection {
         status: DocumentStatus,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
-
         use schema::documents::{self, dsl};
 
         let documents = documents::table

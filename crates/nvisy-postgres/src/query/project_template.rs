@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{NewProjectTemplate, ProjectTemplate, UpdateProjectTemplate};
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for project template database operations.
 ///

@@ -7,11 +7,10 @@
 
 use aide::axum::ApiRouter;
 use axum::http::StatusCode;
-
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::{ProjectRole, ProjectVisibility};
 
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{MemberPathParams, Pagination, ProjectPathParams, UpdateMemberRole};
 use crate::handler::response::{Member, Members};
 use crate::handler::{ErrorKind, Result};
@@ -144,11 +143,7 @@ async fn delete_member(
     tracing::warn!(target: TRACING_TARGET, "Removing project member");
 
     auth_state
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::RemoveMembers,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::RemoveMembers)
         .await?;
 
     // Prevent self-removal (use leave endpoint instead)
@@ -171,8 +166,7 @@ async fn delete_member(
             .with_context("Admins can only leave the project themselves"));
     }
 
-    conn
-        .remove_project_member(path_params.project_id, path_params.account_id)
+    conn.remove_project_member(path_params.project_id, path_params.account_id)
         .await?;
 
     tracing::warn!(target: TRACING_TARGET, "Project member removed successfully");
@@ -272,8 +266,7 @@ async fn leave_project(
             .with_message("You are not a member of this project"));
     };
 
-    conn
-        .remove_project_member(path_params.project_id, auth_state.account_id)
+    conn.remove_project_member(path_params.project_id, auth_state.account_id)
         .await?;
 
     tracing::warn!(target: TRACING_TARGET, "Member left project successfully");

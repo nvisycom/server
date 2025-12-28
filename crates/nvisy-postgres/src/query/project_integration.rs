@@ -10,8 +10,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectIntegration, ProjectIntegration, UpdateProjectIntegration};
 use crate::types::IntegrationStatus;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for project integration database operations.
 ///
@@ -38,8 +37,10 @@ pub trait ProjectIntegrationRepository {
     ) -> impl Future<Output = PgResult<ProjectIntegration>> + Send;
 
     /// Soft deletes an integration by deactivating it.
-    fn delete_integration(&mut self, integration_id: Uuid)
-    -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_integration(
+        &mut self,
+        integration_id: Uuid,
+    ) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Lists all integrations for a specific project.
     fn list_project_integrations(
@@ -147,7 +148,6 @@ impl ProjectIntegrationRepository for PgConnection {
     ) -> PgResult<ProjectIntegration> {
         use schema::project_integrations;
 
-
         let integration = diesel::insert_into(project_integrations::table)
             .values(&integration)
             .returning(ProjectIntegration::as_returning())
@@ -163,7 +163,6 @@ impl ProjectIntegrationRepository for PgConnection {
         integration_id: Uuid,
     ) -> PgResult<Option<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let integration = project_integrations
             .filter(id.eq(integration_id))
@@ -183,7 +182,6 @@ impl ProjectIntegrationRepository for PgConnection {
     ) -> PgResult<ProjectIntegration> {
         use schema::project_integrations::dsl::*;
 
-
         let integration = diesel::update(project_integrations)
             .filter(id.eq(integration_id))
             .set(&changes)
@@ -198,7 +196,6 @@ impl ProjectIntegrationRepository for PgConnection {
     async fn delete_integration(&mut self, integration_id: Uuid) -> PgResult<()> {
         use schema::project_integrations::dsl::*;
 
-
         diesel::update(project_integrations)
             .filter(id.eq(integration_id))
             .set(is_active.eq(false))
@@ -209,9 +206,11 @@ impl ProjectIntegrationRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_project_integrations(&mut self, proj_id: Uuid) -> PgResult<Vec<ProjectIntegration>> {
+    async fn list_project_integrations(
+        &mut self,
+        proj_id: Uuid,
+    ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let integrations = project_integrations
             .filter(project_id.eq(proj_id))
@@ -230,7 +229,6 @@ impl ProjectIntegrationRepository for PgConnection {
     ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
 
-
         let integrations = project_integrations
             .filter(sync_status.eq(Some(integration_status)))
             .select(ProjectIntegration::as_select())
@@ -248,7 +246,6 @@ impl ProjectIntegrationRepository for PgConnection {
         name: &str,
     ) -> PgResult<Option<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let integration = project_integrations
             .filter(project_id.eq(proj_id))
@@ -288,9 +285,11 @@ impl ProjectIntegrationRepository for PgConnection {
         self.update_integration(integration_id, changes).await
     }
 
-    async fn list_active_integrations(&mut self, proj_id: Uuid) -> PgResult<Vec<ProjectIntegration>> {
+    async fn list_active_integrations(
+        &mut self,
+        proj_id: Uuid,
+    ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let integrations = project_integrations
             .filter(project_id.eq(proj_id))
@@ -323,7 +322,6 @@ impl ProjectIntegrationRepository for PgConnection {
         proj_id: Option<Uuid>,
     ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let mut query = project_integrations.into_boxed();
 
@@ -381,7 +379,6 @@ impl ProjectIntegrationRepository for PgConnection {
     ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
 
-
         let integrations = project_integrations
             .filter(created_by.eq(creator_id))
             .select(ProjectIntegration::as_select())
@@ -401,7 +398,6 @@ impl ProjectIntegrationRepository for PgConnection {
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let search_pattern = format!("%{}%", name_pattern);
 
@@ -424,7 +420,6 @@ impl ProjectIntegrationRepository for PgConnection {
         hours: i64,
     ) -> PgResult<Vec<ProjectIntegration>> {
         use schema::project_integrations::dsl::*;
-
 
         let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
 
@@ -454,7 +449,6 @@ impl ProjectIntegrationRepository for PgConnection {
         exclude_id: Option<Uuid>,
     ) -> PgResult<bool> {
         use schema::project_integrations::dsl::*;
-
 
         let mut query = project_integrations
             .filter(project_id.eq(proj_id))

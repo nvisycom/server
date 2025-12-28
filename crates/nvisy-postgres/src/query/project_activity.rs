@@ -11,8 +11,7 @@ use uuid::Uuid;
 use super::Pagination;
 use crate::model::{NewProjectActivity, ProjectActivity};
 use crate::types::ActivityType;
-use crate::{PgError, PgResult, schema};
-use crate::PgConnection;
+use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
@@ -139,7 +138,6 @@ impl ProjectActivityRepository for PgConnection {
     async fn log_activity(&mut self, activity: NewProjectActivity) -> PgResult<ProjectActivity> {
         use schema::project_activities;
 
-
         let activity = diesel::insert_into(project_activities::table)
             .values(&activity)
             .returning(ProjectActivity::as_returning())
@@ -156,7 +154,6 @@ impl ProjectActivityRepository for PgConnection {
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
-
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -177,7 +174,6 @@ impl ProjectActivityRepository for PgConnection {
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
-
 
         let activities = project_activities
             .filter(account_id.eq(user_id))
@@ -200,7 +196,6 @@ impl ProjectActivityRepository for PgConnection {
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-
         let activities = project_activities
             .filter(project_id.eq(proj_id))
             .filter(activity_type.eq(activity_type_filter))
@@ -221,7 +216,6 @@ impl ProjectActivityRepository for PgConnection {
         hours: i64,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
-
 
         let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
 
@@ -244,7 +238,6 @@ impl ProjectActivityRepository for PgConnection {
         pagination: Pagination,
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
-
 
         let activities = project_activities
             .filter(project_id.eq(proj_id))
@@ -321,7 +314,6 @@ impl ProjectActivityRepository for PgConnection {
     ) -> PgResult<Vec<(Option<Uuid>, i64)>> {
         use schema::project_activities::dsl::*;
 
-
         let results = if let Some(time_window) = hours {
             let cutoff_time =
                 jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
@@ -359,7 +351,6 @@ impl ProjectActivityRepository for PgConnection {
     ) -> PgResult<Vec<(ActivityType, i64)>> {
         use schema::project_activities::dsl::*;
 
-
         let results = if let Some(time_window) = hours {
             let cutoff_time =
                 jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
@@ -393,7 +384,6 @@ impl ProjectActivityRepository for PgConnection {
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-
         let activities = project_activities
             .filter(project_id.eq(proj_id))
             .filter(account_id.is_null())
@@ -416,7 +406,6 @@ impl ProjectActivityRepository for PgConnection {
     ) -> PgResult<Vec<ProjectActivity>> {
         use schema::project_activities::dsl::*;
 
-
         let activities = project_activities
             .filter(project_id.eq(proj_id))
             .filter(ip_address.eq(ip_addr))
@@ -433,7 +422,6 @@ impl ProjectActivityRepository for PgConnection {
 
     async fn cleanup_old_activities(&mut self, days_to_keep: i64) -> PgResult<usize> {
         use schema::project_activities::dsl::*;
-
 
         let cutoff_date =
             jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(days_to_keep));

@@ -7,10 +7,9 @@
 
 use aide::axum::ApiRouter;
 use axum::http::StatusCode;
-
 use nvisy_postgres::query::{Pagination, ProjectWebhookRepository};
 
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
     CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
 };
@@ -202,9 +201,7 @@ async fn delete_webhook(
     // Verify webhook exists and belongs to the project
     let _ = find_project_webhook(&mut conn, &path_params).await?;
 
-    conn
-        .delete_project_webhook(path_params.webhook_id)
-        .await?;
+    conn.delete_project_webhook(path_params.webhook_id).await?;
 
     tracing::warn!(target: TRACING_TARGET, "Webhook deleted successfully");
 

@@ -7,8 +7,7 @@
 use aide::axum::ApiRouter;
 use axum::http::StatusCode;
 
-
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
 use crate::handler::request::{CreateTemplate, ProjectPathParams, TemplatePathParams};
 use crate::handler::response::{Template, Templates};
 use crate::handler::{ErrorKind, Result};
@@ -35,11 +34,7 @@ async fn list_project_templates(
     tracing::debug!(target: TRACING_TARGET, "Listing project templates");
 
     auth_state
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::ViewTemplates,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewTemplates)
         .await?;
 
     // Stub: return empty list until database schema is implemented
@@ -73,11 +68,7 @@ async fn get_project_template(
     tracing::debug!(target: TRACING_TARGET, "Reading project template");
 
     auth_state
-        .authorize_project(
-            &mut conn,
-            path_params.project_id,
-            Permission::ViewTemplates,
-        )
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewTemplates)
         .await?;
 
     // Stub: return not found until database schema is implemented

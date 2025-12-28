@@ -5,10 +5,9 @@
 
 use aide::axum::ApiRouter;
 use axum::http::StatusCode;
-
 use nvisy_postgres::query::{DocumentCommentRepository, DocumentFileRepository};
 
-use crate::extract::{PgPool, AuthState, Json, Path, ValidateJson};
+use crate::extract::{AuthState, Json, Path, PgPool, ValidateJson};
 use crate::handler::request::{
     CreateDocumentComment, FileCommentPathParams, FilePathParams, Pagination,
     UpdateDocumentComment as UpdateCommentRequest,
@@ -193,8 +192,7 @@ async fn find_file(
     conn: &mut nvisy_postgres::PgConn,
     file_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::DocumentFile> {
-    conn
-        .find_document_file_by_id(file_id)
+    conn.find_document_file_by_id(file_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -208,14 +206,11 @@ async fn find_comment(
     conn: &mut nvisy_postgres::PgConn,
     comment_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::DocumentComment> {
-    conn
-        .find_comment_by_id(comment_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Comment not found")
-                .with_resource("comment")
-        })
+    conn.find_comment_by_id(comment_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("Comment not found")
+            .with_resource("comment")
+    })
 }
 
 /// Returns a [`Router`] with all comment-related routes.

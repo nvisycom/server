@@ -7,10 +7,9 @@
 
 use aide::axum::ApiRouter;
 use axum::http::StatusCode;
-
 use nvisy_postgres::query::ProjectIntegrationRepository;
 
-use crate::extract::{PgPool, AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
     CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
     UpdateIntegrationCredentials, UpdateProjectIntegration,
@@ -273,9 +272,7 @@ async fn delete_integration(
     // Verify integration exists and belongs to the project
     let _ = find_project_integration(&mut conn, &path_params).await?;
 
-    conn
-        .delete_integration(path_params.integration_id)
-        .await?;
+    conn.delete_integration(path_params.integration_id).await?;
 
     tracing::warn!(target: TRACING_TARGET, "Integration deleted successfully");
 
