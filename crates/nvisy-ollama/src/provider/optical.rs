@@ -4,7 +4,7 @@
 //! to extract text from images.
 
 use jiff::Timestamp;
-use nvisy_core::ocr::{BoxedStream, OcrProvider, Request, Response};
+use nvisy_core::ocr::{OcrProvider, Request, Response};
 use nvisy_core::{ServiceHealth, SharedContext, UsageStats};
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
@@ -15,67 +15,21 @@ use crate::{OllamaClient, TRACING_TARGET_CLIENT};
 /// Default OCR prompt for text extraction.
 const OCR_PROMPT: &str = "Extract all text from this image. Return only the extracted text, preserving the original layout and formatting as much as possible. Do not add any explanations or commentary.";
 
-/// Trait for types that can be used as OCR request payloads.
-pub trait OcrRequestPayload: Send + Sync {
-    /// Get the image data as bytes.
-    fn image_data(&self) -> &[u8];
-
-    /// Get the MIME type of the image (e.g., "image/png", "image/jpeg").
-    fn mime_type(&self) -> &str {
-        "image/png"
-    }
-
-    /// Get an optional custom prompt for OCR.
-    fn prompt(&self) -> Option<&str> {
-        None
-    }
-}
-
-/// Trait for types that can be constructed from OCR results.
-pub trait OcrResponsePayload: Send + Sync {
-    /// Create from extracted text.
-    fn from_text(text: String) -> Self;
-}
-
-impl OcrResponsePayload for String {
-    fn from_text(text: String) -> Self {
-        text
-    }
-}
-
-// Implement for () to support default service type parameters
-impl OcrRequestPayload for () {
-    fn image_data(&self) -> &[u8] {
-        &[]
-    }
-}
-
-impl OcrResponsePayload for () {
-    fn from_text(_text: String) -> Self {}
-}
-
 #[async_trait::async_trait]
-impl<Req, Resp> OcrProvider<Req, Resp> for OllamaClient
-where
-    Req: OcrRequestPayload + 'static,
-    Resp: OcrResponsePayload + Default + 'static,
-{
+impl OcrProvider for OllamaClient {
     async fn process_ocr(
         &self,
         context: &SharedContext,
-        request: Request<Req>,
-    ) -> nvisy_core::Result<Response<Resp>> {
+        request: &Request,
+    ) -> nvisy_core::Result<Response> {
         let model = self.vlm_model();
         let started_at = Timestamp::now();
 
-        let image_data = request.payload.image_data();
+        let image_data = request.as_bytes();
 
         // Skip processing if no image data
         if image_data.is_empty() {
-            return Ok(Response::new(
-                request.request_id,
-                Resp::from_text(String::new()),
-            ));
+            return Ok(request.reply(String::new()));
         }
 
         tracing::debug!(
@@ -83,7 +37,7 @@ where
             request_id = %request.request_id,
             model = %model,
             image_size = image_data.len(),
-            mime_type = %request.payload.mime_type(),
+            content_type = ?request.content_type(),
             "Processing OCR request via Ollama VLM"
         );
 
@@ -92,7 +46,7 @@ where
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, image_data);
 
         // Use custom prompt if provided, otherwise use default OCR prompt
-        let prompt = request.payload.prompt().unwrap_or(OCR_PROMPT).to_string();
+        let prompt = request.prompt.as_deref().unwrap_or(OCR_PROMPT).to_string();
 
         let message =
             ChatMessage::user(prompt.clone()).with_images(vec![Image::from_base64(&image_base64)]);
@@ -124,7 +78,7 @@ where
                     "OCR request processed successfully"
                 );
 
-                Ok(Response::new(request.request_id, Resp::from_text(text)))
+                Ok(request.reply(text).with_timing(started_at, ended_at))
             }
             Err(e) => {
                 context
@@ -143,21 +97,6 @@ where
                     .with_message(format!("Ollama OCR error: {}", e)))
             }
         }
-    }
-
-    async fn process_ocr_stream(
-        &self,
-        _context: &SharedContext,
-        request: Request<Req>,
-    ) -> nvisy_core::Result<BoxedStream<Response<Resp>>> {
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            request_id = %request.request_id,
-            "OCR streaming not yet implemented"
-        );
-
-        Err(nvisy_core::Error::external_error()
-            .with_message("OCR streaming not yet implemented for Ollama"))
     }
 
     async fn health_check(&self) -> nvisy_core::Result<ServiceHealth> {

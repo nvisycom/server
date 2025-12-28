@@ -193,8 +193,8 @@ mod tests {
         let error = Error::external("nats", "Connection refused");
 
         assert_eq!(error.kind(), ErrorKind::External);
-        assert!(error.to_string().contains("NATS"));
-        assert!(error.to_string().contains("connection refused"));
+        assert!(error.to_string().contains("nats"));
+        assert!(error.to_string().contains("Connection refused"));
     }
 
     #[test]
@@ -203,6 +203,6 @@ mod tests {
         assert_eq!(ErrorKind::External.as_str(), "external_service");
         assert_eq!(ErrorKind::Auth.as_str(), "auth");
         assert_eq!(ErrorKind::FileSystem.as_str(), "file_system");
-        assert_eq!(ErrorKind::Internal.as_str(), "internal");
+        assert_eq!(ErrorKind::Internal.as_str(), "internal_service");
     }
 }

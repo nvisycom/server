@@ -1,9 +1,7 @@
-//! VLM (Vision Language Model) provider implementation and payload traits.
-
-use std::time::SystemTime;
+//! VLM (Vision Language Model) provider implementation.
 
 use jiff::Timestamp;
-use nvisy_core::vlm::{BoxedStream, Request, Response, VlmProvider};
+use nvisy_core::vlm::{Request, Response, VlmProvider};
 use nvisy_core::{ServiceHealth, SharedContext, UsageStats};
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
@@ -11,51 +9,13 @@ use ollama_rs::generation::images::Image;
 
 use crate::{OllamaClient, TRACING_TARGET_CLIENT};
 
-/// Trait for types that can be used as VLM request payloads.
-pub trait VlmRequestPayload: Send + Sync {
-    /// Get the text prompt.
-    fn prompt(&self) -> &str;
-
-    /// Get base64-encoded images (if any).
-    fn images(&self) -> Vec<String> {
-        vec![]
-    }
-}
-
-/// Trait for types that can be constructed from VLM results.
-pub trait VlmResponsePayload: Send + Sync {
-    /// Create from generated text.
-    fn from_text(text: String) -> Self;
-}
-
-impl VlmResponsePayload for String {
-    fn from_text(text: String) -> Self {
-        text
-    }
-}
-
-// Implement for () to support default service type parameters
-impl VlmRequestPayload for () {
-    fn prompt(&self) -> &str {
-        ""
-    }
-}
-
-impl VlmResponsePayload for () {
-    fn from_text(_text: String) -> Self {}
-}
-
 #[async_trait::async_trait]
-impl<Req, Resp> VlmProvider<Req, Resp> for OllamaClient
-where
-    Req: VlmRequestPayload + 'static,
-    Resp: VlmResponsePayload + Default + 'static,
-{
+impl VlmProvider for OllamaClient {
     async fn process_vlm(
         &self,
         context: &SharedContext,
-        request: &Request<Req>,
-    ) -> nvisy_core::Result<Response<Resp>> {
+        request: &Request,
+    ) -> nvisy_core::Result<Response> {
         let model = self.vlm_model();
         let started_at = Timestamp::now();
 
@@ -63,18 +23,28 @@ where
             target: TRACING_TARGET_CLIENT,
             request_id = %request.request_id,
             model = %model,
-            image_count = request.images.len(),
+            document_count = request.document_count(),
             "Processing VLM request"
         );
 
-        let prompt = request.payload.prompt();
-        let images = request.payload.images();
+        // Collect base64-encoded images from documents
+        let images: Vec<Image> = request
+            .documents
+            .iter()
+            .filter(|doc| doc.is_image())
+            .map(|doc| {
+                let base64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    doc.as_bytes(),
+                );
+                Image::from_base64(&base64)
+            })
+            .collect();
 
         let message = if images.is_empty() {
-            ChatMessage::user(prompt.to_string())
+            ChatMessage::user(request.prompt.clone())
         } else {
-            let ollama_images: Vec<Image> = images.into_iter().map(Image::from_base64).collect();
-            ChatMessage::user(prompt.to_string()).with_images(ollama_images)
+            ChatMessage::user(request.prompt.clone()).with_images(images)
         };
 
         let chat_request = ChatMessageRequest::new(model.to_string(), vec![message]);
@@ -89,9 +59,9 @@ where
                 let text = response.message.content;
 
                 // Estimate tokens from prompt + response length
-                let tokens = ((prompt.len() + text.len()) / 4) as u32;
-                // Count images as runs
-                let runs = request.images.len().max(1) as u32;
+                let tokens = ((request.prompt.len() + text.len()) / 4) as u32;
+                // Count documents as runs
+                let runs = request.document_count().max(1) as u32;
 
                 context
                     .record(UsageStats::success(tokens, runs, processing_time))
@@ -107,16 +77,10 @@ where
                     "VLM request processed"
                 );
 
-                Ok(Response {
-                    content: text.clone(),
-                    usage: None,
-                    finish_reason: Some("stop".to_string()),
-                    created: SystemTime::now(),
-                    confidence: None,
-                    visual_analysis: None,
-                    metadata: Default::default(),
-                    payload: Resp::from_text(text),
-                })
+                Ok(request
+                    .reply(text)
+                    .with_timing(started_at, ended_at)
+                    .with_finish_reason("stop"))
             }
             Err(e) => {
                 context
@@ -135,20 +99,6 @@ where
                     .with_message(format!("Ollama VLM error: {}", e)))
             }
         }
-    }
-
-    async fn process_vlm_stream(
-        &self,
-        _context: &SharedContext,
-        request: &Request<Req>,
-    ) -> nvisy_core::Result<BoxedStream<Response<Resp>>> {
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            request_id = %request.request_id,
-            "VLM streaming not yet implemented"
-        );
-
-        Err(nvisy_core::Error::external_error().with_message("VLM streaming not yet implemented"))
     }
 
     async fn health_check(&self) -> nvisy_core::Result<ServiceHealth> {

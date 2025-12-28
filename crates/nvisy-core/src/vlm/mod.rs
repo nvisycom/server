@@ -1,86 +1,117 @@
 //! Vision Language Model (VLM) abstractions.
 //!
 //! This module provides traits and types for working with multimodal AI models that
-//! can process both images and text. It supports various VLM capabilities including
-//! visual question answering, image description, visual reasoning, and multimodal
-//! conversations.
-
-use futures_util::Stream;
+//! can process both images and text. It supports visual question answering, image
+//! description, and multimodal conversations.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use nvisy_core::vlm::{VlmProvider, VlmService, Request};
+//! use nvisy_core::types::SharedContext;
+//!
+//! // Create a service with your provider
+//! let service = VlmService::new(my_provider);
+//!
+//! // Process a VLM request
+//! let request = Request::new("Describe this image").with_document(document);
+//! let response = service.process_vlm(&request).await?;
+//!
+//! println!("Response: {}", response.content());
+//! ```
 
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use request::{ImageInput, Request, RequestOptions, VlmInput};
-pub use response::{
-    ColorInfo, DetectedObject, EmotionalAnalysis, FontProperties, ImageProperties, Response,
-    ResponseMetadata, SceneCategory, TextRegion, Usage, VisualAnalysis, VlmResponseChunk,
-};
+pub use request::{BatchRequest, Request};
+pub use response::{BatchResponse, Response, Usage};
 pub use service::VlmService;
 
+use crate::Result;
 use crate::types::{ServiceHealth, SharedContext};
-use crate::{Error, Result};
-
-/// Type alias for a boxed VLM service with specific request and response types.
-pub type BoxedVlmProvider<Req, Resp> = Box<dyn VlmProvider<Req, Resp> + Send + Sync>;
-
-/// Type alias for boxed response stream.
-pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
 
 /// Tracing target for VLM operations.
 pub const TRACING_TARGET: &str = "nvisy_core::vlm";
 
 /// Core trait for VLM (Vision Language Model) operations.
 ///
-/// This trait is generic over request (`Req`) and response (`Resp`) types,
-/// allowing implementations to define their own specific data structures
-/// while maintaining a consistent interface.
+/// Implement this trait to create custom VLM providers. The trait provides
+/// a default batch implementation that processes requests concurrently.
 ///
-/// # Type Parameters
+/// # Example
 ///
-/// * `Req` - The request payload type specific to the VLM implementation
-/// * `Resp` - The response payload type specific to the VLM implementation
+/// ```rust,ignore
+/// use nvisy_core::vlm::{VlmProvider, Request, Response};
+/// use nvisy_core::types::{ServiceHealth, SharedContext};
+/// use nvisy_core::Result;
+///
+/// struct MyProvider;
+///
+/// #[async_trait::async_trait]
+/// impl VlmProvider for MyProvider {
+///     async fn process_vlm(
+///         &self,
+///         context: &SharedContext,
+///         request: &Request,
+///     ) -> Result<Response> {
+///         let content = "Description of the image"; // Your VLM logic
+///         Ok(request.reply(content))
+///     }
+///
+///     async fn health_check(&self) -> Result<ServiceHealth> {
+///         Ok(ServiceHealth::healthy())
+///     }
+/// }
+/// ```
 #[async_trait::async_trait]
-pub trait VlmProvider<Req, Resp>: Send + Sync {
-    /// Process a vision-language request and return a complete response.
+pub trait VlmProvider: Send + Sync {
+    /// Process a vision-language request and return a response.
     ///
     /// # Parameters
     ///
-    /// * `context` - VLM shared context with session information and usage tracking
-    /// * `request` - VLM request containing images, text prompts, and configuration
+    /// * `context` - Shared context for tracking usage statistics
+    /// * `request` - The VLM request containing images and prompts
     ///
     /// # Returns
     ///
-    /// Returns a complete `Response<Resp>` with the model's output.
-    async fn process_vlm(
-        &self,
-        context: &SharedContext,
-        request: &Request<Req>,
-    ) -> Result<Response<Resp>>;
+    /// Returns a `Response` containing the model's output and metadata.
+    async fn process_vlm(&self, context: &SharedContext, request: &Request) -> Result<Response>;
 
-    /// Process a request with streaming response.
+    /// Process a batch of VLM requests.
     ///
-    /// This method returns a stream of partial responses, allowing for real-time
-    /// processing of long-running requests.
+    /// The default implementation processes requests concurrently using `futures::join_all`.
+    /// Providers can override this for optimized batch processing.
     ///
-    /// # Parameters
+    /// # Error Handling
     ///
-    /// * `context` - VLM shared context with session information and usage tracking
-    /// * `request` - VLM request containing images, text prompts, and configuration
-    ///
-    /// # Returns
-    ///
-    /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
-    async fn process_vlm_stream(
+    /// Returns an error if any request in the batch fails. For partial failure tolerance,
+    /// override this method with custom logic.
+    async fn process_vlm_batch(
         &self,
         context: &SharedContext,
-        request: &Request<Req>,
-    ) -> Result<BoxedStream<Response<Resp>>>;
+        request: &BatchRequest,
+    ) -> Result<BatchResponse> {
+        let requests = request.iter_requests();
+        let futures: Vec<_> = requests
+            .iter()
+            .map(|req| self.process_vlm(context, req))
+            .collect();
+
+        let results = futures_util::future::join_all(futures).await;
+
+        let mut responses = Vec::with_capacity(results.len());
+        for result in results {
+            responses.push(result?);
+        }
+
+        Ok(BatchResponse::new(responses))
+    }
 
     /// Perform a health check on the VLM service.
     ///
     /// # Returns
     ///
-    /// Returns service health information including status, response time, and metrics.
+    /// Returns `ServiceHealth` indicating the current status of the provider.
     async fn health_check(&self) -> Result<ServiceHealth>;
 }

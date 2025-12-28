@@ -30,14 +30,11 @@ services:
       - "${NATS_PORT:-4222}:4222"
       - "${NATS_MONITOR_PORT:-8222}:8222"
     command:
-      - "--jetstream"
-      - "--store_dir=/data"
-      - "--http_port=8222"
-      - "--max_payload=8MB"
-      - "--max_mem_store=1GB"
-      - "--max_file_store=10GB"
+      - "-c"
+      - "/etc/nats/nats.conf"
     volumes:
       - nats_data:/data
+      - ./nats.conf:/etc/nats/nats.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
       interval: 5s

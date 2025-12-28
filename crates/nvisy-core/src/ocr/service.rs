@@ -3,9 +3,12 @@
 //! This module provides a wrapper around OCR implementations that adds
 //! production-ready logging and tracing.
 
+use std::fmt;
 use std::sync::Arc;
 
-use super::{BoxedStream, OcrProvider, Request, Response, TRACING_TARGET};
+use jiff::Timestamp;
+
+use super::{BatchRequest, BatchResponse, OcrProvider, Request, Response, TRACING_TARGET};
 use crate::Result;
 use crate::types::{Context, ServiceHealth, SharedContext};
 
@@ -14,20 +17,24 @@ use crate::types::{Context, ServiceHealth, SharedContext};
 /// This wrapper adds structured logging to any OCR implementation.
 /// The inner service is wrapped in `Arc` for cheap cloning.
 #[derive(Clone)]
-pub struct OcrService<Req = (), Resp = ()> {
-    inner: Arc<dyn OcrProvider<Req, Resp>>,
+pub struct OcrService {
+    inner: Arc<dyn OcrProvider>,
     context: SharedContext,
 }
 
-impl<Req, Resp> OcrService<Req, Resp>
-where
-    Req: Send + Sync + 'static,
-    Resp: Send + Sync + 'static,
-{
+impl fmt::Debug for OcrService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OcrService")
+            .field("context", &self.context)
+            .finish_non_exhaustive()
+    }
+}
+
+impl OcrService {
     /// Create a new OCR service wrapper.
     pub fn new<P>(provider: P) -> Self
     where
-        P: OcrProvider<Req, Resp> + 'static,
+        P: OcrProvider + 'static,
     {
         Self {
             inner: Arc::new(provider),
@@ -38,7 +45,7 @@ where
     /// Create a new OCR service with a specific context.
     pub fn with_context<P>(provider: P, context: Context) -> Self
     where
-        P: OcrProvider<Req, Resp> + 'static,
+        P: OcrProvider + 'static,
     {
         Self {
             inner: Arc::new(provider),
@@ -49,7 +56,7 @@ where
     /// Create a new OCR service with a shared context.
     pub fn with_shared_context<P>(provider: P, context: SharedContext) -> Self
     where
-        P: OcrProvider<Req, Resp> + 'static,
+        P: OcrProvider + 'static,
     {
         Self {
             inner: Arc::new(provider),
@@ -58,7 +65,7 @@ where
     }
 
     /// Create from a boxed provider.
-    pub fn from_boxed(provider: Box<dyn OcrProvider<Req, Resp>>) -> Self {
+    pub fn from_boxed(provider: Box<dyn OcrProvider>) -> Self {
         Self {
             inner: Arc::from(provider),
             context: SharedContext::new(),
@@ -76,23 +83,26 @@ where
     }
 
     /// Process an image or document with OCR.
-    pub async fn process_ocr(&self, request: Request<Req>) -> Result<Response<Resp>> {
-        let start = std::time::Instant::now();
+    pub async fn process_ocr(&self, request: &Request) -> Result<Response> {
+        let started_at = Timestamp::now();
 
         tracing::debug!(
             target: TRACING_TARGET,
             request_id = %request.request_id,
+            document_size = request.document_size(),
             "Processing OCR request"
         );
 
         let result = self.inner.process_ocr(&self.context, request).await;
-        let elapsed = start.elapsed();
+        let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
             Ok(response) => {
                 tracing::debug!(
                     target: TRACING_TARGET,
+                    request_id = %request.request_id,
                     response_id = %response.response_id,
+                    text_len = response.text.len(),
                     elapsed_ms = elapsed.as_millis(),
                     "OCR processing successful"
                 );
@@ -100,6 +110,7 @@ where
             Err(error) => {
                 tracing::error!(
                     target: TRACING_TARGET,
+                    request_id = %request.request_id,
                     error = %error,
                     elapsed_ms = elapsed.as_millis(),
                     "OCR processing failed"
@@ -110,18 +121,40 @@ where
         result
     }
 
-    /// Process an image or document with OCR using streaming responses.
-    pub async fn process_ocr_stream(
-        &self,
-        request: Request<Req>,
-    ) -> Result<BoxedStream<Response<Resp>>> {
+    /// Process a batch of OCR requests.
+    pub async fn process_ocr_batch(&self, request: &BatchRequest) -> Result<BatchResponse> {
+        let started_at = Timestamp::now();
+
         tracing::debug!(
             target: TRACING_TARGET,
-            request_id = %request.request_id,
-            "Starting OCR stream processing"
+            batch_size = request.len(),
+            "Processing batch OCR request"
         );
 
-        self.inner.process_ocr_stream(&self.context, request).await
+        let result = self.inner.process_ocr_batch(&self.context, request).await;
+        let elapsed = Timestamp::now().duration_since(started_at);
+
+        match &result {
+            Ok(response) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    batch_id = %response.batch_id,
+                    count = response.len(),
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch OCR completed"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %error,
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch OCR failed"
+                );
+            }
+        }
+
+        result
     }
 
     /// Perform a health check on the OCR service.

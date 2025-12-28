@@ -3,9 +3,12 @@
 //! This module provides a wrapper around VLM implementations that adds
 //! production-ready logging and tracing.
 
+use std::fmt;
 use std::sync::Arc;
 
-use super::{BoxedStream, Request, Response, TRACING_TARGET, VlmProvider};
+use jiff::Timestamp;
+
+use super::{BatchRequest, BatchResponse, Request, Response, TRACING_TARGET, VlmProvider};
 use crate::Result;
 use crate::types::{Context, ServiceHealth, SharedContext};
 
@@ -14,20 +17,24 @@ use crate::types::{Context, ServiceHealth, SharedContext};
 /// This wrapper adds structured logging to any VLM implementation.
 /// The inner service is wrapped in `Arc` for cheap cloning.
 #[derive(Clone)]
-pub struct VlmService<Req = (), Resp = ()> {
-    inner: Arc<dyn VlmProvider<Req, Resp>>,
+pub struct VlmService {
+    inner: Arc<dyn VlmProvider>,
     context: SharedContext,
 }
 
-impl<Req, Resp> VlmService<Req, Resp>
-where
-    Req: Send + Sync + 'static,
-    Resp: Send + Sync + 'static,
-{
+impl fmt::Debug for VlmService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VlmService")
+            .field("context", &self.context)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VlmService {
     /// Create a new VLM service wrapper.
     pub fn new<P>(provider: P) -> Self
     where
-        P: VlmProvider<Req, Resp> + 'static,
+        P: VlmProvider + 'static,
     {
         Self {
             inner: Arc::new(provider),
@@ -38,7 +45,7 @@ where
     /// Create a new VLM service with a specific context.
     pub fn with_context<P>(provider: P, context: Context) -> Self
     where
-        P: VlmProvider<Req, Resp> + 'static,
+        P: VlmProvider + 'static,
     {
         Self {
             inner: Arc::new(provider),
@@ -49,7 +56,7 @@ where
     /// Create a new VLM service with a shared context.
     pub fn with_shared_context<P>(provider: P, context: SharedContext) -> Self
     where
-        P: VlmProvider<Req, Resp> + 'static,
+        P: VlmProvider + 'static,
     {
         Self {
             inner: Arc::new(provider),
@@ -58,7 +65,7 @@ where
     }
 
     /// Create from a boxed provider.
-    pub fn from_boxed(provider: Box<dyn VlmProvider<Req, Resp>>) -> Self {
+    pub fn from_boxed(provider: Box<dyn VlmProvider>) -> Self {
         Self {
             inner: Arc::from(provider),
             context: SharedContext::new(),
@@ -76,23 +83,27 @@ where
     }
 
     /// Process a vision-language request.
-    pub async fn process_vlm(&self, request: &Request<Req>) -> Result<Response<Resp>> {
-        let start = std::time::Instant::now();
+    pub async fn process_vlm(&self, request: &Request) -> Result<Response> {
+        let started_at = Timestamp::now();
 
         tracing::debug!(
             target: TRACING_TARGET,
             request_id = %request.request_id,
-            image_count = request.images.len(),
+            document_count = request.document_count(),
+            prompt_length = request.prompt_length(),
             "Processing VLM request"
         );
 
         let result = self.inner.process_vlm(&self.context, request).await;
-        let elapsed = start.elapsed();
+        let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
-            Ok(_) => {
+            Ok(response) => {
                 tracing::debug!(
                     target: TRACING_TARGET,
+                    request_id = %request.request_id,
+                    response_id = %response.response_id,
+                    content_length = response.content_length(),
                     elapsed_ms = elapsed.as_millis(),
                     "VLM processing successful"
                 );
@@ -100,6 +111,7 @@ where
             Err(error) => {
                 tracing::error!(
                     target: TRACING_TARGET,
+                    request_id = %request.request_id,
                     error = %error,
                     elapsed_ms = elapsed.as_millis(),
                     "VLM processing failed"
@@ -110,18 +122,41 @@ where
         result
     }
 
-    /// Process a vision-language request with streaming response.
-    pub async fn process_vlm_stream(
-        &self,
-        request: &Request<Req>,
-    ) -> Result<BoxedStream<Response<Resp>>> {
+    /// Process a batch of VLM requests.
+    pub async fn process_vlm_batch(&self, request: &BatchRequest) -> Result<BatchResponse> {
+        let started_at = Timestamp::now();
+
         tracing::debug!(
             target: TRACING_TARGET,
-            request_id = %request.request_id,
-            "Starting VLM stream processing"
+            batch_size = request.len(),
+            total_documents = request.total_documents(),
+            "Processing batch VLM request"
         );
 
-        self.inner.process_vlm_stream(&self.context, request).await
+        let result = self.inner.process_vlm_batch(&self.context, request).await;
+        let elapsed = Timestamp::now().duration_since(started_at);
+
+        match &result {
+            Ok(response) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    batch_id = %response.batch_id,
+                    count = response.len(),
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch VLM completed"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %error,
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch VLM failed"
+                );
+            }
+        }
+
+        result
     }
 
     /// Perform a health check on the VLM service.

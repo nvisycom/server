@@ -2447,7 +2447,6 @@ dependencies = [
  "nvisy-ollama",
  "nvisy-postgres",
  "nvisy-server",
- "nvisy-test",
  "serde",
  "thiserror 2.0.17",
  "tokio",
@@ -2462,6 +2461,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bytes",
+ "clap",
  "derive_more",
  "futures-util",
  "jiff",
@@ -2569,7 +2569,6 @@ dependencies = [
  "nvisy-core",
  "nvisy-nats",
  "nvisy-postgres",
- "nvisy-test",
  "rand 0.10.0-rc.5",
  "regex",
  "schemars 0.9.0",
@@ -2590,18 +2589,6 @@ dependencies = [
  "validator",
  "zip",
  "zxcvbn",
-]
-
-[[package]]
-name = "nvisy-test"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "clap",
- "futures",
- "jiff",
- "nvisy-core",
- "serde",
 ]
 
 [[package]]

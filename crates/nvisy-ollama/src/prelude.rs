@@ -6,4 +6,3 @@
 
 pub use crate::client::{OllamaClient, OllamaConfig};
 pub use crate::error::{Error, Result};
-pub use crate::provider::{OllamaEmbeddingProvider, OllamaVlmProvider};

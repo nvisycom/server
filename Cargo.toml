@@ -9,7 +9,6 @@ members = [
     "./crates/nvisy-ollama",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
-    "./crates/nvisy-test",
 ]
 
 [workspace.package]
@@ -37,7 +36,6 @@ nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
-nvisy-test = { path = "./crates/nvisy-test", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 
 # CLI

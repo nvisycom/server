@@ -5,6 +5,10 @@
 
 use std::sync::Arc;
 
+use nvisy_core::AiServices;
+use nvisy_core::emb::EmbeddingService;
+use nvisy_core::ocr::OcrService;
+use nvisy_core::vlm::VlmService;
 use ollama_rs::Ollama;
 
 use super::OllamaConfig;
@@ -124,5 +128,29 @@ impl OllamaClient {
             .vlm_model
             .as_deref()
             .expect("vlm_model must be configured")
+    }
+
+    /// Convert this client into a complete set of AI services.
+    ///
+    /// Creates embedding, OCR, and VLM services all backed by this Ollama client.
+    /// The client is cloned for each service (cheap Arc clone).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use nvisy_ollama::{OllamaClient, OllamaConfig};
+    ///
+    /// let config = OllamaConfig::default()
+    ///     .with_embedding_model("nomic-embed-text")
+    ///     .with_vlm_model("llava");
+    /// let client = OllamaClient::new(config)?;
+    /// let services = client.into_services();
+    /// ```
+    pub fn into_services(self) -> AiServices {
+        AiServices::new(
+            EmbeddingService::new(self.clone()),
+            OcrService::new(self.clone()),
+            VlmService::new(self),
+        )
     }
 }

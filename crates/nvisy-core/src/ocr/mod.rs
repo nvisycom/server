@@ -1,85 +1,116 @@
 //! Optical Character Recognition (OCR) abstractions.
 //!
-//! This module provides traits and types for extracting structured text from images
-//! and documents. It supports various OCR capabilities including image text extraction,
-//! document processing, and structured output.
-
-use futures_util::Stream;
+//! This module provides traits and types for extracting text from images
+//! and documents. It supports single and batch OCR operations.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use nvisy_core::ocr::{OcrProvider, OcrService, Request};
+//! use nvisy_core::types::SharedContext;
+//!
+//! // Create a service with your provider
+//! let service = OcrService::new(my_provider);
+//!
+//! // Process an OCR request
+//! let request = Request::from_document(document);
+//! let response = service.process_ocr(&request).await?;
+//!
+//! println!("Extracted text: {}", response.text());
+//! ```
 
 pub mod request;
 pub mod response;
 pub mod service;
 
-pub use request::{DocumentRequest, Request, RequestOptions};
-pub use response::{BatchResponse, BatchStats, OcrResult, Response, TextExtraction};
+pub use request::{BatchRequest, Request};
+pub use response::{BatchResponse, Response, TextExtraction};
 pub use service::OcrService;
 
+use crate::Result;
 use crate::types::{ServiceHealth, SharedContext};
-use crate::{Error, Result};
-
-/// Type alias for a boxed OCR service with specific request and response types.
-pub type BoxedOcrProvider<Req, Resp> = Box<dyn OcrProvider<Req, Resp> + Send + Sync>;
-
-/// Type alias for boxed response stream.
-pub type BoxedStream<T> = Box<dyn Stream<Item = std::result::Result<T, Error>> + Send + Unpin>;
 
 /// Tracing target for OCR operations.
 pub const TRACING_TARGET: &str = "nvisy_core::ocr";
 
 /// Core trait for OCR operations.
 ///
-/// This trait is generic over request (`Req`) and response (`Resp`) types,
-/// allowing implementations to define their own specific data structures
-/// while maintaining a consistent interface.
+/// Implement this trait to create custom OCR providers. The trait provides
+/// a default batch implementation that processes requests concurrently.
 ///
-/// # Type Parameters
+/// # Example
 ///
-/// * `Req` - The request payload type specific to the OCR implementation
-/// * `Resp` - The response payload type specific to the OCR implementation
+/// ```rust,ignore
+/// use nvisy_core::ocr::{OcrProvider, Request, Response};
+/// use nvisy_core::types::{ServiceHealth, SharedContext};
+/// use nvisy_core::Result;
+///
+/// struct MyProvider;
+///
+/// #[async_trait::async_trait]
+/// impl OcrProvider for MyProvider {
+///     async fn process_ocr(
+///         &self,
+///         context: &SharedContext,
+///         request: &Request,
+///     ) -> Result<Response> {
+///         let text = "Extracted text"; // Your OCR logic
+///         Ok(request.reply(text))
+///     }
+///
+///     async fn health_check(&self) -> Result<ServiceHealth> {
+///         Ok(ServiceHealth::healthy())
+///     }
+/// }
+/// ```
 #[async_trait::async_trait]
-pub trait OcrProvider<Req, Resp>: Send + Sync {
-    /// Process an image or document with OCR to extract text and structured data.
-    ///
-    /// This method takes ownership of the request to allow efficient processing
-    /// without unnecessary cloning.
+pub trait OcrProvider: Send + Sync {
+    /// Process an image or document with OCR to extract text.
     ///
     /// # Parameters
     ///
-    /// * `context` - OCR shared context with session information and usage tracking
-    /// * `request` - OCR request containing the image/document and processing options
+    /// * `context` - Shared context for tracking usage statistics
+    /// * `request` - The OCR request containing the document to process
     ///
     /// # Returns
     ///
-    /// Returns a `Response<Resp>` containing the extracted text, regions, and metadata.
-    async fn process_ocr(
-        &self,
-        context: &SharedContext,
-        request: Request<Req>,
-    ) -> Result<Response<Resp>>;
+    /// Returns a `Response` containing the extracted text and metadata.
+    async fn process_ocr(&self, context: &SharedContext, request: &Request) -> Result<Response>;
 
-    /// Process an image or document with OCR using streaming responses.
+    /// Process a batch of OCR requests.
     ///
-    /// This method returns a stream of partial responses, allowing for real-time
-    /// processing of long-running OCR operations or large documents.
+    /// The default implementation processes requests concurrently using `futures::join_all`.
+    /// Providers can override this for optimized batch processing.
     ///
-    /// # Parameters
+    /// # Error Handling
     ///
-    /// * `context` - OCR shared context with session information and usage tracking
-    /// * `request` - OCR request containing the image/document and processing options
-    ///
-    /// # Returns
-    ///
-    /// Returns a stream of `Response<Resp>` chunks that can be consumed incrementally.
-    async fn process_ocr_stream(
+    /// Returns an error if any request in the batch fails. For partial failure tolerance,
+    /// override this method with custom logic.
+    async fn process_ocr_batch(
         &self,
         context: &SharedContext,
-        request: Request<Req>,
-    ) -> Result<BoxedStream<Response<Resp>>>;
+        request: &BatchRequest,
+    ) -> Result<BatchResponse> {
+        let requests = request.iter_requests();
+        let futures: Vec<_> = requests
+            .iter()
+            .map(|req| self.process_ocr(context, req))
+            .collect();
+
+        let results = futures_util::future::join_all(futures).await;
+
+        let mut responses = Vec::with_capacity(results.len());
+        for result in results {
+            responses.push(result?);
+        }
+
+        Ok(BatchResponse::new(responses))
+    }
 
     /// Perform a health check on the OCR service.
     ///
     /// # Returns
     ///
-    /// Returns service health information including status, response time, and metrics.
+    /// Returns `ServiceHealth` indicating the current status of the provider.
     async fn health_check(&self) -> Result<ServiceHealth>;
 }

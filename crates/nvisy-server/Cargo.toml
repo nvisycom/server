@@ -96,7 +96,7 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 [dev-dependencies]
 # Internal crates
-nvisy-test = { workspace = true, features = [] }
+nvisy-core = { workspace = true, features = ["test-utils", "config"] }
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
 

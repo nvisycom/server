@@ -6,6 +6,3 @@
 mod embedding;
 mod optical;
 mod visual;
-
-pub use optical::{OcrRequestPayload, OcrResponsePayload};
-pub use visual::{VlmRequestPayload, VlmResponsePayload};
