@@ -48,10 +48,10 @@ use crate::service::AuthKeys;
 /// # Errors
 ///
 /// Extraction fails with specific error types for:
-/// - [`ErrorKind::MalformedAuthToken`]: Invalid JWT format
-/// - [`ErrorKind::ExpiredAuthToken`]: Token expired
-/// - [`ErrorKind::Unauthorized`]: Invalid credentials or revoked token
-/// - [`ErrorKind::InternalServerError`]: Database or system errors
+/// - `MalformedAuthToken`: Invalid JWT format
+/// - `ExpiredToken`: Token expired
+/// - `Unauthorized`: Invalid credentials or revoked token
+/// - `InternalServerError`: Database or system errors
 ///
 /// # Thread Safety
 ///
@@ -66,8 +66,8 @@ impl<T> AuthState<T> {
     /// # Safety Requirements
     ///
     /// This method should **only** be used when the claims have already undergone
-    /// complete database verification via [`Self::from_unverified_state`].
-    /// Using this with unverified claims bypasses critical security checks.
+    /// complete database verification. Using this with unverified claims bypasses
+    /// critical security checks.
     ///
     /// # Arguments
     ///

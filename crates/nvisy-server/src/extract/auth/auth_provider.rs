@@ -252,12 +252,12 @@ pub trait AuthProvider {
     /// # Returns
     ///
     /// Returns [`ProjectMember`] if authorized with member info,
-    /// [`Ok(None)`] if authorized without member info (e.g., global admin),
+    /// `Ok(None)` if authorized without member info (e.g., global admin),
     /// or [`Err`] if access is denied.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if access is denied, or propagates database errors.
+    /// Returns `Forbidden` error if access is denied, or propagates database errors.
     #[allow(async_fn_in_trait)]
     async fn authorize_project(
         &self,
@@ -290,7 +290,7 @@ pub trait AuthProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if access is denied, or propagates database errors.
+    /// Returns `Forbidden` error if access is denied, or propagates database errors.
     #[allow(async_fn_in_trait)]
     async fn authorize_document(
         &self,
@@ -315,7 +315,7 @@ pub trait AuthProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if the user cannot access the target account.
+    /// Returns `Forbidden` error if the user cannot access the target account.
     fn authorize_self(&self, target_account_id: Uuid) -> Result<()> {
         let auth_result = self.check_self_permission(target_account_id)?;
         auth_result.into_result().map(|_| ())
@@ -328,7 +328,7 @@ pub trait AuthProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if the user lacks global admin privileges.
+    /// Returns `Forbidden` error if the user lacks global admin privileges.
     fn authorize_admin(&self) -> Result<()> {
         let auth_result = self.check_admin_permission()?;
         auth_result.into_result().map(|_| ())

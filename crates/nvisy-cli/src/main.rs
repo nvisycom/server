@@ -19,7 +19,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::config::{Cli, MiddlewareConfig, create_ai_services, log_server_config};
+use crate::config::{Cli, MiddlewareConfig, create_services, log_server_config};
 
 // Tracing target constants
 pub const TRACING_TARGET_SERVER_STARTUP: &str = "nvisy_cli::server::startup";
@@ -63,8 +63,8 @@ async fn run() -> anyhow::Result<()> {
 
     log_middleware_config(&cli.middleware);
 
-    let ai_services = create_ai_services(&cli).context("failed to create AI services")?;
-    let state = create_service_state(&cli.service, ai_services).await?;
+    let services = create_services(&cli).context("failed to create AI services")?;
+    let state = create_service_state(&cli.service, services).await?;
     let router = create_router(state, &cli.middleware);
 
     server::serve(router, cli.server).await?;

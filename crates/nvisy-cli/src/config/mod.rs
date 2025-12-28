@@ -30,7 +30,7 @@ mod server;
 use clap::Parser;
 pub use middleware::MiddlewareConfig;
 use nvisy_server::service::ServiceConfig;
-pub use provider::create_ai_services;
+pub use provider::create_services;
 use serde::{Deserialize, Serialize};
 pub use server::{ServerConfig, log_server_config};
 
@@ -40,7 +40,8 @@ pub use server::{ServerConfig, log_server_config};
 /// - [`ServiceConfig`]: External service connections (Postgres, NATS)
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
-/// - [`OllamaConfig`]: Ollama AI services configuration (feature-gated)
+/// - `OllamaConfig`: Ollama AI services configuration (feature-gated)
+/// - `MockConfig`: Testing AI services configuration (feature-gated)
 #[derive(Debug, Clone, Parser, Serialize, Deserialize)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy document processing server")]

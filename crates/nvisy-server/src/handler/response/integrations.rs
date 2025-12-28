@@ -50,7 +50,7 @@ pub struct Integration {
 }
 
 impl Integration {
-    /// Creates a new instance of [`ProjectIntegration`] from database model.
+    /// Creates a new instance of [`Integration`] from database model.
     pub fn new(integration: model::ProjectIntegration) -> Self {
         Self {
             integration_id: integration.id,

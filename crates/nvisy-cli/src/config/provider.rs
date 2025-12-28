@@ -28,20 +28,17 @@ compile_error!(
 /// # Errors
 ///
 /// Returns an error if a provider cannot be initialized.
-pub fn create_ai_services(cli: &Cli) -> anyhow::Result<AiServices> {
-    #[cfg(feature = "ollama")]
-    {
-        use nvisy_ollama::OllamaClient;
-        let client = OllamaClient::new(cli.ollama.clone())?;
-        return Ok(client.into_services());
-    }
+#[cfg(feature = "ollama")]
+pub fn create_services(cli: &Cli) -> anyhow::Result<AiServices> {
+    use nvisy_ollama::OllamaClient;
+    let client = OllamaClient::new(cli.ollama.clone())?;
+    Ok(client.into_services())
+}
 
-    #[cfg(feature = "mock")]
-    {
-        use nvisy_core::{MockConfig, MockProvider};
-        let config = MockConfig::default();
-        return Ok(MockProvider::new(config).into_services());
-    }
-
-    unreachable!()
+/// Creates AI services using mock providers for testing.
+#[cfg(all(feature = "mock", not(feature = "ollama")))]
+pub fn create_services(cli: &Cli) -> anyhow::Result<AiServices> {
+    use nvisy_core::{MockConfig, MockProvider};
+    let client = MockProvider::new(cli.mock.clone());
+    Ok(client.into_services())
 }
