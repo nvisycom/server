@@ -271,4 +271,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/auth/login", post(login))
         .api_route("/auth/signup", post(signup))
         .api_route("/auth/logout", post(logout))
+        .with_path_items(|item| item.tag("Authentication"))
 }

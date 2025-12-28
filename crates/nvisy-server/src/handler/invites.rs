@@ -347,4 +347,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post(generate_invite_code),
         )
         .api_route("/invites/{invite_code}/join/", post(join_via_invite_code))
+        .with_path_items(|item| item.tag("Invites"))
 }

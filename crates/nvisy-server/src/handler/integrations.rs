@@ -331,4 +331,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/{project_id}/integrations/{integration_id}/",
             delete(delete_integration),
         )
+        .with_path_items(|item| item.tag("Integrations"))
 }

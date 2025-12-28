@@ -716,4 +716,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/{project_id}/files/archive",
             post(download_archived_files),
         )
+        .with_path_items(|item| item.tag("Files"))
 }

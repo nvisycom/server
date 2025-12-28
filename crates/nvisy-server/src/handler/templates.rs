@@ -199,4 +199,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/{project_id}/templates/{template_id}",
             delete(delete_project_template),
         )
+        .with_path_items(|item| item.tag("Templates"))
 }

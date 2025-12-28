@@ -250,4 +250,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/{project_id}/webhooks/{webhook_id}/",
             delete(delete_webhook),
         )
+        .with_path_items(|item| item.tag("Webhooks"))
 }

@@ -236,4 +236,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/{project_id}/files/{file_id}/comments/{comment_id}",
             delete(delete_comment),
         )
+        .with_path_items(|item| item.tag("Comments"))
 }

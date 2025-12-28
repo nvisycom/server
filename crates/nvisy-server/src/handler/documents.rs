@@ -227,4 +227,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/documents/{document_id}", get(get_document))
         .api_route("/documents/{document_id}", patch(update_document))
         .api_route("/documents/{document_id}", delete(delete_document))
+        .with_path_items(|item| item.tag("Documents"))
 }

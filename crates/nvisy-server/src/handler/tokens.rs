@@ -202,4 +202,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/api-tokens/{access_token}/", get(read_api_token))
         .api_route("/api-tokens/{access_token}/", patch(update_api_token))
         .api_route("/api-tokens/{access_token}/", delete(revoke_api_token))
+        .with_path_items(|item| item.tag("API Tokens"))
 }

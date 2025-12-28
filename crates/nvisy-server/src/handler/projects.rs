@@ -200,4 +200,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/projects/{project_id}/", get(read_project))
         .api_route("/projects/{project_id}/", patch(update_project))
         .api_route("/projects/{project_id}/", delete(delete_project))
+        .with_path_items(|item| item.tag("Projects"))
 }

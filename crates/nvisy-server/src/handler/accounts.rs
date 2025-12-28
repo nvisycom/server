@@ -159,4 +159,5 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
         .api_route("/me", get(get_own_account))
         .api_route("/me", patch(update_own_account))
         .api_route("/me", delete(delete_own_account))
+        .with_path_items(|item| item.tag("Accounts"))
 }

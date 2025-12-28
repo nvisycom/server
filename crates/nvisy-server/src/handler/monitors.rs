@@ -131,5 +131,7 @@ async fn health_status(
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
-    ApiRouter::new().api_route("/health", post(health_status))
+    ApiRouter::new()
+        .api_route("/health", post(health_status))
+        .with_path_items(|item| item.tag("Health"))
 }

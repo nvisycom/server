@@ -295,4 +295,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/projects/{project_id}/members/{account_id}/role",
             patch(update_member),
         )
+        .with_path_items(|item| item.tag("Members"))
 }
