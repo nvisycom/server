@@ -2,14 +2,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-// Compile-time checks: ensure at least one backend is enabled for each service type.
-#[cfg(not(any(feature = "mock", feature = "ollama")))]
-compile_error!(
-    "At least one AI service backend must be enabled. \
-     Enable either the 'mock' (for testing) or 'ollama' (for production) feature. \
-     Example: cargo build --features ollama"
-);
-
 mod config;
 mod server;
 

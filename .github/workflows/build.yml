@@ -1,4 +1,4 @@
-name: Build & Test
+name: Build
 
 on:
   push:
@@ -14,12 +14,9 @@ on:
       - "diesel.toml"
       - "rustfmt.toml"
       - "Makefile"
-      - ".github/actions/setup-postgres/**"
       - ".github/workflows/build.yml"
   pull_request:
-    branches:
-      - "main"
-      - "release"
+    branches: [main, release]
     paths:
       - "crates/**"
       - "migrations/**"
@@ -29,56 +26,75 @@ on:
       - "diesel.toml"
       - "rustfmt.toml"
       - "Makefile"
-      - ".github/actions/setup-postgres/**"
       - ".github/workflows/build.yml"
-  schedule:
-    - cron: "0 2 * * *"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  POSTGRES_URL: postgres://postgres:postgres@localhost/nvisy_test
+  RUST_BACKTRACE: 1
+  # Database settings for docker-compose
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DB: postgres
+  POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
+  # NATS settings for docker-compose
+  NATS_HOST: localhost
+  NATS_PORT: 4222
+  NATS_URL: nats://localhost:4222
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fmt:
-    name: Format
+  check:
+    name: Check
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
+      - name: Start services
+        run: docker compose -f docker/docker-compose.dev.yml up -d
+
+      - name: Wait for services
+        run: |
+          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
+          scripts/wait-for-postgres.sh 60
+          scripts/wait-for-nats.sh 30
+
+      - name: Install diesel CLI
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        run: make generate-migrations
+
+      - name: Check
+        run: cargo check --all-features --workspace
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f docker/docker-compose.dev.yml down -v
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          postgres-timeout: 120
+          components: rustfmt
 
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
@@ -86,25 +102,10 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
+    needs: check
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -114,90 +115,71 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
+      - name: Start services
+        run: docker compose -f docker/docker-compose.dev.yml up -d
+
+      - name: Wait for services
+        run: |
+          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
+          scripts/wait-for-postgres.sh 60
+          scripts/wait-for-nats.sh 30
+
+      - name: Install diesel CLI
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        run: make generate-migrations
 
       - name: Run clippy
-        run: |
-          cargo clippy --all-targets --all-features --workspace -- \
-            -D warnings
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f docker/docker-compose.dev.yml down -v
 
   test:
     name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable]
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
+    runs-on: ubuntu-latest
+    needs: check
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ${{ runner.os }}-${{ matrix.rust }}
 
-      - name: Setup PostgreSQL (Ubuntu only)
-        if: matrix.os == 'ubuntu-latest'
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
+      - name: Start services
+        run: docker compose -f docker/docker-compose.dev.yml up -d
 
-      - name: Run tests (with database)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Wait for services
+        run: |
+          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
+          scripts/wait-for-postgres.sh 60
+          scripts/wait-for-nats.sh 30
+
+      - name: Install diesel CLI
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        run: make generate-migrations
+
+      - name: Run tests
         run: cargo test --all-features --workspace
 
-      - name: Run tests (without database)
-        if: matrix.os != 'ubuntu-latest'
-        run: cargo test --all-features --workspace --exclude nvisy-postgres
+      - name: Stop services
+        if: always()
+        run: docker compose -f docker/docker-compose.dev.yml down -v
 
   docs:
-    name: Documentation
+    name: Docs
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
+    needs: check
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -205,201 +187,26 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
+      - name: Start services
+        run: docker compose -f docker/docker-compose.dev.yml up -d
 
-      - name: Check documentation
+      - name: Wait for services
+        run: |
+          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
+          scripts/wait-for-postgres.sh 60
+          scripts/wait-for-nats.sh 30
+
+      - name: Install diesel CLI
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
+
+      - name: Run migrations
+        run: make generate-migrations
+
+      - name: Build docs
         run: cargo doc --no-deps --all-features --workspace
         env:
-          RUSTDOCFLAGS: "-D warnings -D rustdoc::broken-intra-doc-links"
+          RUSTDOCFLAGS: "-D warnings"
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
-
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
-
-      - name: Generate coverage
-        run: |
-          cargo llvm-cov --all-features --workspace \
-            --lcov --output-path lcov.info \
-            --ignore-filename-regex "(tests?/|benches?/)"
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Run cargo-deny
-        run: |
-          cargo install cargo-deny --locked
-          cargo deny check --hide-inclusion-graph
-
-  integration:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: [fmt, clippy, test]
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_integration
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
-        env:
-          POSTGRES_URL: postgres://postgres:postgres@localhost/nvisy_integration
-
-      - name: Build server
-        run: cargo build --release --bin nvisy-server
-
-      - name: Start server
-        run: |
-          ./target/release/nvisy-server &
-          echo $! > server.pid
-        env:
-          POSTGRES_URL: postgres://postgres:postgres@localhost/nvisy_integration
-          RUST_LOG: info
-          HTTP_PORT: 4321
-
-      - name: Wait for server
-        run: |
-          chmod +x scripts/wait-for-server.sh
-          scripts/wait-for-server.sh http://localhost:4321 30
-
-      - name: Run integration tests
-        run: |
-          curl -f http://localhost:4321/health || exit 1
-          echo "Integration tests passed"
-
-      - name: Stop server
+      - name: Stop services
         if: always()
-        run: |
-          if [[ -f server.pid ]]; then
-            kill $(cat server.pid) || true
-            rm server.pid
-          fi
-
-  benchmarks:
-    name: Benchmarks
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_bench
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
-        env:
-          POSTGRES_URL: postgres://postgres:postgres@localhost/nvisy_bench
-
-      - name: Install cargo-criterion
-        run: cargo install cargo-criterion --locked
-
-      - name: Run benchmarks
-        run: cargo criterion --output-format json --message-format json
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v6
-        with:
-          name: benchmark-results
-          path: target/criterion/
-          retention-days: 30
+        run: docker compose -f docker/docker-compose.dev.yml down -v

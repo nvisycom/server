@@ -31,14 +31,16 @@ compile_error!(
 pub fn create_ai_services(cli: &Cli) -> anyhow::Result<AiServices> {
     #[cfg(feature = "ollama")]
     {
-        let client = nvisy_ollama::OllamaClient::new(cli.ollama.clone())?;
+        use nvisy_ollama::OllamaClient;
+        let client = OllamaClient::new(cli.ollama.clone())?;
         return Ok(client.into_services());
     }
 
     #[cfg(feature = "mock")]
     {
-        let _ = cli;
-        return Ok(nvisy_core::MockConfig::default().into_services());
+        use nvisy_core::{MockConfig, MockProvider};
+        let config = MockConfig::default();
+        return Ok(MockProvider::new(config).into_services());
     }
 
     unreachable!()

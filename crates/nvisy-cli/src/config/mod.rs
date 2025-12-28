@@ -62,4 +62,9 @@ pub struct Cli {
     #[cfg(feature = "ollama")]
     #[clap(flatten)]
     pub ollama: nvisy_ollama::OllamaConfig,
+
+    /// Mock configuration for embeddings, VLM, and OCR.
+    #[cfg(feature = "mock")]
+    #[clap(flatten)]
+    pub mock: nvisy_core::MockConfig,
 }
