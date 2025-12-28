@@ -60,9 +60,9 @@ let health = ServiceHealth::healthy()
 
 ### Error Handling with Context
 ```rust
-use nvisy_core::ocr::Error;
+use nvisy_core::{Error, ErrorKind};
 
-let error = Error::authentication()
+let error = Error::new(ErrorKind::Authentication)
     .with_message("API key expired or invalid");
 ```
 

@@ -23,13 +23,15 @@ use super::{Content, Result, TypeError};
 ///
 /// User text message:
 /// ```rust
-/// use nvisy_core::types::{Message, MessageRole};
+/// use nvisy_core::{Message, MessageRole};
 ///
 /// let message = Message::new(MessageRole::User, "What is the capital of France?");
 /// ```
 ///
 /// Assistant response with metadata:
 /// ```rust
+/// use nvisy_core::{Message, MessageRole};
+///
 /// let response = Message::new(MessageRole::Assistant, "The capital of France is Paris.")
 ///     .with_model("gpt-4")
 ///     .with_token_count(15);
@@ -170,7 +172,7 @@ impl Message {
 ///
 /// Creating a new chat:
 /// ```rust
-/// use nvisy_core::types::{Chat, Message, MessageRole};
+/// use nvisy_core::{Chat, Message, MessageRole};
 ///
 /// let mut chat = Chat::new();
 ///

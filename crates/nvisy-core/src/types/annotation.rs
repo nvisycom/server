@@ -25,7 +25,7 @@ use super::{Result, TypeError};
 ///
 /// Text entity annotation:
 /// ```rust
-/// use nvisy_core::types::{Annotation, AnnotationType, TextSpan};
+/// use nvisy_core::{Annotation, AnnotationType, TextSpan};
 ///
 /// let annotation = Annotation::new(AnnotationType::Entity, "PERSON")
 ///     .with_text_span(TextSpan::new(0, 12))
@@ -34,10 +34,10 @@ use super::{Result, TypeError};
 ///
 /// Image object detection:
 /// ```rust
-/// use nvisy_core::types::{Annotation, AnnotationType, BoundingBox};
+/// use nvisy_core::{Annotation, AnnotationType, BoundingBox};
 ///
 /// let annotation = Annotation::new(AnnotationType::Object, "car")
-///     .with_bounding_box(BoundingBox::new(100, 150, 200, 300))
+///     .with_bounding_box(BoundingBox::new(100.0, 150.0, 200.0, 300.0))
 ///     .with_confidence(0.87);
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

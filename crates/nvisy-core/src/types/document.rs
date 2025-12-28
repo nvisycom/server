@@ -54,7 +54,7 @@ impl fmt::Display for DocumentId {
 /// Creating a simple text document:
 ///
 /// ```rust
-/// use nvisy_core::types::Document;
+/// use nvisy_core::Document;
 /// use bytes::Bytes;
 ///
 /// let content = "Hello, world!";
@@ -66,6 +66,9 @@ impl fmt::Display for DocumentId {
 /// Creating a document from binary data:
 ///
 /// ```rust
+/// use nvisy_core::Document;
+/// use bytes::Bytes;
+///
 /// let binary_data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
 /// let doc = Document::new(Bytes::from(binary_data))
 ///     .with_content_type("image/png")
@@ -133,7 +136,7 @@ impl Document {
     ///
     /// ```rust
     /// use bytes::Bytes;
-    /// use nvisy_core::types::Document;
+    /// use nvisy_core::Document;
     ///
     /// let content = Bytes::from("Hello, world!");
     /// let doc = Document::new(content);

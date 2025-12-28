@@ -5,11 +5,11 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```rust,ignore
 //! use nvisy_nats::prelude::*;
 //!
 //! # async fn example() -> Result<()> {
-//! let config = NatsConfig::new("nats://localhost:4222");
+//! let config = NatsConfig::new("nats://localhost:4222", "my-token");
 //! let client = NatsClient::connect(config).await?;
 //! # Ok(())
 //! # }

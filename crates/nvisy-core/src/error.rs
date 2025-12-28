@@ -64,7 +64,8 @@ impl Error {
     /// # Example
     ///
     /// ```rust
-    /// # use nvisy_core::error::{Error, ErrorKind};
+    /// use nvisy_core::{Error, ErrorKind};
+    ///
     /// Error::new(ErrorKind::InvalidInput)
     ///     .with_message("Text input exceeds maximum length");
     /// ```
@@ -84,10 +85,10 @@ impl Error {
     /// # Example
     ///
     /// ```rust
-    /// # use nvisy_core::error::{Error, ErrorKind};
-    /// # let io_error = Box::new(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+    /// use nvisy_core::{Error, ErrorKind};
+    ///
     /// Error::new(ErrorKind::NetworkError)
-    ///     .with_source(io_error);
+    ///     .with_message("Connection refused");
     /// ```
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
@@ -113,10 +114,11 @@ impl Error {
     /// # Example
     ///
     /// ```rust
-    /// # use nvisy_core::error::{Error, ErrorKind};
-    /// # let io_error = Box::new(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+    /// use nvisy_core::{Error, ErrorKind};
+    ///
+    /// let io_error = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
     /// Error::new(ErrorKind::NetworkError)
-    ///     .with_source(io_error);
+    ///     .with_source(Box::new(io_error));
     /// ```
     pub fn with_source(mut self, source: BoxedError) -> Self {
         self.source = Some(source);
