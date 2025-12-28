@@ -44,7 +44,7 @@ async fn send_invite(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project invitation");
+    tracing::debug!(target: TRACING_TARGET, "Creating project invitation");
 
     auth_state
         .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
@@ -94,7 +94,7 @@ async fn send_invite(
     tracing::info!(
         target: TRACING_TARGET,
         invite_id = %response.invite_id,
-        "Project invitation created successfully",
+        "Project invitation created ",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -132,7 +132,7 @@ async fn list_invites(
     tracing::debug!(
         target: TRACING_TARGET,
         invite_count = invites.len(),
-        "Project invitations listed successfully",
+        "Project invitations listed ",
     );
 
     Ok((StatusCode::OK, Json(invites)))
@@ -164,7 +164,7 @@ async fn cancel_invite(
     conn.cancel_invite(path_params.invite_id, auth_state.account_id)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Project invitation cancelled successfully");
+    tracing::info!(target: TRACING_TARGET, "Project invitation cancelled");
 
     Ok(StatusCode::OK)
 }
@@ -262,7 +262,7 @@ async fn generate_invite_code(
     tracing::info!(
         target: TRACING_TARGET,
         invite_id = %project_invite.id,
-        "Invite code generated successfully",
+        "Invite code generated ",
     );
 
     Ok((
@@ -319,7 +319,7 @@ async fn join_via_invite_code(
         target: TRACING_TARGET,
         project_id = %invite.project_id,
         role = ?invite.invited_role,
-        "User joined project via invite code successfully",
+        "User joined project via invite code ",
     );
 
     Ok((StatusCode::CREATED, Json(Member::from(project_member))))

@@ -30,7 +30,7 @@ pub trait RouterSecurityExt<S> {
     ///
     /// This middleware stack applies CORS rules, security headers including
     /// HSTS and CSP, response compression, and request body size limits.
-    fn with_security(self, cors: CorsConfig, headers: SecurityHeadersConfig) -> Self;
+    fn with_security(self, cors: &CorsConfig, headers: &SecurityHeadersConfig) -> Self;
 
     /// Layers security middlewares with default configurations.
     ///
@@ -44,7 +44,7 @@ impl<S> RouterSecurityExt<S> for Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    fn with_security(self, cors: CorsConfig, headers: SecurityHeadersConfig) -> Self {
+    fn with_security(self, cors: &CorsConfig, headers: &SecurityHeadersConfig) -> Self {
         let cors_layer = CorsLayer::new()
             .allow_origin(cors.to_header_values())
             .allow_methods([
@@ -53,7 +53,6 @@ where
                 Method::PUT,
                 Method::PATCH,
                 Method::DELETE,
-                Method::OPTIONS,
             ])
             .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
             .expose_headers([header::AUTHORIZATION])
@@ -92,7 +91,7 @@ where
     }
 
     fn with_default_security(self) -> Self {
-        self.with_security(CorsConfig::default(), SecurityHeadersConfig::default())
+        self.with_security(&CorsConfig::default(), &SecurityHeadersConfig::default())
     }
 }
 

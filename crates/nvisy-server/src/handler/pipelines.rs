@@ -43,7 +43,7 @@ async fn list_project_pipelines(
     tracing::debug!(
         target: TRACING_TARGET,
         count = pipelines.len(),
-        "Project pipelines listed successfully",
+        "Project pipelines listed ",
     );
 
     Ok((StatusCode::OK, Json(pipelines)))
@@ -93,7 +93,7 @@ async fn create_project_pipeline(
     AuthState(auth_state): AuthState,
     Json(_request): Json<CreatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project pipeline");
+    tracing::debug!(target: TRACING_TARGET, "Creating project pipeline");
 
     auth_state
         .authorize_project(
@@ -126,7 +126,7 @@ async fn update_project_pipeline(
     AuthState(auth_state): AuthState,
     Json(_request): Json<CreatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project pipeline");
+    tracing::debug!(target: TRACING_TARGET, "Updating project pipeline");
 
     auth_state
         .authorize_project(
@@ -158,7 +158,7 @@ async fn delete_project_pipeline(
     Path(path_params): Path<PipelinePathParams>,
     AuthState(auth_state): AuthState,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Deleting project pipeline");
+    tracing::debug!(target: TRACING_TARGET, "Deleting project pipeline");
 
     auth_state
         .authorize_project(

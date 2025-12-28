@@ -33,7 +33,7 @@ async fn post_comment(
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateDocumentComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating comment");
+    tracing::debug!(target: TRACING_TARGET, "Creating comment");
 
     // Verify file exists
     let _ = find_file(&mut conn, path_params.file_id).await?;
@@ -57,7 +57,7 @@ async fn post_comment(
     tracing::info!(
         target: TRACING_TARGET,
         comment_id = %comment.id,
-        "Comment created successfully",
+        "Comment created ",
     );
 
     Ok((StatusCode::CREATED, Json(comment.into())))
@@ -89,7 +89,7 @@ async fn list_comments(
     tracing::debug!(
         target: TRACING_TARGET,
         comment_count = comments.len(),
-        "File comments listed successfully",
+        "File comments listed ",
     );
 
     Ok((
@@ -113,7 +113,7 @@ async fn update_comment(
     Path(path_params): Path<FileCommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateCommentRequest>,
 ) -> Result<(StatusCode, Json<Comment>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating comment");
+    tracing::debug!(target: TRACING_TARGET, "Updating comment");
 
     // Verify file exists
     let _ = find_file(&mut conn, path_params.file_id).await?;
@@ -139,7 +139,7 @@ async fn update_comment(
         .update_comment(path_params.comment_id, request.into_model())
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Comment updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Comment updated");
 
     Ok((StatusCode::OK, Json(comment.into())))
 }
@@ -158,7 +158,7 @@ async fn delete_comment(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Comment deletion requested");
+    tracing::warn!(target: TRACING_TARGET, "Comment Deleting");
 
     // Verify file exists
     let _ = find_file(&mut conn, path_params.file_id).await?;
@@ -182,7 +182,7 @@ async fn delete_comment(
 
     conn.delete_comment(path_params.comment_id).await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Comment deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Comment deleted");
 
     Ok(StatusCode::OK)
 }

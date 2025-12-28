@@ -33,7 +33,7 @@ async fn create_api_token(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<CreateApiToken>,
 ) -> Result<(StatusCode, Json<ApiTokenWithSecret>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating API token");
+    tracing::debug!(target: TRACING_TARGET, "Creating API token");
 
     let new_token =
         request.into_model(auth_state.account_id, ip_address, user_agent.to_string())?;
@@ -42,7 +42,7 @@ async fn create_api_token(
     tracing::info!(
         target: TRACING_TARGET,
         token_id = %token.access_seq_short(),
-        "API token created successfully",
+        "API token created ",
     );
 
     Ok((StatusCode::CREATED, Json(token.into())))
@@ -81,7 +81,7 @@ async fn list_api_tokens(
     tracing::debug!(
         target: TRACING_TARGET,
         count = api_tokens.len(),
-        "API tokens listed successfully",
+        "API tokens listed ",
     );
 
     Ok((StatusCode::OK, Json(api_tokens)))
@@ -98,7 +98,7 @@ async fn read_api_token(
 
     let token = find_account_token(&mut conn, auth_state.account_id, access_token).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "API token retrieved successfully");
+    tracing::debug!(target: TRACING_TARGET, "API token read");
 
     Ok((StatusCode::OK, Json(token.into())))
 }
@@ -111,7 +111,7 @@ async fn update_api_token(
     Path(access_token): Path<Uuid>,
     ValidateJson(request): ValidateJson<UpdateApiToken>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating API token");
+    tracing::debug!(target: TRACING_TARGET, "Updating API token");
 
     // Verify the token exists and belongs to the authenticated account
     let _ = find_account_token(&mut conn, auth_state.account_id, access_token).await?;
@@ -125,7 +125,7 @@ async fn update_api_token(
 
     let updated_token = conn.update_token(access_token, update_token).await?;
 
-    tracing::info!(target: TRACING_TARGET, "API token updated successfully");
+    tracing::info!(target: TRACING_TARGET, "API token updated");
 
     Ok((StatusCode::OK, Json(updated_token.into())))
 }
@@ -150,7 +150,7 @@ async fn revoke_api_token(
             .with_message("API token is already revoked"));
     }
 
-    tracing::warn!(target: TRACING_TARGET, "API token revoked successfully");
+    tracing::warn!(target: TRACING_TARGET, "API token revoked");
 
     Ok(StatusCode::NO_CONTENT)
 }

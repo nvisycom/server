@@ -217,7 +217,7 @@ async fn upload_file(
         tracing::debug!(
             target: TRACING_TARGET,
             file_id = %file_id,
-            "File uploaded to storage successfully"
+            "File uploaded to storage"
         );
 
         let uploaded_file = File {
@@ -281,7 +281,7 @@ async fn upload_file(
     tracing::info!(
         target: TRACING_TARGET,
         file_count = uploaded_files.len(),
-        "Files uploaded successfully",
+        "Files uploaded ",
     );
 
     Ok((StatusCode::CREATED, Json(uploaded_files)))
@@ -303,7 +303,7 @@ async fn update_file(
     _version: Version,
     ValidateJson(request): ValidateJson<UpdateFileRequest>,
 ) -> Result<(StatusCode, Json<File>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating file");
+    tracing::debug!(target: TRACING_TARGET, "Updating file");
 
     auth_claims
         .authorize_project(&mut conn, path_params.project_id, Permission::UpdateFiles)
@@ -321,7 +321,7 @@ async fn update_file(
             ErrorKind::InternalServerError.with_message("Failed to update file")
         })?;
 
-    tracing::info!(target: TRACING_TARGET, "File updated successfully");
+    tracing::info!(target: TRACING_TARGET, "File updated");
 
     let response = File {
         file_id: updated_file.id,
@@ -413,7 +413,7 @@ async fn download_file(
 
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
 
-    tracing::debug!(target: TRACING_TARGET, "File downloaded successfully");
+    tracing::debug!(target: TRACING_TARGET, "File downloaded");
 
     // Stream the file content
     let bytes = content_data.into_bytes().to_vec();
@@ -437,7 +437,7 @@ async fn delete_file(
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "File deletion requested");
+    tracing::warn!(target: TRACING_TARGET, "File Deleting");
 
     auth_claims
         .authorize_project(&mut conn, path_params.project_id, Permission::DeleteFiles)
@@ -460,7 +460,7 @@ async fn delete_file(
                 .with_context(format!("Database error: {}", err))
         })?;
 
-    tracing::warn!(target: TRACING_TARGET, "File deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "File deleted");
 
     Ok(StatusCode::NO_CONTENT)
 }

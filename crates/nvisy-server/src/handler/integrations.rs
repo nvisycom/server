@@ -39,7 +39,7 @@ async fn create_integration(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateProjectIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project integration");
+    tracing::debug!(target: TRACING_TARGET, "Creating project integration");
 
     auth_state
         .authorize_project(
@@ -64,7 +64,7 @@ async fn create_integration(
     tracing::info!(
         target: TRACING_TARGET,
         integration_id = %integration.id,
-        "Integration created successfully",
+        "Integration created ",
     );
 
     Ok((StatusCode::CREATED, Json(integration.into())))
@@ -105,7 +105,7 @@ async fn list_integrations(
     tracing::debug!(
         target: TRACING_TARGET,
         integration_count = integrations.len(),
-        "Project integrations listed successfully",
+        "Project integrations listed ",
     );
 
     Ok((StatusCode::OK, Json(integrations)))
@@ -139,7 +139,7 @@ async fn read_integration(
 
     let integration = find_project_integration(&mut conn, &path_params).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Project integration retrieved successfully");
+    tracing::debug!(target: TRACING_TARGET, "Project integration read");
 
     Ok((StatusCode::OK, Json(integration.into())))
 }
@@ -161,7 +161,7 @@ async fn update_integration(
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateProjectIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project integration");
+    tracing::debug!(target: TRACING_TARGET, "Updating project integration");
 
     auth_state
         .authorize_project(
@@ -196,7 +196,7 @@ async fn update_integration(
         .update_integration(path_params.integration_id, request.into_model())
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Integration updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Integration updated");
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
@@ -217,7 +217,7 @@ async fn update_integration_credentials(
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateIntegrationCredentials>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating integration credentials");
+    tracing::debug!(target: TRACING_TARGET, "Updating integration credentials");
 
     auth_state
         .authorize_project(
@@ -238,7 +238,7 @@ async fn update_integration_credentials(
         )
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Integration credentials updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Integration credentials updated");
 
     Ok((StatusCode::OK, Json(integration.into())))
 }
@@ -259,7 +259,7 @@ async fn delete_integration(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Deleting project integration");
+    tracing::debug!(target: TRACING_TARGET, "Deleting project integration");
 
     auth_state
         .authorize_project(
@@ -274,7 +274,7 @@ async fn delete_integration(
 
     conn.delete_integration(path_params.integration_id).await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Integration deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Integration deleted");
 
     Ok(StatusCode::NO_CONTENT)
 }

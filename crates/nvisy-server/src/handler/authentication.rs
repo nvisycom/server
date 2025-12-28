@@ -26,6 +26,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 /// Tracing target for authentication cleanup operations.
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
 
+/// Builds user inputs for password strength validation.
+fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str) -> Vec<&'a str> {
+    let mut inputs = vec![display_name];
+    inputs.extend(email_address.split('@'));
+    inputs
+}
+
 /// Creates a new authentication header.
 fn create_auth_header(
     auth_secret_keys: AuthKeys,
@@ -47,10 +54,9 @@ async fn login(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::info!(target: TRACING_TARGET, "Login attempt");
+    tracing::debug!(target: TRACING_TARGET, "Logging in");
 
-    let normalized_email = request.email_address.to_lowercase();
-    let account = conn.find_account_by_email(&normalized_email).await?;
+    let account = conn.find_account_by_email(&request.email_address).await?;
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
@@ -143,32 +149,22 @@ async fn signup(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::info!(target: TRACING_TARGET, "Signup attempt");
+    tracing::debug!(target: TRACING_TARGET, "Signing up");
 
-    let normalized_email = request.email_address.to_lowercase();
-
-    // Validate password strength
-    let email_parts: Vec<&str> = normalized_email.split('@').collect();
-    let mut user_inputs = vec![request.display_name.as_str()];
-    user_inputs.extend(email_parts);
-
-    password_strength
-        .validate_password(&request.password, &user_inputs)
-        .map_err(|_| ErrorKind::BadRequest.into_error())?;
-
-    let password_hash = auth_hasher
-        .hash_password(&request.password)
-        .map_err(|_| ErrorKind::InternalServerError.into_error())?;
+    // Validate password strength and hash
+    let user_inputs = build_password_user_inputs(&request.display_name, &request.email_address);
+    password_strength.validate_password(&request.password, &user_inputs)?;
+    let password_hash = auth_hasher.hash_password(&request.password)?;
 
     // Check if email already exists
-    if conn.email_exists(&normalized_email).await? {
+    if conn.email_exists(&request.email_address).await? {
         tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
         return Err(ErrorKind::Conflict.into_error());
     }
 
     let new_account = NewAccount {
         display_name: request.display_name,
-        email_address: normalized_email,
+        email_address: request.email_address,
         password_hash,
         ..Default::default()
     };

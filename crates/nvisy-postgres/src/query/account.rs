@@ -57,11 +57,12 @@ pub trait AccountRepository {
     /// Soft deletes an account by setting the deletion timestamp.
     ///
     /// Marks an account as deleted without permanently removing it,
-    /// preserving data for audit purposes.
+    /// preserving data for audit purposes. Returns `None` if the account
+    /// was not found.
     fn delete_account(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
 
     /// Lists all active accounts with pagination support.
     ///
@@ -201,8 +202,11 @@ pub trait AccountRepository {
 }
 
 impl AccountRepository for PgConnection {
-    async fn create_account(&mut self, new_account: NewAccount) -> PgResult<Account> {
+    async fn create_account(&mut self, mut new_account: NewAccount) -> PgResult<Account> {
         use schema::accounts;
+
+        // Normalize email to lowercase
+        new_account.email_address = new_account.email_address.to_lowercase();
 
         diesel::insert_into(accounts::table)
             .values(&new_account)
@@ -241,9 +245,14 @@ impl AccountRepository for PgConnection {
     async fn update_account(
         &mut self,
         account_id: Uuid,
-        updates: UpdateAccount,
+        mut updates: UpdateAccount,
     ) -> PgResult<Account> {
         use schema::accounts::{self, dsl};
+
+        // Normalize email to lowercase if provided
+        if let Some(email) = updates.email_address.as_mut() {
+            *email = email.to_lowercase();
+        }
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
             .set(&updates)
@@ -253,7 +262,7 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn delete_account(&mut self, account_id: Uuid) -> PgResult<Account> {
+    async fn delete_account(&mut self, account_id: Uuid) -> PgResult<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
@@ -261,6 +270,7 @@ impl AccountRepository for PgConnection {
             .returning(Account::as_returning())
             .get_result(self)
             .await
+            .optional()
             .map_err(PgError::from)
     }
 

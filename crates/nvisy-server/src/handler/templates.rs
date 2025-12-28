@@ -43,7 +43,7 @@ async fn list_project_templates(
     tracing::debug!(
         target: TRACING_TARGET,
         count = templates.len(),
-        "Project templates listed successfully",
+        "Project templates listed ",
     );
 
     Ok((StatusCode::OK, Json(templates)))
@@ -93,7 +93,7 @@ async fn create_project_template(
     AuthState(auth_state): AuthState,
     Json(_request): Json<CreateTemplate>,
 ) -> Result<(StatusCode, Json<Template>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project template");
+    tracing::debug!(target: TRACING_TARGET, "Creating project template");
 
     auth_state
         .authorize_project(
@@ -126,7 +126,7 @@ async fn update_project_template(
     AuthState(auth_state): AuthState,
     Json(_request): Json<CreateTemplate>,
 ) -> Result<(StatusCode, Json<Template>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project template");
+    tracing::debug!(target: TRACING_TARGET, "Updating project template");
 
     auth_state
         .authorize_project(
@@ -158,7 +158,7 @@ async fn delete_project_template(
     Path(path_params): Path<TemplatePathParams>,
     AuthState(auth_state): AuthState,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Deleting project template");
+    tracing::debug!(target: TRACING_TARGET, "Deleting project template");
 
     auth_state
         .authorize_project(

@@ -63,7 +63,7 @@ async fn list_members(
     tracing::info!(
         target: TRACING_TARGET,
         member_count = members.len(),
-        "Project members listed successfully",
+        "Project members listed ",
     );
 
     Ok((StatusCode::OK, Json(members)))
@@ -116,7 +116,7 @@ async fn get_member(
     tracing::debug!(
         target: TRACING_TARGET,
         member_role = ?project_member.member_role,
-        "Project member retrieved successfully",
+        "Project member read",
     );
 
     Ok((StatusCode::OK, Json(project_member.into())))
@@ -169,7 +169,7 @@ async fn delete_member(
     conn.remove_project_member(path_params.project_id, path_params.account_id)
         .await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Project member removed successfully");
+    tracing::warn!(target: TRACING_TARGET, "Project member removed");
 
     Ok(StatusCode::OK)
 }
@@ -194,7 +194,7 @@ async fn update_member(
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMemberRole>,
 ) -> Result<(StatusCode, Json<Member>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project member role");
+    tracing::debug!(target: TRACING_TARGET, "Updating project member role");
 
     auth_state
         .authorize_project(&mut conn, path_params.project_id, Permission::ManageRoles)
@@ -232,7 +232,7 @@ async fn update_member(
     tracing::info!(
         target: TRACING_TARGET,
         new_role = ?updated_member.member_role,
-        "Member role updated successfully",
+        "Member role updated ",
     );
 
     Ok((StatusCode::OK, Json(updated_member.into())))
@@ -269,7 +269,7 @@ async fn leave_project(
     conn.remove_project_member(path_params.project_id, auth_state.account_id)
         .await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Member left project successfully");
+    tracing::warn!(target: TRACING_TARGET, "Member left project");
 
     Ok(StatusCode::OK)
 }

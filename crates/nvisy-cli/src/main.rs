@@ -71,9 +71,9 @@ fn create_router(state: ServiceState, middleware: &MiddlewareConfig) -> Router {
     let api_routes = routes(CustomRoutes::new(), state.clone()).with_state(state);
 
     api_routes
-        .with_open_api(Default::default())
+        .with_open_api(&middleware.openapi)
         .with_metrics()
-        .with_security(middleware.cors.clone(), Default::default())
+        .with_security(&middleware.cors, &Default::default())
         .with_observability()
-        .with_recovery(middleware.recovery.clone())
+        .with_recovery(&middleware.recovery)
 }

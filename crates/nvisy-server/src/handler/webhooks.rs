@@ -37,7 +37,7 @@ async fn create_webhook(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateWebhook>,
 ) -> Result<(StatusCode, Json<WebhookWithSecret>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project webhook");
+    tracing::debug!(target: TRACING_TARGET, "Creating project webhook");
 
     auth_state
         .authorize_project(
@@ -53,7 +53,7 @@ async fn create_webhook(
     tracing::info!(
         target: TRACING_TARGET,
         webhook_id = %webhook.id,
-        "Webhook created successfully",
+        "Webhook created ",
     );
 
     Ok((StatusCode::CREATED, Json(webhook.into())))
@@ -93,7 +93,7 @@ async fn list_webhooks(
     tracing::debug!(
         target: TRACING_TARGET,
         webhook_count = webhooks.len(),
-        "Project webhooks listed successfully",
+        "Project webhooks listed ",
     );
 
     Ok((StatusCode::OK, Json(webhooks)))
@@ -127,7 +127,7 @@ async fn read_webhook(
 
     let webhook = find_project_webhook(&mut conn, &path_params).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Project webhook retrieved successfully");
+    tracing::debug!(target: TRACING_TARGET, "Project webhook read");
 
     Ok((StatusCode::OK, Json(webhook.into())))
 }
@@ -149,7 +149,7 @@ async fn update_webhook(
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project webhook");
+    tracing::debug!(target: TRACING_TARGET, "Updating project webhook");
 
     auth_state
         .authorize_project(
@@ -167,7 +167,7 @@ async fn update_webhook(
         .update_project_webhook(path_params.webhook_id, update_data)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Webhook updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Webhook updated");
 
     Ok((StatusCode::OK, Json(webhook.into())))
 }
@@ -188,7 +188,7 @@ async fn delete_webhook(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Deleting project webhook");
+    tracing::debug!(target: TRACING_TARGET, "Deleting project webhook");
 
     auth_state
         .authorize_project(
@@ -203,7 +203,7 @@ async fn delete_webhook(
 
     conn.delete_project_webhook(path_params.webhook_id).await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Webhook deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Webhook deleted");
 
     Ok(StatusCode::NO_CONTENT)
 }

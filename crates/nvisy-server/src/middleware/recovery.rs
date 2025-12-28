@@ -73,7 +73,7 @@ pub trait RouterRecoveryExt<S> {
     ///
     /// This middleware stack handles request timeouts, panics in handlers,
     /// and Tower service errors, converting them to appropriate HTTP responses.
-    fn with_recovery(self, config: RecoveryConfig) -> Self;
+    fn with_recovery(self, config: &RecoveryConfig) -> Self;
 
     /// Layers recovery middleware with default configuration.
     ///
@@ -85,7 +85,7 @@ impl<S> RouterRecoveryExt<S> for Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    fn with_recovery(self, config: RecoveryConfig) -> Self {
+    fn with_recovery(self, config: &RecoveryConfig) -> Self {
         let middlewares = ServiceBuilder::new()
             .layer(HandleErrorLayer::new(handle_error))
             .layer(CatchPanicLayer::custom(catch_panic))
@@ -95,7 +95,7 @@ where
     }
 
     fn with_default_recovery(self) -> Self {
-        self.with_recovery(RecoveryConfig::default())
+        self.with_recovery(&RecoveryConfig::default())
     }
 }
 

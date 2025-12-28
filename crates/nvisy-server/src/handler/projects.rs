@@ -29,7 +29,7 @@ async fn create_project(
     AuthState(auth_state): AuthState,
     ValidateJson(request): ValidateJson<CreateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating new project");
+    tracing::debug!(target: TRACING_TARGET, "Creating project");
 
     let new_project = request.into_model(auth_state.account_id);
     let creator_id = auth_state.account_id;
@@ -50,7 +50,7 @@ async fn create_project(
     tracing::info!(
         target: TRACING_TARGET,
         project_id = %response.project_id,
-        "Project created successfully",
+        "Project created",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -75,10 +75,10 @@ async fn list_projects(
         .map(|(project, membership)| Project::from_model_with_membership(project, membership))
         .collect();
 
-    tracing::debug!(
+    tracing::info!(
         target: TRACING_TARGET,
         project_count = projects.len(),
-        "Listed user projects",
+        "Projects listed",
     );
 
     Ok((StatusCode::OK, Json(projects)))
@@ -109,7 +109,7 @@ async fn read_project(
             .with_resource("project"));
     };
 
-    tracing::debug!(target: TRACING_TARGET, "Retrieved project details");
+    tracing::info!(target: TRACING_TARGET, "Project read");
 
     let project = Project::from_model(project);
     Ok((StatusCode::OK, Json(project)))
@@ -131,7 +131,7 @@ async fn update_project(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<UpdateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project");
+    tracing::debug!(target: TRACING_TARGET, "Updating project");
 
     auth_state
         .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
@@ -142,7 +142,7 @@ async fn update_project(
         .update_project(path_params.project_id, update_data)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Project updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Project updated");
 
     let project = Project::from_model(project);
     Ok((StatusCode::OK, Json(project)))
@@ -164,7 +164,7 @@ async fn delete_project(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Project deletion requested");
+    tracing::debug!(target: TRACING_TARGET, "Deleting project");
 
     auth_state
         .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
@@ -183,7 +183,7 @@ async fn delete_project(
 
     conn.delete_project(path_params.project_id).await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Project deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Project deleted");
 
     Ok(StatusCode::OK)
 }

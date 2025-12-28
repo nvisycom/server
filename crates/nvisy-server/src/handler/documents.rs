@@ -37,7 +37,7 @@ async fn create_document(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating new document");
+    tracing::debug!(target: TRACING_TARGET, "Creating new document");
 
     auth_state
         .authorize_project(
@@ -53,7 +53,7 @@ async fn create_document(
     tracing::info!(
         target: TRACING_TARGET,
         document_id = %document.id,
-        "Document created successfully",
+        "Document created ",
     );
 
     Ok((StatusCode::CREATED, Json(document.into())))
@@ -90,7 +90,7 @@ async fn get_all_documents(
     tracing::debug!(
         target: TRACING_TARGET,
         document_count = response.len(),
-        "Project documents listed successfully",
+        "Project documents listed ",
     );
 
     Ok((StatusCode::OK, Json(response)))
@@ -123,7 +123,7 @@ async fn get_document(
 
     let document = find_document(&mut conn, path_params.document_id).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Document retrieved successfully");
+    tracing::info!(target: TRACING_TARGET, "Document read");
 
     Ok((StatusCode::OK, Json(document.into())))
 }
@@ -144,7 +144,7 @@ async fn update_document(
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating document");
+    tracing::debug!(target: TRACING_TARGET, "Updating document");
 
     auth_state
         .authorize_document(
@@ -162,7 +162,7 @@ async fn update_document(
         .update_document(path_params.document_id, update_data)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Document updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Document updated");
 
     Ok((StatusCode::OK, Json(document.into())))
 }
@@ -183,7 +183,7 @@ async fn delete_document(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Document deletion requested");
+    tracing::warn!(target: TRACING_TARGET, "Document Deleting");
 
     auth_state
         .authorize_document(
@@ -198,7 +198,7 @@ async fn delete_document(
 
     conn.delete_document(path_params.document_id).await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Document deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Document deleted");
 
     Ok(StatusCode::OK)
 }
