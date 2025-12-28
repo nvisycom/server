@@ -22,23 +22,23 @@ pub use optical::{MockOpticalConfig, MockOpticalProvider};
 /// embedding, OCR, and VLM services.
 pub fn create_mock_services() -> AiServices {
     AiServices::new(
-        create_embedding_service(),
-        create_optical_service(),
-        create_language_service(),
+        create_mock_embedding_service(),
+        create_mock_ocr_service(),
+        create_mock_vlm_service(),
     )
 }
 
 /// Creates a mock embedding service.
-fn create_embedding_service() -> EmbeddingService {
+pub fn create_mock_embedding_service() -> EmbeddingService {
     EmbeddingService::new(MockEmbeddingProvider::default())
 }
 
 /// Creates a mock OCR service.
-fn create_optical_service() -> OcrService {
+pub fn create_mock_ocr_service() -> OcrService {
     OcrService::new(MockOpticalProvider::default())
 }
 
 /// Creates a mock VLM service.
-fn create_language_service() -> VlmService {
+pub fn create_mock_vlm_service() -> VlmService {
     VlmService::new(MockLanguageProvider::default())
 }

@@ -23,7 +23,7 @@ services:
       - nvisy-dev
 
   nats:
-    image: nats:latest
+    image: nats:2.12.3-alpine
     container_name: nvisy-nats-dev
     restart: unless-stopped
     ports:

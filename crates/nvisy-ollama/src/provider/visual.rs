@@ -1,5 +1,7 @@
 //! VLM (Vision Language Model) provider implementation and payload traits.
 
+use std::time::SystemTime;
+
 use jiff::Timestamp;
 use nvisy_core::vlm::{BoxedStream, Request, Response, VlmProvider};
 use nvisy_core::{ServiceHealth, SharedContext, UsageStats};
@@ -32,11 +34,22 @@ impl VlmResponsePayload for String {
     }
 }
 
+// Implement for () to support default service type parameters
+impl VlmRequestPayload for () {
+    fn prompt(&self) -> &str {
+        ""
+    }
+}
+
+impl VlmResponsePayload for () {
+    fn from_text(_text: String) -> Self {}
+}
+
 #[async_trait::async_trait]
 impl<Req, Resp> VlmProvider<Req, Resp> for OllamaClient
 where
     Req: VlmRequestPayload + 'static,
-    Resp: VlmResponsePayload + 'static,
+    Resp: VlmResponsePayload + Default + 'static,
 {
     async fn process_vlm(
         &self,
@@ -94,7 +107,16 @@ where
                     "VLM request processed"
                 );
 
-                Ok(Response::new(request.request_id, Resp::from_text(text)))
+                Ok(Response {
+                    content: text.clone(),
+                    usage: None,
+                    finish_reason: Some("stop".to_string()),
+                    created: SystemTime::now(),
+                    confidence: None,
+                    visual_analysis: None,
+                    metadata: Default::default(),
+                    payload: Resp::from_text(text),
+                })
             }
             Err(e) => {
                 context

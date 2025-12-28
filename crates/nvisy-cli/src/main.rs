@@ -5,17 +5,9 @@
 // Compile-time checks: ensure at least one backend is enabled for each service type.
 #[cfg(not(any(feature = "mock", feature = "ollama")))]
 compile_error!(
-    "At least one embedding/VLM (visual language model) backend must be enabled. \
+    "At least one AI service backend must be enabled. \
      Enable either the 'mock' (for testing) or 'ollama' (for production) feature. \
      Example: cargo build --features ollama"
-);
-
-// Compile-time checks: ensure at least one backend is enabled for each service type.
-#[cfg(not(any(feature = "mock", feature = "olmocr")))]
-compile_error!(
-    "At least one OCR (optical character recognition) backend must be enabled. \
-     Enable either the 'mock' (for testing) or 'olmocr' (for production) feature. \
-     Example: cargo build --features olmocr"
 );
 
 mod config;
@@ -35,7 +27,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::config::{Cli, MiddlewareConfig, log_server_config};
+use crate::config::{Cli, MiddlewareConfig, create_ai_services, log_server_config};
 
 // Tracing target constants
 pub const TRACING_TARGET_SERVER_STARTUP: &str = "nvisy_cli::server::startup";
@@ -79,7 +71,8 @@ async fn run() -> anyhow::Result<()> {
 
     log_middleware_config(&cli.middleware);
 
-    let state = create_service_state(&cli.service).await?;
+    let ai_services = create_ai_services(&cli).context("failed to create AI services")?;
+    let state = create_service_state(&cli.service, ai_services).await?;
     let router = create_router(state, &cli.middleware);
 
     server::serve(router, cli.server).await?;
@@ -90,18 +83,8 @@ async fn run() -> anyhow::Result<()> {
 /// Creates the service state from configuration.
 async fn create_service_state(
     config: &nvisy_server::service::ServiceConfig,
+    ai_services: nvisy_core::AiServices,
 ) -> anyhow::Result<ServiceState> {
-    #[cfg(feature = "mock")]
-    let ai_services = nvisy_test::create_mock_services();
-
-    #[cfg(all(feature = "ollama", feature = "olmocr", not(feature = "mock")))]
-    let ai_services = {
-        let emb_service = nvisy_ollama::EmbeddingService::default();
-        let vlm_service = nvisy_ollama::VlmService::default();
-        let ocr_service = nvisy_olmocr2::OcrService::default();
-        nvisy_core::AiServices::new(emb_service, vlm_service, ocr_service)
-    };
-
     ServiceState::from_config(config.clone(), ai_services)
         .await
         .context("failed to create service state")
@@ -173,7 +156,6 @@ fn enabled_features() -> Vec<&'static str> {
         cfg!(feature = "otel").then_some("otel"),
         cfg!(feature = "mock").then_some("mock"),
         cfg!(feature = "ollama").then_some("ollama"),
-        cfg!(feature = "olmocr").then_some("olmocr"),
     ]
     .into_iter()
     .flatten()

@@ -21,4 +21,6 @@ pub mod provider;
 
 pub use crate::client::{OllamaClient, OllamaConfig};
 pub use crate::error::{Error, Result};
-pub use crate::provider::{VlmRequestPayload, VlmResponsePayload};
+pub use crate::provider::{
+    OcrRequestPayload, OcrResponsePayload, VlmRequestPayload, VlmResponsePayload,
+};

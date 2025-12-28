@@ -7,7 +7,6 @@ members = [
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-ollama",
-    "./crates/nvisy-olmocr2",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
     "./crates/nvisy-test",
@@ -35,7 +34,6 @@ documentation = "https://docs.rs/nvisy-server"
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
-nvisy-olmocr2 = { path = "./crates/nvisy-olmocr2", version = "0.1.0" }
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }

@@ -37,7 +37,7 @@ impl std::fmt::Debug for OllamaClientInner {
 /// let config = OllamaConfig::default()
 ///     .with_embedding_model("nomic-embed-text")
 ///     .with_vlm_model("llava");
-/// let client = OllamaClient::new(config).await?;
+/// let client = OllamaClient::new(config)?;
 /// ```
 #[derive(Clone, Debug)]
 pub struct OllamaClient {
@@ -49,8 +49,8 @@ impl OllamaClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the client cannot connect to the Ollama service.
-    pub async fn new(config: OllamaConfig) -> Result<Self> {
+    /// Returns an error if the configuration is invalid.
+    pub fn new(config: OllamaConfig) -> Result<Self> {
         tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             host = %config.host,
@@ -68,8 +68,6 @@ impl OllamaClient {
             inner: Arc::new(inner),
         };
 
-        client.health_check().await?;
-
         tracing::info!(
             target: TRACING_TARGET_CLIENT,
             "Ollama client created successfully"
@@ -79,8 +77,8 @@ impl OllamaClient {
     }
 
     /// Create a new Ollama client with default configuration (localhost:11434).
-    pub async fn with_defaults() -> Result<Self> {
-        Self::new(OllamaConfig::default()).await
+    pub fn with_defaults() -> Result<Self> {
+        Self::new(OllamaConfig::default())
     }
 
     /// Perform a health check against the Ollama service.

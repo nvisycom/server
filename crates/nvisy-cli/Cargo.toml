@@ -26,7 +26,6 @@ otel = ["tracing-subscriber/env-filter"]
 # AI service backends for embeddings, OCRs, and VLMs
 mock = ["dep:nvisy-test"]
 ollama = ["dep:nvisy-ollama"]
-olmocr = ["dep:nvisy-olmocr2"]
 
 [dependencies]
 # Internal crates
@@ -37,8 +36,7 @@ nvisy-server = { workspace = true, features = ["config"] }
 
 # AI service backends (optional)
 nvisy-test = { workspace = true, optional = true }
-nvisy-ollama = { workspace = true, optional = true }
-nvisy-olmocr2 = { workspace = true, optional = true }
+nvisy-ollama = { workspace = true, features = ["config"], optional = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
