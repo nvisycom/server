@@ -1,77 +1,49 @@
 # Contributing
 
-Thank you for your interest in contributing to the Nvisy API Server.
+Thank you for your interest in contributing to Nvisy Server.
 
 ## Requirements
 
-- Rust 1.89 or higher
-- PostgreSQL 17 or higher
-- NATS 2.10 or higher (for messaging, sessions, and queues)
-- OpenRouter API key (for AI features)
-- PaddleX service (for document processing and OCR)
-- OpenSSL (for key generation)
+- Rust 1.89+
+- PostgreSQL 17+
+- NATS 2.10+ (with JetStream)
+- Ollama (for AI features)
 
-## Development Setup
+## Setup
 
 ```bash
 git clone https://github.com/nvisycom/server.git
 cd server
 make install-all
+make generate-keys
 ```
-
-## Development
 
 ## Pull Request Process
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Run quality checks: `cargo fmt && cargo clippy && cargo test`
-6. Submit a pull request
+3. Make changes with tests
+4. Run checks: `cargo fmt && cargo clippy && cargo test`
+5. Submit a pull request
 
-### Pull Request Checklist
+### Checklist
 
 - [ ] Tests pass (`cargo test --workspace`)
-- [ ] Code follows Rust style guide (`cargo fmt`)
-- [ ] No clippy warnings (`cargo clippy`)
-- [ ] Documentation updated if needed
-- [ ] Database migrations included (`make generate-migrations`)
-- [ ] No breaking changes (or properly documented)
-
-## Code Standards
-
-- Follow standard Rust formatting with `rustfmt`
-- Write comprehensive tests for new features
-- Use `#[must_use]` for functions that return important values
-- Include rustdoc comments for public APIs
-- Prefer explicit error handling over panics
-- Follow workspace patterns established in existing crates
-
-## Documentation Standards
-
-### Documentation Requirements
-
-- Keep README files concise and focused on essential information
-- Use consistent badge formatting with the project color scheme
-- Include Features and Key Dependencies sections for all crates
-- Avoid excessive code examples, link to docs.rs instead
-- Use present tense and active voice
-- Follow the established pattern from nvisy-postgres, nvisy-nats
+- [ ] Code formatted (`cargo fmt`)
+- [ ] No clippy warnings (`cargo clippy -- -D warnings`)
+- [ ] Migrations included if needed (`make generate-migrations`)
 
 ## Database Changes
 
-- Always create migrations for schema changes
-- Test migrations both forward and backward
-- Update the schema file with `make generate-migrations`
-- Include migration rollback strategies
+- Create migrations for schema changes
+- Test migrations forward and backward
+- Update schema with `make generate-migrations`
 
 ## Security
 
 - Never commit secrets or API keys
 - Use environment variables for configuration
 - Validate all external inputs
-- Follow secure coding practices for authentication
 
 ## License
 

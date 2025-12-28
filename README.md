@@ -1,145 +1,91 @@
-# Nvisy.com API Server
+# Nvisy Server
 
-[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&color=000000&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
-[![axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
+[![Rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&color=000000&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+[![Axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
 
-High-performance backend API server for the Nvisy document redaction platform,
-built with Rust and modern async technologies.
+High-performance backend server for the Nvisy document processing platform.
 
 ## Features
 
-- **High-Performance Architecture** - Built with Axum and Tokio for exceptional
-  async performance
-- **Type-Safe Database Layer** - PostgreSQL integration with Diesel ORM and
-  strict typing
-- **Comprehensive Security** - JWT authentication, session management, and input
-  validation
-- **OCR Processing** - PaddleX HTTP API integration for high-accuracy document
-  understanding
-- **LLM Chat Assistant** - OpenRouter integration for intelligent document
-  analysis and AI-powered features
-- **NATS Messaging** - Real-time updates, job queues, sessions, and caching via
-  NATS with JetStream and KV
-- **Production Ready** - Health checks, graceful shutdown, connection pooling,
-  and observability
-- **Auto-Generated Documentation** - OpenAPI/Swagger specs with interactive UI
-- **Workspace Architecture** - Modular crate design for optimal code
-  organization
+- **High-Performance** - Async HTTP server with Axum and Tokio
+- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
+- **LLM Annotations** - AI-driven document edits via structured annotations
+- **Real-Time Updates** - Live collaboration via NATS pub/sub and WebSocket
+- **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
+
+## Optional Features
+
+| Feature | Description |
+|---------|-------------|
+| **tls** | HTTPS support with rustls |
+| **otel** | OpenTelemetry log filtering |
+| **dotenv** | Load config from `.env` files |
+| **ollama** | Ollama AI backend |
+| **mock** | Mock AI services for testing |
 
 ## Architecture
 
 ```
 server/
 ├── crates/
-│   ├── nvisy-cli/          # HTTP server CLI
-│   ├── nvisy-nats/         # NATS client (streams, KV, queues)
-│   ├── nvisy-openrouter/   # OpenRouter AI HTTP API client (assistant chatbot)
-│   ├── nvisy-paddle/       # PaddleX HTTP API client (OCR, image recognition)
-│   ├── nvisy-postgres/     # PostgreSQL database layer
-│   └── nvisy-server/       # Core HTTP API server
-├── migrations/             # PostgreSQL database migrations
-└── Cargo.toml              # Workspace configuration
+│   ├── nvisy-cli/       # Server binary with CLI
+│   ├── nvisy-core/      # Shared types and AI service traits
+│   ├── nvisy-nats/      # NATS client (streams, KV, queues)
+│   ├── nvisy-ollama/    # Ollama client (embeddings, OCR, VLM)
+│   ├── nvisy-postgres/  # PostgreSQL database layer
+│   └── nvisy-server/    # HTTP handlers and middleware
+├── migrations/          # PostgreSQL database migrations
+└── Cargo.toml           # Workspace configuration
 ```
 
 ## Quick Start
 
-### Prerequisites
-
-- Rust 1.89 or higher
-- PostgreSQL 17 or higher
-- NATS server with JetStream enabled
-- PaddleX server with OCR pipeline enabled
-- OpenRouter/OpenAI-compatible API key
-
-### Installation
-
 ```bash
-# Clone the repository
-git clone https://github.com/nvisycom/server.git
-cd server
-
-# Install required tools
+# Install tools and generate keys
 make install-all
-# Generate auth keys and migrations
 make generate-keys
+
+# Run database migrations
 make generate-migrations
 
-# Build the workspace and start the server
-cargo build --release
-cargo run --bin nvisy-cli
-```
-
-### Docker
-
-```bash
-# Build and run with Docker
-docker build -t nvisy-server .
-docker run -p 3000:3000 nvisy-server
-
-# Or use docker-compose
-docker-compose up -d
+# Start the server
+cargo run --features ollama,dotenv
 ```
 
 ## Configuration
 
-### Environment Variables
-
-Configure the API server using these environment variables:
-
-| Variable                    | Description                   | Required | Default                         |
-| --------------------------- | ----------------------------- | -------- | ------------------------------- |
-| `HOST`                      | Server host address           | No       | `127.0.0.1`                     |
-| `PORT`                      | Server port number            | No       | `3000`                          |
-| `REQUEST_TIMEOUT`           | Request timeout in seconds    | No       | `30`                            |
-| `SHUTDOWN_TIMEOUT`          | Graceful shutdown timeout     | No       | `30`                            |
-| `POSTGRES_URL`              | PostgreSQL connection string  | Yes      | -                               |
-| `AUTH_PUBLIC_PEM_FILEPATH`  | JWT public key file path      | No       | `./public.pem`                  |
-| `AUTH_PRIVATE_PEM_FILEPATH` | JWT private key file path     | No       | `./private.pem`                 |
-| `PADDLEX_API_KEY`           | PaddleX service API key       | No       | -                               |
-| `PADDLEX_BASE_URL`          | PaddleX service base URL      | No       | `http://localhost:8080/api/v1/` |
-| `OPENROUTER_API_KEY`        | OpenRouter API key for LLM    | No       | -                               |
-| `OPENROUTER_BASE_URL`       | OpenRouter API base URL       | No       | `https://openrouter.ai/api/v1/` |
-| `NATS_URL`                  | NATS server URL               | No       | `nats://127.0.0.1:4222`         |
-| `NATS_CLIENT_NAME`          | NATS client name              | No       | `nvisy-api`                     |
-| `CORS_ALLOWED_ORIGINS`      | Comma-separated CORS origins  | No       | Empty (allows localhost)        |
-| `CORS_MAX_AGE`              | CORS preflight cache duration | No       | `3600`                          |
-| `CORS_ALLOW_CREDENTIALS`    | Allow credentials in CORS     | No       | `true`                          |
-
-### TLS Configuration (Optional)
-
-When built with the `tls` feature:
-
-| Variable        | Description                   | Required |
-| --------------- | ----------------------------- | -------- |
-| `TLS_CERT_PATH` | Path to TLS certificate (PEM) | No       |
-| `TLS_KEY_PATH`  | Path to TLS private key (PEM) | No       |
+See [.env.example](.env.example) for all available environment variables.
 
 ## API Documentation
 
-When the server is running, access the interactive API documentation:
+- Scalar UI: `http://localhost:8080/api/scalar`
+- OpenAPI JSON: `http://localhost:8080/api/openapi.json`
+- Health Check: `POST http://localhost:8080/health`
 
-- **Swagger UI**: `http://localhost:3000/api/swagger`
-- **Scalar UI**: `http://localhost:3000/api/scalar`
-- **OpenAPI JSON**: `http://localhost:3000/api/openapi.json`
-- **Health Check**: `http://localhost:3000/health`
+## Docker
+
+```bash
+cd docker
+
+# Development (with hot reload)
+docker-compose -f docker-compose.dev.yml up -d
+
+# Production
+docker-compose up -d
+```
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and
-contribution process.
-
 ## License
 
-MIT License - see [LICENSE.txt](LICENSE.txt) for details.
+MIT License - see [LICENSE.txt](LICENSE.txt)
 
 ## Support
 
 - **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/api/issues)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status**: [status.nvisy.com](https://status.nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

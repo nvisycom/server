@@ -1,11 +1,11 @@
-# api.nvisy.com/postgres
+# nvisy-postgres
 
 Type-safe PostgreSQL database layer for the Nvisy platform with async connection
 pooling and embedded migrations.
 
-[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![diesel](https://img.shields.io/badge/Diesel-2.3+-000000?style=flat-square&logo=rust&logoColor=white)](https://diesel.rs/)
-[![postgresql](https://img.shields.io/badge/PostgreSQL-17+-000000?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Diesel](https://img.shields.io/badge/Diesel-2.3+-000000?style=flat-square&logo=rust&logoColor=white)](https://diesel.rs/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17+-000000?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
 ## Features
 

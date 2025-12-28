@@ -1,11 +1,10 @@
-# api.nvisy.com/nats
+# nvisy-nats
 
 Task-focused NATS client for the Nvisy platform with comprehensive JetStream
 support and unified streaming infrastructure.
 
-[![rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![nats](https://img.shields.io/badge/NATS-JetStream-000000?style=flat-square&logo=nats&logoColor=white)](https://nats.io/)
-[![async-nats](https://img.shields.io/badge/async--nats-0.38+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/nats-io/nats.rs)
+[![Rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![NATS](https://img.shields.io/badge/NATS-JetStream-000000?style=flat-square&logo=nats&logoColor=white)](https://nats.io/)
 
 ## Features
 
