@@ -1,85 +1,72 @@
-# OS
-Thumbs.db
-.DS_Store
+# Git
+.git/
+.gitignore
+.gitattributes
 
-# Editors
+# IDE and Editors
 .vs/
 .vscode/
 .idea/
-.fleet/
 .zed/
 
-# Rust
-debug/
+# Rust build artifacts
 target/
+debug/
 **/*.rs.bk
 *.pdb
 
-# Generated
+# Generated files
 *.pem
-*.backup
 coverage/
 *.lcov
-
-# Intermediate output
-crates/nvisy-postgres/src/migrations/
-crates/nvisy-postgres/src/schema.rs
-
-# Build output
-dist/
-build/
-output/
-
-# Environment files
-.env*
-!.env.example
-.envrc
-
-# Logs
-logs/
-*.log
-*.log*
-
-# Development and CI files
-.github/
-.gitlab-ci.yml
-.travis.yml
-.circleci/
-scripts/
-Makefile
-
-# Scripts
-*.sh
-*.bat
-*.ps1
 
 # Documentation
 *.md
 !README.md
 docs/
-**/docs/
 
-# Test files
-tests/
-**/tests/
-fixtures/
-benchmarks/
-**/benchmarks/
+# Development
+.env
+.env.*
+!.env.example
+.envrc
+Makefile
 
-# Development tools
-rustfmt.toml
-clippy.toml
-deny.toml
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
 
-# Docker files (avoid recursion)
+# Docker (prevent recursion)
+docker/
 Dockerfile*
 docker-compose*.yml
 .dockerignore
 
-# License and legal
-LICENSE*
-COPYRIGHT*
-NOTICE*
+# Tests and benchmarks
+tests/
+**/tests/
+benchmarks/
+**/benchmarks/
+fixtures/
+
+# Scripts
+scripts/
+*.sh
+*.bat
+*.ps1
+
+# Config files not needed in build
+rustfmt.toml
+clippy.toml
+deny.toml
+diesel.toml
+
+# Logs
+logs/
+*.log
+*.log*
 
 # Backup and temporary files
 *.bak
@@ -88,6 +75,12 @@ NOTICE*
 tmp/
 temp/
 
+# OS files
+.DS_Store
+Thumbs.db
+
 # Other
-.ignore*/
 LLM.md
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE*

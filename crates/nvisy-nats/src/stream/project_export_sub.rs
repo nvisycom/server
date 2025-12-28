@@ -17,10 +17,7 @@ pub struct ProjectExportSubscriber {
 
 impl ProjectExportSubscriber {
     /// Create a new project export job subscriber.
-    pub async fn new(
-        jetstream: &Context,
-        consumer_name: &str,
-    ) -> Result<Self> {
+    pub async fn new(jetstream: &Context, consumer_name: &str) -> Result<Self> {
         let subscriber = StreamSubscriber::new(jetstream, "PROJECT_EXPORTS", consumer_name).await?;
         Ok(Self { subscriber })
     }

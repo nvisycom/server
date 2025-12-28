@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -16,9 +15,11 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Get version
         id: version
@@ -32,7 +33,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  build-binaries:
+  build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     needs: create-release
@@ -52,8 +53,8 @@ jobs:
             os: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -69,85 +70,32 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Build release binary
+      - name: Build
         run: cargo build --release --target ${{ matrix.target }} --bin nvisy-server
 
-      - name: Package binary (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           tar czf nvisy-server-${{ matrix.target }}.tar.gz nvisy-server
           mv nvisy-server-${{ matrix.target }}.tar.gz ${{ github.workspace }}
 
-      - name: Package binary (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
-          7z a nvisy-server-${{ matrix.target }}.zip nvisy-server.exe
-          move nvisy-server-${{ matrix.target }}.zip ${{ github.workspace }}
+          Compress-Archive -Path nvisy-server.exe -DestinationPath nvisy-server-${{ matrix.target }}.zip
+          Move-Item nvisy-server-${{ matrix.target }}.zip ${{ github.workspace }}
 
-      - name: Upload binary (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          gh release upload ${GITHUB_REF#refs/tags/} \
-            nvisy-server-${{ matrix.target }}.tar.gz
+      - name: Upload (Unix)
+        if: runner.os != 'Windows'
+        run: gh release upload ${{ needs.create-release.outputs.version }} nvisy-server-${{ matrix.target }}.tar.gz
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Upload binary (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          gh release upload ${GITHUB_REF#refs/tags/} \
-            nvisy-server-${{ matrix.target }}.zip
+      - name: Upload (Windows)
+        if: runner.os == 'Windows'
+        run: gh release upload ${{ needs.create-release.outputs.version }} nvisy-server-${{ matrix.target }}.zip
         env:
           GH_TOKEN: ${{ github.token }}
-
-  publish-crates:
-    name: Publish Crates
-    runs-on: ubuntu-latest
-    needs: create-release
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: nvisy_release
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Setup PostgreSQL
-        uses: ./.github/actions/setup-postgres
-        with:
-          postgres-timeout: 120
-        env:
-          POSTGRES_URL: postgres://postgres:postgres@localhost/nvisy_release
-
-      - name: Publish crates
-        run: |
-          # Publish in dependency order
-          cargo publish -p nvisy-postgres --token ${{ secrets.CARGO_TOKEN }} || true
-          sleep 30
-          cargo publish -p nvisy-nats --token ${{ secrets.CARGO_TOKEN }} || true
-          sleep 30
-          cargo publish -p nvisy-server --token ${{ secrets.CARGO_TOKEN }} || true
-          sleep 30
-          cargo publish -p nvisy-cli --token ${{ secrets.CARGO_TOKEN }} || true
-        continue-on-error: true

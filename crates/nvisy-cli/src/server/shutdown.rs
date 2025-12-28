@@ -61,7 +61,7 @@ pub async fn shutdown_signal(shutdown_timeout: Duration) {
 
     tracing::info!(
         target: "nvisy_cli::shutdown",
-        timeout_seconds = shutdown_timeout.as_secs(),
+        timeout_secs = shutdown_timeout.as_secs(),
         "Graceful shutdown initiated"
     );
 }

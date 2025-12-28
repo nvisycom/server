@@ -6,143 +6,95 @@
 //! lifecycle management.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use jiff::Timestamp;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::NewProjectInvite;
-use nvisy_postgres::query::{ProjectInviteRepository, ProjectMemberRepository};
+use nvisy_postgres::model::NewProjectMember;
+use nvisy_postgres::query::{
+    Pagination as PgPagination, ProjectInviteRepository, ProjectMemberRepository,
+};
 use nvisy_postgres::types::InviteStatus;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::projects::ProjectPathParams;
-use crate::handler::request::{CreateInvite, ReplyInvite};
-use crate::handler::response::{Invite, Invites};
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::handler::request::{
+    CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, Pagination,
+    ProjectPathParams, ReplyInvite,
+};
+use crate::handler::response::{Invite, InviteCode, Invites, Member};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project invite operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::project_invites";
-
-/// Combined path parameters for invite-specific endpoints.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InvitePathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-    /// Unique identifier of the invite.
-    pub invite_id: Uuid,
-}
+const TRACING_TARGET: &str = "nvisy_server::handler::invites";
 
 /// Creates a new project invitation.
 ///
 /// Sends an invitation to join a project to the specified email address.
 /// The invitee will receive an email with instructions to accept or decline.
-/// Requires administrator permissions to send invitations.
-#[tracing::instrument(skip_all)]
+/// Requires `InviteMembers` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        invited_role = ?request.invited_role,
+    )
+)]
 async fn send_invite(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        invitee_email = %request.invitee_email,
-        invited_role = ?request.invited_role,
-        "Creating project invitation"
-    );
+    tracing::info!(target: TRACING_TARGET, "Creating project invitation");
 
-    // Verify user has permission to send invitations
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::InviteMembers,
-        )
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
         .await?;
 
     // Check if user is already a member
-    if let Some(existing_member) = pg_client
-        .find_project_member(path_params.project_id, auth_claims.account_id)
+    if conn
+        .find_project_member(path_params.project_id, auth_state.account_id)
         .await?
-        && existing_member.is_active
+        .is_some()
     {
         return Err(ErrorKind::Conflict
             .with_message("User is already a member of this project")
-            .with_resource("project_member")
-            .with_context(format!(
-                "Project ID: {}, Account ID: {}",
-                path_params.project_id, auth_claims.account_id
-            )));
+            .with_resource("project_member"));
     }
 
-    // Check for existing pending invites to the same email
-    let normalized_email = request.invitee_email.to_lowercase();
-    let all_invites = pg_client
+    // Check for existing pending invites
+    let all_invites = conn
         .list_user_invites(
             None,
-            nvisy_postgres::query::Pagination {
+            PgPagination {
                 limit: 100,
                 offset: 0,
             },
         )
         .await?;
 
-    // Filter by project_id since list_user_invites doesn't filter by project
-    let existing_invites: Vec<_> = all_invites
-        .into_iter()
-        .filter(|invite| invite.project_id == path_params.project_id)
-        .collect();
+    let has_pending = all_invites.iter().any(|invite| {
+        invite.project_id == path_params.project_id && invite.invite_status == InviteStatus::Pending
+    });
 
-    // Check if there's already a pending invite
-    if let Some(pending_invite) = existing_invites
-        .iter()
-        .find(|invite| invite.invite_status == InviteStatus::Pending)
-    {
+    if has_pending {
         return Err(ErrorKind::Conflict
-            .with_message("Invitation already sent")
-            .with_context(format!(
-                "A pending invitation to {} already exists for this project (expires at {})",
-                normalized_email,
-                pending_invite.expires_at.to_jiff()
-            )));
+            .with_message("A pending invitation already exists for this project")
+            .with_resource("project_invite"));
     }
 
-    // Generate expiration time
-    let expires_at = Timestamp::now()
-        + jiff::Span::new().days(request.expires_in_days.unwrap_or(7).clamp(1, 30) as i64);
-
-    // Sanitize the invite message for additional security
-    let sanitized_message = sanitize_text(&request.invite_message);
-
-    let new_invite = NewProjectInvite {
-        project_id: path_params.project_id,
-        invitee_id: None, // Will be set when user accepts if they have an account
-        invited_role: Some(request.invited_role),
-        invite_message: Some(sanitized_message),
-        expires_at: Some(expires_at.into()),
-        created_by: auth_claims.account_id,
-        updated_by: auth_claims.account_id,
-        ..Default::default()
-    };
-
-    let project_invite = pg_client.create_project_invite(new_invite).await?;
-
+    let project_invite = conn
+        .create_project_invite(request.into_model(
+            path_params.project_id,
+            None,
+            auth_state.account_id,
+        ))
+        .await?;
     let response = Invite::from(project_invite);
 
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        invite_id = response.invite_id.to_string(),
-        "Project invitation created successfully"
+        invite_id = %response.invite_id,
+        "Project invitation created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -151,28 +103,27 @@ async fn send_invite(
 /// Lists all invitations for a project.
 ///
 /// Returns a paginated list of project invitations with their current status.
-/// Optionally filter by invitation status. Requires administrator permissions.
-#[tracing::instrument(skip_all)]
+/// Requires `ViewMembers` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn list_invites(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Invites>)> {
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Listing project invitations"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Listing project invitations");
 
-    // Verify user has permission to view project invitations
-    auth_claims
-        .authorize_project(&pg_client, path_params.project_id, Permission::ViewMembers)
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewMembers)
         .await?;
 
-    // Retrieve project invitations with pagination
-    let project_invites = pg_client
+    let project_invites = conn
         .list_project_invites(path_params.project_id, pagination.into())
         .await?;
 
@@ -180,10 +131,8 @@ async fn list_invites(
 
     tracing::debug!(
         target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
         invite_count = invites.len(),
-        "Project invitations listed successfully"
+        "Project invitations listed successfully",
     );
 
     Ok((StatusCode::OK, Json(invites)))
@@ -192,42 +141,30 @@ async fn list_invites(
 /// Cancels a project invitation.
 ///
 /// Permanently cancels a pending invitation. The invitee will no longer be able
-/// to accept this invitation. Requires administrator permissions.
-#[tracing::instrument(skip_all)]
+/// to accept this invitation. Requires `InviteMembers` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        invite_id = %path_params.invite_id,
+    )
+)]
 async fn cancel_invite(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<StatusCode> {
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        invite_id = path_params.invite_id.to_string(),
-        "Cancelling project invitation"
-    );
+    tracing::info!(target: TRACING_TARGET, "Cancelling project invitation");
 
-    // Verify user has permission to manage project invitations
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::InviteMembers,
-        )
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
         .await?;
 
-    // Cancel the invitation
-    pg_client
-        .cancel_invite(path_params.invite_id, auth_claims.account_id)
+    conn.cancel_invite(path_params.invite_id, auth_state.account_id)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        invite_id = path_params.invite_id.to_string(),
-        "Project invitation cancelled successfully"
-    );
+    tracing::info!(target: TRACING_TARGET, "Project invitation cancelled successfully");
 
     Ok(StatusCode::OK)
 }
@@ -237,95 +174,155 @@ async fn cancel_invite(
 /// Allows the invitee to accept or decline a project invitation.
 /// If accepted, the user becomes a member of the project with the specified role.
 /// The invitation must be valid and not expired.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        invite_id = %path_params.invite_id,
+        accept = request.accept_invite,
+    )
+)]
 async fn reply_to_invite(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        invite_id = path_params.invite_id.to_string(),
-        accept_invite = request.accept_invite,
-        "Responding to project invitation"
-    );
+    tracing::info!(target: TRACING_TARGET, "Responding to project invitation");
 
-    // Find the invitation
-    let Some(invite) = pg_client.find_invite_by_id(path_params.invite_id).await? else {
+    let Some(invite) = conn.find_invite_by_id(path_params.invite_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("project_invite")
-            .with_message("Project invitation not found")
-            .with_context(format!("Invite ID: {}", path_params.invite_id)));
+            .with_message("Invitation not found"));
     };
 
     // Verify invitation belongs to this project
     if invite.project_id != path_params.project_id {
         return Err(ErrorKind::NotFound
             .with_resource("project_invite")
-            .with_message("Project invitation not found in this project")
-            .with_context(format!(
-                "Expected project {}, but invite belongs to project {}",
-                path_params.project_id, invite.project_id
-            )));
+            .with_message("Invitation not found in this project"));
     }
 
-    // Verify invitation is valid
+    // Verify invitation is still valid
     if !invite.can_be_used() {
         return Err(ErrorKind::BadRequest
             .with_message("This invitation has expired or is no longer valid")
-            .with_resource("project_invite")
-            .with_context(format!(
-                "Invite status: {:?}, Expires at: {}",
-                invite.invite_status,
-                invite.expires_at.to_jiff()
-            )));
+            .with_resource("project_invite"));
     }
 
     let project_invite = if request.accept_invite {
-        // Accept the invitation
-        let accepted_invite = pg_client
-            .accept_invite(path_params.invite_id, auth_claims.account_id)
+        let accepted = conn
+            .accept_invite(path_params.invite_id, auth_state.account_id)
             .await?;
 
-        tracing::info!(
-            target: TRACING_TARGET,
-            account_id = auth_claims.account_id.to_string(),
-            project_id = path_params.project_id.to_string(),
-            invite_id = path_params.invite_id.to_string(),
-            "Project invitation accepted successfully"
-        );
-
-        accepted_invite
+        tracing::info!(target: TRACING_TARGET, "Invitation accepted");
+        accepted
     } else {
-        // Decline the invitation
-        let declined_invite = pg_client
-            .reject_invite(path_params.invite_id, auth_claims.account_id)
+        let declined = conn
+            .reject_invite(path_params.invite_id, auth_state.account_id)
             .await?;
 
-        tracing::info!(
-            target: TRACING_TARGET,
-            account_id = auth_claims.account_id.to_string(),
-            project_id = path_params.project_id.to_string(),
-            invite_id = path_params.invite_id.to_string(),
-            "Project invitation declined"
-        );
-
-        declined_invite
+        tracing::info!(target: TRACING_TARGET, "Invitation declined");
+        declined
     };
 
     Ok((StatusCode::OK, Json(Invite::from(project_invite))))
 }
 
-/// Sanitizes user input by removing potentially dangerous characters.
+/// Generates a shareable invite code for a project.
 ///
-/// This is a defense-in-depth measure in addition to validation.
-fn sanitize_text(text: &str) -> String {
-    text.chars()
-        .filter(|c| !matches!(c, '<' | '>' | '{' | '}' | '`'))
-        .collect()
+/// Creates an invite code that can be shared with anyone to join the project.
+/// The code can be used multiple times until it expires.
+/// Requires `InviteMembers` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        role = ?request.role,
+    )
+)]
+async fn generate_invite_code(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<ProjectPathParams>,
+    ValidateJson(request): ValidateJson<GenerateInviteCode>,
+) -> Result<(StatusCode, Json<InviteCode>)> {
+    tracing::info!(target: TRACING_TARGET, "Generating invite code");
+
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
+        .await?;
+
+    let project_invite = conn
+        .create_project_invite(request.into_model(path_params.project_id, auth_state.account_id))
+        .await?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        invite_id = %project_invite.id,
+        "Invite code generated successfully",
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(InviteCode::from_invite(&project_invite)),
+    ))
+}
+
+/// Joins a project using an invite code.
+///
+/// Allows a user to join a project by providing a valid invite code.
+/// The user will be added as a member with the role specified when the
+/// invite code was generated.
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+async fn join_via_invite_code(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<InviteCodePathParams>,
+) -> Result<(StatusCode, Json<Member>)> {
+    tracing::info!(target: TRACING_TARGET, "Attempting to join project via invite code");
+
+    let Some(invite) = conn.find_invite_by_token(&path_params.invite_code).await? else {
+        return Err(ErrorKind::NotFound
+            .with_resource("invite_code")
+            .with_message("Invalid invite code"));
+    };
+
+    if !invite.can_be_used() {
+        return Err(ErrorKind::BadRequest
+            .with_message("This invite code has expired or is no longer valid")
+            .with_resource("invite_code"));
+    }
+
+    // Check if user is already a member
+    if conn
+        .find_project_member(invite.project_id, auth_state.account_id)
+        .await?
+        .is_some()
+    {
+        return Err(ErrorKind::Conflict
+            .with_message("You are already a member of this project")
+            .with_resource("project_member"));
+    }
+
+    let new_member = NewProjectMember::new(
+        invite.project_id,
+        auth_state.account_id,
+        invite.invited_role,
+    );
+
+    let project_member = conn.add_project_member(new_member).await?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        project_id = %invite.project_id,
+        role = ?invite.invited_role,
+        "User joined project via invite code successfully",
+    );
+
+    Ok((StatusCode::CREATED, Json(Member::from(project_member))))
 }
 
 /// Returns a [`Router`] with all project invite related routes.
@@ -335,52 +332,20 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/:project_id/invites/", post(send_invite))
-        .api_route("/projects/:project_id/invites/", get(list_invites))
+        .api_route("/projects/{project_id}/invites/", post(send_invite))
+        .api_route("/projects/{project_id}/invites/", get(list_invites))
         .api_route(
-            "/projects/:project_id/invites/:invite_id/",
+            "/projects/{project_id}/invites/{invite_id}/",
             delete(cancel_invite),
         )
         .api_route(
-            "/projects/:project_id/invites/:invite_id/reply/",
+            "/projects/{project_id}/invites/{invite_id}/reply/",
             patch(reply_to_invite),
         )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn project_invite_routes_integration() -> anyhow::Result<()> {
-        let _server = create_test_server_with_router(|_| routes()).await?;
-
-        // TODO: Add comprehensive integration tests for:
-        // - Creating invitations with proper validation
-        // - Listing invitations with pagination and filtering
-        // - Accepting/declining invitations
-        // - Cancelling invitations with proper authorization
-        // - Error scenarios and edge cases
-        // - Email validation and business logic
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_create_invite_validation() {
-        // TODO: Add tests using ValidateJson extractor
-        // - Test valid requests pass validation
-        // - Test invalid emails are rejected
-        // - Test message length limits
-        // - Test expiry day ranges
-    }
-
-    #[test]
-    fn test_response_conversions() {
-        // TODO: Add unit tests for response model conversions
-        // - Test From<ProjectInvite> implementations
-        // - Verify all fields are properly mapped
-        // - Check serialization behavior
-    }
+        .api_route(
+            "/projects/{project_id}/invites/code/",
+            post(generate_invite_code),
+        )
+        .api_route("/invites/{invite_code}/join/", post(join_via_invite_code))
+        .with_path_items(|item| item.tag("Invites"))
 }

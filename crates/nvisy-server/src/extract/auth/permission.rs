@@ -122,8 +122,8 @@ impl Permission {
             | Self::ManageTemplates
             | Self::ManageSettings => ProjectRole::Admin,
 
-            // Owner-only permissions
-            Self::DeleteProject | Self::ManageRoles => ProjectRole::Owner,
+            // Admin-only permissions (highest level)
+            Self::DeleteProject | Self::ManageRoles => ProjectRole::Admin,
         }
     }
 
@@ -178,10 +178,10 @@ impl AuthResult {
     /// ```rust
     /// # use nvisy_server::extract::AuthResult;
     /// let result = AuthResult::granted();
-    /// assert!(result.into_unit_result().is_ok());
+    /// assert!(result.into_result().is_ok());
     ///
     /// let result = AuthResult::denied("Access denied");
-    /// assert!(result.into_unit_result().is_err());
+    /// assert!(result.into_result().is_err());
     /// ```
     pub fn into_result(self) -> Result<Option<ProjectMember>> {
         if self.granted {

@@ -15,63 +15,57 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::RequireMode"]
 pub enum RequireMode {
-    /// Plain text content that is ready for analysis without additional processing
-    #[db_rename = "text"]
-    #[serde(rename = "text")]
+    /// No special processing required, content is ready for use
+    #[db_rename = "none"]
+    #[serde(rename = "none")]
     #[default]
-    Text,
+    None,
 
-    /// File requires Optical Character Recognition (OCR) to extract text
-    #[db_rename = "ocr"]
-    #[serde(rename = "ocr")]
-    Ocr,
+    /// Requires Optical Character Recognition (OCR) to extract text from images
+    #[db_rename = "optical"]
+    #[serde(rename = "optical")]
+    Optical,
 
-    /// File requires audio/video transcription to convert speech to text
-    #[db_rename = "transcribe"]
-    #[serde(rename = "transcribe")]
-    Transcribe,
+    /// Requires Vision Language Model (VLM) for advanced content understanding
+    #[db_rename = "language"]
+    #[serde(rename = "language")]
+    Language,
 
-    /// File may require multiple processing modes (combination of text, OCR, transcription)
-    #[db_rename = "mixed"]
-    #[serde(rename = "mixed")]
-    Mixed,
+    /// Requires both OCR and VLM processing
+    #[db_rename = "both"]
+    #[serde(rename = "both")]
+    Both,
 }
 
 impl RequireMode {
-    /// Returns whether this mode requires text extraction processing.
-    #[inline]
-    pub fn requires_text_extraction(self) -> bool {
-        matches!(self, RequireMode::Text | RequireMode::Mixed)
-    }
-
     /// Returns whether this mode requires OCR processing.
     #[inline]
     pub fn requires_ocr(self) -> bool {
-        matches!(self, RequireMode::Ocr | RequireMode::Mixed)
+        matches!(self, RequireMode::Optical | RequireMode::Both)
     }
 
-    /// Returns whether this mode requires transcription processing.
+    /// Returns whether this mode requires VLM processing.
     #[inline]
-    pub fn requires_transcription(self) -> bool {
-        matches!(self, RequireMode::Transcribe | RequireMode::Mixed)
+    pub fn requires_vlm(self) -> bool {
+        matches!(self, RequireMode::Language | RequireMode::Both)
     }
 
     /// Returns whether this mode requires any special processing.
     #[inline]
     pub fn requires_processing(self) -> bool {
-        !matches!(self, RequireMode::Text)
+        !matches!(self, RequireMode::None)
     }
 
     /// Returns whether this mode involves multiple processing types.
     #[inline]
     pub fn is_complex(self) -> bool {
-        matches!(self, RequireMode::Mixed)
+        matches!(self, RequireMode::Both)
     }
 
     /// Returns whether this mode is ready for immediate analysis.
     #[inline]
     pub fn is_ready_for_analysis(self) -> bool {
-        matches!(self, RequireMode::Text)
+        matches!(self, RequireMode::None)
     }
 
     /// Returns whether this mode requires external processing services.
@@ -79,7 +73,7 @@ impl RequireMode {
     pub fn requires_external_services(self) -> bool {
         matches!(
             self,
-            RequireMode::Ocr | RequireMode::Transcribe | RequireMode::Mixed
+            RequireMode::Optical | RequireMode::Language | RequireMode::Both
         )
     }
 
@@ -88,7 +82,7 @@ impl RequireMode {
     pub fn is_expensive_to_process(self) -> bool {
         matches!(
             self,
-            RequireMode::Ocr | RequireMode::Transcribe | RequireMode::Mixed
+            RequireMode::Optical | RequireMode::Language | RequireMode::Both
         )
     }
 
@@ -96,10 +90,10 @@ impl RequireMode {
     #[inline]
     pub fn processing_complexity(self) -> u8 {
         match self {
-            RequireMode::Text => 1,
-            RequireMode::Ocr => 3,
-            RequireMode::Transcribe => 4,
-            RequireMode::Mixed => 5,
+            RequireMode::None => 1,
+            RequireMode::Optical => 3,
+            RequireMode::Language => 4,
+            RequireMode::Both => 5,
         }
     }
 
@@ -107,35 +101,29 @@ impl RequireMode {
     #[inline]
     pub fn processing_time_factor(self) -> f32 {
         match self {
-            RequireMode::Text => 1.0,
-            RequireMode::Ocr => 3.0,
-            RequireMode::Transcribe => 5.0,
-            RequireMode::Mixed => 8.0,
+            RequireMode::None => 1.0,
+            RequireMode::Optical => 3.0,
+            RequireMode::Language => 5.0,
+            RequireMode::Both => 8.0,
         }
     }
 
     /// Returns the types of processing that this mode typically involves.
     pub fn processing_types(self) -> &'static [&'static str] {
         match self {
-            RequireMode::Text => &["text_extraction"],
-            RequireMode::Ocr => &["optical_character_recognition", "image_processing"],
-            RequireMode::Transcribe => &["speech_recognition", "audio_processing"],
-            RequireMode::Mixed => &[
-                "text_extraction",
-                "optical_character_recognition",
-                "speech_recognition",
-                "image_processing",
-                "audio_processing",
-            ],
+            RequireMode::None => &[],
+            RequireMode::Optical => &["optical_character_recognition"],
+            RequireMode::Language => &["vision_language_model"],
+            RequireMode::Both => &["optical_character_recognition", "vision_language_model"],
         }
     }
 
     /// Returns require modes that need external processing.
     pub fn external_processing_modes() -> &'static [RequireMode] {
         &[
-            RequireMode::Ocr,
-            RequireMode::Transcribe,
-            RequireMode::Mixed,
+            RequireMode::Optical,
+            RequireMode::Language,
+            RequireMode::Both,
         ]
     }
 }

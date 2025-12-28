@@ -14,6 +14,7 @@ mod pipelines;
 mod projects;
 mod templates;
 mod tokens;
+mod webhooks;
 
 pub use accounts::*;
 pub use authentications::*;
@@ -29,3 +30,4 @@ pub use pipelines::*;
 pub use projects::*;
 pub use templates::*;
 pub use tokens::*;
+pub use webhooks::*;

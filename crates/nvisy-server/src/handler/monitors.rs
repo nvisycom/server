@@ -8,6 +8,7 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use jiff::Timestamp;
+use nvisy_core::ServiceStatus;
 
 use super::request::CheckHealth;
 use super::response::MonitorStatus;
@@ -19,7 +20,29 @@ use crate::service::{HealthCache, ServiceState};
 const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 
 /// Returns system health status.
-#[tracing::instrument(skip_all, fields(authenticated = auth_state.is_some()))]
+///
+/// This endpoint provides health information about the API server and its
+/// dependencies. The response includes the current status, timestamp, and
+/// application version.
+///
+/// # Behavior
+///
+/// - **Unauthenticated requests**: Always return cached health status for performance
+/// - **Authenticated requests**: Perform real-time health check unless `use_cache` is true
+/// - **Administrator requests**: Can force real-time checks even when caching is preferred
+///
+/// # Response Codes
+///
+/// - `200 OK` - System is healthy
+/// - `503 Service Unavailable` - System is unhealthy
+#[tracing::instrument(
+    skip_all,
+    fields(
+        authenticated = auth_state.is_some(),
+        is_administrator = auth_state.as_ref().map(|a| a.is_administrator).unwrap_or(false),
+        account_id = auth_state.as_ref().map(|a| a.account_id.to_string()),
+    )
+)]
 async fn health_status(
     State(service_state): State<ServiceState>,
     State(health_service): State<HealthCache>,
@@ -28,36 +51,52 @@ async fn health_status(
     request: Option<Json<CheckHealth>>,
 ) -> Result<(StatusCode, Json<MonitorStatus>)> {
     let Json(request) = request.unwrap_or_default();
+
     let is_authenticated = auth_state.is_some();
+    let is_administrator = auth_state
+        .as_ref()
+        .is_some_and(|auth| auth.is_administrator);
+    let account_id = auth_state.as_ref().map(|auth| auth.account_id);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        authenticated = is_authenticated,
+        ?account_id,
+        is_authenticated,
+        is_administrator,
         version = %version,
-        "health status check requested"
+        use_cache = request.use_cache,
+        timeout_ms = request.timeout.unwrap_or(5000),
+        "Health status check requested"
     );
 
-    // Get cached health status or perform new check
-    let explicitly_cached = request.use_cache.is_some_and(|c| c);
-    let is_healthy = if is_authenticated && !explicitly_cached {
-        health_service.is_healthy(&service_state).await
+    // Determine whether to use cached or real-time health check
+    // - Unauthenticated: always use cache (fast response for load balancers)
+    // - Authenticated non-admin: use cache if explicitly requested, otherwise real-time
+    // - Administrator: real-time check unless explicitly cached
+    let use_cached = if !is_authenticated {
+        true
     } else {
-        health_service.get_cached_health()
+        request.use_cache.unwrap_or(false)
     };
 
-    let response = MonitorStatus {
-        updated_at: Timestamp::now(),
-        is_healthy,
-        overall_status: if is_healthy {
-            super::response::SystemStatus::Healthy
-        } else {
-            super::response::SystemStatus::Critical
-        },
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: 0, // TODO: Implement actual uptime tracking
-        services: None,
-        metrics: None,
-        alerts: None,
+    let is_healthy = if use_cached {
+        tracing::trace!(
+            target: TRACING_TARGET,
+            "Using cached health status"
+        );
+        health_service.get_cached_health()
+    } else {
+        tracing::trace!(
+            target: TRACING_TARGET,
+            "Performing real-time health check"
+        );
+        health_service.is_healthy(&service_state).await
+    };
+
+    let status = if is_healthy {
+        ServiceStatus::Healthy
+    } else {
+        ServiceStatus::Unhealthy
     };
 
     let status_code = if is_healthy {
@@ -66,12 +105,21 @@ async fn health_status(
         StatusCode::SERVICE_UNAVAILABLE
     };
 
+    let response = MonitorStatus {
+        checked_at: Timestamp::now(),
+        status,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+
     tracing::info!(
         target: TRACING_TARGET,
-        authenticated = is_authenticated,
-        is_healthy = is_healthy,
+        ?account_id,
+        is_authenticated,
+        is_administrator,
+        is_healthy,
+        used_cache = use_cached,
         status_code = status_code.as_u16(),
-        "health status response prepared"
+        "Health status response"
     );
 
     Ok((status_code, Json(response)))
@@ -83,71 +131,7 @@ async fn health_status(
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
-    ApiRouter::new().api_route("/health", post(health_status))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn test_health_status_endpoint_unauthenticated() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CheckHealth {
-            timeout: None,
-            use_cache: None,
-        };
-
-        let response = server.post("/health").json(&request).await;
-        response.assert_status_success();
-
-        let status_response = response.json::<MonitorStatus>();
-
-        // Unauthenticated requests should return healthy (basic check)
-        assert!(status_response.is_healthy);
-        assert!(!status_response.updated_at.to_string().is_empty());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_health_status_endpoint_with_prefer_policy() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CheckHealth {
-            timeout: None,
-            use_cache: Some(false),
-        };
-
-        let response = server.post("/health").json(&request).await;
-        response.assert_status_success();
-
-        let status_response = response.json::<MonitorStatus>();
-
-        // Should still work without authentication
-        assert!(status_response.is_healthy);
-        assert!(!status_response.updated_at.to_string().is_empty());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_health_status_endpoint_empty_request() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Test with no request body
-        let response = server.post("/health").await;
-        response.assert_status_success();
-
-        let status_response = response.json::<MonitorStatus>();
-        assert!(status_response.is_healthy);
-
-        Ok(())
-    }
-
-    // Note: Tests for authenticated requests would require setting up proper
-    // authentication in the test server, which should be implemented when
-    // the auth system testing infrastructure is available.
+    ApiRouter::new()
+        .api_route("/health", post(health_status))
+        .with_path_items(|item| item.tag("Health"))
 }

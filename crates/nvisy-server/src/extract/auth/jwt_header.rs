@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AuthClaims;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::SessionKeys;
+use crate::service::AuthKeys;
 
 /// JWT authentication header extractor and response generator.
 ///
@@ -44,7 +44,7 @@ use crate::service::SessionKeys;
 #[derive(Debug, Clone)]
 pub struct AuthHeader<T = ()> {
     auth_claims: AuthClaims<T>,
-    auth_secret_keys: SessionKeys,
+    auth_secret_keys: AuthKeys,
 }
 
 impl<T> AuthHeader<T> {
@@ -55,7 +55,7 @@ impl<T> AuthHeader<T> {
     /// * `claims` - The JWT claims to include in the token
     /// * `keys` - The cryptographic keys for signing the token
     #[inline]
-    pub const fn new(claims: AuthClaims<T>, keys: SessionKeys) -> Self {
+    pub const fn new(claims: AuthClaims<T>, keys: AuthKeys) -> Self {
         Self {
             auth_claims: claims,
             auth_secret_keys: keys,
@@ -88,7 +88,7 @@ where
     /// Returns an error if the token is invalid, expired, or malformed.
     fn from_header(
         authorization_header: TypedHeader<Authorization<Bearer>>,
-        auth_secret_keys: SessionKeys,
+        auth_secret_keys: AuthKeys,
     ) -> Result<Self> {
         let decoding_key = auth_secret_keys.decoding_key();
         let auth_claims = AuthClaims::from_header(authorization_header, decoding_key)?;
@@ -117,7 +117,7 @@ impl<T, S> FromRequestParts<S> for AuthHeader<T>
 where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -129,7 +129,7 @@ where
 
         // Extract Bearer token from Authorization header
         type AuthBearerHeader = TypedHeader<Authorization<Bearer>>;
-        let auth_keys = SessionKeys::from_ref(state);
+        let auth_keys = AuthKeys::from_ref(state);
 
         match AuthBearerHeader::from_request_parts(parts, state).await {
             Ok(bearer_header) => {

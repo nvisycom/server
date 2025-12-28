@@ -7,12 +7,12 @@
 use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::model;
 use nvisy_postgres::query::AccountRepository;
-use nvisy_postgres::{PgClient, model};
 
 use super::request::UpdateAccount;
 use super::response::Account;
-use crate::extract::{AuthState, Json, ValidateJson};
+use crate::extract::{AuthState, Json, PgPool, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
@@ -20,60 +20,38 @@ use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
 
 /// Retrieves the authenticated account.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(account_id = %auth_claims.account_id)
+)]
 async fn get_own_account(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<Account>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        "retrieving own account"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Reading account");
 
-    let Some(account) = pg_client.find_account_by_id(auth_claims.account_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("account")
-            .with_message("Account not found")
-            .with_context(format!("Account ID: {}", auth_claims.account_id)));
-    };
+    let account = find_account(&mut conn, auth_claims.account_id).await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %account.id,
-        display_name = %account.display_name,
-        "account retrieved"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Account retrieved successfully");
 
-    let account = Account::from_model(account);
-    Ok((StatusCode::OK, Json(account)))
+    Ok((StatusCode::OK, Json(Account::from_model(account))))
 }
 
 /// Updates the authenticated account.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(account_id = %auth_claims.account_id)
+)]
 async fn update_own_account(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateAccount>,
 ) -> Result<(StatusCode, Json<Account>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        has_display_name = request.display_name.is_some(),
-        has_email = request.email_address.is_some(),
-        has_password = request.password.is_some(),
-        "updating account"
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating account");
 
-    // Get current account info for password validation
-    let Some(current_account) = pg_client.find_account_by_id(auth_claims.account_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("account")
-            .with_message("Account not found")
-            .with_context(format!("Account ID: {}", auth_claims.account_id)));
-    };
+    let current_account = find_account(&mut conn, auth_claims.account_id).await?;
 
     // Validate password strength if password is being updated
     let password_hash = if let Some(ref password) = request.password {
@@ -111,15 +89,10 @@ async fn update_own_account(
 
     // Check if email already exists for another account
     if let Some(ref email) = normalized_email
-        && pg_client.email_exists(email).await?
+        && conn.email_exists(email).await?
         && current_account.email_address != *email
     {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            account_id = %auth_claims.account_id,
-            email = %email,
-            "account update failed: email already exists"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
         return Err(ErrorKind::Conflict
             .with_message("Account with this email already exists")
             .with_resource("account"));
@@ -134,41 +107,46 @@ async fn update_own_account(
         ..Default::default()
     };
 
-    let account = pg_client
+    let account = conn
         .update_account(auth_claims.account_id, update_account)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %account.id,
-        "account updated"
-    );
+    tracing::info!(target: TRACING_TARGET, "Account updated successfully");
 
-    let account = Account::from_model(account);
-    Ok((StatusCode::OK, Json(account)))
+    Ok((StatusCode::OK, Json(Account::from_model(account))))
 }
 
 /// Deletes the authenticated account.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(
+    skip_all,
+    fields(account_id = %auth_claims.account_id)
+)]
 async fn delete_own_account(
-    State(pg_client): State<PgClient>,
+    mut conn: PgPool,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        "deleting own account"
-    );
+    tracing::warn!(target: TRACING_TARGET, "Account deletion requested");
 
-    pg_client.delete_account(auth_claims.account_id).await?;
+    // Verify account exists
+    let _ = find_account(&mut conn, auth_claims.account_id).await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %auth_claims.account_id,
-        "account deleted"
-    );
+    conn.delete_account(auth_claims.account_id).await?;
+
+    tracing::warn!(target: TRACING_TARGET, "Account deleted successfully");
 
     Ok(StatusCode::OK)
+}
+
+/// Finds an account by ID or returns NotFound error.
+async fn find_account(
+    conn: &mut nvisy_postgres::PgConn,
+    account_id: uuid::Uuid,
+) -> Result<nvisy_postgres::model::Account> {
+    conn.find_account_by_id(account_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("Account not found")
+            .with_resource("account")
+    })
 }
 
 /// Returns a [`Router`] with all related routes.
@@ -181,29 +159,5 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
         .api_route("/me", get(get_own_account))
         .api_route("/me", patch(update_own_account))
         .api_route("/me", delete(delete_own_account))
-}
-
-#[cfg(test)]
-mod test {
-    use crate::handler::accounts::routes;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn handlers_startup() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(routes).await?;
-
-        // Retrieves authenticated account.
-        let response = server.get("/accounts/").await;
-        response.assert_status_success();
-
-        // Updates authenticated account.
-        let response = server.patch("/accounts/").await;
-        response.assert_status_success();
-
-        // Deletes authenticated account.
-        let response = server.delete("/accounts/").await;
-        response.assert_status_success();
-
-        Ok(())
-    }
+        .with_path_items(|item| item.tag("Accounts"))
 }

@@ -54,7 +54,7 @@ impl fmt::Display for DocumentId {
 /// Creating a simple text document:
 ///
 /// ```rust
-/// use nvisy_core::types::Document;
+/// use nvisy_core::Document;
 /// use bytes::Bytes;
 ///
 /// let content = "Hello, world!";
@@ -66,6 +66,9 @@ impl fmt::Display for DocumentId {
 /// Creating a document from binary data:
 ///
 /// ```rust
+/// use nvisy_core::Document;
+/// use bytes::Bytes;
+///
 /// let binary_data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
 /// let doc = Document::new(Bytes::from(binary_data))
 ///     .with_content_type("image/png")
@@ -96,7 +99,7 @@ pub struct Document {
 ///
 /// This struct contains various metadata fields commonly used for document processing,
 /// including content type information, filename, encoding, and custom attributes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentMetadata {
     /// MIME type of the document content.
     pub content_type: Option<String>,
@@ -133,7 +136,7 @@ impl Document {
     ///
     /// ```rust
     /// use bytes::Bytes;
-    /// use nvisy_core::types::Document;
+    /// use nvisy_core::Document;
     ///
     /// let content = Bytes::from("Hello, world!");
     /// let doc = Document::new(content);
@@ -344,10 +347,10 @@ impl Document {
     /// Validates the document structure and metadata.
     pub fn validate(&self) -> Result<()> {
         // Validate content type format if present
-        if let Some(ref content_type) = self.metadata.content_type {
-            if !content_type.contains('/') {
-                return Err(TypeError::InvalidContentType(content_type.clone()));
-            }
+        if let Some(ref content_type) = self.metadata.content_type
+            && !content_type.contains('/')
+        {
+            return Err(TypeError::InvalidContentType(content_type.clone()));
         }
 
         // Validate size consistency
@@ -365,21 +368,6 @@ impl Document {
         }
 
         Ok(())
-    }
-}
-
-impl Default for DocumentMetadata {
-    fn default() -> Self {
-        Self {
-            content_type: None,
-            encoding: None,
-            filename: None,
-            extension: None,
-            size: 0,
-            language: None,
-            attributes: HashMap::new(),
-            processing_hints: HashMap::new(),
-        }
     }
 }
 

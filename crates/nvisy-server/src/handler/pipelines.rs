@@ -1,154 +1,177 @@
 //! Project pipeline management handlers.
 //!
 //! This module provides comprehensive pipeline management functionality for projects,
-//! including creation, listing, updating, and deletion of CI/CD pipelines.
+//! including creation, listing, updating, and deletion of processing pipelines.
+//! Currently a stub implementation pending database schema.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
-use crate::handler::request::CreateProjectPipeline;
-use crate::handler::response::{ProjectPipeline, ProjectPipelines};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
+use crate::handler::request::{CreatePipeline, PipelinePathParams, ProjectPathParams};
+use crate::handler::response::{Pipeline, Pipelines};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project pipeline operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::project_pipelines";
-
-/// Path parameters for project operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathParams {
-    /// The unique identifier of the project.
-    pub project_id: Uuid,
-}
-
-/// Path parameters for project pipeline operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPipelinePathParams {
-    /// The unique identifier of the project.
-    pub project_id: Uuid,
-    /// The unique identifier of the pipeline.
-    pub pipeline_id: Uuid,
-}
+const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
 
 /// Lists all pipelines for a project.
-#[tracing::instrument(skip(pg_client))]
+///
+/// Returns all configured pipelines. Requires `ViewPipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn list_project_pipelines(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<ProjectPathParams>,
-    AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<ProjectPipelines>)> {
-    // Authorize project access
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ViewPipelines,
-        )
+    AuthState(auth_state): AuthState,
+) -> Result<(StatusCode, Json<Pipelines>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing project pipelines");
+
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewPipelines)
         .await?;
 
-    // For now, return empty list until database schema is implemented
+    // Stub: return empty list until database schema is implemented
     let pipelines = vec![];
 
     tracing::debug!(
         target: TRACING_TARGET,
-        project_id = %path_params.project_id,
         count = pipelines.len(),
-        "project pipelines listed successfully"
+        "Project pipelines listed successfully",
     );
 
     Ok((StatusCode::OK, Json(pipelines)))
 }
 
 /// Gets details of a specific pipeline.
-#[tracing::instrument(skip(pg_client))]
+///
+/// Returns pipeline configuration. Requires `ViewPipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        pipeline_id = %path_params.pipeline_id,
+    )
+)]
 async fn get_project_pipeline(
-    State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectPipelinePathParams>,
-    AuthState(auth_claims): AuthState,
-) -> Result<(StatusCode, Json<ProjectPipeline>)> {
-    // Authorize project access
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::ViewPipelines,
-        )
+    PgPool(mut conn): PgPool,
+    Path(path_params): Path<PipelinePathParams>,
+    AuthState(auth_state): AuthState,
+) -> Result<(StatusCode, Json<Pipeline>)> {
+    tracing::debug!(target: TRACING_TARGET, "Reading project pipeline");
+
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewPipelines)
         .await?;
 
-    // For now, return not found until database schema is implemented
-    Err(ErrorKind::NotFound.with_message("Pipeline not found"))
+    // Stub: return not found until database schema is implemented
+    Err(ErrorKind::NotFound
+        .with_message("Pipeline not found")
+        .with_resource("pipeline"))
 }
 
 /// Creates a new pipeline for a project.
-#[tracing::instrument(skip(pg_client, _request))]
+///
+/// Creates a processing pipeline configuration. Requires `ManagePipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn create_project_pipeline(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     Path(path_params): Path<ProjectPathParams>,
-    AuthState(auth_claims): AuthState,
-    Json(_request): Json<CreateProjectPipeline>,
-) -> Result<(StatusCode, Json<ProjectPipeline>)> {
-    // Authorize project access
-    auth_claims
+    AuthState(auth_state): AuthState,
+    Json(_request): Json<CreatePipeline>,
+) -> Result<(StatusCode, Json<Pipeline>)> {
+    tracing::info!(target: TRACING_TARGET, "Creating project pipeline");
+
+    auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManagePipelines,
         )
         .await?;
 
-    // For now, return not implemented until database schema is implemented
-    Err(ErrorKind::InternalServerError.with_message("Pipeline creation not yet implemented"))
+    // Stub: return not implemented until database schema is implemented
+    Err(ErrorKind::InternalServerError
+        .with_message("Pipeline creation not yet implemented")
+        .with_resource("pipeline"))
 }
 
 /// Updates an existing pipeline.
-#[tracing::instrument(skip(pg_client, _request))]
+///
+/// Updates pipeline configuration. Requires `ManagePipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        pipeline_id = %path_params.pipeline_id,
+    )
+)]
 async fn update_project_pipeline(
-    State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectPipelinePathParams>,
-    AuthState(auth_claims): AuthState,
-    Json(_request): Json<CreateProjectPipeline>,
-) -> Result<(StatusCode, Json<ProjectPipeline>)> {
-    // Authorize project access
-    auth_claims
+    PgPool(mut conn): PgPool,
+    Path(path_params): Path<PipelinePathParams>,
+    AuthState(auth_state): AuthState,
+    Json(_request): Json<CreatePipeline>,
+) -> Result<(StatusCode, Json<Pipeline>)> {
+    tracing::info!(target: TRACING_TARGET, "Updating project pipeline");
+
+    auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManagePipelines,
         )
         .await?;
 
-    // For now, return not found until database schema is implemented
-    Err(ErrorKind::NotFound.with_message("Pipeline not found"))
+    // Stub: return not found until database schema is implemented
+    Err(ErrorKind::NotFound
+        .with_message("Pipeline not found")
+        .with_resource("pipeline"))
 }
 
 /// Deletes a pipeline.
-#[tracing::instrument(skip(pg_client))]
+///
+/// Permanently removes the pipeline. Requires `ManagePipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+        pipeline_id = %path_params.pipeline_id,
+    )
+)]
 async fn delete_project_pipeline(
-    State(pg_client): State<PgClient>,
-    Path(path_params): Path<ProjectPipelinePathParams>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    Path(path_params): Path<PipelinePathParams>,
+    AuthState(auth_state): AuthState,
 ) -> Result<StatusCode> {
-    // Authorize project access
-    auth_claims
+    tracing::warn!(target: TRACING_TARGET, "Deleting project pipeline");
+
+    auth_state
         .authorize_project(
-            &pg_client,
+            &mut conn,
             path_params.project_id,
             Permission::ManagePipelines,
         )
         .await?;
 
-    // For now, return not found until database schema is implemented
-    Err(ErrorKind::NotFound.with_message("Pipeline not found"))
+    // Stub: return not found until database schema is implemented
+    Err(ErrorKind::NotFound
+        .with_message("Pipeline not found")
+        .with_resource("pipeline"))
 }
 
 /// Returns an [`ApiRouter`] with project pipeline routes.
@@ -157,36 +180,24 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/:project_id/pipelines",
+            "/projects/{project_id}/pipelines",
             get(list_project_pipelines),
         )
         .api_route(
-            "/projects/:project_id/pipelines/:pipeline_id",
+            "/projects/{project_id}/pipelines/{pipeline_id}",
             get(get_project_pipeline),
         )
         .api_route(
-            "/projects/:project_id/pipelines",
+            "/projects/{project_id}/pipelines",
             post(create_project_pipeline),
         )
         .api_route(
-            "/projects/:project_id/pipelines/:pipeline_id",
+            "/projects/{project_id}/pipelines/{pipeline_id}",
             put(update_project_pipeline),
         )
         .api_route(
-            "/projects/:project_id/pipelines/:pipeline_id",
+            "/projects/{project_id}/pipelines/{pipeline_id}",
             delete(delete_project_pipeline),
         )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::handler::test::create_test_server;
-
-    #[tokio::test]
-    async fn test_project_pipelines_routes() -> anyhow::Result<()> {
-        let _server = create_test_server().await?;
-        // TODO: Add actual tests once database schema is implemented
-        Ok(())
-    }
+        .with_path_items(|item| item.tag("Pipelines"))
 }

@@ -6,7 +6,7 @@
 
 use nvisy_postgres::model::ProjectMember;
 use nvisy_postgres::query::{DocumentRepository, ProjectMemberRepository};
-use nvisy_postgres::{PgClient, PgError};
+use nvisy_postgres::{PgConn, PgError};
 use uuid::Uuid;
 
 use super::{AuthResult, Permission, TRACING_TARGET_AUTHORIZATION};
@@ -54,7 +54,7 @@ pub trait AuthProvider {
     #[allow(async_fn_in_trait)]
     async fn check_project_permission(
         &self,
-        pg_client: &PgClient,
+        conn: &mut PgConn,
         project_id: Uuid,
         permission: Permission,
     ) -> Result<AuthResult, PgError> {
@@ -72,7 +72,7 @@ pub trait AuthProvider {
         }
 
         // Check project membership
-        let member = pg_client
+        let member = conn
             .find_project_member(project_id, self.account_id())
             .await?;
 
@@ -138,12 +138,12 @@ pub trait AuthProvider {
     #[allow(async_fn_in_trait)]
     async fn check_document_permission(
         &self,
-        pg_client: &PgClient,
+        conn: &mut PgConn,
         document_id: Uuid,
         permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Get the document to find its project
-        let document = pg_client.find_document_by_id(document_id).await?;
+        let document = conn.find_document_by_id(document_id).await?;
 
         let Some(document) = document else {
             tracing::warn!(
@@ -165,11 +165,11 @@ pub trait AuthProvider {
         if requires_ownership && !is_document_owner && !self.is_admin() {
             // Non-owners need explicit project-level permissions for destructive operations
             return self
-                .check_project_permission(pg_client, document.project_id, permission)
+                .check_project_permission(conn, document.project_id, permission)
                 .await;
         }
 
-        self.check_project_permission(pg_client, document.project_id, permission)
+        self.check_project_permission(conn, document.project_id, permission)
             .await
     }
 
@@ -252,21 +252,21 @@ pub trait AuthProvider {
     /// # Returns
     ///
     /// Returns [`ProjectMember`] if authorized with member info,
-    /// [`Ok(None)`] if authorized without member info (e.g., global admin),
+    /// `Ok(None)` if authorized without member info (e.g., global admin),
     /// or [`Err`] if access is denied.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if access is denied, or propagates database errors.
+    /// Returns `Forbidden` error if access is denied, or propagates database errors.
     #[allow(async_fn_in_trait)]
     async fn authorize_project(
         &self,
-        pg_client: &PgClient,
+        conn: &mut PgConn,
         project_id: Uuid,
         permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
-            .check_project_permission(pg_client, project_id, permission)
+            .check_project_permission(conn, project_id, permission)
             .await?;
         auth_result.into_result()
     }
@@ -290,16 +290,16 @@ pub trait AuthProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if access is denied, or propagates database errors.
+    /// Returns `Forbidden` error if access is denied, or propagates database errors.
     #[allow(async_fn_in_trait)]
     async fn authorize_document(
         &self,
-        pg_client: &PgClient,
+        conn: &mut PgConn,
         document_id: Uuid,
         permission: Permission,
     ) -> Result<Option<ProjectMember>> {
         let auth_result = self
-            .check_document_permission(pg_client, document_id, permission)
+            .check_document_permission(conn, document_id, permission)
             .await?;
         auth_result.into_result()
     }
@@ -315,7 +315,7 @@ pub trait AuthProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if the user cannot access the target account.
+    /// Returns `Forbidden` error if the user cannot access the target account.
     fn authorize_self(&self, target_account_id: Uuid) -> Result<()> {
         let auth_result = self.check_self_permission(target_account_id)?;
         auth_result.into_result().map(|_| ())
@@ -328,7 +328,7 @@ pub trait AuthProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Forbidden`] if the user lacks global admin privileges.
+    /// Returns `Forbidden` error if the user lacks global admin privileges.
     fn authorize_admin(&self) -> Result<()> {
         let auth_result = self.check_admin_permission()?;
         auth_result.into_result().map(|_| ())

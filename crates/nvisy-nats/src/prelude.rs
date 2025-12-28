@@ -5,18 +5,18 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```rust,ignore
 //! use nvisy_nats::prelude::*;
 //!
 //! # async fn example() -> Result<()> {
-//! let config = NatsConfig::new("nats://localhost:4222");
+//! let config = NatsConfig::new("nats://localhost:4222", "my-token");
 //! let client = NatsClient::connect(config).await?;
 //! # Ok(())
 //! # }
 //! ```
 
 // Client types
-pub use crate::client::{NatsClient, NatsConfig, NatsConnection, NatsCredentials, NatsTlsConfig};
+pub use crate::client::{NatsClient, NatsConfig, NatsConnection};
 // Key-Value store types
 pub use crate::kv::{
     ApiToken, ApiTokenStore, ApiTokenType, CacheStats, CacheStore, KvEntry, KvStore, KvValue,

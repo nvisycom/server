@@ -1,3 +1,8 @@
+//! Validated JSON extractor with automatic validation.
+//!
+//! This module provides [`ValidateJson`], an enhanced JSON extractor that
+//! combines deserialization with automatic validation using the `validator` crate.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -230,13 +235,13 @@ where
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
     ) {
-        axum::Json::<T>::operation_input(ctx, operation);
+        Json::<T>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
     ) -> Vec<(Option<u16>, aide::openapi::Response)> {
-        axum::Json::<T>::inferred_early_responses(ctx, operation)
+        Json::<T>::inferred_early_responses(ctx, operation)
     }
 }

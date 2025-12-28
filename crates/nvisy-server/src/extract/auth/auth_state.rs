@@ -17,7 +17,7 @@ use serde::Deserialize;
 
 use super::{AuthClaims, AuthHeader, TRACING_TARGET_AUTHENTICATION};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::SessionKeys;
+use crate::service::AuthKeys;
 
 /// Authenticated user state with comprehensive database verification.
 ///
@@ -48,10 +48,10 @@ use crate::service::SessionKeys;
 /// # Errors
 ///
 /// Extraction fails with specific error types for:
-/// - [`ErrorKind::MalformedAuthToken`]: Invalid JWT format
-/// - [`ErrorKind::ExpiredAuthToken`]: Token expired
-/// - [`ErrorKind::Unauthorized`]: Invalid credentials or revoked token
-/// - [`ErrorKind::InternalServerError`]: Database or system errors
+/// - `MalformedAuthToken`: Invalid JWT format
+/// - `ExpiredToken`: Token expired
+/// - `Unauthorized`: Invalid credentials or revoked token
+/// - `InternalServerError`: Database or system errors
 ///
 /// # Thread Safety
 ///
@@ -66,8 +66,8 @@ impl<T> AuthState<T> {
     /// # Safety Requirements
     ///
     /// This method should **only** be used when the claims have already undergone
-    /// complete database verification via [`Self::from_unverified_state`].
-    /// Using this with unverified claims bypasses critical security checks.
+    /// complete database verification. Using this with unverified claims bypasses
+    /// critical security checks.
     ///
     /// # Arguments
     ///
@@ -137,11 +137,22 @@ where
             "beginning authentication verification"
         );
 
+        let mut conn = pg_client.get_connection().await.map_err(|db_error| {
+            tracing::error!(
+                target: TRACING_TARGET_AUTHENTICATION,
+                error = %db_error,
+                "failed to acquire database connection for authentication verification"
+            );
+            ErrorKind::InternalServerError
+                .with_message("Authentication verification encountered an error")
+                .with_resource("authentication")
+        })?;
+
         // Step 1: Verify API token exists and is active
-        let api_token = Self::verify_token_validity(&pg_client, &auth_claims).await?;
+        let api_token = Self::verify_token_validity(&mut conn, &auth_claims).await?;
 
         // Step 2: Verify account exists and is in good standing
-        let account = Self::verify_account_status(&pg_client, &auth_claims).await?;
+        let account = Self::verify_account_status(&mut conn, &auth_claims).await?;
 
         // Step 3: Ensure token claims match current account state
         Self::verify_privilege_consistency(&auth_claims, &account)?;
@@ -190,10 +201,10 @@ where
     /// * [`ErrorKind::Unauthorized`]: API token not found or expired
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_token_validity(
-        pg_client: &PgClient,
+        conn: &mut nvisy_postgres::PgConn,
         auth_claims: &AuthClaims<T>,
     ) -> Result<AccountApiToken> {
-        let api_token = pg_client
+        let api_token = conn
             .find_token_by_access_token(auth_claims.token_id)
             .await
             .map_err(|db_error| {
@@ -283,10 +294,10 @@ where
     /// * [`ErrorKind::Unauthorized`]: Account not found, unverified, or suspended
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_account_status(
-        pg_client: &PgClient,
+        conn: &mut nvisy_postgres::PgConn,
         auth_claims: &AuthClaims<T>,
     ) -> Result<Account> {
-        let account = pg_client
+        let account = conn
             .find_account_by_id(auth_claims.account_id)
             .await
             .map_err(|db_error| {
@@ -402,7 +413,7 @@ where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -428,7 +439,7 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 

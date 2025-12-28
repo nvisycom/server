@@ -1,8 +1,8 @@
 //! Document-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    DocumentAnnotationConstraints, DocumentCommentConstraints, DocumentConstraints,
-    DocumentFileConstraints, DocumentVersionConstraints,
+    DocumentAnnotationConstraints, DocumentChunkConstraints, DocumentCommentConstraints,
+    DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -152,11 +152,56 @@ impl From<DocumentCommentConstraints> for Error<'static> {
 
 impl From<DocumentAnnotationConstraints> for Error<'static> {
     fn from(c: DocumentAnnotationConstraints) -> Self {
-        // For now, return a generic error for document annotations
-        // TODO: Add specific error messages for each constraint variant
-        let _ = c;
-        ErrorKind::BadRequest
-            .with_message("Document annotation constraint violation")
-            .with_resource("document_annotation")
+        let error = match c {
+            DocumentAnnotationConstraints::ContentLength => {
+                ErrorKind::BadRequest.with_message("Annotation content length is invalid")
+            }
+            DocumentAnnotationConstraints::TypeFormat => {
+                ErrorKind::BadRequest.with_message("Annotation type format is invalid")
+            }
+            DocumentAnnotationConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Annotation metadata size is invalid")
+            }
+            DocumentAnnotationConstraints::UpdatedAfterCreated
+            | DocumentAnnotationConstraints::DeletedAfterCreated
+            | DocumentAnnotationConstraints::DeletedAfterUpdated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("document_annotation")
+    }
+}
+
+impl From<DocumentChunkConstraints> for Error<'static> {
+    fn from(c: DocumentChunkConstraints) -> Self {
+        let error = match c {
+            DocumentChunkConstraints::ChunkIndexMin => {
+                ErrorKind::BadRequest.with_message("Chunk index must be at least 0")
+            }
+            DocumentChunkConstraints::ContentSha256Length => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            DocumentChunkConstraints::ContentSizeMin => {
+                ErrorKind::BadRequest.with_message("Chunk content size must be at least 0")
+            }
+            DocumentChunkConstraints::TokenCountMin => {
+                ErrorKind::BadRequest.with_message("Token count must be at least 0")
+            }
+            DocumentChunkConstraints::EmbeddingModelFormat => {
+                ErrorKind::BadRequest.with_message("Invalid embedding model format")
+            }
+            DocumentChunkConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Chunk metadata size is invalid")
+            }
+            DocumentChunkConstraints::UpdatedAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            DocumentChunkConstraints::FileChunkUnique => {
+                ErrorKind::Conflict.with_message("Chunk with this index already exists for file")
+            }
+        };
+
+        error.with_resource("document_chunk")
     }
 }

@@ -1,84 +1,117 @@
 //! Embedding service wrapper with observability.
 //!
 //! This module provides a wrapper around embedding implementations that adds
-//! production-ready logging and service naming.
+//! production-ready logging and tracing.
 
+use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use jiff::Timestamp;
 
-use super::{
-    BoxedEmbeddingProvider, EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, Result,
-};
-use crate::types::ServiceHealth;
+use super::{BatchRequest, BatchResponse, EmbeddingProvider, Request, Response, TRACING_TARGET};
+use crate::Result;
+use crate::types::{Context, ServiceHealth, SharedContext};
 
 /// Embedding service wrapper with observability.
 ///
-/// This wrapper adds logging and service naming to any embedding implementation.
-/// The inner service is wrapped in Arc for cheap cloning.
-///
-/// # Type Parameters
-///
-/// * `Req` - The request payload type
-/// * `Resp` - The response payload type
+/// This wrapper adds structured logging to any embedding implementation.
+/// The inner service is wrapped in `Arc` for cheap cloning.
 #[derive(Clone)]
-pub struct EmbeddingService<Req = (), Resp = ()> {
-    inner: Arc<ServiceInner<Req, Resp>>,
+pub struct EmbeddingService {
+    inner: Arc<dyn EmbeddingProvider>,
+    context: SharedContext,
 }
 
-struct ServiceInner<Req, Resp> {
-    embedding: BoxedEmbeddingProvider<Req, Resp>,
-}
-
-impl<Req, Resp> EmbeddingService<Req, Resp>
-where
-    Req: Send + Sync + 'static,
-    Resp: Send + Sync + 'static,
-{
-    /// Create a new embedding service wrapper.
-    ///
-    /// # Parameters
-    ///
-    /// * `embedding` - Embedding implementation
-    pub fn new(embedding: BoxedEmbeddingProvider<Req, Resp>) -> Self {
-        Self {
-            inner: Arc::new(ServiceInner { embedding }),
-        }
+impl fmt::Debug for EmbeddingService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EmbeddingService")
+            .field("context", &self.context)
+            .finish_non_exhaustive()
     }
 }
 
-#[async_trait]
-impl<Req, Resp> EmbeddingProvider<Req, Resp> for EmbeddingService<Req, Resp>
-where
-    Req: Send + Sync + 'static,
-    Resp: Send + Sync + 'static,
-{
-    async fn generate_embedding(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
+impl EmbeddingService {
+    /// Create a new embedding service wrapper.
+    pub fn new<P>(provider: P) -> Self
+    where
+        P: EmbeddingProvider + 'static,
+    {
+        Self {
+            inner: Arc::new(provider),
+            context: SharedContext::new(),
+        }
+    }
+
+    /// Create a new embedding service with a specific context.
+    pub fn with_context<P>(provider: P, context: Context) -> Self
+    where
+        P: EmbeddingProvider + 'static,
+    {
+        Self {
+            inner: Arc::new(provider),
+            context: SharedContext::from_context(context),
+        }
+    }
+
+    /// Create a new embedding service with a shared context.
+    pub fn with_shared_context<P>(provider: P, context: SharedContext) -> Self
+    where
+        P: EmbeddingProvider + 'static,
+    {
+        Self {
+            inner: Arc::new(provider),
+            context,
+        }
+    }
+
+    /// Create from a boxed provider.
+    pub fn from_boxed(provider: Box<dyn EmbeddingProvider>) -> Self {
+        Self {
+            inner: Arc::from(provider),
+            context: SharedContext::new(),
+        }
+    }
+
+    /// Get a reference to the shared context.
+    pub fn context(&self) -> &SharedContext {
+        &self.context
+    }
+
+    /// Replace the context.
+    pub fn set_context(&mut self, context: SharedContext) {
+        self.context = context;
+    }
+
+    /// Generate an embedding for the provided input.
+    pub async fn generate_embedding(&self, request: &Request) -> Result<Response> {
+        let started_at = Timestamp::now();
+
         tracing::debug!(
-            target: super::TRACING_TARGET,
-            input_count = request.inputs.len(),
-            model = %request.model,
+            target: TRACING_TARGET,
+            request_id = %request.request_id,
             "Processing embedding request"
         );
 
-        let start = std::time::Instant::now();
-
-        let result = self.inner.embedding.generate_embedding(request).await;
+        let result = self.inner.generate_embedding(&self.context, request).await;
+        let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
             Ok(response) => {
                 tracing::debug!(
-                    target: super::TRACING_TARGET,
-                    embedding_count = response.embedding_count(),
-                    elapsed = ?start.elapsed(),
+                    target: TRACING_TARGET,
+                    request_id = %request.request_id,
+                    response_id = %response.response_id,
+                    dimensions = response.dimensions(),
+                    elapsed_ms = elapsed.as_millis(),
                     "Embedding generation successful"
                 );
             }
             Err(error) => {
                 tracing::error!(
-                    target: super::TRACING_TARGET,
+                    target: TRACING_TARGET,
+                    request_id = %request.request_id,
                     error = %error,
-                    elapsed = ?start.elapsed(),
+                    elapsed_ms = elapsed.as_millis(),
                     "Embedding generation failed"
                 );
             }
@@ -87,12 +120,47 @@ where
         result
     }
 
-    async fn health_check(&self) -> Result<ServiceHealth> {
-        tracing::trace!(
-            target: super::TRACING_TARGET,
-            "Performing health check"
+    /// Generate embeddings for a batch of inputs.
+    pub async fn generate_embedding_batch(&self, request: &BatchRequest) -> Result<BatchResponse> {
+        let started_at = Timestamp::now();
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            batch_size = request.len(),
+            "Processing batch embedding request"
         );
 
-        self.inner.embedding.health_check().await
+        let result = self
+            .inner
+            .generate_embedding_batch(&self.context, request)
+            .await;
+        let elapsed = Timestamp::now().duration_since(started_at);
+
+        match &result {
+            Ok(response) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    batch_id = %response.batch_id,
+                    count = response.len(),
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch embedding completed"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %error,
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch embedding failed"
+                );
+            }
+        }
+
+        result
+    }
+
+    /// Perform a health check on the embedding service.
+    pub async fn health_check(&self) -> Result<ServiceHealth> {
+        self.inner.health_check().await
     }
 }

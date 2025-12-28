@@ -19,15 +19,32 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
+
+# TLS support: enables HTTPS with rustls for secure connections
 tls = ["axum-server"]
+
+# OpenTelemetry support: enables environment-based log filtering
 otel = ["tracing-subscriber/env-filter"]
-telemetry = ["uuid", "reqwest", "serde_json"]
+
+# Dotenv support: loads environment variables from .env files
+# This allows configuration via .env files in addition to CLI args
+dotenv = ["dep:dotenvy"]
+
+# AI service backends for embeddings, OCRs, and VLMs
+mock = ["nvisy-core/test-utils", "nvisy-core/config"]
+ollama = ["dep:nvisy-ollama"]
 
 [dependencies]
 # Internal crates
-nvisy-nats = { workspace = true, features = [] }
-nvisy-server = { workspace = true, features = [] }
+nvisy-core = { workspace = true }
+nvisy-nats = { workspace = true, features = ["config"] }
+nvisy-postgres = { workspace = true, features = ["config"] }
+nvisy-server = { workspace = true, features = ["config"] }
+
+# AI service backends (optional)
+nvisy-ollama = { workspace = true, features = ["config"], optional = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
@@ -45,12 +62,10 @@ tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = [], optional = true }
 
 # Error handling
 anyhow = { workspace = true, features = ["backtrace"] }
 thiserror = { workspace = true, features = [] }
 
-# Telemetry (optional)
-uuid = { workspace = true, features = ["v4", "serde"], optional = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls"], optional = true }
+# Environment
+dotenvy = { workspace = true, optional = true }

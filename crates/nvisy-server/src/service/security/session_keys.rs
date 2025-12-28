@@ -7,85 +7,55 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[cfg(all(not(test), feature = "config"))]
+use clap::Args;
+#[cfg(test)]
+use clap::Parser;
 use jsonwebtoken::{DecodingKey, EncodingKey};
+use serde::{Deserialize, Serialize};
 
-use crate::service::{Result, Error};
+use crate::service::{Error, Result};
+use crate::utility::tracing_targets::SESSION_KEYS as TRACING_TARGET;
 
-/// Logging target for authentication key operations.
-const TRACING_TARGET_AUTH_KEYS: &str = "nvisy_server::service::auth_keys";
+/// Default values for configuration options.
+mod defaults {
+    use std::path::PathBuf;
 
-/// Default name for the decoding key file.
-const DECODING_KEY_FILE: &str = "public.pem";
-
-/// Default name for the encoding key file.
-const ENCODING_KEY_FILE: &str = "private.pem";
-
-/// Configuration for authentication secret keys.
-#[derive(Debug, Clone)]
-pub struct AuthKeysConfig {
-    /// Path to the PEM file containing the decoding key.
-    pub decoding_key_path: PathBuf,
-    /// Path to the PEM file containing the encoding key.
-    pub encoding_key_path: PathBuf,
-}
-
-impl AuthKeysConfig {
-    /// Creates a new configuration with the specified key file paths.
-    pub fn new(decoding_key_path: impl AsRef<Path>, encoding_key_path: impl AsRef<Path>) -> Self {
-        Self {
-            decoding_key_path: decoding_key_path.as_ref().to_path_buf(),
-            encoding_key_path: encoding_key_path.as_ref().to_path_buf(),
-        }
+    /// Default path to JWT decoding key.
+    pub fn decoding_key() -> PathBuf {
+        "./public.pem".into()
     }
 
-    /// Creates a new configuration using a base directory and default file names.
-    pub fn from_directory(base_dir: impl AsRef<Path>) -> Self {
-        let base_dir = base_dir.as_ref();
-        Self {
-            decoding_key_path: base_dir.join(DECODING_KEY_FILE),
-            encoding_key_path: base_dir.join(ENCODING_KEY_FILE),
-        }
-    }
-
-    /// Validates that both key files exist and are readable.
-    pub fn validate(&self) -> Result<()> {
-        if !self.decoding_key_path.exists() {
-            return Err(Error::config("Decoding key file does not exist"));
-        }
-
-        if !self.encoding_key_path.exists() {
-            return Err(Error::config("Encoding key file does not exist"));
-        }
-
-        // Check if files are readable
-        if !self.decoding_key_path.is_file() {
-            return Err(Error::config("Decoding key path is not a file"));
-        }
-
-        if !self.encoding_key_path.is_file() {
-            return Err(Error::config("Encoding key path is not a file"));
-        }
-
-        Ok(())
-    }
-
-    /// Returns the decoding key path.
-    #[inline]
-    pub fn decoding_key_path(&self) -> &Path {
-        &self.decoding_key_path
-    }
-
-    /// Returns the encoding key path.
-    #[inline]
-    pub fn encoding_key_path(&self) -> &Path {
-        &self.encoding_key_path
+    /// Default path to JWT encoding key.
+    pub fn encoding_key() -> PathBuf {
+        "./private.pem".into()
     }
 }
 
-impl Default for AuthKeysConfig {
-    fn default() -> Self {
-        Self::from_directory(".")
-    }
+/// Authentication key file paths configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Parser))]
+#[cfg_attr(all(not(test), feature = "config"), derive(Args))]
+pub struct AuthConfig {
+    /// File path to the JWT decoding (public) key used for sessions.
+    #[cfg_attr(
+        any(test, feature = "config"),
+        arg(long, env = "AUTH_PUBLIC_PEM_FILEPATH", default_value = "./public.pem")
+    )]
+    #[serde(default = "defaults::decoding_key")]
+    pub decoding_key: PathBuf,
+
+    /// File path to the JWT encoding (private) key used for sessions.
+    #[cfg_attr(
+        any(test, feature = "config"),
+        arg(
+            long,
+            env = "AUTH_PRIVATE_PEM_FILEPATH",
+            default_value = "./private.pem"
+        )
+    )]
+    #[serde(default = "defaults::encoding_key")]
+    pub encoding_key: PathBuf,
 }
 
 /// Secret keys used for JWT session authentication.
@@ -93,7 +63,7 @@ impl Default for AuthKeysConfig {
 /// This struct provides thread-safe access to cryptographic keys used for
 /// encoding and decoding JWT tokens in session management.
 #[derive(Clone)]
-pub struct SessionKeys {
+pub struct AuthKeys {
     inner: Arc<AuthKeysInner>,
 }
 
@@ -101,10 +71,10 @@ pub struct SessionKeys {
 struct AuthKeysInner {
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
-    config: AuthKeysConfig,
+    config: AuthConfig,
 }
 
-impl SessionKeys {
+impl AuthKeys {
     /// Creates a new `AuthKeys` instance from the provided configuration.
     ///
     /// # Arguments
@@ -114,45 +84,32 @@ impl SessionKeys {
     /// # Returns
     ///
     /// Returns a result containing the initialized keys or an error.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use nvisy_server::service::auth::{AuthKeys, AuthSecretKeysConfig};
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> anyhow::Result<()> {
-    ///     let config = AuthSecretKeysConfig::new("decode.pem", "encode.pem");
-    ///     let keys = AuthKeys::from_config(config).await?;
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn from_config(config: AuthKeysConfig) -> Result<Self> {
+    pub async fn from_config(config: &AuthConfig) -> Result<Self> {
         // Validate configuration before attempting to load keys
-        config.validate()?;
+        Self::validate_config(config)?;
 
-        tracing::info!(
-            target: TRACING_TARGET_AUTH_KEYS,
-            decoding_key_path = %config.decoding_key_path().display(),
-            encoding_key_path = %config.encoding_key_path().display(),
-            "loading authentication secret keys",
+        tracing::debug!(
+            target: TRACING_TARGET,
+            decoding_key_path = %config.decoding_key.display(),
+            encoding_key_path = %config.encoding_key.display(),
+            "Loading authentication secret keys",
         );
 
         // Load and parse decoding key
-        let decoding_key = Self::load_decoding_key(&config).await?;
+        let decoding_key = Self::load_decoding_key(&config.decoding_key).await?;
 
         // Load and parse encoding key
-        let encoding_key = Self::load_encoding_key(&config).await?;
+        let encoding_key = Self::load_encoding_key(&config.encoding_key).await?;
 
         tracing::info!(
-            target: TRACING_TARGET_AUTH_KEYS,
-            "authentication secret keys loaded successfully",
+            target: TRACING_TARGET,
+            "Authentication keys loaded",
         );
 
         let inner = Arc::new(AuthKeysInner {
             decoding_key,
             encoding_key,
-            config,
+            config: config.clone(),
         });
 
         Ok(Self { inner })
@@ -174,8 +131,11 @@ impl SessionKeys {
         decoding_pem_key: impl AsRef<Path>,
         encoding_pem_key: impl AsRef<Path>,
     ) -> Result<Self> {
-        let config = AuthKeysConfig::new(decoding_pem_key, encoding_pem_key);
-        Self::from_config(config).await
+        let config = AuthConfig {
+            decoding_key: decoding_pem_key.as_ref().to_path_buf(),
+            encoding_key: encoding_pem_key.as_ref().to_path_buf(),
+        };
+        Self::from_config(&config).await
     }
 
     /// Returns a reference to the decoding key.
@@ -196,7 +156,7 @@ impl SessionKeys {
 
     /// Returns a reference to the configuration used to create this instance.
     #[inline]
-    pub fn config(&self) -> &AuthKeysConfig {
+    pub fn config(&self) -> &AuthConfig {
         &self.inner.config
     }
 
@@ -230,7 +190,7 @@ impl SessionKeys {
         let header = Header::new(Algorithm::EdDSA);
         let token = encode(&header, &claims, self.encoding_key()).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 error = %e,
                 "key validation failed during encoding",
             );
@@ -244,7 +204,7 @@ impl SessionKeys {
 
         decode::<TestClaims>(&token, self.decoding_key(), &validation).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 error = %e,
                 "key validation failed during decoding",
             );
@@ -252,26 +212,45 @@ impl SessionKeys {
         })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             "key validation successful",
         );
 
         Ok(())
     }
 
-    /// Loads and parses the decoding key from the configured path.
-    async fn load_decoding_key(config: &AuthKeysConfig) -> Result<DecodingKey> {
-        let path = config.decoding_key_path();
+    /// Validates that both key files exist and are readable.
+    fn validate_config(config: &AuthConfig) -> Result<()> {
+        if !config.decoding_key.exists() {
+            return Err(Error::config("Decoding key file does not exist"));
+        }
 
+        if !config.encoding_key.exists() {
+            return Err(Error::config("Encoding key file does not exist"));
+        }
+
+        if !config.decoding_key.is_file() {
+            return Err(Error::config("Decoding key path is not a file"));
+        }
+
+        if !config.encoding_key.is_file() {
+            return Err(Error::config("Encoding key path is not a file"));
+        }
+
+        Ok(())
+    }
+
+    /// Loads and parses the decoding key from the configured path.
+    async fn load_decoding_key(path: &Path) -> Result<DecodingKey> {
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             "loading decoding key from file",
         );
 
         let pem_data = tokio::fs::read(path).await.map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to read decoding key file",
@@ -281,7 +260,7 @@ impl SessionKeys {
 
         let key = DecodingKey::from_ed_pem(&pem_data).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to parse decoding key PEM data",
@@ -290,7 +269,7 @@ impl SessionKeys {
         })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             key_size_bytes = pem_data.len(),
             "decoding key loaded successfully",
@@ -300,18 +279,16 @@ impl SessionKeys {
     }
 
     /// Loads and parses the encoding key from the configured path.
-    async fn load_encoding_key(config: &AuthKeysConfig) -> Result<EncodingKey> {
-        let path = config.encoding_key_path();
-
+    async fn load_encoding_key(path: &Path) -> Result<EncodingKey> {
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             "loading encoding key from file",
         );
 
         let pem_data = tokio::fs::read(path).await.map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to read encoding key file",
@@ -322,7 +299,7 @@ impl SessionKeys {
 
         let key = EncodingKey::from_ed_pem(&pem_data).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTH_KEYS,
+                target: TRACING_TARGET,
                 path = %path.display(),
                 error = %e,
                 "failed to parse encoding key PEM data",
@@ -332,7 +309,7 @@ impl SessionKeys {
         })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTH_KEYS,
+            target: TRACING_TARGET,
             path = %path.display(),
             key_size_bytes = pem_data.len(),
             "encoding key loaded successfully",
@@ -342,7 +319,7 @@ impl SessionKeys {
     }
 }
 
-impl fmt::Debug for SessionKeys {
+impl fmt::Debug for AuthKeys {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AuthKeys")
             .field("config", &self.inner.config)
@@ -359,11 +336,11 @@ mod tests {
     use super::*;
 
     const TEST_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIJ+DYvh6SEqVTm50DFtMDoQikTmiCqirVv9mWG9qfSnF
+MC4CAQAwBQYDK2VwBCIEIDQtFc/jcCECuwR6cQqh9Xy3y8pcryWDn/HVN5fPSwm+
 -----END PRIVATE KEY-----"#;
 
     const TEST_PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
+MCowBQYDK2VwAyEAMveirBCUUpVI8TCv4W5jAZqtkEzfA7eIvozsugFbvDU=
 -----END PUBLIC KEY-----"#;
 
     #[tokio::test]
@@ -375,8 +352,9 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
         fs::write(&priv_path, TEST_PRIVATE_KEY).unwrap();
 
-        let keys = SessionKeys::new(&pub_path, &priv_path).await.unwrap();
-        assert!(keys.validate_keys().is_ok());
+        let keys = AuthKeys::new(&pub_path, &priv_path).await.unwrap();
+        let result = keys.validate_keys();
+        assert!(result.is_ok(), "validate_keys failed: {:?}", result.err());
     }
 
     #[tokio::test]
@@ -388,7 +366,7 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         fs::write(&invalid_path, "invalid pem").unwrap();
         fs::write(&priv_path, TEST_PRIVATE_KEY).unwrap();
 
-        assert!(SessionKeys::new(&invalid_path, &priv_path).await.is_err());
+        assert!(AuthKeys::new(&invalid_path, &priv_path).await.is_err());
     }
 
     #[tokio::test]
@@ -397,16 +375,24 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         let pub_path = temp_dir.path().join("public.pem");
         let wrong_priv_path = temp_dir.path().join("wrong_private.pem");
 
-        fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
-        fs::write(
-            &wrong_priv_path,
-            r#"-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIFhQrCxTwEJ4aYZp4QWc5jDjQw3gGkwLG6D8FP+CvKgA
------END PRIVATE KEY-----"#,
-        )
-        .unwrap();
+        // Different key pair
+        let wrong_private_key = r#"-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIPBLfUxGwCNcZ+6kBdNp8e7AiJMpFJ6kXBDDZsREj6Dk
+-----END PRIVATE KEY-----"#;
 
-        let keys = SessionKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
+        fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
+        fs::write(&wrong_priv_path, wrong_private_key).unwrap();
+
+        let keys = AuthKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
         assert!(keys.validate_keys().is_err());
+    }
+
+    #[tokio::test]
+    async fn reject_missing_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let pub_path = temp_dir.path().join("nonexistent_public.pem");
+        let priv_path = temp_dir.path().join("nonexistent_private.pem");
+
+        assert!(AuthKeys::new(&pub_path, &priv_path).await.is_err());
     }
 }

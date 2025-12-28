@@ -1,7 +1,7 @@
 //! Application state and dependency injection.
 
-mod archive;
 mod cache;
+mod compression;
 mod config;
 mod security;
 
@@ -9,12 +9,10 @@ use nvisy_core::AiServices;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 
-pub use crate::service::archive::{ArchiveFormat, ArchiveService};
 pub use crate::service::cache::HealthCache;
+pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
-pub use crate::service::security::{
-    AuthKeysConfig, PasswordHasher, PasswordStrength, RateLimitKey, RateLimiter, SessionKeys,
-};
+pub use crate::service::security::{AuthConfig, AuthKeys, PasswordHasher, PasswordStrength};
 // Re-export error types from crate root for convenience
 pub use crate::{Error, Result};
 
@@ -34,7 +32,7 @@ pub struct ServiceState {
     // Internal services:
     pub auth_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
-    pub auth_keys: SessionKeys,
+    pub auth_keys: AuthKeys,
     pub health_cache: HealthCache,
     pub archive: ArchiveService,
 }
@@ -43,10 +41,7 @@ impl ServiceState {
     /// Initializes application state from configuration.
     ///
     /// Connects to all external services and loads required resources.
-    pub async fn from_config(
-        service_config: ServiceConfig,
-        ai_services: AiServices,
-    ) -> Result<Self> {
+    pub async fn new(service_config: ServiceConfig, ai_services: AiServices) -> Result<Self> {
         let service_state = Self {
             pg_client: service_config.connect_postgres().await?,
             nats_client: service_config.connect_nats().await?,
@@ -81,6 +76,6 @@ impl_di!(ai_services: AiServices);
 // Internal services:
 impl_di!(auth_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
-impl_di!(auth_keys: SessionKeys);
+impl_di!(auth_keys: AuthKeys);
 impl_di!(health_cache: HealthCache);
 impl_di!(archive: ArchiveService);

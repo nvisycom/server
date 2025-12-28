@@ -1,6 +1,10 @@
 -- This migration provides core utility functions for database management and common operations
 -- Foundation functions required by all subsequent migrations
 
+-- Enable pgvector extension for vector similarity search
+-- Required for embedding storage and semantic search capabilities
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Timestamp management function
 CREATE OR REPLACE FUNCTION trigger_updated_at()
 RETURNS TRIGGER

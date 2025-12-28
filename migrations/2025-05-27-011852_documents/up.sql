@@ -5,9 +5,7 @@ CREATE TYPE DOCUMENT_STATUS AS ENUM (
     'draft',        -- Document is being created/edited
     'processing',   -- Document is being processed
     'ready',        -- Document is ready for use
-    'archived',     -- Document is archived but accessible
-    'locked',       -- Document is locked for editing
-    'error'         -- Document processing failed
+    'archived'      -- Document is archived but accessible
 );
 
 COMMENT ON TYPE DOCUMENT_STATUS IS
@@ -93,8 +91,7 @@ CREATE TYPE PROCESSING_STATUS AS ENUM (
     'completed',    -- Processing completed successfully
     'failed',       -- Processing failed
     'canceled',     -- Processing was canceled
-    'skipped',      -- Processing was skipped
-    'retry'         -- Processing is queued for retry
+    'skipped'       -- Processing was skipped
 );
 
 COMMENT ON TYPE PROCESSING_STATUS IS
@@ -102,10 +99,10 @@ COMMENT ON TYPE PROCESSING_STATUS IS
 
 -- Create processing requirements enum
 CREATE TYPE REQUIRE_MODE AS ENUM (
-    'text',         -- Plain text content ready for analysis
-    'ocr',          -- Requires optical character recognition
-    'transcribe',   -- Requires audio/video transcription
-    'mixed'         -- May require multiple processing modes
+    'none',         -- No special processing required
+    'optical',      -- Requires OCR to extract text from images
+    'language',     -- Requires VLM for advanced content understanding
+    'both'          -- Requires both OCR and VLM processing
 );
 
 COMMENT ON TYPE REQUIRE_MODE IS
@@ -156,7 +153,7 @@ CREATE TABLE document_files (
     CONSTRAINT document_files_tags_count_max CHECK (array_length(tags, 1) IS NULL OR array_length(tags, 1) <= 32),
 
     -- Processing configuration
-    require_mode            REQUIRE_MODE     NOT NULL DEFAULT 'text',
+    require_mode            REQUIRE_MODE     NOT NULL DEFAULT 'none',
     processing_priority     INTEGER          NOT NULL DEFAULT 5,
     processing_status       PROCESSING_STATUS NOT NULL DEFAULT 'pending',
     virus_scan_status       VIRUS_SCAN_STATUS NOT NULL DEFAULT 'pending',
@@ -226,7 +223,7 @@ CREATE INDEX document_files_document_status_idx
 
 CREATE INDEX document_files_processing_queue_idx
     ON document_files (processing_status, processing_priority DESC, created_at ASC)
-    WHERE processing_status IN ('pending', 'retry') AND deleted_at IS NULL;
+    WHERE processing_status = 'pending' AND deleted_at IS NULL;
 
 CREATE INDEX document_files_hash_dedup_idx
     ON document_files (file_hash_sha256, file_size_bytes)
@@ -275,15 +272,89 @@ COMMENT ON COLUMN document_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN document_files.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN document_files.deleted_at IS 'Soft deletion timestamp';
 
+-- Create document chunks table - Text chunks with vector embeddings for semantic search
+CREATE TABLE document_chunks (
+    -- Primary identifiers
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    file_id             UUID             NOT NULL REFERENCES document_files (id) ON DELETE CASCADE,
+
+    -- Chunk position and content info
+    chunk_index         INTEGER          NOT NULL DEFAULT 0,
+    content_sha256      BYTEA            NOT NULL,
+    content_size        INTEGER          NOT NULL DEFAULT 0,
+    token_count         INTEGER          NOT NULL DEFAULT 0,
+
+    CONSTRAINT document_chunks_chunk_index_min CHECK (chunk_index >= 0),
+    CONSTRAINT document_chunks_content_sha256_length CHECK (octet_length(content_sha256) = 32),
+    CONSTRAINT document_chunks_content_size_min CHECK (content_size >= 0),
+    CONSTRAINT document_chunks_token_count_min CHECK (token_count >= 0),
+
+    -- Vector embedding (1536 dimensions for OpenAI ada-002, adjust as needed)
+    embedding           VECTOR(1536)     DEFAULT NULL,
+
+    -- Embedding metadata
+    embedding_model     TEXT             DEFAULT NULL,
+    embedded_at         TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT document_chunks_embedding_model_format CHECK (embedding_model IS NULL OR embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
+
+    -- Chunk metadata (positions, page numbers, etc.)
+    metadata            JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT document_chunks_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+
+    -- Lifecycle timestamps
+    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+
+    CONSTRAINT document_chunks_updated_after_created CHECK (updated_at >= created_at),
+
+    -- Unique constraint on file + chunk index
+    CONSTRAINT document_chunks_file_chunk_unique UNIQUE (file_id, chunk_index)
+);
+
+-- Set up automatic updated_at trigger
+SELECT setup_updated_at('document_chunks');
+
+-- Create indexes for document chunks
+CREATE INDEX document_chunks_file_idx
+    ON document_chunks (file_id, chunk_index ASC);
+
+CREATE INDEX document_chunks_embedded_idx
+    ON document_chunks (file_id)
+    WHERE embedding IS NOT NULL;
+
+-- Create HNSW index for vector similarity search (L2 distance)
+CREATE INDEX document_chunks_embedding_idx
+    ON document_chunks USING hnsw (embedding vector_cosine_ops)
+    WHERE embedding IS NOT NULL;
+
+-- Add table and column comments
+COMMENT ON TABLE document_chunks IS
+    'Text chunks extracted from document files with vector embeddings for semantic search.';
+
+COMMENT ON COLUMN document_chunks.id IS 'Unique chunk identifier';
+COMMENT ON COLUMN document_chunks.file_id IS 'Parent document file reference';
+COMMENT ON COLUMN document_chunks.chunk_index IS 'Sequential index of chunk within file (0-based)';
+COMMENT ON COLUMN document_chunks.content_sha256 IS 'SHA-256 hash of chunk content';
+COMMENT ON COLUMN document_chunks.content_size IS 'Size of chunk content in bytes';
+COMMENT ON COLUMN document_chunks.token_count IS 'Approximate token count for the chunk';
+COMMENT ON COLUMN document_chunks.embedding IS 'Vector embedding (1536 dimensions)';
+COMMENT ON COLUMN document_chunks.embedding_model IS 'Model used to generate the embedding';
+COMMENT ON COLUMN document_chunks.embedded_at IS 'Timestamp when embedding was generated';
+COMMENT ON COLUMN document_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
+COMMENT ON COLUMN document_chunks.created_at IS 'Chunk creation timestamp';
+COMMENT ON COLUMN document_chunks.updated_at IS 'Last modification timestamp';
+
 -- Create document comments table - User discussions and annotations
 CREATE TABLE document_comments (
     -- Primary identifiers
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References (exactly one target must be set)
-    document_id         UUID             DEFAULT NULL REFERENCES documents (id) ON DELETE CASCADE,
-    document_file_id    UUID             DEFAULT NULL REFERENCES document_files (id) ON DELETE CASCADE,
-
+    -- References
+    file_id             UUID             NOT NULL REFERENCES document_files (id) ON DELETE CASCADE,
     account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Thread references
@@ -294,10 +365,6 @@ CREATE TABLE document_comments (
     content             TEXT             NOT NULL,
 
     CONSTRAINT document_comments_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
-    CONSTRAINT document_comments_single_target CHECK (
-        (document_id IS NOT NULL)::INTEGER +
-        (document_file_id IS NOT NULL)::INTEGER = 1
-    ),
 
     -- Metadata
     metadata            JSONB            NOT NULL DEFAULT '{}',
@@ -318,13 +385,9 @@ CREATE TABLE document_comments (
 SELECT setup_updated_at('document_comments');
 
 -- Create indexes for document comments
-CREATE INDEX document_comments_document_idx
-    ON document_comments (document_id, created_at DESC)
-    WHERE document_id IS NOT NULL AND deleted_at IS NULL;
-
 CREATE INDEX document_comments_file_idx
-    ON document_comments (document_file_id, created_at DESC)
-    WHERE document_file_id IS NOT NULL AND deleted_at IS NULL;
+    ON document_comments (file_id, created_at DESC)
+    WHERE deleted_at IS NULL;
 
 CREATE INDEX document_comments_account_idx
     ON document_comments (account_id, created_at DESC)
@@ -344,11 +407,10 @@ CREATE INDEX document_comments_metadata_idx
 
 -- Add table and column comments
 COMMENT ON TABLE document_comments IS
-    'User comments and discussions about documents and files, supporting threaded conversations and @mentions.';
+    'User comments and discussions on files, supporting threaded conversations and @mentions.';
 
 COMMENT ON COLUMN document_comments.id IS 'Unique comment identifier';
-COMMENT ON COLUMN document_comments.document_id IS 'Parent document reference (mutually exclusive with file)';
-COMMENT ON COLUMN document_comments.document_file_id IS 'Parent document file reference (mutually exclusive with document)';
+COMMENT ON COLUMN document_comments.file_id IS 'Parent file reference';
 COMMENT ON COLUMN document_comments.account_id IS 'Comment author reference';
 COMMENT ON COLUMN document_comments.parent_comment_id IS 'Parent comment for threaded replies (NULL for top-level)';
 COMMENT ON COLUMN document_comments.reply_to_account_id IS 'Account being replied to (@mention)';
@@ -453,7 +515,7 @@ SELECT
     EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - df.created_at)) AS queue_time_seconds
 FROM document_files df
     JOIN documents d ON df.document_id = d.id
-WHERE df.processing_status IN ('pending', 'retry', 'processing')
+WHERE df.processing_status IN ('pending', 'processing')
     AND df.deleted_at IS NULL
     AND d.deleted_at IS NULL
 ORDER BY df.processing_priority DESC, df.created_at ASC;

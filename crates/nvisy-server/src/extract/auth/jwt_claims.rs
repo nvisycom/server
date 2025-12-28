@@ -1,3 +1,9 @@
+//! JWT claims structure and token encoding/decoding.
+//!
+//! This module provides [`AuthClaims`], the core JWT claims structure used for
+//! authentication tokens. It handles token creation, validation, encoding, and
+//! decoding with comprehensive security checks.
+
 use std::borrow::Cow;
 
 use axum_extra::TypedHeader;
@@ -14,7 +20,7 @@ use crate::handler::{ErrorKind, Result};
 
 /// JWT claims for authentication tokens.
 ///
-/// This structure contains both RFC 7519 standard JWT claims and nvisy-specific claims.
+/// This structure contains both RFC 7519 standard JWT claims and service-specific claims.
 /// All timestamps use RFC 3339 format for consistency and interoperability.
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -1,194 +1,72 @@
 //! Request types for OCR operations.
 //!
-//! The `Request<Req>` type is a generic wrapper that allows OCR implementations
-//! to define their own request payload types while maintaining a consistent
-//! interface for common metadata like request IDs and options.
+//! This module provides `Request` for single-document OCR operations
+//! and `BatchRequest` for processing multiple documents in one call.
+
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Response;
 use crate::types::Document;
 
-/// Generic request for OCR operations.
-///
-/// This wrapper type provides common metadata and configuration while allowing
-/// implementations to define their own specific request payload type.
-///
-/// # Type Parameters
-///
-/// * `Req` - The implementation-specific request payload type
-///
-/// # Example
-///
-/// ```rust
-/// #[derive(Debug, Clone)]
-/// struct MyOcrRequest {
-///     image_data: Vec<u8>,
-///     mime_type: String,
-/// }
-///
-/// let request = Request::new(MyOcrRequest {
-///     image_data: image_bytes,
-///     mime_type: "image/jpeg".to_string(),
-/// });
-/// ```
+/// Request for a single OCR operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Request<Req> {
+pub struct Request {
     /// Unique identifier for this request.
     pub request_id: Uuid,
-    /// Implementation-specific request payload.
-    pub payload: Req,
-    /// Processing options.
-    pub options: RequestOptions,
-}
-
-/// Processing options for OCR requests.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestOptions {
-    /// Whether to preserve layout information.
+    /// Account identifier associated with this request.
+    pub account_id: Option<Uuid>,
+    /// The document to process for text extraction.
+    pub document: Document,
+    /// Optional custom prompt for OCR processing.
+    pub prompt: Option<String>,
+    /// Language hint for OCR processing (ISO 639-1 code).
+    pub language: Option<String>,
+    /// Custom tags for categorization and filtering.
+    pub tags: HashSet<String>,
+    /// Whether to preserve layout information in the output.
     pub preserve_layout: bool,
     /// Minimum confidence threshold for text extraction.
     pub confidence_threshold: Option<f32>,
-    /// DPI setting for image processing.
-    pub dpi: Option<u32>,
 }
 
-impl Default for RequestOptions {
-    fn default() -> Self {
+impl Request {
+    /// Create a new OCR request with the given document.
+    pub fn new(document: Document) -> Self {
         Self {
+            request_id: Uuid::now_v7(),
+            account_id: None,
+            document,
+            prompt: None,
+            language: None,
+            tags: HashSet::new(),
             preserve_layout: true,
-            confidence_threshold: Some(0.5),
-            dpi: Some(300),
+            confidence_threshold: None,
         }
     }
-}
 
-impl<Req> Request<Req> {
-    /// Create a new OCR request with the given payload.
-    pub fn new(payload: Req) -> Self {
-        Self {
-            request_id: Uuid::new_v4(),
-            payload,
-            options: RequestOptions::default(),
-        }
+    /// Create a new OCR request from a document (alias for `new`).
+    pub fn from_document(document: Document) -> Self {
+        Self::new(document)
     }
 
     /// Create a new OCR request with a specific request ID.
-    pub fn with_request_id(request_id: Uuid, payload: Req) -> Self {
-        Self {
-            request_id,
-            payload,
-            options: RequestOptions::default(),
-        }
-    }
-
-    /// Create a new request with custom options.
-    pub fn with_options(payload: Req, options: RequestOptions) -> Self {
-        Self {
-            request_id: Uuid::new_v4(),
-            payload,
-            options,
-        }
-    }
-
-    /// Set whether to preserve layout.
-    pub fn with_layout_preservation(mut self, preserve_layout: bool) -> Self {
-        self.options.preserve_layout = preserve_layout;
+    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
+        self.request_id = request_id;
         self
     }
 
-    /// Set confidence threshold.
-    pub fn with_confidence_threshold(mut self, threshold: f32) -> Self {
-        self.options.confidence_threshold = Some(threshold);
+    /// Set the account ID for this request.
+    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
+        self.account_id = Some(account_id);
         self
     }
 
-    /// Set DPI for processing.
-    pub fn with_dpi(mut self, dpi: u32) -> Self {
-        self.options.dpi = Some(dpi);
-        self
-    }
-
-    /// Validate the request parameters.
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(threshold) = self.options.confidence_threshold {
-            if !(0.0..=1.0).contains(&threshold) {
-                return Err("Confidence threshold must be between 0.0 and 1.0".to_string());
-            }
-        }
-
-        if let Some(dpi) = self.options.dpi {
-            if dpi < 50 || dpi > 1200 {
-                return Err("DPI must be between 50 and 1200".to_string());
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Standard OCR request using Document input.
-///
-/// This is a convenience type for OCR operations that work directly with Document inputs,
-/// providing a standard interface while maintaining compatibility with the generic Request type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentOcrRequest {
-    /// The document to process.
-    pub document: Document,
-    /// Optional region of interest within the document.
-    pub region: Option<BoundingBox>,
-    /// Language hint for OCR processing (ISO 639-1 code).
-    pub language: Option<String>,
-}
-
-/// Bounding box for specifying regions within images.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct BoundingBox {
-    /// X coordinate of the top-left corner.
-    pub x: f32,
-    /// Y coordinate of the top-left corner.
-    pub y: f32,
-    /// Width of the bounding box.
-    pub width: f32,
-    /// Height of the bounding box.
-    pub height: f32,
-}
-
-impl BoundingBox {
-    /// Create a new bounding box.
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    /// Check if this bounding box is valid (non-negative dimensions).
-    pub fn is_valid(&self) -> bool {
-        self.width >= 0.0 && self.height >= 0.0
-    }
-
-    /// Get the area of this bounding box.
-    pub fn area(&self) -> f32 {
-        self.width * self.height
-    }
-}
-
-impl DocumentOcrRequest {
-    /// Create a new document OCR request.
-    pub fn new(document: Document) -> Self {
-        Self {
-            document,
-            region: None,
-            language: None,
-        }
-    }
-
-    /// Set the region of interest for processing.
-    pub fn with_region(mut self, region: BoundingBox) -> Self {
-        self.region = Some(region);
+    /// Set a custom prompt for OCR processing.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = Some(prompt.into());
         self
     }
 
@@ -198,49 +76,218 @@ impl DocumentOcrRequest {
         self
     }
 
-    /// Validate the request.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.document.is_empty() {
-            return Err("Document cannot be empty".to_string());
-        }
-
-        // Validate content type
-        if let Some(content_type) = self.document.content_type() {
-            if !content_type.starts_with("image/") && content_type != "application/pdf" {
-                return Err("Document content type must be an image or PDF".to_string());
-            }
-        }
-
-        // Validate region if specified
-        if let Some(region) = &self.region {
-            if !region.is_valid() {
-                return Err("Invalid bounding box region".to_string());
-            }
-        }
-
-        // Validate language code if specified
-        if let Some(lang) = &self.language {
-            if lang.len() != 2 {
-                return Err("Language must be a 2-character ISO 639-1 code".to_string());
-            }
-        }
-
-        Ok(())
+    /// Add a tag to this request.
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.insert(tag.into());
+        self
     }
 
-    /// Check if this request has a specific region of interest.
-    pub fn has_region(&self) -> bool {
-        self.region.is_some()
+    /// Set tags for this request.
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(|t| t.into()).collect();
+        self
     }
 
-    /// Get the content type of the document.
-    pub fn content_type(&self) -> Option<String> {
-        self.document.content_type().map(|s| s.to_string())
+    /// Set whether to preserve layout information.
+    pub fn with_preserve_layout(mut self, preserve: bool) -> Self {
+        self.preserve_layout = preserve;
+        self
+    }
+
+    /// Set the confidence threshold for text extraction.
+    pub fn with_confidence_threshold(mut self, threshold: f32) -> Self {
+        self.confidence_threshold = Some(threshold);
+        self
+    }
+
+    /// Check if the request has a specific tag.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.contains(tag)
+    }
+
+    /// Get the document's content type.
+    pub fn content_type(&self) -> Option<&str> {
+        self.document.content_type()
     }
 
     /// Get the document size in bytes.
     pub fn document_size(&self) -> usize {
         self.document.size()
+    }
+
+    /// Check if the document is empty.
+    pub fn is_empty(&self) -> bool {
+        self.document.is_empty()
+    }
+
+    /// Get the document bytes.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.document.as_bytes()
+    }
+
+    /// Create a response for this request with the given text.
+    pub fn reply(&self, text: impl Into<String>) -> Response {
+        Response::new(self.request_id, text)
+    }
+}
+
+/// Batch request for multiple OCR operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRequest {
+    /// Unique identifier for this batch request.
+    pub batch_id: Uuid,
+    /// Account identifier associated with this batch.
+    pub account_id: Option<Uuid>,
+    /// The documents to process.
+    pub documents: Vec<Document>,
+    /// Optional custom prompt for OCR processing.
+    pub prompt: Option<String>,
+    /// Language hint for OCR processing (ISO 639-1 code).
+    pub language: Option<String>,
+    /// Custom tags for categorization and filtering.
+    pub tags: HashSet<String>,
+    /// Whether to preserve layout information.
+    pub preserve_layout: bool,
+    /// Minimum confidence threshold for text extraction.
+    pub confidence_threshold: Option<f32>,
+}
+
+impl BatchRequest {
+    /// Create a new batch request.
+    pub fn new() -> Self {
+        Self {
+            batch_id: Uuid::now_v7(),
+            account_id: None,
+            documents: Vec::new(),
+            prompt: None,
+            language: None,
+            tags: HashSet::new(),
+            preserve_layout: true,
+            confidence_threshold: None,
+        }
+    }
+
+    /// Create a new batch request from documents.
+    pub fn from_documents(documents: Vec<Document>) -> Self {
+        Self {
+            batch_id: Uuid::now_v7(),
+            account_id: None,
+            documents,
+            prompt: None,
+            language: None,
+            tags: HashSet::new(),
+            preserve_layout: true,
+            confidence_threshold: None,
+        }
+    }
+
+    /// Set the account ID for this batch.
+    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
+        self.account_id = Some(account_id);
+        self
+    }
+
+    /// Add a document to the batch.
+    pub fn with_document(mut self, document: Document) -> Self {
+        self.documents.push(document);
+        self
+    }
+
+    /// Set a custom prompt for OCR processing.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set the language hint for OCR processing.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(language.into());
+        self
+    }
+
+    /// Add a tag to this batch request.
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.insert(tag.into());
+        self
+    }
+
+    /// Set tags for this batch request.
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(|t| t.into()).collect();
+        self
+    }
+
+    /// Set whether to preserve layout information.
+    pub fn with_preserve_layout(mut self, preserve: bool) -> Self {
+        self.preserve_layout = preserve;
+        self
+    }
+
+    /// Set the confidence threshold for text extraction.
+    pub fn with_confidence_threshold(mut self, threshold: f32) -> Self {
+        self.confidence_threshold = Some(threshold);
+        self
+    }
+
+    /// Check if the batch request has a specific tag.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.contains(tag)
+    }
+
+    /// Returns the number of documents in this batch.
+    pub fn len(&self) -> usize {
+        self.documents.len()
+    }
+
+    /// Returns true if this batch has no documents.
+    pub fn is_empty(&self) -> bool {
+        self.documents.is_empty()
+    }
+
+    /// Convert this batch request into individual requests.
+    pub fn into_requests(self) -> Vec<Request> {
+        self.documents
+            .into_iter()
+            .map(|document| Request {
+                request_id: Uuid::now_v7(),
+                account_id: self.account_id,
+                document,
+                prompt: self.prompt.clone(),
+                language: self.language.clone(),
+                tags: self.tags.clone(),
+                preserve_layout: self.preserve_layout,
+                confidence_threshold: self.confidence_threshold,
+            })
+            .collect()
+    }
+
+    /// Create individual requests from this batch.
+    pub fn iter_requests(&self) -> Vec<Request> {
+        self.documents
+            .iter()
+            .cloned()
+            .map(|document| Request {
+                request_id: Uuid::now_v7(),
+                account_id: self.account_id,
+                document,
+                prompt: self.prompt.clone(),
+                language: self.language.clone(),
+                tags: self.tags.clone(),
+                preserve_layout: self.preserve_layout,
+                confidence_threshold: self.confidence_threshold,
+            })
+            .collect()
+    }
+
+    /// Estimates the total size of all documents.
+    pub fn estimated_total_size(&self) -> usize {
+        self.documents.iter().map(|doc| doc.size()).sum()
+    }
+}
+
+impl Default for BatchRequest {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -249,118 +296,113 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::types::Document;
 
     #[test]
-    fn test_document_ocr_request_creation() {
-        let document = Document::new(Bytes::from("test content")).with_content_type("image/png");
+    fn test_request_creation() {
+        let document = Document::new(Bytes::from("test image data")).with_content_type("image/png");
+        let request = Request::from_document(document);
 
-        let request = DocumentOcrRequest::new(document.clone());
-
-        assert_eq!(request.document.size(), 12);
-        assert!(!request.has_region());
-        assert_eq!(request.language, None);
-        assert_eq!(request.content_type(), Some("image/png".to_string()));
+        assert!(!request.request_id.is_nil());
+        assert!(request.account_id.is_none());
+        assert!(request.tags.is_empty());
+        assert!(request.preserve_layout);
+        assert_eq!(request.content_type(), Some("image/png"));
     }
 
     #[test]
-    fn test_document_ocr_request_with_region() {
-        let document =
-            Document::new(Bytes::from("test image data")).with_content_type("image/jpeg");
+    fn test_request_with_account_id() {
+        let document = Document::new(Bytes::from("test")).with_content_type("image/png");
+        let account_id = Uuid::new_v4();
+        let request = Request::from_document(document).with_account_id(account_id);
 
-        let bbox = BoundingBox::new(10.0, 20.0, 100.0, 50.0);
-        let request = DocumentOcrRequest::new(document)
-            .with_region(bbox)
+        assert_eq!(request.account_id, Some(account_id));
+    }
+
+    #[test]
+    fn test_request_with_tags() {
+        let document = Document::new(Bytes::from("test")).with_content_type("image/png");
+        let request = Request::from_document(document)
+            .with_tag("category:test")
+            .with_tag("priority:high");
+
+        assert_eq!(request.tags.len(), 2);
+        assert!(request.has_tag("category:test"));
+        assert!(request.has_tag("priority:high"));
+        assert!(!request.has_tag("unknown"));
+    }
+
+    #[test]
+    fn test_request_with_options() {
+        let document = Document::new(Bytes::from("test")).with_content_type("image/png");
+        let request = Request::from_document(document)
+            .with_prompt("Extract all text")
+            .with_language("en")
+            .with_preserve_layout(false)
+            .with_confidence_threshold(0.8);
+
+        assert_eq!(request.prompt, Some("Extract all text".to_string()));
+        assert_eq!(request.language, Some("en".to_string()));
+        assert!(!request.preserve_layout);
+        assert_eq!(request.confidence_threshold, Some(0.8));
+    }
+
+    #[test]
+    fn test_request_reply() {
+        let document = Document::new(Bytes::from("test")).with_content_type("image/png");
+        let request = Request::from_document(document);
+        let text = "Extracted text";
+
+        let response = request.reply(text);
+
+        assert_eq!(response.request_id, request.request_id);
+        assert_eq!(response.text(), text);
+    }
+
+    #[test]
+    fn test_batch_request() {
+        let doc1 = Document::new(Bytes::from("doc1")).with_content_type("image/png");
+        let doc2 = Document::new(Bytes::from("doc2")).with_content_type("image/jpeg");
+
+        let batch = BatchRequest::new().with_document(doc1).with_document(doc2);
+
+        assert_eq!(batch.len(), 2);
+        assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn test_batch_request_with_account_id() {
+        let doc1 = Document::new(Bytes::from("doc1")).with_content_type("image/png");
+        let doc2 = Document::new(Bytes::from("doc2")).with_content_type("image/jpeg");
+        let account_id = Uuid::new_v4();
+
+        let batch = BatchRequest::new()
+            .with_account_id(account_id)
+            .with_document(doc1)
+            .with_document(doc2);
+
+        let requests = batch.into_requests();
+
+        assert_eq!(requests[0].account_id, Some(account_id));
+        assert_eq!(requests[1].account_id, Some(account_id));
+    }
+
+    #[test]
+    fn test_batch_request_into_requests() {
+        let doc1 = Document::new(Bytes::from("doc1")).with_content_type("image/png");
+        let doc2 = Document::new(Bytes::from("doc2")).with_content_type("image/jpeg");
+
+        let batch = BatchRequest::new()
+            .with_document(doc1)
+            .with_document(doc2)
+            .with_tag("batch")
             .with_language("en");
 
-        assert!(request.has_region());
-        assert_eq!(request.language, Some("en".to_string()));
-        assert_eq!(request.region.unwrap().area(), 5000.0);
-    }
+        let requests = batch.into_requests();
 
-    #[test]
-    fn test_bounding_box_validation() {
-        let valid_bbox = BoundingBox::new(0.0, 0.0, 100.0, 50.0);
-        assert!(valid_bbox.is_valid());
-        assert_eq!(valid_bbox.area(), 5000.0);
-
-        let invalid_bbox = BoundingBox::new(0.0, 0.0, -10.0, 50.0);
-        assert!(!invalid_bbox.is_valid());
-    }
-
-    #[test]
-    fn test_request_validation_success() {
-        let document =
-            Document::new(Bytes::from(vec![0x89, 0x50, 0x4E, 0x47])).with_content_type("image/png");
-
-        let request = DocumentOcrRequest::new(document);
-        assert!(request.validate().is_ok());
-    }
-
-    #[test]
-    fn test_request_validation_empty_document() {
-        let document = Document::new(Bytes::new()).with_content_type("image/png");
-
-        let request = DocumentOcrRequest::new(document);
-        let result = request.validate();
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Document cannot be empty"));
-    }
-
-    #[test]
-    fn test_request_validation_unsupported_content_type() {
-        let document = Document::new(Bytes::from("test content")).with_content_type("text/plain");
-
-        let request = DocumentOcrRequest::new(document);
-        let result = request.validate();
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must be an image or PDF"));
-    }
-
-    #[test]
-    fn test_request_validation_invalid_region() {
-        let document =
-            Document::new(Bytes::from("test content")).with_content_type("application/pdf");
-
-        let invalid_bbox = BoundingBox::new(0.0, 0.0, -10.0, 50.0);
-        let request = DocumentOcrRequest::new(document).with_region(invalid_bbox);
-
-        let result = request.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid bounding box"));
-    }
-
-    #[test]
-    fn test_request_validation_invalid_language() {
-        let document = Document::new(Bytes::from("test content")).with_content_type("image/png");
-
-        let request = DocumentOcrRequest::new(document).with_language("invalid");
-
-        let result = request.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("2-character ISO 639-1 code"));
-    }
-
-    #[test]
-    fn test_request_options_validation() {
-        let mut request = Request::new(());
-
-        // Test valid confidence threshold
-        request = request.with_confidence_threshold(0.8);
-        assert!(request.validate().is_ok());
-
-        // Test invalid confidence threshold
-        request = request.with_confidence_threshold(1.5);
-        assert!(request.validate().is_err());
-
-        // Test valid DPI
-        request = Request::new(()).with_dpi(300);
-        assert!(request.validate().is_ok());
-
-        // Test invalid DPI
-        request = request.with_dpi(2000);
-        assert!(request.validate().is_err());
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].has_tag("batch"));
+        assert_eq!(requests[0].language, Some("en".to_string()));
+        assert!(requests[1].has_tag("batch"));
+        assert_eq!(requests[1].language, Some("en".to_string()));
     }
 }

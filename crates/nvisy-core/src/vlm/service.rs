@@ -1,83 +1,119 @@
 //! VLM service wrapper with observability.
 //!
 //! This module provides a wrapper around VLM implementations that adds
-//! production-ready logging and service naming.
+//! production-ready logging and tracing.
 
+use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use jiff::Timestamp;
 
-use super::{BoxedStream, BoxedVlmProvider, Request, Response, Result, VlmProvider};
-use crate::types::ServiceHealth;
+use super::{BatchRequest, BatchResponse, Request, Response, TRACING_TARGET, VlmProvider};
+use crate::Result;
+use crate::types::{Context, ServiceHealth, SharedContext};
 
 /// VLM service wrapper with observability.
 ///
-/// This wrapper adds logging and service naming to any VLM implementation.
-/// The inner service is wrapped in Arc for cheap cloning.
-///
-/// # Type Parameters
-///
-/// * `Req` - The request payload type
-/// * `Resp` - The response payload type
+/// This wrapper adds structured logging to any VLM implementation.
+/// The inner service is wrapped in `Arc` for cheap cloning.
 #[derive(Clone)]
-pub struct Service<Req = (), Resp = ()> {
-    inner: Arc<ServiceInner<Req, Resp>>,
+pub struct VlmService {
+    inner: Arc<dyn VlmProvider>,
+    context: SharedContext,
 }
 
-struct ServiceInner<Req, Resp> {
-    vlm: BoxedVlmProvider<Req, Resp>,
-}
-
-impl<Req, Resp> Service<Req, Resp>
-where
-    Req: Send + Sync + 'static,
-    Resp: Send + Sync + 'static,
-{
-    /// Create a new service wrapper.
-    ///
-    /// # Parameters
-    ///
-    /// * `vlm` - VLM implementation
-    pub fn new(vlm: BoxedVlmProvider<Req, Resp>) -> Self {
-        Self {
-            inner: Arc::new(ServiceInner {
-                vlm,
-            }),
-        }
+impl fmt::Debug for VlmService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VlmService")
+            .field("context", &self.context)
+            .finish_non_exhaustive()
     }
 }
 
-#[async_trait]
-impl<Req, Resp> VlmProvider<Req, Resp> for Service<Req, Resp>
-where
-    Req: Send + Sync + 'static,
-    Resp: Send + Sync + 'static,
-{
-    async fn process_vlm(&self, request: &Request<Req>) -> Result<Response<Resp>> {
+impl VlmService {
+    /// Create a new VLM service wrapper.
+    pub fn new<P>(provider: P) -> Self
+    where
+        P: VlmProvider + 'static,
+    {
+        Self {
+            inner: Arc::new(provider),
+            context: SharedContext::new(),
+        }
+    }
+
+    /// Create a new VLM service with a specific context.
+    pub fn with_context<P>(provider: P, context: Context) -> Self
+    where
+        P: VlmProvider + 'static,
+    {
+        Self {
+            inner: Arc::new(provider),
+            context: SharedContext::from_context(context),
+        }
+    }
+
+    /// Create a new VLM service with a shared context.
+    pub fn with_shared_context<P>(provider: P, context: SharedContext) -> Self
+    where
+        P: VlmProvider + 'static,
+    {
+        Self {
+            inner: Arc::new(provider),
+            context,
+        }
+    }
+
+    /// Create from a boxed provider.
+    pub fn from_boxed(provider: Box<dyn VlmProvider>) -> Self {
+        Self {
+            inner: Arc::from(provider),
+            context: SharedContext::new(),
+        }
+    }
+
+    /// Get a reference to the shared context.
+    pub fn context(&self) -> &SharedContext {
+        &self.context
+    }
+
+    /// Replace the context.
+    pub fn set_context(&mut self, context: SharedContext) {
+        self.context = context;
+    }
+
+    /// Process a vision-language request.
+    pub async fn process_vlm(&self, request: &Request) -> Result<Response> {
+        let started_at = Timestamp::now();
+
         tracing::debug!(
-            target: super::TRACING_TARGET,
+            target: TRACING_TARGET,
             request_id = %request.request_id,
-            image_count = request.images.len(),
+            document_count = request.document_count(),
+            prompt_length = request.prompt_length(),
             "Processing VLM request"
         );
 
-        let start = std::time::Instant::now();
-
-        let result = self.inner.vlm.process_vlm(request).await;
+        let result = self.inner.process_vlm(&self.context, request).await;
+        let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
-            Ok(_) => {
+            Ok(response) => {
                 tracing::debug!(
-                    target: super::TRACING_TARGET,
-                    elapsed = ?start.elapsed(),
+                    target: TRACING_TARGET,
+                    request_id = %request.request_id,
+                    response_id = %response.response_id,
+                    content_length = response.content_length(),
+                    elapsed_ms = elapsed.as_millis(),
                     "VLM processing successful"
                 );
             }
             Err(error) => {
                 tracing::error!(
-                    target: super::TRACING_TARGET,
+                    target: TRACING_TARGET,
+                    request_id = %request.request_id,
                     error = %error,
-                    elapsed = ?start.elapsed(),
+                    elapsed_ms = elapsed.as_millis(),
                     "VLM processing failed"
                 );
             }
@@ -86,25 +122,45 @@ where
         result
     }
 
-    async fn process_vlm_stream(
-        &self,
-        request: &Request<Req>,
-    ) -> Result<BoxedStream<Response<Resp>>> {
+    /// Process a batch of VLM requests.
+    pub async fn process_vlm_batch(&self, request: &BatchRequest) -> Result<BatchResponse> {
+        let started_at = Timestamp::now();
+
         tracing::debug!(
-            target: super::TRACING_TARGET,
-            request_id = %request.request_id,
-            "Starting VLM stream processing"
+            target: TRACING_TARGET,
+            batch_size = request.len(),
+            total_documents = request.total_documents(),
+            "Processing batch VLM request"
         );
 
-        self.inner.vlm.process_vlm_stream(request).await
+        let result = self.inner.process_vlm_batch(&self.context, request).await;
+        let elapsed = Timestamp::now().duration_since(started_at);
+
+        match &result {
+            Ok(response) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    batch_id = %response.batch_id,
+                    count = response.len(),
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch VLM completed"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %error,
+                    elapsed_ms = elapsed.as_millis(),
+                    "Batch VLM failed"
+                );
+            }
+        }
+
+        result
     }
 
-    async fn health_check(&self) -> Result<ServiceHealth> {
-        tracing::trace!(
-            target: super::TRACING_TARGET,
-            "Performing health check"
-        );
-
-        self.inner.vlm.health_check().await
+    /// Perform a health check on the VLM service.
+    pub async fn health_check(&self) -> Result<ServiceHealth> {
+        self.inner.health_check().await
     }
 }

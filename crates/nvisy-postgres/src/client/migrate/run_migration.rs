@@ -18,7 +18,7 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
     );
 
     let start_time = Instant::now();
-    let mut conn = pg.get_connection().await?;
+    let mut conn = pg.get_pooled_connection().await?;
     let initial_status = get_migration_status(&mut conn).await?;
 
     if initial_status.is_up_to_date() {

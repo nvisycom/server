@@ -1,117 +1,118 @@
-//! Ollama client configuration
-//!
-//! This module provides configuration structures and builders for the Ollama client.
+//! Ollama client configuration.
 
-use std::time::Duration;
+#[cfg(feature = "config")]
+use clap::Args;
+use serde::{Deserialize, Serialize};
 
-use derive_builder::Builder;
-use url::Url;
-
-use crate::error::{Error, Result};
-
-/// Configuration for the Ollama client
+/// Configuration for the Ollama client.
 ///
-/// Contains all the settings needed to configure the Ollama client behavior,
-/// including timeouts, retry settings, and API endpoints.
-#[derive(Debug, Clone, Builder)]
-#[builder(
-    name = "OllamaBuilder",
-    pattern = "owned",
-    setter(into, strip_option, prefix = "with"),
-    build_fn(validate = "Self::validate_config")
-)]
+/// This configuration is used to connect to an Ollama server.
+/// The `ollama-rs` client uses host and port internally.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "config", derive(Args))]
 pub struct OllamaConfig {
-    /// Base URL for the Ollama API
-    #[builder(setter(custom), default = "OllamaConfig::default_base_url()")]
-    pub base_url: Url,
-    /// Request timeout duration
-    #[builder(default = "Duration::from_secs(60)")]
-    pub timeout: Duration,
-    /// Connection timeout duration
-    #[builder(default = "Duration::from_secs(10)")]
-    pub connect_timeout: Duration,
-    /// Maximum number of retry attempts
-    #[builder(default = "3")]
-    pub max_retries: u32,
-    /// Maximum concurrent requests
-    #[builder(default = "10")]
-    pub max_concurrent_requests: usize,
-    /// User agent string for requests
-    #[builder(default = "OllamaConfig::default_user_agent()")]
-    pub user_agent: String,
-    /// Enable request/response logging
-    #[builder(default = "false")]
-    pub enable_logging: bool,
-    /// Enable streaming responses (for chat and generation)
-    #[builder(default = "true")]
-    pub enable_streaming: bool,
-    /// Keep alive duration for persistent connections
-    #[builder(default = "Some(Duration::from_secs(30))")]
-    pub keep_alive: Option<Duration>,
+    /// Ollama server host (e.g., "localhost" or "192.168.1.100")
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "ollama-host", env = "OLLAMA_HOST", default_value = "localhost")
+    )]
+    #[serde(default = "default_host")]
+    pub host: String,
+
+    /// Ollama server port
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "ollama-port", env = "OLLAMA_PORT", default_value = "11434")
+    )]
+    #[serde(default = "default_port")]
+    pub port: u16,
+
+    /// Default model for embeddings (e.g., "nomic-embed-text")
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "ollama-embedding-model", env = "OLLAMA_EMBEDDING_MODEL")
+    )]
+    pub embedding_model: Option<String>,
+
+    /// Default model for VLM/chat (e.g., "llava", "llama3")
+    #[cfg_attr(
+        feature = "config",
+        arg(long = "ollama-vlm-model", env = "OLLAMA_VLM_MODEL")
+    )]
+    pub vlm_model: Option<String>,
+}
+
+fn default_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_port() -> u16 {
+    11434
 }
 
 impl Default for OllamaConfig {
     fn default() -> Self {
         Self {
-            base_url: Self::default_base_url(),
-            timeout: Duration::from_secs(60),
-            connect_timeout: Duration::from_secs(10),
-            max_retries: 3,
-            max_concurrent_requests: 10,
-            user_agent: Self::default_user_agent(),
-            enable_logging: false,
-            enable_streaming: true,
-            keep_alive: Some(Duration::from_secs(30)),
+            host: default_host(),
+            port: default_port(),
+            embedding_model: None,
+            vlm_model: None,
         }
     }
 }
 
 impl OllamaConfig {
-    /// Create a new configuration builder
-    pub fn builder() -> OllamaBuilder {
-        OllamaBuilder::default()
-    }
-
-    fn default_base_url() -> Url {
-        "http://localhost:11434".parse().expect("Valid default URL")
-    }
-
-    fn default_user_agent() -> String {
-        format!("nvisy-ollama/{}", env!("CARGO_PKG_VERSION"))
-    }
-}
-
-impl OllamaBuilder {
-    /// Set the base URL for the Ollama API
-    pub fn with_base_url(mut self, url: &str) -> Result<Self> {
-        self.base_url =
-            Some(url.parse().map_err(|e| {
-                Error::invalid_config(format!("Invalid base URL '{}': {}", url, e))
-            })?);
-        Ok(self)
-    }
-
-    fn validate_config(&self) -> std::result::Result<(), String> {
-        // Validate timeout values
-        if let Some(timeout) = &self.timeout {
-            if timeout.as_secs() == 0 {
-                return Err("Timeout must be greater than 0".to_string());
-            }
+    /// Create a new configuration with host and port.
+    pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            host: host.into(),
+            port,
+            embedding_model: None,
+            vlm_model: None,
         }
+    }
 
-        if let Some(connect_timeout) = &self.connect_timeout {
-            if connect_timeout.as_secs() == 0 {
-                return Err("Connect timeout must be greater than 0".to_string());
-            }
+    /// Returns the full URL for the Ollama server.
+    pub fn url(&self) -> String {
+        format!("http://{}:{}", self.host, self.port)
+    }
+
+    /// Set the host.
+    #[must_use]
+    pub fn with_host(mut self, host: impl Into<String>) -> Self {
+        self.host = host.into();
+        self
+    }
+
+    /// Set the port.
+    #[must_use]
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    /// Set the default embedding model.
+    #[must_use]
+    pub fn with_embedding_model(mut self, model: impl Into<String>) -> Self {
+        self.embedding_model = Some(model.into());
+        self
+    }
+
+    /// Set the default VLM model.
+    #[must_use]
+    pub fn with_vlm_model(mut self, model: impl Into<String>) -> Self {
+        self.vlm_model = Some(model.into());
+        self
+    }
+
+    /// Validate the configuration.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.host.is_empty() {
+            return Err("Host cannot be empty".to_string());
         }
-
-        // Validate concurrent requests limit
-        if let Some(max_concurrent) = &self.max_concurrent_requests {
-            if *max_concurrent == 0 {
-                return Err("Max concurrent requests must be greater than 0".to_string());
-            }
+        if self.port == 0 {
+            return Err("Port cannot be 0".to_string());
         }
-
         Ok(())
     }
 }
@@ -121,68 +122,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_config_builder() {
-        let config = OllamaConfig::builder()
-            .with_timeout(Duration::from_secs(120))
-            .with_max_retries(5)
-            .with_enable_logging(true)
-            .with_enable_streaming(false)
-            .build()
-            .expect("Valid config");
-
-        assert_eq!(config.timeout, Duration::from_secs(120));
-        assert_eq!(config.max_retries, 5);
-        assert!(config.enable_logging);
-        assert!(!config.enable_streaming);
-    }
-
-    #[test]
     fn test_default_config() {
         let config = OllamaConfig::default();
-
-        assert_eq!(config.base_url.as_str(), "http://localhost:11434/");
-        assert_eq!(config.timeout, Duration::from_secs(60));
-        assert_eq!(config.connect_timeout, Duration::from_secs(10));
-        assert_eq!(config.max_retries, 3);
-        assert_eq!(config.max_concurrent_requests, 10);
-        assert!(!config.enable_logging);
-        assert!(config.enable_streaming);
-        assert_eq!(config.keep_alive, Some(Duration::from_secs(30)));
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.port, 11434);
+        assert_eq!(config.url(), "http://localhost:11434");
     }
 
     #[test]
-    fn test_custom_base_url() {
-        let config = OllamaConfig::builder()
-            .with_base_url("http://remote-ollama:11434")
-            .expect("Valid URL")
-            .build()
-            .expect("Valid config");
-
-        assert_eq!(config.base_url.as_str(), "http://remote-ollama:11434/");
+    fn test_new_config() {
+        let config = OllamaConfig::new("192.168.1.100", 8080);
+        assert_eq!(config.host, "192.168.1.100");
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.url(), "http://192.168.1.100:8080");
     }
 
     #[test]
-    fn test_invalid_base_url() {
-        let result = OllamaConfig::builder().with_base_url("not-a-valid-url");
+    fn test_builder_pattern() {
+        let config = OllamaConfig::default()
+            .with_host("remote-server")
+            .with_port(9999)
+            .with_embedding_model("nomic-embed-text")
+            .with_vlm_model("llava");
 
-        assert!(result.is_err());
+        assert_eq!(config.host, "remote-server");
+        assert_eq!(config.port, 9999);
+        assert_eq!(config.embedding_model, Some("nomic-embed-text".to_string()));
+        assert_eq!(config.vlm_model, Some("llava".to_string()));
     }
 
     #[test]
-    fn test_validation_zero_timeout() {
-        let result = OllamaConfig::builder()
-            .with_timeout(Duration::from_secs(0))
-            .build();
+    fn test_validation() {
+        let valid = OllamaConfig::default();
+        assert!(valid.validate().is_ok());
 
-        assert!(result.is_err());
-    }
+        let empty_host = OllamaConfig::new("", 11434);
+        assert!(empty_host.validate().is_err());
 
-    #[test]
-    fn test_validation_zero_concurrent_requests() {
-        let result = OllamaConfig::builder()
-            .with_max_concurrent_requests(0)
-            .build();
-
-        assert!(result.is_err());
+        let zero_port = OllamaConfig::new("localhost", 0);
+        assert!(zero_port.validate().is_err());
     }
 }

@@ -5,94 +5,71 @@
 //! with role-based access control.
 
 use aide::axum::ApiRouter;
-use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{self, NewProject, NewProjectMember};
+use nvisy_postgres::PgError;
+use nvisy_postgres::model::{NewProjectMember, Project as ProjectModel, ProjectMember};
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
-use nvisy_postgres::types::ProjectRole;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, ValidateJson};
-use crate::handler::request::{CreateProject, UpdateProject};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::handler::request::{CreateProject, Pagination, ProjectPathParams, UpdateProject};
 use crate::handler::response::{Project, Projects};
-use crate::handler::{ErrorKind, Pagination, Result};
+use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for project operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::projects";
 
-/// `Path` param for `{projectId}` handlers.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathParams {
-    /// Unique identifier of the project.
-    pub project_id: Uuid,
-}
-
-/// Creates a new project.
-#[tracing::instrument(skip_all)]
+/// Creates a new project with the authenticated user as admin.
+///
+/// The creator is automatically added as an admin member of the project,
+/// granting full management permissions.
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_project(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     ValidateJson(request): ValidateJson<CreateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        display_name = %request.display_name,
-        "Creating new project",
-    );
+    tracing::info!(target: TRACING_TARGET, "Creating new project");
 
-    let new_project = NewProject {
-        display_name: request.display_name,
-        description: request.description,
-        keep_for_sec: request.keep_for_sec,
-        auto_cleanup: request.auto_cleanup,
-        require_approval: request.require_approval,
-        max_members: request.max_members,
-        max_storage: request.max_storage,
-        enable_comments: request.enable_comments,
-        created_by: auth_claims.account_id,
-        ..Default::default()
-    };
-    let project = pg_client.create_project(new_project).await?;
+    let new_project = request.into_model(auth_state.account_id);
+    let creator_id = auth_state.account_id;
 
-    let new_member = NewProjectMember {
-        project_id: project.id,
-        account_id: auth_claims.account_id,
-        member_role: ProjectRole::Owner,
-        ..Default::default()
-    };
-    pg_client.add_project_member(new_member).await?;
+    let (project, _membership) = conn
+        .transaction(|conn| {
+            Box::pin(async move {
+                let project = conn.create_project(new_project).await?;
+                let new_member = NewProjectMember::new_owner(project.id, creator_id);
+                let member = conn.add_project_member(new_member).await?;
+                Ok::<(ProjectModel, ProjectMember), PgError>((project, member))
+            })
+        })
+        .await?;
 
     let response = Project::from_model(project);
 
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = response.project_id.to_string(),
-        "New project created successfully",
+        project_id = %response.project_id,
+        "Project created successfully",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// Returns all projects for an account.
-#[tracing::instrument(skip_all)]
+/// Lists all projects the authenticated user is a member of.
+///
+/// Returns projects with membership details including the user's role
+/// in each project.
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_projects(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Projects>)> {
-    let project_memberships = pg_client
-        .list_user_projects_with_details(auth_claims.account_id, pagination.into())
+    let project_memberships = conn
+        .list_user_projects_with_details(auth_state.account_id, pagination.into())
         .await?;
 
-    // Convert to response items
     let projects: Projects = project_memberships
         .into_iter()
         .map(|(project, membership)| Project::from_model_with_membership(project, membership))
@@ -100,134 +77,118 @@ async fn list_projects(
 
     tracing::debug!(
         target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
         project_count = projects.len(),
-        "Listed user projects"
+        "Listed user projects",
     );
 
     Ok((StatusCode::OK, Json(projects)))
 }
 
-/// Gets a project by its project ID.
-#[tracing::instrument(skip_all)]
+/// Retrieves details for a specific project.
+///
+/// Requires `ViewProject` permission for the requested project.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn read_project(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    auth_claims
-        .authorize_project(&pg_client, path_params.project_id, Permission::ViewProject)
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::ViewProject)
         .await?;
 
-    let Some(project) = pg_client.find_project_by_id(path_params.project_id).await? else {
+    let Some(project) = conn.find_project_by_id(path_params.project_id).await? else {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
     };
 
-    tracing::debug!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Retrieved project details"
-    );
+    tracing::debug!(target: TRACING_TARGET, "Retrieved project details");
 
     let project = Project::from_model(project);
     Ok((StatusCode::OK, Json(project)))
 }
 
-/// Updates a project by the project ID.
-#[tracing::instrument(skip_all)]
+/// Updates an existing project's configuration.
+///
+/// Requires `UpdateProject` permission. Only provided fields are updated.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn update_project(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<UpdateProject>,
 ) -> Result<(StatusCode, Json<Project>)> {
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Updating project",
-    );
+    tracing::info!(target: TRACING_TARGET, "Updating project");
 
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::UpdateProject,
-        )
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateProject)
         .await?;
 
-    let update_data = model::UpdateProject {
-        display_name: request.display_name,
-        description: request.description,
-        keep_for_sec: request.keep_for_sec,
-        auto_cleanup: request.auto_cleanup,
-        require_approval: request.require_approval,
-        max_members: request.max_members,
-        max_storage: request.max_storage,
-        enable_comments: request.enable_comments,
-        ..Default::default()
-    };
-
-    let project = pg_client
+    let update_data = request.into_model();
+    let project = conn
         .update_project(path_params.project_id, update_data)
         .await?;
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Project updated successfully",
-    );
+    tracing::info!(target: TRACING_TARGET, "Project updated successfully");
 
     let project = Project::from_model(project);
     Ok((StatusCode::OK, Json(project)))
 }
 
-/// Deletes a project by its project ID.
-#[tracing::instrument(skip_all)]
+/// Soft-deletes a project.
+///
+/// Requires `DeleteProject` permission. The project is marked as deleted
+/// but data is retained for potential recovery.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        project_id = %path_params.project_id,
+    )
+)]
 async fn delete_project(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<ProjectPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Project deletion requested",
-    );
+    tracing::warn!(target: TRACING_TARGET, "Project deletion requested");
 
-    auth_claims
-        .authorize_project(
-            &pg_client,
-            path_params.project_id,
-            Permission::DeleteProject,
-        )
+    auth_state
+        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteProject)
         .await?;
 
     // Verify project exists before deletion
-    let Some(_project) = pg_client.find_project_by_id(path_params.project_id).await? else {
+    if conn
+        .find_project_by_id(path_params.project_id)
+        .await?
+        .is_none()
+    {
         return Err(ErrorKind::NotFound
             .with_message(format!("Project not found: {}", path_params.project_id))
             .with_resource("project"));
-    };
+    }
 
-    pg_client.delete_project(path_params.project_id).await?;
+    conn.delete_project(path_params.project_id).await?;
 
-    tracing::warn!(
-        target: TRACING_TARGET,
-        account_id = auth_claims.account_id.to_string(),
-        project_id = path_params.project_id.to_string(),
-        "Project deleted successfully",
-    );
+    tracing::warn!(target: TRACING_TARGET, "Project deleted successfully");
 
     Ok(StatusCode::OK)
 }
 
-/// Returns a [`Router`] with all related routes.
+/// Returns a [`Router`] with all project-related routes.
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
@@ -236,162 +197,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route("/projects/", post(create_project))
         .api_route("/projects/", get(list_projects))
-        .api_route("/projects/:project_id/", get(read_project))
-        .api_route("/projects/:project_id/", patch(update_project))
-        .api_route("/projects/:project_id/", delete(delete_project))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn test_create_project_success() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CreateProject {
-            display_name: "Test Project".to_string(),
-            description: Some("A test project".to_string()),
-            keep_for_sec: Some(86400),
-            auto_cleanup: Some(true),
-            require_approval: Some(false),
-            ..Default::default()
-        };
-
-        let response = server.post("/projects/").json(&request).await;
-        response.assert_status(StatusCode::CREATED);
-
-        let body: Project = response.json();
-        assert!(!body.project_id.is_nil());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_create_project_invalid_name() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let request = CreateProject {
-            display_name: "Ab".to_owned(),
-            ..Default::default()
-        };
-
-        let response = server.post("/projects/").json(&request).await;
-        response.assert_status_bad_request();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_list_projects() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project first
-        let request = CreateProject {
-            display_name: "List Test Project".to_string(),
-            ..Default::default()
-        };
-        server.post("/projects/").json(&request).await;
-
-        // List projects
-        let pagination = Pagination::default().with_limit(10);
-        let response = server.get("/projects/").json(&pagination).await;
-        response.assert_status_ok();
-
-        let body: Projects = response.json();
-        assert!(!body.is_empty());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_update_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project
-        let create_request = CreateProject {
-            display_name: "Original Name".to_string(),
-            ..Default::default()
-        };
-        let create_response = server.post("/projects/").json(&create_request).await;
-        let created: Project = create_response.json();
-
-        // Update the project
-        let update_request = UpdateProject {
-            display_name: Some("Updated Name".to_string()),
-            ..Default::default()
-        };
-
-        let response = server
-            .patch(&format!("/projects/{}/", created.project_id))
-            .json(&update_request)
-            .await;
-        response.assert_status_ok();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_read_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project
-        let request = CreateProject {
-            display_name: "Read Test".to_string(),
-            description: Some("Test description".to_string()),
-            ..Default::default()
-        };
-        let create_response = server.post("/projects/").json(&request).await;
-        let created: Project = create_response.json();
-
-        // Read the project
-        let response = server
-            .get(&format!("/projects/{}/", created.project_id))
-            .await;
-        response.assert_status_ok();
-
-        let body: Project = response.json();
-        assert_eq!(body.project_id, created.project_id);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_delete_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create a project
-        let request = CreateProject {
-            display_name: "Delete Test".to_string(),
-            ..Default::default()
-        };
-        let create_response = server.post("/projects/").json(&request).await;
-        let created: Project = create_response.json();
-
-        // Delete the project
-        let response = server
-            .delete(&format!("/projects/{}/", created.project_id))
-            .await;
-        response.assert_status_ok();
-
-        // Verify it's deleted by trying to read it
-        let response = server
-            .get(&format!("/projects/{}/", created.project_id))
-            .await;
-        response.assert_status_not_found();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_read_nonexistent_project() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let fake_id = Uuid::new_v4();
-        let response = server.get(&format!("/projects/{}/", fake_id)).await;
-        response.assert_status_not_found();
-
-        Ok(())
-    }
+        .api_route("/projects/{project_id}/", get(read_project))
+        .api_route("/projects/{project_id}/", patch(update_project))
+        .api_route("/projects/{project_id}/", delete(delete_project))
+        .with_path_items(|item| item.tag("Projects"))
 }

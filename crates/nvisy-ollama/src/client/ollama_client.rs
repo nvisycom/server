@@ -1,76 +1,76 @@
-//! Ollama client implementation
+//! Ollama client implementation.
 //!
 //! This module provides the main client interface for Ollama API operations.
-//! It handles authentication, request/response processing, and connection management.
+//! It wraps the `ollama-rs` crate and provides integration with nvisy-core.
 
-use reqwest::{Client as HttpClient, ClientBuilder};
+use std::sync::Arc;
 
-use super::{OllamaConfig, OllamaCredentials};
+use nvisy_core::AiServices;
+use nvisy_core::emb::EmbeddingService;
+use nvisy_core::ocr::OcrService;
+use nvisy_core::vlm::VlmService;
+use ollama_rs::Ollama;
+
+use super::OllamaConfig;
 use crate::{Error, Result, TRACING_TARGET_CLIENT};
 
-/// Ollama client for interacting with Ollama API services
+/// Inner client that holds the actual ollama-rs client.
+struct OllamaClientInner {
+    ollama: Ollama,
+    config: OllamaConfig,
+}
+
+impl std::fmt::Debug for OllamaClientInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OllamaClientInner")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Ollama client for interacting with Ollama API services.
 ///
-/// The client handles authentication, request routing, and connection pooling
-/// for optimal performance when working with language models.
+/// This client wraps the `ollama-rs` crate and implements both
+/// `EmbeddingProvider` and `VlmProvider` traits from nvisy-core.
 ///
 /// # Examples
 ///
-/// ```rust
-/// use nvisy_ollama::client::{OllamaClient, OllamaConfig, OllamaCredentials};
-/// use std::time::Duration;
+/// ```rust,ignore
+/// use nvisy_ollama::{OllamaClient, OllamaConfig};
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let config = OllamaConfig::builder()
-///     .with_base_url("http://localhost:11434")?
-///     .with_timeout(Duration::from_secs(30))
-///     .build()?;
-///
-/// let credentials = OllamaCredentials::none();
-/// let client = OllamaClient::new(config, credentials).await?;
-/// # Ok(())
-/// # }
+/// let config = OllamaConfig::default()
+///     .with_embedding_model("nomic-embed-text")
+///     .with_vlm_model("llava");
+/// let client = OllamaClient::new(config)?;
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct OllamaClient {
-    http_client: HttpClient,
-    config: OllamaConfig,
-    credentials: OllamaCredentials,
+    inner: Arc<OllamaClientInner>,
 }
 
 impl OllamaClient {
-    /// Create a new Ollama client with the given configuration and credentials
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Client configuration
-    /// * `credentials` - Authentication credentials
+    /// Create a new Ollama client with the given configuration.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be created or if the
-    /// configuration is invalid.
-    pub async fn new(config: OllamaConfig, credentials: OllamaCredentials) -> Result<Self> {
+    /// Returns an error if the configuration is invalid.
+    pub fn new(config: OllamaConfig) -> Result<Self> {
         tracing::debug!(
             target: TRACING_TARGET_CLIENT,
-            base_url = %config.base_url,
+            host = %config.host,
+            port = config.port,
             "Creating Ollama client"
         );
 
-        let http_client = ClientBuilder::new()
-            .timeout(config.timeout)
-            .connect_timeout(config.connect_timeout)
-            .user_agent(&config.user_agent)
-            .build()
-            .map_err(Error::Http)?;
+        config.validate().map_err(Error::invalid_config)?;
 
+        let host_with_scheme = format!("http://{}", config.host);
+        let ollama = Ollama::new(host_with_scheme, config.port);
+
+        let inner = OllamaClientInner { ollama, config };
         let client = Self {
-            http_client,
-            config,
-            credentials,
+            inner: Arc::new(inner),
         };
-
-        // Verify connection by making a health check
-        client.health_check().await?;
 
         tracing::info!(
             target: TRACING_TARGET_CLIENT,
@@ -80,127 +80,77 @@ impl OllamaClient {
         Ok(client)
     }
 
-    /// Create a new Ollama client with default configuration
-    ///
-    /// # Arguments
-    ///
-    /// * `base_url` - Base URL for the Ollama API
-    /// * `credentials` - Authentication credentials
-    pub async fn with_defaults(
-        base_url: impl AsRef<str>,
-        credentials: OllamaCredentials,
-    ) -> Result<Self> {
-        let config = OllamaConfig::builder()
-            .with_base_url(base_url.as_ref())?
-            .build()?;
-
-        Self::new(config, credentials).await
+    /// Create a new Ollama client with default configuration (localhost:11434).
+    pub fn with_defaults() -> Result<Self> {
+        Self::new(OllamaConfig::default())
     }
 
-    /// Perform a health check against the Ollama service
-    ///
-    /// This method verifies that the service is accessible and responding.
+    /// Perform a health check against the Ollama service.
     pub async fn health_check(&self) -> Result<()> {
         tracing::debug!(
             target: TRACING_TARGET_CLIENT,
             "Performing health check"
         );
 
-        let url = self
-            .config
-            .base_url
-            .join("/api/tags")
-            .map_err(|e| Error::invalid_config(format!("Invalid health check URL: {}", e)))?;
+        self.inner.ollama.list_local_models().await?;
 
-        let mut request = self.http_client.get(url);
-        request = self.add_auth_headers(request);
+        tracing::debug!(
+            target: TRACING_TARGET_CLIENT,
+            "Health check successful"
+        );
 
-        let response = request.send().await.map_err(Error::Http)?;
-
-        if response.status().is_success() {
-            tracing::debug!(
-                target: TRACING_TARGET_CLIENT,
-                status = response.status().as_u16(),
-                "Health check successful"
-            );
-            Ok(())
-        } else {
-            let status = response.status().as_u16();
-            let message = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            tracing::error!(
-                target: TRACING_TARGET_CLIENT,
-                status,
-                message,
-                "Health check failed"
-            );
-
-            Err(Error::api_error(status, message))
-        }
+        Ok(())
     }
 
-    /// Get the client configuration
+    /// Get the client configuration.
     pub fn config(&self) -> &OllamaConfig {
-        &self.config
+        &self.inner.config
     }
 
-    /// Get the client credentials (for debugging/logging purposes only)
-    pub fn credentials_type(&self) -> &'static str {
-        match &self.credentials {
-            OllamaCredentials::ApiKey(_) => "api_key",
-            OllamaCredentials::BearerToken(_) => "bearer_token",
-            OllamaCredentials::Basic { .. } => "basic_auth",
-            OllamaCredentials::None => "none",
-        }
+    /// Get a reference to the inner ollama-rs client.
+    pub(crate) fn ollama(&self) -> &Ollama {
+        &self.inner.ollama
     }
 
-    /// Add authentication headers to a request
-    fn add_auth_headers(&self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match &self.credentials {
-            OllamaCredentials::ApiKey(key) => {
-                request = request.header("Authorization", format!("Bearer {}", key));
-            }
-            OllamaCredentials::BearerToken(token) => {
-                request = request.header("Authorization", format!("Bearer {}", token));
-            }
-            OllamaCredentials::Basic { username, password } => {
-                request = request.basic_auth(username, Some(password));
-            }
-            OllamaCredentials::None => {
-                // No authentication headers needed for local Ollama instances
-            }
-        }
-        request
-    }
-
-    /// Create a new request builder with base configuration
-    pub(crate) fn request(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-    ) -> Result<reqwest::RequestBuilder> {
-        let url = self
+    /// Get the embedding model name.
+    pub(crate) fn embedding_model(&self) -> &str {
+        self.inner
             .config
-            .base_url
-            .join(path)
-            .map_err(|e| Error::invalid_config(format!("Invalid request URL: {}", e)))?;
-
-        let request = self.http_client.request(method, url);
-        let request = self.add_auth_headers(request);
-
-        Ok(request)
+            .embedding_model
+            .as_deref()
+            .expect("embedding_model must be configured")
     }
 
-    // TODO: Add Ollama-specific API methods
-    // - list_models()
-    // - generate()
-    // - chat()
-    // - embeddings()
-    // - create_model()
-    // - delete_model()
-    // - pull_model()
-    // - push_model()
+    /// Get the VLM model name.
+    pub(crate) fn vlm_model(&self) -> &str {
+        self.inner
+            .config
+            .vlm_model
+            .as_deref()
+            .expect("vlm_model must be configured")
+    }
+
+    /// Convert this client into a complete set of AI services.
+    ///
+    /// Creates embedding, OCR, and VLM services all backed by this Ollama client.
+    /// The client is cloned for each service (cheap Arc clone).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use nvisy_ollama::{OllamaClient, OllamaConfig};
+    ///
+    /// let config = OllamaConfig::default()
+    ///     .with_embedding_model("nomic-embed-text")
+    ///     .with_vlm_model("llava");
+    /// let client = OllamaClient::new(config)?;
+    /// let services = client.into_services();
+    /// ```
+    pub fn into_services(self) -> AiServices {
+        AiServices::new(
+            EmbeddingService::new(self.clone()),
+            OcrService::new(self.clone()),
+            VlmService::new(self),
+        )
+    }
 }

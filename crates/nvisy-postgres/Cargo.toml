@@ -27,6 +27,10 @@ default = []
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
+# CLI configuration support: enables clap derives for config types
+# This allows config types to be used with command-line argument parsing
+config = ["dep:clap"]
+
 [dependencies]
 # Async runtime
 tokio = { workspace = true, features = [] }
@@ -38,6 +42,7 @@ diesel_migrations = { workspace = true, features = ["postgres"] }
 diesel-async = { workspace = true, features = ["postgres", "pool", "deadpool", "async-connection-wrapper"] }
 diesel-derive-enum = { workspace = true, features = ["postgres"] }
 deadpool = { workspace = true, features = ["rt_tokio_1"] }
+pgvector = { workspace = true, features = ["diesel"] }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -49,6 +54,7 @@ serde_json = { workspace = true, features = [] }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
+derive_more = { workspace = true, features = ["deref", "deref_mut"] }
 
 # Data types
 jiff = { workspace = true, features = ["serde"] }
@@ -59,3 +65,6 @@ bigdecimal = { workspace = true, features = ["serde"] }
 
 # OpenAPI documentation (optional)
 schemars = { workspace = true, features = [], optional = true }
+
+# CLI (optional)
+clap = { workspace = true, features = ["derive", "env"], optional = true }

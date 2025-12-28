@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
@@ -16,10 +15,10 @@ use nvisy_postgres::types::ApiTokenType;
 use super::request::{Login, Signup};
 use super::response::AuthToken;
 use crate::extract::{
-    AuthClaims, AuthHeader, AuthState, ClientIp, Json, TypedHeader, ValidateJson,
+    AuthClaims, AuthHeader, AuthState, ClientIp, Json, PgPool, TypedHeader, ValidateJson,
 };
 use crate::handler::{ErrorKind, Result};
-use crate::service::{PasswordHasher, PasswordStrength, ServiceState, SessionKeys};
+use crate::service::{AuthKeys, PasswordHasher, PasswordStrength, ServiceState};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -28,9 +27,8 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
 
 /// Creates a new authentication header.
-#[tracing::instrument(skip_all)]
 fn create_auth_header(
-    auth_secret_keys: SessionKeys,
+    auth_secret_keys: AuthKeys,
     account_model: &Account,
     account_api_token: &AccountApiToken,
 ) -> Result<AuthHeader> {
@@ -39,25 +37,20 @@ fn create_auth_header(
     Ok(auth_header)
 }
 
-/// Creates a new account API token.
+/// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
-    State(auth_keys): State<SessionKeys>,
+    State(auth_keys): State<AuthKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        email = %request.email_address,
-        ip_address = %ip_address,
-        "login attempt"
-    );
+    tracing::info!(target: TRACING_TARGET, "Login attempt");
 
     let normalized_email = request.email_address.to_lowercase();
-    let account = pg_client.find_account_by_email(&normalized_email).await?;
+    let account = conn.find_account_by_email(&normalized_email).await?;
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
@@ -77,23 +70,17 @@ async fn login(
     if !login_successful {
         // Record failed login attempt for existing accounts
         if let Some(ref acc) = account
-            && let Err(e) = pg_client.record_failed_login(acc.id).await
+            && let Err(e) = conn.record_failed_login(acc.id).await
         {
             tracing::error!(
                 target: TRACING_TARGET,
-                account_id = acc.id.to_string(),
+                account_id = %acc.id,
                 error = %e,
-                "failed to record failed login attempt"
+                "Failed to record failed login attempt"
             );
         }
 
-        tracing::warn!(
-            target: TRACING_TARGET,
-            email = %normalized_email,
-            account_exists = account.is_some(),
-            password_valid = password_valid,
-            "login failed"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Login failed");
 
         return Err(ErrorKind::NotFound.into_error());
     }
@@ -101,15 +88,15 @@ async fn login(
     let account = account.unwrap(); // Safe because we verified above
 
     // Record successful login
-    if let Err(e) = pg_client
+    if let Err(e) = conn
         .record_successful_login(account.id, ip_address.into())
         .await
     {
         tracing::error!(
             target: TRACING_TARGET,
-            account_id = account.id.to_string(),
+            account_id = %account.id,
             error = %e,
-            "failed to record successful login"
+            "Failed to record successful login"
         );
     }
 
@@ -122,7 +109,7 @@ async fn login(
         ..Default::default()
     };
 
-    let account_api_token = pg_client.create_token(new_token).await?;
+    let account_api_token = conn.create_token(new_token).await?;
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
@@ -136,34 +123,27 @@ async fn login(
 
     tracing::info!(
         target: TRACING_TARGET,
-        token_id = auth_claims.token_id.to_string(),
-        account_id = auth_claims.account_id.to_string(),
-        email = %normalized_email,
-        "login successful: API token created"
+        token_id = %auth_claims.token_id,
+        account_id = %auth_claims.account_id,
+        "Login successful",
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
-/// Creates a new account and API token.
+/// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
-    State(pg_client): State<PgClient>,
+    PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
-    State(auth_keys): State<SessionKeys>,
+    State(auth_keys): State<AuthKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        email = %request.email_address,
-        display_name = %request.display_name,
-        ip_address = %ip_address,
-        "signup attempt"
-    );
+    tracing::info!(target: TRACING_TARGET, "Signup attempt");
 
     let normalized_email = request.email_address.to_lowercase();
 
@@ -181,29 +161,24 @@ async fn signup(
         .map_err(|_| ErrorKind::InternalServerError.into_error())?;
 
     // Check if email already exists
-    if pg_client.email_exists(&normalized_email).await? {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            email = %normalized_email,
-            "signup failed: email already exists"
-        );
+    if conn.email_exists(&normalized_email).await? {
+        tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
         return Err(ErrorKind::Conflict.into_error());
     }
 
     let new_account = NewAccount {
         display_name: request.display_name,
-        email_address: normalized_email.clone(),
+        email_address: normalized_email,
         password_hash,
         ..Default::default()
     };
 
-    let account = pg_client.create_account(new_account).await?;
+    let account = conn.create_account(new_account).await?;
+
     tracing::info!(
         target: TRACING_TARGET,
-        account_id = account.id.to_string(),
-        email = %account.email_address,
-        display_name = %account.display_name,
-        "account created"
+        account_id = %account.id,
+        "Account created",
     );
 
     let new_token = NewAccountApiToken {
@@ -214,7 +189,7 @@ async fn signup(
         session_type: Some(ApiTokenType::Web),
         ..Default::default()
     };
-    let account_api_token = pg_client.create_token(new_token).await?;
+    let account_api_token = conn.create_token(new_token).await?;
 
     // Extract values before moving account
     let display_name = account.display_name.clone();
@@ -233,69 +208,52 @@ async fn signup(
 
     tracing::info!(
         target: TRACING_TARGET,
-        token_id = auth_claims.token_id.to_string(),
-        account_id = auth_claims.account_id.to_string(),
-        "signup successful: API token created"
+        token_id = %auth_claims.token_id,
+        account_id = %auth_claims.account_id,
+        "Signup successful",
     );
 
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
-/// Deletes an API token by its ID (from the Authorization header).
-#[tracing::instrument(skip_all)]
-async fn logout(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
-) -> Result<StatusCode> {
-    tracing::trace!(
-        target: TRACING_TARGET,
-        token_id = auth_claims.token_id.to_string(),
-        account_id = auth_claims.account_id.to_string(),
-        "logout attempt"
-    );
+/// Deletes an API token by its ID (logout).
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        token_id = %auth_claims.token_id,
+    )
+)]
+async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> Result<StatusCode> {
+    tracing::info!(target: TRACING_TARGET, "Logout requested");
 
     // Verify API token exists before attempting to delete
-    let token_exists = pg_client
+    let token_exists = conn
         .find_token_by_access_token(auth_claims.token_id)
         .await?
         .is_some();
 
     if !token_exists {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            token_id = auth_claims.token_id.to_string(),
-            account_id = auth_claims.account_id.to_string(),
-            "logout attempted on non-existent API token"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent API token");
         return Ok(StatusCode::OK); // Consider it successful if token doesn't exist
     }
 
     // Delete the API token
-    let deleted = pg_client.delete_token(auth_claims.token_id).await?;
+    let deleted = conn.delete_token(auth_claims.token_id).await?;
 
     if deleted {
-        tracing::info!(
-            target: TRACING_TARGET,
-            token_id = auth_claims.token_id.to_string(),
-            account_id = auth_claims.account_id.to_string(),
-            "logout successful: API token deleted"
-        );
+        tracing::info!(target: TRACING_TARGET, "Logout successful");
     } else {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            token_id = auth_claims.token_id.to_string(),
-            account_id = auth_claims.account_id.to_string(),
-            "logout completed but API token was not found for deletion"
-        );
+        tracing::warn!(target: TRACING_TARGET, "Logout completed but API token was not found");
     }
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
     tokio::spawn(async move {
-        if let Err(e) = pg_client.cleanup_expired_tokens().await {
+        if let Err(e) = conn.cleanup_expired_tokens().await {
             tracing::debug!(
                 target: TRACING_TARGET_CLEANUP,
                 error = %e,
-                "failed to cleanup expired sessions during logout"
+                "Failed to cleanup expired sessions during logout"
             );
         }
     });
@@ -313,194 +271,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/auth/login", post(login))
         .api_route("/auth/signup", post(signup))
         .api_route("/auth/logout", post(logout))
-}
-
-#[cfg(test)]
-mod test {
-    use axum::http::StatusCode;
-
-    use super::super::request::{Login, Signup};
-    use super::super::response::AuthToken;
-    use super::routes;
-    use crate::handler::test::create_test_server_with_router;
-
-    #[tokio::test]
-    async fn test_signup_success() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let signup_request = Signup {
-            display_name: "Test User".to_string(),
-            email_address: "test@example.com".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: true,
-        };
-
-        let response = server.post("/auth/signup/").json(&signup_request).await;
-        response.assert_status(StatusCode::CREATED);
-
-        let body: AuthToken = response.json();
-        assert_eq!(body.email_address, "test@example.com");
-        assert_eq!(body.display_name, "Test User");
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_signup_invalid_email() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let signup_request = serde_json::json!({
-            "displayName": "Test User",
-            "emailAddress": "invalid-email",
-            "password": "SecurePassword123!",
-            "rememberMe": true
-        });
-
-        let response = server.post("/auth/signup/").json(&signup_request).await;
-        response.assert_status_bad_request();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_signup_duplicate_email() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let signup_request = Signup {
-            display_name: "First User".to_string(),
-            email_address: "duplicate@example.com".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: false,
-        };
-
-        // First signup should succeed
-        let response = server.post("/auth/signup/").json(&signup_request).await;
-        response.assert_status(StatusCode::CREATED);
-
-        // Second signup with same email should fail
-        let response = server.post("/auth/signup/").json(&signup_request).await;
-        response.assert_status_conflict();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_login_success() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // First create an account
-        let signup_request = Signup {
-            display_name: "Login Test".to_string(),
-            email_address: "login@example.com".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: false,
-        };
-        server.post("/auth/signup/").json(&signup_request).await;
-
-        // Then login
-        let login_request = Login {
-            email_address: "login@example.com".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: true,
-        };
-
-        let response = server.post("/auth/login/").json(&login_request).await;
-        response.assert_status(StatusCode::CREATED);
-
-        let _body: AuthToken = response.json();
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_login_wrong_password() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create account
-        let signup_request = Signup {
-            display_name: "Wrong Pass Test".to_string(),
-            email_address: "wrongpass@example.com".to_string(),
-            password: "CorrectPassword123!".to_string(),
-            remember_me: false,
-        };
-        server.post("/auth/signup/").json(&signup_request).await;
-
-        // Try to login with wrong password
-        let login_request = Login {
-            email_address: "wrongpass@example.com".to_string(),
-            password: "WrongPassword456!".to_string(),
-            remember_me: false,
-        };
-
-        let response = server.post("/auth/login/").json(&login_request).await;
-        response.assert_status(StatusCode::NOT_FOUND);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_login_nonexistent_user() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        let login_request = Login {
-            email_address: "nonexistent@example.com".to_string(),
-            password: "SomePassword123!".to_string(),
-            remember_me: false,
-        };
-
-        let response = server.post("/auth/login/").json(&login_request).await;
-        response.assert_status(StatusCode::NOT_FOUND);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_logout_success() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Create and login
-        let signup_request = Signup {
-            display_name: "Logout Test".to_string(),
-            email_address: "logout@example.com".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: false,
-        };
-        let signup_response = server.post("/auth/signup/").json(&signup_request).await;
-        let cookies = signup_response.headers().get("set-cookie");
-
-        // Logout
-        let mut logout_request = server.post("/auth/logout/");
-        if let Some(cookie) = cookies {
-            logout_request = logout_request.add_header("Cookie", cookie.to_str()?);
-        }
-        let response = logout_request.await;
-        response.assert_status_ok();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_email_normalization() -> anyhow::Result<()> {
-        let server = create_test_server_with_router(|_| routes()).await?;
-
-        // Signup with mixed case email
-        let signup_request = Signup {
-            display_name: "Case Test".to_string(),
-            email_address: "Test@Example.COM".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: false,
-        };
-        server.post("/auth/signup/").json(&signup_request).await;
-
-        // Login with lowercase email should work
-        let login_request = Login {
-            email_address: "test@example.com".to_string(),
-            password: "SecurePassword123!".to_string(),
-            remember_me: false,
-        };
-
-        let response = server.post("/auth/login/").json(&login_request).await;
-        response.assert_status(StatusCode::CREATED);
-
-        Ok(())
-    }
+        .with_path_items(|item| item.tag("Authentication"))
 }

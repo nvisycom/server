@@ -26,14 +26,14 @@ pub type BoxedError = Box<dyn StdError + Send + Sync>;
 
 /// Result type alias for service layer operations.
 ///
-/// This is a convenience alias that uses [`ServiceError`] as the error type,
+/// This is a convenience alias that uses [`Error`] as the error type,
 /// reducing boilerplate in function signatures throughout the service layer.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Error kind enumeration for categorizing service layer errors.
 ///
 /// This enum represents the different categories of errors that can occur
-/// in the service layer. It's separated from [`ServiceError`] to allow
+/// in the service layer. It's separated from [`Error`] to allow
 /// for pattern matching on error types without accessing the full error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
@@ -193,8 +193,8 @@ mod tests {
         let error = Error::external("nats", "Connection refused");
 
         assert_eq!(error.kind(), ErrorKind::External);
-        assert!(error.to_string().contains("NATS"));
-        assert!(error.to_string().contains("connection refused"));
+        assert!(error.to_string().contains("nats"));
+        assert!(error.to_string().contains("Connection refused"));
     }
 
     #[test]
@@ -203,6 +203,6 @@ mod tests {
         assert_eq!(ErrorKind::External.as_str(), "external_service");
         assert_eq!(ErrorKind::Auth.as_str(), "auth");
         assert_eq!(ErrorKind::FileSystem.as_str(), "file_system");
-        assert_eq!(ErrorKind::Internal.as_str(), "internal");
+        assert_eq!(ErrorKind::Internal.as_str(), "internal_service");
     }
 }

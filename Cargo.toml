@@ -7,9 +7,7 @@ members = [
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-ollama",
-    "./crates/nvisy-olmocr2",
     "./crates/nvisy-postgres",
-    "./crates/nvisy-qdrant",
     "./crates/nvisy-server",
 ]
 
@@ -31,14 +29,13 @@ documentation = "https://docs.rs/nvisy-server"
 #
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
+# External dependencies
+nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
+nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
+
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
-nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
-nvisy-olmocr2 = { path = "./crates/nvisy-olmocr2", version = "0.1.0" }
-nvisy-portkey = { path = "./crates/nvisy-portkey", version = "0.1.0" }
-nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
-nvisy-qdrant = { path = "./crates/nvisy-qdrant", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 
 # CLI
@@ -67,7 +64,7 @@ aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
 schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
 
 # Authentication & Security
-jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
 argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
 base64 = { version = "0.22", features = [] }
 rand = { version = "0.10.0-rc.5", features = ["serde"] }
@@ -81,12 +78,10 @@ diesel_migrations = { version = "2.3", features = [] }
 diesel-async = { version = "0.7", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
+pgvector = { version = "0.4", features = [] }
 
-# Messaging (NATS)
+# Messaging and object storage (NATS)
 async-nats = { version = "0.45", features = [] }
-
-# Vector database (Qdrant)
-qdrant-client = { version = "1.11", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }
@@ -94,6 +89,7 @@ tracing-subscriber = { version = "0.3", features = [] }
 
 # Testing utilities
 tempfile = { version = "3.23", features = [] }
+dotenvy = { version = "0.15", features = [] }
 
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }

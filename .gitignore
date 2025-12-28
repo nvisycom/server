@@ -2,11 +2,10 @@
 Thumbs.db
 .DS_Store
 
-# Editors
+# IDE and Editors
 .vs/
 .vscode/
 .idea/
-.fleet/
 .zed/
 
 # Rust
@@ -49,3 +48,4 @@ temp/
 # Other
 .ignore*/
 LLM.md
+.claude

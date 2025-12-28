@@ -36,7 +36,7 @@ pub use diesel_async::AsyncPgConnection as PgConnection;
 pub(crate) use crate::client::PooledConnection;
 pub use crate::client::{
     ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientMigrationExt, PgConfig,
-    PgPoolStatus, get_applied_migrations, get_migration_status, run_pending_migrations,
+    PgConn, PgPoolStatus, get_applied_migrations, get_migration_status, run_pending_migrations,
     verify_schema_integrity,
 };
 pub use crate::error::{PgError, PgResult};

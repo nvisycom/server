@@ -4,6 +4,8 @@
 
 pub mod emb;
 mod error;
+#[cfg(feature = "test-utils")]
+mod mock;
 pub mod ocr;
 #[doc(hidden)]
 pub mod prelude;
@@ -12,9 +14,12 @@ mod types;
 pub mod vlm;
 
 pub use error::{BoxedError, Error, ErrorKind, Result};
+#[cfg(feature = "test-utils")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+pub use mock::{MockConfig, MockProvider};
 pub use services::AiServices;
 pub use types::{
     Annotation, AnnotationRelation, AnnotationSet, AnnotationType, BoundingBox, Chat, Content,
-    Document, DocumentId, DocumentMetadata, Message, MessageRole, RelationType, ServiceHealth,
-    ServiceStatus, TextSpan,
+    Context, Document, DocumentId, DocumentMetadata, Message, MessageRole, RelationType,
+    ServiceHealth, ServiceStatus, SharedContext, TextSpan, Timing, UsageStats,
 };

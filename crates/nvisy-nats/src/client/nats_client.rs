@@ -36,7 +36,6 @@ use async_nats::{Client, ConnectOptions, jetstream};
 use bytes::Bytes;
 use tokio::time::timeout;
 
-use super::credentials::NatsCredentials;
 use super::nats_config::NatsConfig;
 use crate::kv::{ApiTokenStore, CacheStore, KvStore};
 use crate::object::{DocumentFileStore, DocumentLabel, ObjectStore};
@@ -63,18 +62,23 @@ impl NatsClient {
     /// Create a new NATS client and connect
     #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
-        tracing::info!("Connecting to NATS servers: {:?}", config.servers);
+        tracing::info!("Connecting to NATS servers: {}", config.nats_url);
 
         let mut connect_opts = ConnectOptions::new()
-            .name(&config.name)
-            .connection_timeout(config.connect_timeout)
-            .ping_interval(config.ping_interval);
+            .name(config.name())
+            .ping_interval(config.ping_interval())
+            .token(config.nats_token.clone());
+
+        // Set connection timeout if specified
+        if let Some(timeout) = config.connect_timeout() {
+            connect_opts = connect_opts.connection_timeout(timeout);
+        }
 
         // Set reconnection options
-        if let Some(max_reconnects) = config.max_reconnects {
+        if let Some(max_reconnects) = config.max_reconnects_option() {
             connect_opts = connect_opts.max_reconnects(max_reconnects);
         }
-        let reconnect_delay_ms = config.reconnect_delay.as_millis().min(u64::MAX as u128) as u64;
+        let reconnect_delay_ms = config.reconnect_delay().as_millis().min(u64::MAX as u128) as u64;
         connect_opts = connect_opts.reconnect_delay_callback(move |attempts| {
             Duration::from_millis(std::cmp::min(
                 reconnect_delay_ms * 2_u64.pow(attempts.min(32) as u32),
@@ -82,38 +86,16 @@ impl NatsClient {
             ))
         });
 
-        // Set authentication if provided
-        if let Some(credentials) = &config.credentials {
-            connect_opts = match credentials {
-                NatsCredentials::UserPassword { user, pass } => {
-                    connect_opts.user_and_password(user.clone(), pass.clone())
-                }
-                NatsCredentials::Token { token } => connect_opts.token(token.clone()),
-                NatsCredentials::CredsFile { path } => connect_opts
-                    .credentials_file(path)
-                    .await
-                    .map_err(|e| Error::operation("credentials_file", e.to_string()))?,
-                NatsCredentials::NKey { seed } => connect_opts.nkey(seed.clone()),
-            };
-        }
-
-        // Set TLS if configured
-        if let Some(tls_config) = &config.tls
-            && tls_config.enabled
-        {
-            connect_opts = connect_opts.require_tls(true);
-            // Note: Custom TLS verification requires using rustls directly
-            // For production, use proper certificate validation
-        }
-
         // Connect to NATS
+        // Use configured timeout or a sensible default (30 seconds)
+        let connect_timeout = config.connect_timeout().unwrap_or(Duration::from_secs(30));
         let client = timeout(
-            config.connect_timeout,
-            async_nats::connect_with_options(&config.servers.join(","), connect_opts),
+            connect_timeout,
+            async_nats::connect_with_options(&config.nats_url, connect_opts),
         )
         .await
         .map_err(|_| Error::Timeout {
-            timeout: config.connect_timeout,
+            timeout: connect_timeout,
         })?
         .map_err(|e| Error::Connection(Box::new(e)))?;
 
@@ -178,20 +160,19 @@ impl NatsClient {
         Ok(ping_time)
     }
 
-    /// Get connection statistics
+    /// Check if the client is connected.
     #[must_use]
-    pub fn stats(&self) -> ConnectionStats {
-        let server_info = self.inner.client.server_info();
-        ConnectionStats {
-            server_name: server_info.server_name.clone(),
-            server_version: server_info.version.clone(),
-            server_id: server_info.server_id.clone(),
-            is_connected: matches!(
-                self.inner.client.connection_state(),
-                async_nats::connection::State::Connected
-            ),
-            max_payload: server_info.max_payload,
-        }
+    pub fn is_connected(&self) -> bool {
+        matches!(
+            self.inner.client.connection_state(),
+            async_nats::connection::State::Connected
+        )
+    }
+
+    /// Get server information.
+    #[must_use]
+    pub fn server_info(&self) -> async_nats::ServerInfo {
+        self.inner.client.server_info()
     }
 
     /// Get or create an ApiTokenStore
@@ -382,35 +363,5 @@ impl NatsConnection {
             "Flushed pending messages"
         );
         Ok(())
-    }
-}
-
-/// Connection statistics
-#[derive(Debug, Clone)]
-pub struct ConnectionStats {
-    pub server_name: String,
-    pub server_version: String,
-    pub server_id: String,
-    pub is_connected: bool,
-    pub max_payload: usize,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_connection_stats() {
-        let stats = ConnectionStats {
-            server_name: "test-server".to_string(),
-            server_version: "2.9.0".to_string(),
-            server_id: "server123".to_string(),
-            is_connected: true,
-            max_payload: 1048576,
-        };
-
-        assert_eq!(stats.server_name, "test-server");
-        assert!(stats.is_connected);
-        assert_eq!(stats.max_payload, 1048576);
     }
 }

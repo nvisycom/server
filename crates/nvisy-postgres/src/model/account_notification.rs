@@ -121,7 +121,8 @@ impl AccountNotification {
     /// Returns whether the notification is expiring soon (within 24 hours).
     pub fn is_expiring_soon(&self) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
-            remaining.total(jiff::Unit::Second).ok() <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
+            remaining.total(jiff::Unit::Second).ok()
+                <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
         } else {
             false
         }

@@ -22,6 +22,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 schema = ["dep:schemars"]
 
+# CLI configuration support: enables clap derives for config types
+# This allows config types to be used with command-line argument parsing
+config = ["dep:clap"]
+
 [dependencies]
 # NATS messaging client
 async-nats = { workspace = true }
@@ -53,3 +57,6 @@ hex = { workspace = true, features = [] }
 
 # Optional: JSON schema generation
 schemars = { workspace = true, features = [], optional = true }
+
+# CLI (optional)
+clap = { workspace = true, features = ["derive", "env"], optional = true }

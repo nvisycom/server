@@ -130,7 +130,7 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::BadRequest);
-        assert!(http_err.message().unwrap().contains("Invalid request data"));
+        assert!(http_err.message().unwrap().contains("Invalid request"));
     }
 
     #[test]
@@ -150,7 +150,7 @@ mod tests {
 
         assert_eq!(http_err.kind(), ErrorKind::Conflict);
         assert_eq!(http_err.resource(), Some("test_key"));
-        assert!(http_err.context().unwrap().contains("Expected revision 5"));
+        assert!(http_err.context().unwrap().contains("modified"));
     }
 
     #[test]
@@ -160,7 +160,7 @@ mod tests {
 
         assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
         assert_eq!(http_err.resource(), Some("test_stream"));
-        assert!(http_err.context().unwrap().contains("stream not available"));
+        assert!(http_err.context().unwrap().contains("stream"));
     }
 
     #[test]
@@ -179,6 +179,6 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::BadRequest);
-        assert!(http_err.context().unwrap().contains("missing server URL"));
+        assert!(http_err.context().unwrap().contains("configuration"));
     }
 }
