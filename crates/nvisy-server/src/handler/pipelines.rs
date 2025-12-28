@@ -189,23 +189,23 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/:project_id/pipelines",
+            "/projects/{project_id}/pipelines",
             get(list_project_pipelines),
         )
         .api_route(
-            "/projects/:project_id/pipelines/:pipeline_id",
+            "/projects/{project_id}/pipelines/{pipeline_id}",
             get(get_project_pipeline),
         )
         .api_route(
-            "/projects/:project_id/pipelines",
+            "/projects/{project_id}/pipelines",
             post(create_project_pipeline),
         )
         .api_route(
-            "/projects/:project_id/pipelines/:pipeline_id",
+            "/projects/{project_id}/pipelines/{pipeline_id}",
             put(update_project_pipeline),
         )
         .api_route(
-            "/projects/:project_id/pipelines/:pipeline_id",
+            "/projects/{project_id}/pipelines/{pipeline_id}",
             delete(delete_project_pipeline),
         )
 }

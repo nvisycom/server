@@ -332,19 +332,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/:project_id/invites/", post(send_invite))
-        .api_route("/projects/:project_id/invites/", get(list_invites))
+        .api_route("/projects/{project_id}/invites/", post(send_invite))
+        .api_route("/projects/{project_id}/invites/", get(list_invites))
         .api_route(
-            "/projects/:project_id/invites/:invite_id/",
+            "/projects/{project_id}/invites/{invite_id}/",
             delete(cancel_invite),
         )
         .api_route(
-            "/projects/:project_id/invites/:invite_id/reply/",
+            "/projects/{project_id}/invites/{invite_id}/reply/",
             patch(reply_to_invite),
         )
         .api_route(
-            "/projects/:project_id/invites/code/",
+            "/projects/{project_id}/invites/code/",
             post(generate_invite_code),
         )
-        .api_route("/invites/:invite_code/join/", post(join_via_invite_code))
+        .api_route("/invites/{invite_code}/join/", post(join_via_invite_code))
 }

@@ -27,7 +27,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust
 //! use axum::Router;
 //! use nvisy_server::middleware::{
 //!     RecoveryConfig, RouterRecoveryExt, RouterObservabilityExt,
@@ -37,7 +37,6 @@
 //!
 //! fn create_router(state: ServiceState) -> Router {
 //!     Router::new()
-//!         // Innermost: route handlers go here
 //!         .with_authentication(state.clone())  // 5. Auth
 //!         .with_metrics()                      // 4. Metrics
 //!         .with_default_security()             // 3. Security

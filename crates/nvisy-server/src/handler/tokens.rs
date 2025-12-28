@@ -200,7 +200,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route("/api-tokens/", post(create_api_token))
         .api_route("/api-tokens/", get(list_api_tokens))
-        .api_route("/api-tokens/:access_token/", get(read_api_token))
-        .api_route("/api-tokens/:access_token/", patch(update_api_token))
-        .api_route("/api-tokens/:access_token/", delete(revoke_api_token))
+        .api_route("/api-tokens/{access_token}/", get(read_api_token))
+        .api_route("/api-tokens/{access_token}/", patch(update_api_token))
+        .api_route("/api-tokens/{access_token}/", delete(revoke_api_token))
 }

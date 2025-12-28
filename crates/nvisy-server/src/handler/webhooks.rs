@@ -239,18 +239,18 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/:project_id/webhooks/", post(create_webhook))
-        .api_route("/projects/:project_id/webhooks/", get(list_webhooks))
+        .api_route("/projects/{project_id}/webhooks/", post(create_webhook))
+        .api_route("/projects/{project_id}/webhooks/", get(list_webhooks))
         .api_route(
-            "/projects/:project_id/webhooks/:webhook_id/",
+            "/projects/{project_id}/webhooks/{webhook_id}/",
             get(read_webhook),
         )
         .api_route(
-            "/projects/:project_id/webhooks/:webhook_id/",
+            "/projects/{project_id}/webhooks/{webhook_id}/",
             put(update_webhook),
         )
         .api_route(
-            "/projects/:project_id/webhooks/:webhook_id/",
+            "/projects/{project_id}/webhooks/{webhook_id}/",
             delete(delete_webhook),
         )
 }

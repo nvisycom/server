@@ -9,4 +9,4 @@ mod session_keys;
 
 pub use password_hasher::PasswordHasher;
 pub use password_strength::PasswordStrength;
-pub use session_keys::{AuthKeysConfig, SessionKeys};
+pub use session_keys::{AuthConfig, AuthKeys};

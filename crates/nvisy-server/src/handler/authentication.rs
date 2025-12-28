@@ -14,11 +14,11 @@ use nvisy_postgres::types::ApiTokenType;
 
 use super::request::{Login, Signup};
 use super::response::AuthToken;
-use crate::extract::{PgPool, 
-    AuthClaims, AuthHeader, AuthState, ClientIp, Json, TypedHeader, ValidateJson,
+use crate::extract::{
+    AuthClaims, AuthHeader, AuthState, ClientIp, Json, PgPool, TypedHeader, ValidateJson,
 };
 use crate::handler::{ErrorKind, Result};
-use crate::service::{PasswordHasher, PasswordStrength, ServiceState, SessionKeys};
+use crate::service::{AuthKeys, PasswordHasher, PasswordStrength, ServiceState};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -28,7 +28,7 @@ const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cle
 
 /// Creates a new authentication header.
 fn create_auth_header(
-    auth_secret_keys: SessionKeys,
+    auth_secret_keys: AuthKeys,
     account_model: &Account,
     account_api_token: &AccountApiToken,
 ) -> Result<AuthHeader> {
@@ -42,7 +42,7 @@ fn create_auth_header(
 async fn login(
     PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
-    State(auth_keys): State<SessionKeys>,
+    State(auth_keys): State<AuthKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
@@ -138,7 +138,7 @@ async fn signup(
     PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
-    State(auth_keys): State<SessionKeys>,
+    State(auth_keys): State<AuthKeys>,
     ClientIp(ip_address): ClientIp,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
@@ -224,10 +224,7 @@ async fn signup(
         token_id = %auth_claims.token_id,
     )
 )]
-async fn logout(
-    PgPool(mut conn): PgPool,
-    AuthState(auth_claims): AuthState,
-) -> Result<StatusCode> {
+async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Logout requested");
 
     // Verify API token exists before attempting to delete

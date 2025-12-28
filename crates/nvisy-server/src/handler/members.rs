@@ -288,18 +288,18 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/:project_id/members/", get(list_members))
-        .api_route("/projects/:project_id/members/leave", post(leave_project))
+        .api_route("/projects/{project_id}/members/", get(list_members))
+        .api_route("/projects/{project_id}/members/leave", post(leave_project))
         .api_route(
-            "/projects/:project_id/members/:account_id/",
+            "/projects/{project_id}/members/{account_id}/",
             get(get_member),
         )
         .api_route(
-            "/projects/:project_id/members/:account_id/",
+            "/projects/{project_id}/members/{account_id}/",
             delete(delete_member),
         )
         .api_route(
-            "/projects/:project_id/members/:account_id/role",
+            "/projects/{project_id}/members/{account_id}/role",
             patch(update_member),
         )
 }

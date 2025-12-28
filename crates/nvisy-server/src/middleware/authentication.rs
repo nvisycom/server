@@ -12,7 +12,7 @@ use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 
 use crate::extract::{AuthClaims, AuthHeader, AuthState};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{ServiceState, SessionKeys};
+use crate::service::{AuthKeys, ServiceState};
 use crate::utility::tracing_targets;
 
 /// Extension trait for `axum::`[`Router`] to apply authentication middleware.
@@ -69,7 +69,7 @@ pub async fn require_authentication(
 pub async fn refresh_token_middleware(
     AuthState(auth_claims): AuthState,
     State(pg_database): State<PgClient>,
-    State(auth_secret_keys): State<SessionKeys>,
+    State(auth_secret_keys): State<AuthKeys>,
     request: Request,
     next: Next,
 ) -> Result<Response> {
@@ -128,7 +128,7 @@ pub async fn refresh_token_middleware(
 async fn refresh_token(
     auth_claims: &AuthClaims,
     pg_database: PgClient,
-    auth_secret_keys: SessionKeys,
+    auth_secret_keys: AuthKeys,
 ) -> Result<AuthHeader> {
     let mut conn = pg_database.get_connection().await?;
 

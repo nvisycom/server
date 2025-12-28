@@ -126,7 +126,7 @@ mod test {
     pub async fn create_test_server_with_router(
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
-        let config = ServiceConfig::default();
+        let config = ServiceConfig::from_env()?;
         let mock_services = nvisy_core::MockConfig::default().into_services();
         let state = ServiceState::from_config(config, mock_services).await?;
         let router = router(state.clone());
@@ -146,11 +146,7 @@ mod test {
 
     /// Returns a new [`TestServer`] with the default router and state.
     pub async fn create_test_server() -> anyhow::Result<TestServer> {
-        let config = ServiceConfig::default();
-        let ai_services = nvisy_core::MockConfig::default().into_services();
-        let state = ServiceState::from_config(config, ai_services).await?;
-        let router = routes(CustomRoutes::new(), state.clone());
-        create_test_server_with_state(router, state).await
+        create_test_server_with_router(|state| routes(CustomRoutes::new(), state)).await
     }
 
     #[tokio::test]

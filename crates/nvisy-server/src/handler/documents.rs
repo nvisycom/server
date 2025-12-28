@@ -230,9 +230,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/:project_id/documents", post(create_document))
-        .api_route("/projects/:project_id/documents", get(get_all_documents))
-        .api_route("/documents/:document_id", get(get_document))
-        .api_route("/documents/:document_id", patch(update_document))
-        .api_route("/documents/:document_id", delete(delete_document))
+        .api_route("/projects/{project_id}/documents", post(create_document))
+        .api_route("/projects/{project_id}/documents", get(get_all_documents))
+        .api_route("/documents/{document_id}", get(get_document))
+        .api_route("/documents/{document_id}", patch(update_document))
+        .api_route("/documents/{document_id}", delete(delete_document))
 }

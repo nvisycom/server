@@ -128,21 +128,15 @@ impl HealthCacheEntry {
 ///
 /// # Example
 ///
-/// ```no_run
-/// # use nvisy_server::service::cache::HealthCache;
-/// # use std::time::Duration;
-/// # async fn example() {
-/// let health = HealthCache::with_cache_duration(Duration::from_secs(60));
+/// ```rust
+/// use nvisy_server::service::HealthCache;
+/// use std::time::Duration;
 ///
-/// // Check health (performs actual checks or returns cached value)
-/// // let is_healthy = health.is_healthy(app_state).await;
+/// let health = HealthCache::with_cache_duration(Duration::from_secs(60));
 ///
 /// // Fast cached read without any checks
 /// let cached = health.get_cached_health();
-///
-/// // Force next check to be fresh
-/// health.invalidate().await;
-/// # }
+/// assert!(!cached); // Initially unhealthy until first check
 /// ```
 #[derive(Debug, Clone)]
 pub struct HealthCache {
@@ -247,13 +241,14 @@ impl HealthCache {
     ///
     /// # Example
     ///
-    /// ```no_run
-    /// # use nvisy_server::service::cache::HealthCache;
-    /// # async fn example(health: HealthCache) {
-    /// // After restarting a failed service
-    /// health.invalidate().await;
-    /// // Next health check will perform fresh checks
-    /// # }
+    /// ```rust
+    /// use nvisy_server::service::HealthCache;
+    ///
+    /// let rt = tokio::runtime::Runtime::new().unwrap();
+    /// rt.block_on(async {
+    ///     let health = HealthCache::new();
+    ///     health.invalidate().await;
+    /// });
     /// ```
     pub async fn invalidate(&self) {
         self.cache.invalidate().await;

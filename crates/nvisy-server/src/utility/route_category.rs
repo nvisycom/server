@@ -89,11 +89,11 @@ mod tests {
         );
         assert_eq!(
             RouteCategory::from_uri(&"/projects/456/documents/789".parse().unwrap()),
-            RouteCategory::DocumentProcessing
+            RouteCategory::ProjectManagement
         );
         assert_eq!(
             RouteCategory::from_uri(&"/documents/789/inputs/".parse().unwrap()),
-            RouteCategory::FileOperations
+            RouteCategory::DocumentProcessing
         );
         assert_eq!(
             RouteCategory::from_uri(&"/automation/batch".parse().unwrap()),

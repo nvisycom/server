@@ -789,5 +789,5 @@ async fn project_websocket_handler(
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
-    ApiRouter::new().api_route("/projects/:project_id/ws/", get(project_websocket_handler))
+    ApiRouter::new().api_route("/projects/{project_id}/ws/", get(project_websocket_handler))
 }

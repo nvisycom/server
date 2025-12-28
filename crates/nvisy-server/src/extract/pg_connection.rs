@@ -17,16 +17,11 @@ use crate::handler::{Error, ErrorKind};
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust
 /// use nvisy_server::extract::PgPool;
-/// use nvisy_postgres::query::AccountRepository;
 ///
-/// async fn get_account(
-///     PgPool(mut conn): PgPool,
-///     Path(account_id): Path<Uuid>,
-/// ) -> Result<Json<Account>, Error> {
-///     let account = conn.find_account_by_id(account_id).await?;
-///     Ok(Json(account))
+/// async fn get_account(PgPool(conn): PgPool) {
+///     // Use conn with repository traits
 /// }
 /// ```
 #[derive(Debug, Deref, DerefMut)]

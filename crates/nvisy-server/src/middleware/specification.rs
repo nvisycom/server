@@ -12,12 +12,12 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust
 //! use aide::axum::ApiRouter;
+//! use axum::Router;
 //! use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
 //!
-//! let app: ApiRouter<()> = ApiRouter::new()
-//!     // ... add your routes
+//! let app: Router<()> = ApiRouter::new()
 //!     .with_open_api(OpenApiConfig::default());
 //! ```
 //!
@@ -79,11 +79,12 @@ pub trait RouterOpenApiExt<S> {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust
     /// use aide::axum::ApiRouter;
+    /// use axum::Router;
     /// use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
     ///
-    /// let app: ApiRouter<()> = ApiRouter::new()
+    /// let app: Router<()> = ApiRouter::new()
     ///     .with_open_api(OpenApiConfig::default());
     /// ```
     fn with_open_api(self, config: OpenApiConfig) -> Router<S>;

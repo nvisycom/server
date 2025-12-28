@@ -104,3 +104,4 @@ clap = { workspace = true, features = ["derive", "env"] }
 axum-test = { workspace = true, features = [] }
 anyhow = { workspace = true, features = ["backtrace"] }
 tempfile = { workspace = true, features = [] }
+dotenvy = { workspace = true, features = [] }

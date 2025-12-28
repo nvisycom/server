@@ -311,27 +311,27 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/:project_id/integrations/",
+            "/projects/{project_id}/integrations/",
             post(create_integration),
         )
         .api_route(
-            "/projects/:project_id/integrations/",
+            "/projects/{project_id}/integrations/",
             get(list_integrations),
         )
         .api_route(
-            "/projects/:project_id/integrations/:integration_id/",
+            "/projects/{project_id}/integrations/{integration_id}/",
             get(read_integration),
         )
         .api_route(
-            "/projects/:project_id/integrations/:integration_id/",
+            "/projects/{project_id}/integrations/{integration_id}/",
             put(update_integration),
         )
         .api_route(
-            "/projects/:project_id/integrations/:integration_id/credentials/",
+            "/projects/{project_id}/integrations/{integration_id}/credentials/",
             patch(update_integration_credentials),
         )
         .api_route(
-            "/projects/:project_id/integrations/:integration_id/",
+            "/projects/{project_id}/integrations/{integration_id}/",
             delete(delete_integration),
         )
 }

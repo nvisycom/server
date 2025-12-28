@@ -12,7 +12,7 @@ use nvisy_postgres::PgClient;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
-pub use crate::service::security::{AuthKeysConfig, PasswordHasher, PasswordStrength, SessionKeys};
+pub use crate::service::security::{AuthConfig, AuthKeys, PasswordHasher, PasswordStrength};
 // Re-export error types from crate root for convenience
 pub use crate::{Error, Result};
 
@@ -32,7 +32,7 @@ pub struct ServiceState {
     // Internal services:
     pub auth_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
-    pub auth_keys: SessionKeys,
+    pub auth_keys: AuthKeys,
     pub health_cache: HealthCache,
     pub archive: ArchiveService,
 }
@@ -79,6 +79,6 @@ impl_di!(ai_services: AiServices);
 // Internal services:
 impl_di!(auth_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
-impl_di!(auth_keys: SessionKeys);
+impl_di!(auth_keys: AuthKeys);
 impl_di!(health_cache: HealthCache);
 impl_di!(archive: ArchiveService);

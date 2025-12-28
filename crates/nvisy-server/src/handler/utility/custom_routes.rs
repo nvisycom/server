@@ -17,12 +17,10 @@ pub type RouterMapFn = fn(ApiRouter<ServiceState>) -> ApiRouter<ServiceState>;
 /// # Examples
 ///
 /// ```rust
-/// use nvisy_server::handler::utils::CustomRoutes;
+/// use nvisy_server::handler::CustomRoutes;
 ///
-///
-/// let custom = CustomRoutes::new()
-///     .with_private_routes(some_private_router)
-///     .with_public_routes(some_public_router);
+/// let custom = CustomRoutes::new();
+/// assert!(custom.is_empty());
 /// ```
 #[derive(Default, Clone)]
 pub struct CustomRoutes {

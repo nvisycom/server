@@ -226,19 +226,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/:project_id/files/:file_id/comments",
+            "/projects/{project_id}/files/{file_id}/comments",
             post(post_comment),
         )
         .api_route(
-            "/projects/:project_id/files/:file_id/comments",
+            "/projects/{project_id}/files/{file_id}/comments",
             get(list_comments),
         )
         .api_route(
-            "/projects/:project_id/files/:file_id/comments/:comment_id",
+            "/projects/{project_id}/files/{file_id}/comments/{comment_id}",
             patch(update_comment),
         )
         .api_route(
-            "/projects/:project_id/files/:file_id/comments/:comment_id",
+            "/projects/{project_id}/files/{file_id}/comments/{comment_id}",
             delete(delete_comment),
         )
 }

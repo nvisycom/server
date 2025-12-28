@@ -197,7 +197,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route("/projects/", post(create_project))
         .api_route("/projects/", get(list_projects))
-        .api_route("/projects/:project_id/", get(read_project))
-        .api_route("/projects/:project_id/", patch(update_project))
-        .api_route("/projects/:project_id/", delete(delete_project))
+        .api_route("/projects/{project_id}/", get(read_project))
+        .api_route("/projects/{project_id}/", patch(update_project))
+        .api_route("/projects/{project_id}/", delete(delete_project))
 }

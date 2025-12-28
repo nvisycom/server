@@ -711,19 +711,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/documents/:document_id/files/", post(upload_file))
-        .api_route("/documents/:document_id/files/:file_id", patch(update_file))
-        .api_route("/documents/:document_id/files/:file_id", get(download_file))
+        .api_route("/documents/{document_id}/files/", post(upload_file))
+        .api_route("/documents/{document_id}/files/{file_id}", patch(update_file))
+        .api_route("/documents/{document_id}/files/{file_id}", get(download_file))
         .api_route(
-            "/documents/:document_id/files/:file_id",
+            "/documents/{document_id}/files/{file_id}",
             delete(delete_file),
         )
         .api_route(
-            "/projects/:project_id/files/download",
+            "/projects/{project_id}/files/download",
             post(download_multiple_files),
         )
         .api_route(
-            "/projects/:project_id/files/archive",
+            "/projects/{project_id}/files/archive",
             post(download_archived_files),
         )
 }
