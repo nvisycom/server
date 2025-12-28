@@ -128,7 +128,7 @@ mod test {
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
         let mock_services = nvisy_core::MockConfig::default().into_services();
-        let state = ServiceState::from_config(config, mock_services).await?;
+        let state = ServiceState::new(config, mock_services).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }

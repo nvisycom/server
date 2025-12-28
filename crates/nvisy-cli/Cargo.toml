@@ -19,9 +19,18 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
+
+# TLS support: enables HTTPS with rustls for secure connections
 tls = ["axum-server"]
+
+# OpenTelemetry support: enables environment-based log filtering
 otel = ["tracing-subscriber/env-filter"]
+
+# Dotenv support: loads environment variables from .env files
+# This allows configuration via .env files in addition to CLI args
+dotenv = ["dep:dotenvy"]
 
 # AI service backends for embeddings, OCRs, and VLMs
 mock = ["nvisy-core/test-utils", "nvisy-core/config"]
@@ -57,3 +66,6 @@ serde = { workspace = true, features = ["derive"] }
 # Error handling
 anyhow = { workspace = true, features = ["backtrace"] }
 thiserror = { workspace = true, features = [] }
+
+# Environment
+dotenvy = { workspace = true, optional = true }

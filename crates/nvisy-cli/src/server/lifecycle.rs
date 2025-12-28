@@ -30,31 +30,13 @@ where
 {
     let start_time = Instant::now();
 
-    log_server_starting(server_config);
-
     validate_config(server_config)?;
     log_security_warnings(server_config);
     log_config_details(server_config);
 
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_STARTUP,
-        addr = %server_config.socket_addr(),
-        "server ready and listening"
-    );
-
     let result = serve_fn().await;
 
     handle_result(result, start_time)
-}
-
-/// Logs server starting message.
-fn log_server_starting(config: &ServerConfig) {
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_STARTUP,
-        addr = %config.socket_addr(),
-        version = env!("CARGO_PKG_VERSION"),
-        "starting server"
-    );
 }
 
 /// Validates server configuration.
@@ -63,7 +45,7 @@ fn validate_config(config: &ServerConfig) -> ServerResult<()> {
         tracing::error!(
             target: TRACING_TARGET_SERVER_STARTUP,
             error = %e,
-            "configuration validation failed"
+            "Configuration validation failed"
         );
         return Err(ServerError::invalid_config(&e));
     }
@@ -75,7 +57,7 @@ fn log_security_warnings(config: &ServerConfig) {
     if config.binds_to_all_interfaces() {
         tracing::warn!(
             target: TRACING_TARGET_SERVER_STARTUP,
-            "server bound to all interfaces (0.0.0.0) - ensure firewall is configured"
+            "Server bound to all interfaces (0.0.0.0) - ensure firewall is configured"
         );
     }
 }
@@ -88,7 +70,7 @@ fn log_config_details(config: &ServerConfig) {
         port = config.port,
         shutdown_timeout = config.shutdown_timeout,
         tls = config.is_tls_enabled(),
-        "configuration active"
+        "Server configuration"
     );
 }
 
@@ -101,7 +83,7 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> ServerResult<()
             tracing::info!(
                 target: TRACING_TARGET_SERVER_SHUTDOWN,
                 uptime_secs = uptime.as_secs(),
-                "shutdown completed"
+                "Shutdown completed"
             );
             Ok(())
         }
@@ -113,14 +95,14 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> ServerResult<()
                 error = %server_error,
                 uptime_secs = uptime.as_secs(),
                 recoverable = server_error.is_recoverable(),
-                "fatal error"
+                "Fatal error"
             );
 
             if let Some(suggestion) = server_error.suggestion() {
                 tracing::info!(
                     target: TRACING_TARGET_SERVER_SHUTDOWN,
                     suggestion = suggestion,
-                    "recovery suggestion"
+                    "Recovery suggestion"
                 );
             }
 
@@ -138,7 +120,7 @@ fn log_error_context(error: &ServerError) {
             target: TRACING_TARGET_SERVER_SHUTDOWN,
             key = key,
             value = value,
-            "error context"
+            "Error context"
         );
     }
 }

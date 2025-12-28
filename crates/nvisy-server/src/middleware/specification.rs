@@ -42,11 +42,17 @@ use serde::{Deserialize, Serialize};
 #[must_use = "config does nothing unless you use it"]
 pub struct OpenApiConfig {
     /// Path which exposes the OpenAPI JSON specification.
-    #[cfg_attr(feature = "config", arg(long, default_value = "/api/openapi.json"))]
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "OPENAPI_JSON_PATH", default_value = "/api/openapi.json")
+    )]
     pub open_api_json: String,
 
     /// Path which exposes the Scalar API reference UI.
-    #[cfg_attr(feature = "config", arg(long, default_value = "/api/scalar"))]
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "OPENAPI_SCALAR_PATH", default_value = "/api/scalar")
+    )]
     pub scalar_ui: String,
 }
 

@@ -30,8 +30,6 @@ use anyhow::{Result as AnyhowResult, anyhow};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
-use crate::TRACING_TARGET_SERVER_STARTUP;
-
 /// HTTP server network and lifecycle configuration.
 ///
 /// Controls how the server binds to network interfaces, handles TLS,
@@ -164,17 +162,6 @@ impl Default for ServerConfig {
             tls_key_path: None,
         }
     }
-}
-
-/// Logs server configuration at startup.
-pub fn log_server_config(config: &ServerConfig) {
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_STARTUP,
-        host = %config.host,
-        port = config.port,
-        tls = config.is_tls_enabled(),
-        "server configuration"
-    );
 }
 
 #[cfg(test)]

@@ -41,7 +41,7 @@ impl ServiceState {
     /// Initializes application state from configuration.
     ///
     /// Connects to all external services and loads required resources.
-    pub async fn from_config(
+    pub async fn new(
         service_config: ServiceConfig,
         ai_services: AiServices,
     ) -> Result<Self> {

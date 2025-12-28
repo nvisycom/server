@@ -88,11 +88,11 @@ impl AuthKeys {
         // Validate configuration before attempting to load keys
         Self::validate_config(config)?;
 
-        tracing::info!(
+        tracing::debug!(
             target: TRACING_TARGET,
             decoding_key_path = %config.decoding_key.display(),
             encoding_key_path = %config.encoding_key.display(),
-            "loading authentication secret keys",
+            "Loading authentication secret keys",
         );
 
         // Load and parse decoding key
@@ -103,7 +103,7 @@ impl AuthKeys {
 
         tracing::info!(
             target: TRACING_TARGET,
-            "authentication secret keys loaded successfully",
+            "Authentication keys loaded",
         );
 
         let inner = Arc::new(AuthKeysInner {

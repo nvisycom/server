@@ -27,7 +27,7 @@ use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
 /// let config = PgConfig::new("postgresql://user:pass@localhost/db");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "config", derive(Args))]
 #[must_use = "database configurations must be used to create connection pools"]
 pub struct PgConfig {
@@ -257,6 +257,23 @@ impl PgConfig {
         self.validate()?;
         tracing::debug!(target: TRACING_TARGET_CONNECTION, "Database configuration validation passed");
         PgClient::new(self)
+    }
+}
+
+impl fmt::Debug for PgConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PgConfig")
+            .field("postgres_url", &self.database_url_masked())
+            .field("postgres_max_connections", &self.postgres_max_connections)
+            .field(
+                "postgres_connection_timeout_secs",
+                &self.postgres_connection_timeout_secs,
+            )
+            .field(
+                "postgres_idle_timeout_secs",
+                &self.postgres_idle_timeout_secs,
+            )
+            .finish()
     }
 }
 

@@ -49,3 +49,4 @@ temp/
 # Other
 .ignore*/
 LLM.md
+.claude

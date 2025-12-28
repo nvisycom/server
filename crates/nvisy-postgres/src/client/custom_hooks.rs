@@ -11,6 +11,18 @@ use futures::future::BoxFuture;
 
 use crate::TRACING_TARGET_CONNECTION;
 
+/// Masks sensitive information (password) in a database URL for safe logging.
+fn mask_url(url: &str) -> String {
+    if let Some(at_pos) = url.find('@') {
+        if let Some(colon_pos) = url[..at_pos].rfind(':') {
+            let mut masked = url.to_string();
+            masked.replace_range(colon_pos + 1..at_pos, "***");
+            return masked;
+        }
+    }
+    url.to_string()
+}
+
 /// Custom setup procedure used to establish a new connection.
 ///
 /// See [`ManagerConfig`] and [`SetupCallback`] for more details.
@@ -22,11 +34,12 @@ where
     C: AsyncConnection + 'static,
 {
     let start = Instant::now();
+    let masked_addr = mask_url(addr);
 
     tracing::info!(
         target: TRACING_TARGET_CONNECTION,
         hook = "setup_callback",
-        addr = addr,
+        addr = %masked_addr,
         "Establishing new database connection"
     );
 
@@ -39,7 +52,7 @@ where
                 tracing::info!(
                     target: TRACING_TARGET_CONNECTION,
                     hook = "setup_callback",
-                    addr = addr,
+                    addr = %masked_addr,
                     elapsed_ms = elapsed.as_millis(),
                     "Database connection established successfully"
                 );
@@ -48,7 +61,7 @@ where
                 tracing::error!(
                     target: TRACING_TARGET_CONNECTION,
                     hook = "setup_callback",
-                    addr = addr,
+                    addr = %masked_addr,
                     elapsed_ms = elapsed.as_millis(),
                     error = %err,
                     "Failed to establish database connection"

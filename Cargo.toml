@@ -64,7 +64,7 @@ aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
 schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
 
 # Authentication & Security
-jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
 argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
 base64 = { version = "0.22", features = [] }
 rand = { version = "0.10.0-rc.5", features = ["serde"] }
@@ -80,7 +80,7 @@ diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
 pgvector = { version = "0.4", features = [] }
 
-# Messaging (NATS)
+# Messaging and object storage (NATS)
 async-nats = { version = "0.45", features = [] }
 
 # Observability

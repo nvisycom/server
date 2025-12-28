@@ -1,10 +1,10 @@
 //! HTTPS server implementation using enhanced lifecycle management.
 
-use std::net::SocketAddr;
 use std::path::Path;
 
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
+use nvisy_server::extract::AppConnectInfo;
 
 use crate::TRACING_TARGET_SERVER_STARTUP;
 use crate::config::ServerConfig;
@@ -12,7 +12,6 @@ use crate::server::lifecycle::serve_with_shutdown;
 use crate::server::{ServerError, ServerResult, shutdown_signal};
 
 /// Starts an HTTPS server with enhanced lifecycle management.
-#[allow(dead_code)]
 pub async fn serve_https(
     app: Router,
     server_config: ServerConfig,
@@ -37,17 +36,18 @@ pub async fn serve_https(
                 )
             })?;
 
-        tracing::info!(
+        tracing::debug!(
             target: TRACING_TARGET_SERVER_STARTUP,
             cert_path = %cert_path.display(),
             key_path = %key_path.display(),
-            "TLS certificates loaded successfully"
+            "TLS certificates loaded"
         );
 
         tracing::info!(
             target: TRACING_TARGET_SERVER_STARTUP,
             addr = %server_addr,
-            "HTTPS server bound and ready"
+            tls = true,
+            "Server listening"
         );
 
         let handle = axum_server::Handle::new();
@@ -60,7 +60,7 @@ pub async fn serve_https(
 
         axum_server::bind_rustls(server_addr, tls_config)
             .handle(handle)
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .serve(app.into_make_service_with_connect_info::<AppConnectInfo>())
             .await
     })
     .await
@@ -111,7 +111,7 @@ fn validate_tls_files(cert_path: &Path, key_path: &Path) -> ServerResult<()> {
         target: TRACING_TARGET_SERVER_STARTUP,
         cert_path = %cert_path.display(),
         key_path = %key_path.display(),
-        "TLS files validated successfully"
+        "TLS files validated"
     );
 
     Ok(())

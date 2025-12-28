@@ -1,8 +1,7 @@
 //! HTTP server implementation using enhanced lifecycle management.
 
-use std::net::SocketAddr;
-
 use axum::Router;
+use nvisy_server::extract::AppConnectInfo;
 use tokio::net::TcpListener;
 
 use crate::TRACING_TARGET_SERVER_STARTUP;
@@ -22,10 +21,10 @@ pub async fn serve_http(app: Router, server_config: ServerConfig) -> ServerResul
         tracing::info!(
             target: TRACING_TARGET_SERVER_STARTUP,
             addr = %server_addr,
-            "HTTP server bound and ready"
+            "Server listening"
         );
 
-        let app = app.into_make_service_with_connect_info::<SocketAddr>();
+        let app = app.into_make_service_with_connect_info::<AppConnectInfo>();
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
             .await

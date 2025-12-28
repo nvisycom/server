@@ -167,10 +167,10 @@ impl HealthCache {
     ///
     /// Consider your SLA requirements and health check endpoint call frequency.
     pub fn with_cache_duration(cache_duration: Duration) -> Self {
-        tracing::info!(
+        tracing::debug!(
             target: TRACING_TARGET,
             cache_duration_secs = cache_duration.as_secs(),
-            "health service initialized"
+            "Health cache initialized"
         );
 
         Self {
