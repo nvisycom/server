@@ -13,12 +13,12 @@ use crate::TRACING_TARGET_CONNECTION;
 
 /// Masks sensitive information (password) in a database URL for safe logging.
 fn mask_url(url: &str) -> String {
-    if let Some(at_pos) = url.find('@') {
-        if let Some(colon_pos) = url[..at_pos].rfind(':') {
-            let mut masked = url.to_string();
-            masked.replace_range(colon_pos + 1..at_pos, "***");
-            return masked;
-        }
+    if let Some(at_pos) = url.find('@')
+        && let Some(colon_pos) = url[..at_pos].rfind(':')
+    {
+        let mut masked = url.to_string();
+        masked.replace_range(colon_pos + 1..at_pos, "***");
+        return masked;
     }
     url.to_string()
 }

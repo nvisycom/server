@@ -95,10 +95,10 @@ impl Cli {
     /// feature can pick up values from .env files.
     #[cfg(feature = "dotenv")]
     fn load_dotenv() {
-        if let Err(err) = dotenvy::dotenv() {
-            if !err.not_found() {
-                eprintln!("Warning: failed to load .env file: {err}");
-            }
+        if let Err(err) = dotenvy::dotenv()
+            && !err.not_found()
+        {
+            eprintln!("Warning: failed to load .env file: {err}");
         }
     }
 

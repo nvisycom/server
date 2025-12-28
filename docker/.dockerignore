@@ -4,13 +4,10 @@
 .gitattributes
 
 # IDE and Editors
-.idea/
+.vs/
 .vscode/
-.fleet/
+.idea/
 .zed/
-*.swp
-*.swo
-*~
 
 # Rust build artifacts
 target/

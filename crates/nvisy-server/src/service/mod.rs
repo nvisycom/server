@@ -41,10 +41,7 @@ impl ServiceState {
     /// Initializes application state from configuration.
     ///
     /// Connects to all external services and loads required resources.
-    pub async fn new(
-        service_config: ServiceConfig,
-        ai_services: AiServices,
-    ) -> Result<Self> {
+    pub async fn new(service_config: ServiceConfig, ai_services: AiServices) -> Result<Self> {
         let service_state = Self {
             pg_client: service_config.connect_postgres().await?,
             nats_client: service_config.connect_nats().await?,
