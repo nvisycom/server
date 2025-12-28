@@ -18,6 +18,7 @@ DROP FUNCTION IF EXISTS set_document_file_auto_delete();
 -- Drop tables (indexes and remaining triggers dropped automatically with tables)
 DROP TABLE IF EXISTS document_annotations;
 DROP TABLE IF EXISTS document_comments;
+DROP TABLE IF EXISTS document_chunks;
 DROP TABLE IF EXISTS document_files;
 DROP TABLE IF EXISTS documents;
 

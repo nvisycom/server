@@ -2,7 +2,7 @@ name: nvisy
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: pgvector/pgvector:pg18
     container_name: nvisy-postgres
     restart: unless-stopped
     ports:
@@ -47,27 +47,6 @@ services:
     networks:
       - nvisy
 
-  qdrant:
-    image: qdrant/qdrant:v1.16
-    container_name: nvisy-qdrant
-    restart: unless-stopped
-    ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-      QDRANT__SERVICE__HTTP_PORT: 6333
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:6333/healthz"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    networks:
-      - nvisy
-
   server:
     build:
       context: ..
@@ -84,8 +63,6 @@ services:
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-30}
       POSTGRES_URL: postgresql://${POSTGRES_USER:-nvisy}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-nvisy}
       NATS_URL: nats://nats:4222
-      QDRANT_CLUSTER_ENDPOINT: http://qdrant:6334
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       AUTH_PUBLIC_PEM: ${AUTH_PUBLIC_PEM:-}
       AUTH_PRIVATE_PEM: ${AUTH_PRIVATE_PEM:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
@@ -97,15 +74,12 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
     networks:
       - nvisy
 
 volumes:
   postgres_data:
   nats_data:
-  qdrant_data:
 
 networks:
   nvisy:

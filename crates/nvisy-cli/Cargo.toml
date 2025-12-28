@@ -33,7 +33,6 @@ olmocr = ["dep:nvisy-olmocr2"]
 nvisy-core = { workspace = true }
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
-nvisy-qdrant = { workspace = true, features = ["config"] }
 nvisy-server = { workspace = true, features = ["config"] }
 
 # AI service backends (optional)

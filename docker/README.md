@@ -6,7 +6,7 @@ Docker configuration for Nvisy API Server.
 
 ### Development (infrastructure only)
 
-Start PostgreSQL, NATS, and Qdrant for local development:
+Start PostgreSQL (with pgvector) and NATS for local development:
 
 ```bash
 cd docker
@@ -33,12 +33,11 @@ docker compose up -d --build
 
 ## Services
 
-| Service    | Port(s)     | Description              |
-| ---------- | ----------- | ------------------------ |
-| PostgreSQL | 5432        | Primary database         |
-| NATS       | 4222, 8222  | Message queue (JetStream)|
-| Qdrant     | 6333, 6334  | Vector database          |
-| Server     | 8080        | Nvisy API                |
+| Service    | Port(s)     | Description                      |
+| ---------- | ----------- | -------------------------------- |
+| PostgreSQL | 5432        | Primary database (with pgvector) |
+| NATS       | 4222, 8222  | Message queue (JetStream)        |
+| Server     | 8080        | Nvisy API                        |
 
 ## Commands
 

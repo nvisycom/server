@@ -6,7 +6,6 @@ use clap::Args;
 use clap::Parser;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
-use nvisy_qdrant::{QdrantClient, QdrantConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::service::{AuthKeysConfig, Error, Result, SessionKeys};
@@ -41,10 +40,6 @@ pub struct ServiceConfig {
     /// NATS configuration.
     #[cfg_attr(any(test, feature = "config"), command(flatten))]
     pub nats_config: NatsConfig,
-
-    /// Qdrant configuration.
-    #[cfg_attr(any(test, feature = "config"), command(flatten))]
-    pub qdrant_config: QdrantConfig,
 
     /// File path to the JWT decoding (public) key used for sessions.
     #[cfg_attr(
@@ -86,12 +81,6 @@ impl ServiceConfig {
         NatsClient::connect(self.nats_config.clone())
             .await
             .map_err(|e| Error::external("NATS", "Failed to connect to NATS").with_source(e))
-    }
-
-    /// Creates a Qdrant client.
-    pub async fn connect_qdrant(&self) -> Result<QdrantClient> {
-        QdrantClient::new(self.qdrant_config.clone())
-            .map_err(|e| Error::external("Qdrant", "Failed to create Qdrant client").with_source(e))
     }
 
     /// Loads authentication keys from configured paths.

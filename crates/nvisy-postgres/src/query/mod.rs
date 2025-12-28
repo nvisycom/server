@@ -16,6 +16,7 @@ pub mod account_notification;
 
 pub mod document;
 pub mod document_annotation;
+pub mod document_chunk;
 pub mod document_comment;
 pub mod document_file;
 
@@ -34,6 +35,7 @@ pub use account_action_token::AccountActionTokenRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
 pub use document::DocumentRepository;
+pub use document_chunk::DocumentChunkRepository;
 pub use document_comment::DocumentCommentRepository;
 pub use document_file::DocumentFileRepository;
 pub use project::ProjectRepository;

@@ -9,3 +9,6 @@ DROP FUNCTION IF EXISTS restore_record(_tbl REGCLASS, _id_column TEXT, _id_value
 DROP FUNCTION IF EXISTS soft_delete_record(_tbl REGCLASS, _id_column TEXT, _id_value ANYELEMENT);
 DROP FUNCTION IF EXISTS setup_updated_at(_tbl REGCLASS);
 DROP FUNCTION IF EXISTS trigger_updated_at();
+
+-- Drop pgvector extension
+DROP EXTENSION IF EXISTS vector;

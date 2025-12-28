@@ -8,10 +8,11 @@ mod utilities;
 pub use constraints::{
     AccountActionTokenConstraints, AccountApiTokenConstraints, AccountConstraints,
     AccountNotificationConstraints, ConstraintCategory, ConstraintViolation,
-    DocumentAnnotationConstraints, DocumentCommentConstraints, DocumentConstraints,
-    DocumentFileConstraints, DocumentVersionConstraints, ProjectActivitiesConstraints,
-    ProjectConstraints, ProjectIntegrationConstraints, ProjectInviteConstraints,
-    ProjectMemberConstraints, ProjectRunConstraints, ProjectWebhookConstraints,
+    DocumentAnnotationConstraints, DocumentChunkConstraints, DocumentCommentConstraints,
+    DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
+    ProjectActivitiesConstraints, ProjectConstraints, ProjectIntegrationConstraints,
+    ProjectInviteConstraints, ProjectMemberConstraints, ProjectRunConstraints,
+    ProjectWebhookConstraints,
 };
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, ApiTokenType, ContentSegmentation,

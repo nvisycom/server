@@ -272,6 +272,82 @@ COMMENT ON COLUMN document_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN document_files.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN document_files.deleted_at IS 'Soft deletion timestamp';
 
+-- Create document chunks table - Text chunks with vector embeddings for semantic search
+CREATE TABLE document_chunks (
+    -- Primary identifiers
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    file_id             UUID             NOT NULL REFERENCES document_files (id) ON DELETE CASCADE,
+
+    -- Chunk position and content info
+    chunk_index         INTEGER          NOT NULL DEFAULT 0,
+    content_sha256      BYTEA            NOT NULL,
+    content_size        INTEGER          NOT NULL DEFAULT 0,
+    token_count         INTEGER          NOT NULL DEFAULT 0,
+
+    CONSTRAINT document_chunks_chunk_index_min CHECK (chunk_index >= 0),
+    CONSTRAINT document_chunks_content_sha256_length CHECK (octet_length(content_sha256) = 32),
+    CONSTRAINT document_chunks_content_size_min CHECK (content_size >= 0),
+    CONSTRAINT document_chunks_token_count_min CHECK (token_count >= 0),
+
+    -- Vector embedding (1536 dimensions for OpenAI ada-002, adjust as needed)
+    embedding           VECTOR(1536)     DEFAULT NULL,
+
+    -- Embedding metadata
+    embedding_model     TEXT             DEFAULT NULL,
+    embedded_at         TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT document_chunks_embedding_model_format CHECK (embedding_model IS NULL OR embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
+
+    -- Chunk metadata (positions, page numbers, etc.)
+    metadata            JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT document_chunks_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+
+    -- Lifecycle timestamps
+    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
+
+    CONSTRAINT document_chunks_updated_after_created CHECK (updated_at >= created_at),
+
+    -- Unique constraint on file + chunk index
+    CONSTRAINT document_chunks_file_chunk_unique UNIQUE (file_id, chunk_index)
+);
+
+-- Set up automatic updated_at trigger
+SELECT setup_updated_at('document_chunks');
+
+-- Create indexes for document chunks
+CREATE INDEX document_chunks_file_idx
+    ON document_chunks (file_id, chunk_index ASC);
+
+CREATE INDEX document_chunks_embedded_idx
+    ON document_chunks (file_id)
+    WHERE embedding IS NOT NULL;
+
+-- Create HNSW index for vector similarity search (L2 distance)
+CREATE INDEX document_chunks_embedding_idx
+    ON document_chunks USING hnsw (embedding vector_cosine_ops)
+    WHERE embedding IS NOT NULL;
+
+-- Add table and column comments
+COMMENT ON TABLE document_chunks IS
+    'Text chunks extracted from document files with vector embeddings for semantic search.';
+
+COMMENT ON COLUMN document_chunks.id IS 'Unique chunk identifier';
+COMMENT ON COLUMN document_chunks.file_id IS 'Parent document file reference';
+COMMENT ON COLUMN document_chunks.chunk_index IS 'Sequential index of chunk within file (0-based)';
+COMMENT ON COLUMN document_chunks.content_sha256 IS 'SHA-256 hash of chunk content';
+COMMENT ON COLUMN document_chunks.content_size IS 'Size of chunk content in bytes';
+COMMENT ON COLUMN document_chunks.token_count IS 'Approximate token count for the chunk';
+COMMENT ON COLUMN document_chunks.embedding IS 'Vector embedding (1536 dimensions)';
+COMMENT ON COLUMN document_chunks.embedding_model IS 'Model used to generate the embedding';
+COMMENT ON COLUMN document_chunks.embedded_at IS 'Timestamp when embedding was generated';
+COMMENT ON COLUMN document_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
+COMMENT ON COLUMN document_chunks.created_at IS 'Chunk creation timestamp';
+COMMENT ON COLUMN document_chunks.updated_at IS 'Last modification timestamp';
+
 -- Create document comments table - User discussions and annotations
 CREATE TABLE document_comments (
     -- Primary identifiers

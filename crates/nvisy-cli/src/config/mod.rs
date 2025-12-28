@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! Cli
-//! ├── service: ServiceConfig      # Database, NATS, Qdrant, auth keys
+//! ├── service: ServiceConfig      # Database, NATS, auth keys
 //! ├── middleware: MiddlewareConfig # CORS, OpenAPI, recovery/timeouts
 //! └── server: ServerConfig         # Host, port, TLS, shutdown
 //! ```
@@ -35,7 +35,7 @@ pub use server::{ServerConfig, log_server_config};
 /// Complete CLI configuration.
 ///
 /// Combines all configuration groups for the nvisy server:
-/// - [`ServiceConfig`]: External service connections (Postgres, NATS, Qdrant)
+/// - [`ServiceConfig`]: External service connections (Postgres, NATS)
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
 #[derive(Debug, Clone, Parser, Serialize, Deserialize)]

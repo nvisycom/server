@@ -2,7 +2,7 @@ name: nvisy-dev
 
 services:
   postgres:
-    image: postgres:latest
+    image: pgvector/pgvector:pg18
     container_name: nvisy-postgres-dev
     restart: unless-stopped
     ports:
@@ -14,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nvisy} -d ${POSTGRES_DB:-nvisy}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -47,31 +47,9 @@ services:
     networks:
       - nvisy-dev
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: nvisy-qdrant-dev
-    restart: unless-stopped
-    ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-      QDRANT__SERVICE__HTTP_PORT: 6333
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:6333/healthz"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    networks:
-      - nvisy-dev
-
 volumes:
   postgres_data:
   nats_data:
-  qdrant_data:
 
 networks:
   nvisy-dev:

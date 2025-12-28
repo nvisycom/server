@@ -27,7 +27,6 @@ config = [
     "dep:clap",
     "nvisy-nats/config",
     "nvisy-postgres/config",
-    "nvisy-qdrant/config",
 ]
 
 [dependencies]
@@ -35,7 +34,6 @@ config = [
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
-nvisy-qdrant = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
@@ -101,7 +99,6 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 nvisy-test = { workspace = true, features = [] }
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
-nvisy-qdrant = { workspace = true, features = ["config"] }
 
 clap = { workspace = true, features = ["derive", "env"] }
 axum-test = { workspace = true, features = [] }

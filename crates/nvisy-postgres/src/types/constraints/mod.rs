@@ -19,6 +19,7 @@ pub mod projects;
 
 // Document-related constraint modules
 pub mod document_annotations;
+pub mod document_chunks;
 pub mod document_comments;
 pub mod document_files;
 pub mod document_versions;
@@ -35,6 +36,7 @@ pub use account_api_tokens::AccountApiTokenConstraints;
 pub use account_notifications::AccountNotificationConstraints;
 pub use accounts::AccountConstraints;
 pub use document_annotations::DocumentAnnotationConstraints;
+pub use document_chunks::DocumentChunkConstraints;
 pub use document_comments::DocumentCommentConstraints;
 pub use document_files::DocumentFileConstraints;
 pub use document_versions::DocumentVersionConstraints;
@@ -74,6 +76,7 @@ pub enum ConstraintViolation {
     // Document-related constraints
     Document(DocumentConstraints),
     DocumentAnnotation(DocumentAnnotationConstraints),
+    DocumentChunk(DocumentChunkConstraints),
     DocumentComment(DocumentCommentConstraints),
     DocumentFile(DocumentFileConstraints),
     DocumentVersion(DocumentVersionConstraints),
@@ -122,76 +125,39 @@ impl ConstraintViolation {
     /// assert!(unknown.is_none());
     /// ```
     pub fn new(constraint: &str) -> Option<Self> {
-        // Route based on constraint name prefix for optimal performance
-        // This avoids unnecessary parsing attempts by checking prefixes first
-
-        if constraint.starts_with("accounts_") {
-            if let Some(c) = AccountConstraints::new(constraint) {
-                return Some(ConstraintViolation::Account(c));
-            }
-        } else if constraint.starts_with("account_notifications_") {
-            if let Some(c) = AccountNotificationConstraints::new(constraint) {
-                return Some(ConstraintViolation::AccountNotification(c));
-            }
-        } else if constraint.starts_with("account_api_tokens_") {
-            if let Some(c) = AccountApiTokenConstraints::new(constraint) {
-                return Some(ConstraintViolation::AccountApiToken(c));
-            }
-        } else if constraint.starts_with("account_action_tokens_") {
-            if let Some(c) = AccountActionTokenConstraints::new(constraint) {
-                return Some(ConstraintViolation::AccountActionToken(c));
-            }
-        } else if constraint.starts_with("projects_") {
-            if let Some(c) = ProjectConstraints::new(constraint) {
-                return Some(ConstraintViolation::Project(c));
-            }
-        } else if constraint.starts_with("project_members_") {
-            if let Some(c) = ProjectMemberConstraints::new(constraint) {
-                return Some(ConstraintViolation::ProjectMember(c));
-            }
-        } else if constraint.starts_with("project_invites_") {
-            if let Some(c) = ProjectInviteConstraints::new(constraint) {
-                return Some(ConstraintViolation::ProjectInvite(c));
-            }
-        } else if constraint.starts_with("project_activities_") {
-            if let Some(c) = ProjectActivitiesConstraints::new(constraint) {
-                return Some(ConstraintViolation::ProjectActivityLog(c));
-            }
-        } else if constraint.starts_with("project_integrations_") {
-            if let Some(c) = ProjectIntegrationConstraints::new(constraint) {
-                return Some(ConstraintViolation::ProjectIntegration(c));
-            }
-        } else if constraint.starts_with("project_webhooks_") {
-            if let Some(c) = ProjectWebhookConstraints::new(constraint) {
-                return Some(ConstraintViolation::ProjectWebhook(c));
-            }
-        } else if constraint.starts_with("project_runs_") {
-            if let Some(c) = ProjectRunConstraints::new(constraint) {
-                return Some(ConstraintViolation::ProjectRun(c));
-            }
-        } else if constraint.starts_with("documents_") {
-            if let Some(c) = DocumentConstraints::new(constraint) {
-                return Some(ConstraintViolation::Document(c));
-            }
-        } else if constraint.starts_with("document_annotations_") {
-            if let Some(c) = DocumentAnnotationConstraints::new(constraint) {
-                return Some(ConstraintViolation::DocumentAnnotation(c));
-            }
-        } else if constraint.starts_with("document_comments_") {
-            if let Some(c) = DocumentCommentConstraints::new(constraint) {
-                return Some(ConstraintViolation::DocumentComment(c));
-            }
-        } else if constraint.starts_with("document_files_") {
-            if let Some(c) = DocumentFileConstraints::new(constraint) {
-                return Some(ConstraintViolation::DocumentFile(c));
-            }
-        } else if constraint.starts_with("document_versions_")
-            && let Some(c) = DocumentVersionConstraints::new(constraint)
-        {
-            return Some(ConstraintViolation::DocumentVersion(c));
+        let prefix = constraint.split('_').next()?;
+        macro_rules! try_parse {
+            ($($parser:expr => $variant:ident),+ $(,)?) => {
+                None$(.or_else(|| $parser(constraint).map(Self::$variant)))+
+            };
         }
 
-        None
+        match prefix {
+            "accounts" => try_parse!(AccountConstraints::new => Account),
+            "account" => try_parse! {
+                AccountNotificationConstraints::new => AccountNotification,
+                AccountApiTokenConstraints::new => AccountApiToken,
+                AccountActionTokenConstraints::new => AccountActionToken,
+            },
+            "projects" => try_parse!(ProjectConstraints::new => Project),
+            "project" => try_parse! {
+                ProjectMemberConstraints::new => ProjectMember,
+                ProjectInviteConstraints::new => ProjectInvite,
+                ProjectActivitiesConstraints::new => ProjectActivityLog,
+                ProjectIntegrationConstraints::new => ProjectIntegration,
+                ProjectWebhookConstraints::new => ProjectWebhook,
+                ProjectRunConstraints::new => ProjectRun,
+            },
+            "documents" => try_parse!(DocumentConstraints::new => Document),
+            "document" => try_parse! {
+                DocumentAnnotationConstraints::new => DocumentAnnotation,
+                DocumentChunkConstraints::new => DocumentChunk,
+                DocumentCommentConstraints::new => DocumentComment,
+                DocumentFileConstraints::new => DocumentFile,
+                DocumentVersionConstraints::new => DocumentVersion,
+            },
+            _ => None,
+        }
     }
 
     /// Returns the table name associated with this constraint.
@@ -217,6 +183,7 @@ impl ConstraintViolation {
             // Document-related tables
             ConstraintViolation::Document(_) => "documents",
             ConstraintViolation::DocumentAnnotation(_) => "document_annotations",
+            ConstraintViolation::DocumentChunk(_) => "document_chunks",
             ConstraintViolation::DocumentComment(_) => "document_comments",
             ConstraintViolation::DocumentFile(_) => "document_files",
             ConstraintViolation::DocumentVersion(_) => "document_versions",
@@ -244,6 +211,7 @@ impl ConstraintViolation {
 
             ConstraintViolation::Document(_)
             | ConstraintViolation::DocumentAnnotation(_)
+            | ConstraintViolation::DocumentChunk(_)
             | ConstraintViolation::DocumentComment(_)
             | ConstraintViolation::DocumentFile(_)
             | ConstraintViolation::DocumentVersion(_) => "documents",
@@ -270,6 +238,7 @@ impl ConstraintViolation {
 
             ConstraintViolation::Document(c) => c.categorize(),
             ConstraintViolation::DocumentAnnotation(c) => c.categorize(),
+            ConstraintViolation::DocumentChunk(c) => c.categorize(),
             ConstraintViolation::DocumentComment(c) => c.categorize(),
             ConstraintViolation::DocumentFile(c) => c.categorize(),
             ConstraintViolation::DocumentVersion(c) => c.categorize(),
@@ -301,6 +270,7 @@ impl fmt::Display for ConstraintViolation {
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentAnnotation(c) => write!(f, "{}", c),
+            ConstraintViolation::DocumentChunk(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentComment(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentFile(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentVersion(c) => write!(f, "{}", c),
