@@ -8,7 +8,7 @@ use aide::axum::ApiRouter;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{self, Account as AccountModel};
+use nvisy_postgres::model::Account as AccountModel;
 use nvisy_postgres::query::AccountRepository;
 use uuid::Uuid;
 
@@ -77,8 +77,10 @@ async fn update_own_account(
 
     // Check if email already exists for another account
     if let Some(ref email) = request.email_address {
-        let normalized = email.to_lowercase();
-        if conn.email_exists(&normalized).await? && current_account.email_address != normalized {
+        if conn
+            .email_exists_for_other(email, auth_claims.account_id)
+            .await?
+        {
             tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
             return Err(ErrorKind::Conflict
                 .with_message("Account with this email already exists")
@@ -86,17 +88,8 @@ async fn update_own_account(
         }
     }
 
-    let update_account = model::UpdateAccount {
-        display_name: request.display_name,
-        email_address: request.email_address,
-        password_hash,
-        company_name: request.company_name,
-        phone_number: request.phone_number,
-        ..Default::default()
-    };
-
     let account = conn
-        .update_account(auth_claims.account_id, update_account)
+        .update_account(auth_claims.account_id, request.into_model(password_hash))
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account updated");
@@ -151,8 +144,8 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/me", get(get_own_account))
-        .api_route("/me", patch(update_own_account))
-        .api_route("/me", delete(delete_own_account))
+        .api_route("/account", get(get_own_account))
+        .api_route("/account", patch(update_own_account))
+        .api_route("/account", delete(delete_own_account))
         .with_path_items(|item| item.tag("Accounts"))
 }

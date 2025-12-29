@@ -1,5 +1,6 @@
 //! Account request types.
 
+use nvisy_postgres::model::UpdateAccount as UpdateAccountModel;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
@@ -31,6 +32,22 @@ pub struct UpdateAccount {
     #[validate(length(min = 10, max = 20))]
     #[validate(custom(function = "validate_phone_format"))]
     pub phone_number: Option<String>,
+}
+
+impl UpdateAccount {
+    /// Converts this request into a database model.
+    ///
+    /// Note: Password must be hashed separately before setting `password_hash`.
+    pub fn into_model(self, password_hash: Option<String>) -> UpdateAccountModel {
+        UpdateAccountModel {
+            display_name: self.display_name,
+            email_address: self.email_address,
+            password_hash,
+            company_name: self.company_name,
+            phone_number: self.phone_number,
+            ..Default::default()
+        }
+    }
 }
 
 fn validate_phone_format(phone: &str) -> Result<(), ValidationError> {
