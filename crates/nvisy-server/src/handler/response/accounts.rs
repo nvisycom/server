@@ -26,8 +26,6 @@ pub struct Account {
     pub email_address: String,
     /// Company name (optional).
     pub company_name: Option<String>,
-    /// Phone number (optional).
-    pub phone_number: Option<String>,
 
     /// Timestamp when the account was created.
     pub created_at: Timestamp,
@@ -47,7 +45,6 @@ impl Account {
             display_name: account.display_name,
             email_address: account.email_address,
             company_name: account.company_name,
-            phone_number: account.phone_number,
 
             created_at: account.created_at.into(),
             updated_at: account.updated_at.into(),

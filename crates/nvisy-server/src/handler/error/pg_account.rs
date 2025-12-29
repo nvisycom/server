@@ -30,9 +30,6 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::CompanyNameLengthMax => {
                 ErrorKind::BadRequest.with_message("Company name is too long")
             }
-            AccountConstraints::PhoneNumberLengthMax => {
-                ErrorKind::BadRequest.with_message("Phone number is too long")
-            }
             AccountConstraints::TimezoneFormat => {
                 ErrorKind::BadRequest.with_message("Invalid timezone format")
             }

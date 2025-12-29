@@ -27,11 +27,6 @@ pub struct UpdateAccount {
     /// Company or organization name.
     #[validate(length(min = 2, max = 100))]
     pub company_name: Option<String>,
-
-    /// Phone number.
-    #[validate(length(min = 10, max = 20))]
-    #[validate(custom(function = "validate_phone_format"))]
-    pub phone_number: Option<String>,
 }
 
 impl UpdateAccount {
@@ -44,22 +39,9 @@ impl UpdateAccount {
             email_address: self.email_address,
             password_hash,
             company_name: self.company_name,
-            phone_number: self.phone_number,
             ..Default::default()
         }
     }
-}
-
-fn validate_phone_format(phone: &str) -> Result<(), ValidationError> {
-    let cleaned: String = phone
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == '+')
-        .collect();
-
-    if cleaned.chars().filter(|c| c.is_ascii_digit()).count() < 7 {
-        return Err(ValidationError::new("phone_format"));
-    }
-    Ok(())
 }
 
 fn validate_display_name_format(name: &str) -> Result<(), ValidationError> {

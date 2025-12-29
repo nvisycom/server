@@ -40,8 +40,6 @@ pub struct Account {
     pub password_hash: String,
     /// Optional company affiliation for business accounts.
     pub company_name: Option<String>,
-    /// Optional phone number for 2FA or emergency contact.
-    pub phone_number: Option<String>,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier (e.g., "America/New_York", "UTC").
@@ -75,8 +73,6 @@ pub struct NewAccount {
     pub password_hash: String,
     /// Optional company affiliation for business accounts.
     pub company_name: Option<String>,
-    /// Optional phone number for 2FA or emergency contact.
-    pub phone_number: Option<String>,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -98,8 +94,6 @@ pub struct UpdateAccount {
     pub password_hash: Option<String>,
     /// Company affiliation for business accounts.
     pub company_name: Option<String>,
-    /// Phone number for 2FA or emergency contact.
-    pub phone_number: Option<String>,
     /// URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -158,13 +152,6 @@ impl Account {
     /// Returns whether the account can perform admin actions.
     pub fn can_admin(&self) -> bool {
         self.is_active() && self.is_admin()
-    }
-
-    /// Returns whether the account has a phone number set.
-    pub fn has_phone_number(&self) -> bool {
-        self.phone_number
-            .as_deref()
-            .is_some_and(|phone_number| !phone_number.is_empty())
     }
 
     /// Returns whether the account has a company name set.

@@ -114,12 +114,8 @@ async fn health_status(
 
     tracing::info!(
         target: TRACING_TARGET,
-        ?account_id,
-        is_authenticated,
-        is_administrator,
         is_healthy,
         used_cache = use_cached,
-        status_code = status_code.as_u16(),
         "Health status response"
     );
 

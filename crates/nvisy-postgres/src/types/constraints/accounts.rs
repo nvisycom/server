@@ -25,8 +25,6 @@ pub enum AccountConstraints {
     PasswordHashLengthMin,
     #[strum(serialize = "accounts_company_name_length_max")]
     CompanyNameLengthMax,
-    #[strum(serialize = "accounts_phone_number_length_max")]
-    PhoneNumberLengthMax,
     #[strum(serialize = "accounts_timezone_format")]
     TimezoneFormat,
     #[strum(serialize = "accounts_locale_format")]
@@ -75,7 +73,6 @@ impl AccountConstraints {
             | AccountConstraints::PasswordHashNotEmpty
             | AccountConstraints::PasswordHashLengthMin
             | AccountConstraints::CompanyNameLengthMax
-            | AccountConstraints::PhoneNumberLengthMax
             | AccountConstraints::TimezoneFormat
             | AccountConstraints::LocaleFormat
             | AccountConstraints::FailedLoginAttemptsRange => ConstraintCategory::Validation,

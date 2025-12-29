@@ -17,6 +17,8 @@ use clap::Args;
 use nvisy_server::middleware::{CorsConfig, OpenApiConfig, RecoveryConfig};
 use serde::{Deserialize, Serialize};
 
+use crate::TRACING_TARGET_CONFIG;
+
 /// Middleware configuration combining CORS, OpenAPI, and recovery settings.
 ///
 /// This struct groups all HTTP middleware configurations that can be
@@ -42,4 +44,29 @@ pub struct MiddlewareConfig {
     /// Controls request timeout and panic recovery behavior.
     #[clap(flatten)]
     pub recovery: RecoveryConfig,
+}
+
+impl MiddlewareConfig {
+    /// Logs middleware configuration at info level.
+    pub fn log(&self) {
+        tracing::info!(
+            target: TRACING_TARGET_CONFIG,
+            origins = ?self.cors.allowed_origins,
+            credentials = self.cors.allow_credentials,
+            "CORS configuration"
+        );
+
+        tracing::info!(
+            target: TRACING_TARGET_CONFIG,
+            openapi_path = %self.openapi.open_api_json,
+            scalar_path = %self.openapi.scalar_ui,
+            "OpenAPI configuration"
+        );
+
+        tracing::info!(
+            target: TRACING_TARGET_CONFIG,
+            request_timeout_secs = self.recovery.request_timeout_secs,
+            "Recovery configuration"
+        );
+    }
 }

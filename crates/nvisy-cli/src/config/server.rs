@@ -30,6 +30,8 @@ use anyhow::{Result as AnyhowResult, anyhow};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
+use crate::TRACING_TARGET_CONFIG;
+
 /// HTTP server network and lifecycle configuration.
 ///
 /// Controls how the server binds to network interfaces, handles TLS,
@@ -147,6 +149,18 @@ impl ServerConfig {
         {
             false
         }
+    }
+
+    /// Logs server configuration at info level.
+    pub fn log(&self) {
+        tracing::info!(
+            target: TRACING_TARGET_CONFIG,
+            host = %self.host,
+            port = self.port,
+            tls = self.is_tls_enabled(),
+            shutdown_timeout_secs = self.shutdown_timeout,
+            "Server configuration"
+        );
     }
 }
 

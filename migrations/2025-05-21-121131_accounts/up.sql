@@ -35,11 +35,9 @@ CREATE TABLE accounts (
 
     -- Optional profile information
     company_name          TEXT        DEFAULT NULL,
-    phone_number          TEXT        DEFAULT NULL,
     avatar_url            TEXT        DEFAULT NULL,
 
     CONSTRAINT accounts_company_name_length_max CHECK (company_name IS NULL OR length(company_name) <= 255),
-    CONSTRAINT accounts_phone_number_length_max CHECK (phone_number IS NULL OR length(phone_number) <= 50),
 
     -- Preferences and settings
     timezone              TEXT        NOT NULL DEFAULT 'UTC',
@@ -98,7 +96,6 @@ COMMENT ON COLUMN accounts.display_name IS 'Human-readable name for UI and commu
 COMMENT ON COLUMN accounts.email_address IS 'Primary email for authentication and communications (validated format)';
 COMMENT ON COLUMN accounts.password_hash IS 'Securely hashed password (bcrypt recommended, minimum 60 characters)';
 COMMENT ON COLUMN accounts.company_name IS 'Optional company affiliation for business accounts';
-COMMENT ON COLUMN accounts.phone_number IS 'Optional phone number for 2FA or emergency contact';
 COMMENT ON COLUMN accounts.avatar_url IS 'URL to user profile image or avatar';
 COMMENT ON COLUMN accounts.timezone IS 'User timezone for date/time display preferences';
 COMMENT ON COLUMN accounts.locale IS 'User locale for language and regional formatting';

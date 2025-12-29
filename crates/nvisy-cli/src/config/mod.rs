@@ -140,25 +140,8 @@ impl Cli {
     /// Logs configuration at debug level (no sensitive information).
     pub fn log(&self) {
         Self::log_build_info();
-
-        tracing::info!(
-            target: TRACING_TARGET_CONFIG,
-            host = %self.server.host,
-            port = self.server.port,
-            tls = self.server.is_tls_enabled(),
-            shutdown_timeout_secs = self.server.shutdown_timeout,
-            "Server configuration"
-        );
-
-        tracing::info!(
-            target: TRACING_TARGET_CONFIG,
-            cors_origins = ?self.middleware.cors.allowed_origins,
-            cors_credentials = self.middleware.cors.allow_credentials,
-            openapi_path = %self.middleware.openapi.open_api_json,
-            scalar_path = %self.middleware.openapi.scalar_ui,
-            request_timeout_secs = self.middleware.recovery.request_timeout_secs,
-            "Middleware configuration"
-        );
+        self.server.log();
+        self.middleware.log();
 
         tracing::info!(
             target: TRACING_TARGET_CONFIG,

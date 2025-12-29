@@ -18,7 +18,7 @@
 //! use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
 //!
 //! let app: Router<()> = ApiRouter::new()
-//!     .with_open_api(OpenApiConfig::default());
+//!     .with_open_api(&OpenApiConfig::default());
 //! ```
 //!
 //! [`aide`]: https://docs.rs/aide
@@ -92,7 +92,7 @@ pub trait RouterOpenApiExt<S> {
     /// use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
     ///
     /// let app: Router<()> = ApiRouter::new()
-    ///     .with_open_api(OpenApiConfig::default());
+    ///     .with_open_api(&OpenApiConfig::default());
     /// ```
     fn with_open_api(self, config: &OpenApiConfig) -> Router<S>;
 }
