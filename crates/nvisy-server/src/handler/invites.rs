@@ -6,6 +6,7 @@
 //! lifecycle management.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::model::NewProjectMember;
 use nvisy_postgres::query::{
@@ -18,7 +19,7 @@ use crate::handler::request::{
     CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, Pagination,
     ProjectPathParams, ReplyInvite,
 };
-use crate::handler::response::{Invite, InviteCode, Invites, Member};
+use crate::handler::response::{ErrorResponse, Invite, InviteCode, Invites, Member};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -44,7 +45,7 @@ async fn send_invite(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project invitation");
+    tracing::debug!(target: TRACING_TARGET, "Creating project invitation");
 
     auth_state
         .authorize_project(&mut conn, path_params.project_id, Permission::InviteMembers)
@@ -94,10 +95,20 @@ async fn send_invite(
     tracing::info!(
         target: TRACING_TARGET,
         invite_id = %response.invite_id,
-        "Project invitation created successfully",
+        "Project invitation created ",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+fn send_invite_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Send invitation")
+        .description("Sends an invitation to join a project to the specified email address.")
+        .response::<201, Json<Invite>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Lists all invitations for a project.
@@ -132,10 +143,18 @@ async fn list_invites(
     tracing::debug!(
         target: TRACING_TARGET,
         invite_count = invites.len(),
-        "Project invitations listed successfully",
+        "Project invitations listed ",
     );
 
     Ok((StatusCode::OK, Json(invites)))
+}
+
+fn list_invites_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List invitations")
+        .description("Returns a paginated list of project invitations with their current status.")
+        .response::<200, Json<Invites>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Cancels a project invitation.
@@ -164,9 +183,18 @@ async fn cancel_invite(
     conn.cancel_invite(path_params.invite_id, auth_state.account_id)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Project invitation cancelled successfully");
+    tracing::info!(target: TRACING_TARGET, "Project invitation cancelled");
 
     Ok(StatusCode::OK)
+}
+
+fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Cancel invitation")
+        .description("Permanently cancels a pending invitation. The invitee will no longer be able to accept it.")
+        .response::<200, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Responds to a project invitation.
@@ -230,6 +258,15 @@ async fn reply_to_invite(
     Ok((StatusCode::OK, Json(Invite::from(project_invite))))
 }
 
+fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Reply to invitation")
+        .description("Allows the invitee to accept or decline a project invitation.")
+        .response::<200, Json<Invite>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Generates a shareable invite code for a project.
 ///
 /// Creates an invite code that can be shared with anyone to join the project.
@@ -262,13 +299,24 @@ async fn generate_invite_code(
     tracing::info!(
         target: TRACING_TARGET,
         invite_id = %project_invite.id,
-        "Invite code generated successfully",
+        "Invite code generated ",
     );
 
     Ok((
         StatusCode::CREATED,
         Json(InviteCode::from_invite(&project_invite)),
     ))
+}
+
+fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Generate invite code")
+        .description(
+            "Creates a shareable invite code that can be used by anyone to join the project.",
+        )
+        .response::<201, Json<InviteCode>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Joins a project using an invite code.
@@ -319,10 +367,20 @@ async fn join_via_invite_code(
         target: TRACING_TARGET,
         project_id = %invite.project_id,
         role = ?invite.invited_role,
-        "User joined project via invite code successfully",
+        "User joined project via invite code ",
     );
 
     Ok((StatusCode::CREATED, Json(Member::from(project_member))))
+}
+
+fn join_via_invite_code_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Join via invite code")
+        .description("Joins a project using a valid invite code. The user becomes a member with the role specified in the code.")
+        .response::<201, Json<Member>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Returns a [`Router`] with all project invite related routes.
@@ -332,20 +390,25 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/{project_id}/invites/", post(send_invite))
-        .api_route("/projects/{project_id}/invites/", get(list_invites))
+        .api_route(
+            "/projects/{project_id}/invites/",
+            post_with(send_invite, send_invite_docs).get_with(list_invites, list_invites_docs),
+        )
         .api_route(
             "/projects/{project_id}/invites/{invite_id}/",
-            delete(cancel_invite),
+            delete_with(cancel_invite, cancel_invite_docs),
         )
         .api_route(
             "/projects/{project_id}/invites/{invite_id}/reply/",
-            patch(reply_to_invite),
+            patch_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(
             "/projects/{project_id}/invites/code/",
-            post(generate_invite_code),
+            post_with(generate_invite_code, generate_invite_code_docs),
         )
-        .api_route("/invites/{invite_code}/join/", post(join_via_invite_code))
+        .api_route(
+            "/invites/{invite_code}/join/",
+            post_with(join_via_invite_code, join_via_invite_code_docs),
+        )
         .with_path_items(|item| item.tag("Invites"))
 }

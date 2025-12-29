@@ -22,7 +22,6 @@ coverage/
 
 # Intermediate output
 crates/nvisy-postgres/src/migrations/
-crates/nvisy-postgres/src/schema.rs
 
 # Build output
 dist/

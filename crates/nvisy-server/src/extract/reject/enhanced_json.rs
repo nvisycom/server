@@ -173,14 +173,14 @@ where
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
     ) {
-        AxumJson::<T>::operation_input(ctx, operation);
+        axum::Json::<T>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
     ) -> Vec<(Option<u16>, aide::openapi::Response)> {
-        AxumJson::<T>::inferred_early_responses(ctx, operation)
+        axum::Json::<T>::inferred_early_responses(ctx, operation)
     }
 }
 

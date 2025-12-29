@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -25,7 +26,7 @@ use crate::handler::request::{
     DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ProjectPathParams,
     UpdateFile as UpdateFileRequest,
 };
-use crate::handler::response::{File, Files};
+use crate::handler::response::{ErrorResponse, File, Files};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
 
@@ -217,7 +218,7 @@ async fn upload_file(
         tracing::debug!(
             target: TRACING_TARGET,
             file_id = %file_id,
-            "File uploaded to storage successfully"
+            "File uploaded to storage"
         );
 
         let uploaded_file = File {
@@ -281,10 +282,19 @@ async fn upload_file(
     tracing::info!(
         target: TRACING_TARGET,
         file_count = uploaded_files.len(),
-        "Files uploaded successfully",
+        "Files uploaded ",
     );
 
     Ok((StatusCode::CREATED, Json(uploaded_files)))
+}
+
+fn upload_file_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Upload files")
+        .description("Uploads one or more files to a document for processing. Files are validated, stored, and queued for processing.")
+        .response::<201, Json<Files>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Updates file metadata.
@@ -303,7 +313,7 @@ async fn update_file(
     _version: Version,
     ValidateJson(request): ValidateJson<UpdateFileRequest>,
 ) -> Result<(StatusCode, Json<File>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating file");
+    tracing::debug!(target: TRACING_TARGET, "Updating file");
 
     auth_claims
         .authorize_project(&mut conn, path_params.project_id, Permission::UpdateFiles)
@@ -321,7 +331,7 @@ async fn update_file(
             ErrorKind::InternalServerError.with_message("Failed to update file")
         })?;
 
-    tracing::info!(target: TRACING_TARGET, "File updated successfully");
+    tracing::info!(target: TRACING_TARGET, "File updated");
 
     let response = File {
         file_id: updated_file.id,
@@ -333,6 +343,16 @@ async fn update_file(
     };
 
     Ok((StatusCode::OK, Json(response)))
+}
+
+fn update_file_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update file")
+        .description("Updates file metadata such as display name or processing priority.")
+        .response::<200, Json<File>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Downloads a project file with streaming support for large files.
@@ -413,13 +433,22 @@ async fn download_file(
 
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
 
-    tracing::debug!(target: TRACING_TARGET, "File downloaded successfully");
+    tracing::debug!(target: TRACING_TARGET, "File downloaded");
 
     // Stream the file content
     let bytes = content_data.into_bytes().to_vec();
     let body = Body::from(bytes);
 
     Ok((StatusCode::OK, headers, body))
+}
+
+fn download_file_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Download file")
+        .description("Downloads a file by ID. Returns the file content as a binary stream.")
+        .response::<200, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes a project file (soft delete).
@@ -437,7 +466,7 @@ async fn delete_file(
     AuthState(auth_claims): AuthState,
     _version: Version,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "File deletion requested");
+    tracing::warn!(target: TRACING_TARGET, "File Deleting");
 
     auth_claims
         .authorize_project(&mut conn, path_params.project_id, Permission::DeleteFiles)
@@ -460,9 +489,18 @@ async fn delete_file(
                 .with_context(format!("Database error: {}", err))
         })?;
 
-    tracing::warn!(target: TRACING_TARGET, "File deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "File deleted");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn delete_file_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete file")
+        .description("Soft deletes a file by setting a deleted timestamp. The file can be recovered within the retention period.")
+        .response::<204, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Downloads multiple files as a zip archive.
@@ -557,6 +595,16 @@ async fn download_multiple_files(
     );
 
     Ok((StatusCode::OK, headers, archive_bytes))
+}
+
+fn download_multiple_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Download multiple files")
+        .description("Downloads multiple files as a zip archive. Provide a list of file IDs to include in the archive.")
+        .response::<200, ()>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Downloads all or specific project files as an archive.
@@ -660,6 +708,16 @@ async fn download_archived_files(
     Ok((StatusCode::OK, headers, archive_bytes))
 }
 
+fn download_archived_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Download archived files")
+        .description("Downloads all or specific project files as a compressed archive. Supports zip and tar.gz formats.")
+        .response::<200, ()>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Validates file name to prevent path traversal and other attacks.
 fn validate_filename(filename: &str) -> Result<String> {
     if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
@@ -695,26 +753,23 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/documents/{document_id}/files/", post(upload_file))
         .api_route(
-            "/documents/{document_id}/files/{file_id}",
-            patch(update_file),
+            "/projects/{project_id}/files/",
+            post_with(upload_file, upload_file_docs),
         )
         .api_route(
-            "/documents/{document_id}/files/{file_id}",
-            get(download_file),
-        )
-        .api_route(
-            "/documents/{document_id}/files/{file_id}",
-            delete(delete_file),
+            "/projects/{project_id}/files/{file_id}",
+            patch_with(update_file, update_file_docs)
+                .get_with(download_file, download_file_docs)
+                .delete_with(delete_file, delete_file_docs),
         )
         .api_route(
             "/projects/{project_id}/files/download",
-            post(download_multiple_files),
+            post_with(download_multiple_files, download_multiple_files_docs),
         )
         .api_route(
             "/projects/{project_id}/files/archive",
-            post(download_archived_files),
+            post_with(download_archived_files, download_archived_files_docs),
         )
         .with_path_items(|item| item.tag("Files"))
 }

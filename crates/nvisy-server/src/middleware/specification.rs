@@ -25,8 +25,9 @@
 //! [`ApiRouter`]: aide::axum::ApiRouter
 
 use aide::axum::ApiRouter;
-use aide::openapi::{Contact, Info, License, OpenApi};
+use aide::openapi::{Contact, License, OpenApi, Tag};
 use aide::scalar::Scalar;
+use aide::transform::TransformOpenApi;
 use axum::routing::{Router, get};
 use axum::{Extension, Json};
 #[cfg(feature = "config")]
@@ -72,7 +73,7 @@ impl Default for OpenApiConfig {
 ///
 /// [`ApiRouter`]: aide::axum::ApiRouter
 pub trait RouterOpenApiExt<S> {
-    /// Adds OpenAPI documentation routes with default API info.
+    /// Adds OpenAPI documentation routes.
     ///
     /// This method:
     /// - Generates the OpenAPI specification from the router's API routes
@@ -93,65 +94,19 @@ pub trait RouterOpenApiExt<S> {
     /// let app: Router<()> = ApiRouter::new()
     ///     .with_open_api(OpenApiConfig::default());
     /// ```
-    fn with_open_api(self, config: OpenApiConfig) -> Router<S>;
-
-    /// Adds OpenAPI documentation routes with custom OpenAPI info.
-    ///
-    /// Use this method when you need full control over the OpenAPI [`Info`] object,
-    /// including title, description, contact information, and license.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration for OpenAPI and Scalar UI paths
-    /// * `info` - Custom OpenAPI info metadata
-    ///
-    /// [`Info`]: aide::openapi::Info
-    fn with_open_api_info(self, config: OpenApiConfig, info: Info) -> Router<S>;
+    fn with_open_api(self, config: &OpenApiConfig) -> Router<S>;
 }
 
 impl<S> RouterOpenApiExt<S> for ApiRouter<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    fn with_open_api(self, config: OpenApiConfig) -> Router<S> {
-        let info = Info {
-            title: "Nvisy API".to_owned(),
-            summary: Some("Document processing and annotation platform".to_owned()),
-            description: Some(
-                "Nvisy provides intelligent document processing, annotation, and analysis \
-                capabilities. This API enables document upload, OCR processing, embedding \
-                generation, and semantic search across your document collections."
-                    .to_owned(),
-            ),
-            terms_of_service: Some("https://nvisy.com/legal/terms-of-service".to_owned()),
-            contact: Some(Contact {
-                name: Some("Nvisy Support".to_owned()),
-                url: Some("https://nvisy.com".to_owned()),
-                email: Some("hello@nvisy.com".to_owned()),
-                ..Contact::default()
-            }),
-            license: Some(License {
-                name: "Proprietary".to_owned(),
-                identifier: None,
-                url: Some("https://nvisy.com/license".to_owned()),
-                ..License::default()
-            }),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            ..Info::default()
-        };
-
-        self.with_open_api_info(config, info)
-    }
-
-    fn with_open_api_info(self, config: OpenApiConfig, info: Info) -> Router<S> {
+    fn with_open_api(self, config: &OpenApiConfig) -> Router<S> {
         async fn serve_openapi(Extension(api): Extension<OpenApi>) -> Json<OpenApi> {
             Json(api)
         }
 
-        let mut api = OpenApi {
-            info,
-            ..OpenApi::default()
-        };
+        let mut api = OpenApi::default();
 
         // Add Scalar UI route and OpenAPI JSON route
         let scalar = Scalar::new(&config.open_api_json);
@@ -159,7 +114,106 @@ where
             .route(&config.scalar_ui, scalar.axum_route())
             .route(&config.open_api_json, get(serve_openapi));
 
-        // Generate the OpenAPI specification and add it as an extension
-        router.finish_api(&mut api).layer(Extension(api))
+        // Generate the OpenAPI specification with tags and add it as extension
+        router
+            .finish_api_with(&mut api, api_docs)
+            .layer(Extension(api))
     }
+}
+
+/// Transforms the OpenAPI specification with info and tags.
+///
+/// This function configures the OpenAPI documentation with API info and
+/// organized tags for different API sections.
+fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
+    api.title("Nvisy API")
+        .summary("Document processing and annotation platform")
+        .description(
+            "Nvisy provides intelligent document processing, annotation, and analysis \
+            capabilities. This API enables document upload, OCR processing, embedding \
+            generation, and semantic search across your document collections.",
+        )
+        .version(env!("CARGO_PKG_VERSION"))
+        .tos("https://nvisy.com/legal/terms-of-service")
+        .contact(Contact {
+            name: Some("Nvisy Support".to_owned()),
+            url: Some("https://nvisy.com".to_owned()),
+            email: Some("hello@nvisy.com".to_owned()),
+            ..Contact::default()
+        })
+        .license(License {
+            name: "Proprietary".to_owned(),
+            url: Some("https://nvisy.com/license".to_owned()),
+            ..License::default()
+        })
+        .tag(Tag {
+            name: "Accounts".into(),
+            description: Some("Account management and profile operations".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Authentication".into(),
+            description: Some("Login, signup, and token management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Projects".into(),
+            description: Some("Project creation and management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Documents".into(),
+            description: Some("Document upload, processing, and retrieval".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Files".into(),
+            description: Some("File upload, download, and management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Comments".into(),
+            description: Some("Document and file annotations".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Members".into(),
+            description: Some("Project member management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Invites".into(),
+            description: Some("Project invitation handling".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Tokens".into(),
+            description: Some("API token management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Templates".into(),
+            description: Some("Document templates".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Pipelines".into(),
+            description: Some("Processing pipelines".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Integrations".into(),
+            description: Some("External service integrations".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Webhooks".into(),
+            description: Some("Webhook configuration".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "WebSocket".into(),
+            description: Some("Real-time communication".into()),
+            ..Default::default()
+        })
 }

@@ -6,6 +6,7 @@
 //! and follow role-based access control principles.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::query::ProjectIntegrationRepository;
 
@@ -14,7 +15,7 @@ use crate::handler::request::{
     CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
     UpdateIntegrationCredentials, UpdateProjectIntegration,
 };
-use crate::handler::response::{Integration, Integrations};
+use crate::handler::response::{ErrorResponse, Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -39,7 +40,7 @@ async fn create_integration(
     Path(path_params): Path<ProjectPathParams>,
     ValidateJson(request): ValidateJson<CreateProjectIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::info!(target: TRACING_TARGET, "Creating project integration");
+    tracing::debug!(target: TRACING_TARGET, "Creating project integration");
 
     auth_state
         .authorize_project(
@@ -64,10 +65,20 @@ async fn create_integration(
     tracing::info!(
         target: TRACING_TARGET,
         integration_id = %integration.id,
-        "Integration created successfully",
+        "Integration created ",
     );
 
     Ok((StatusCode::CREATED, Json(integration.into())))
+}
+
+fn create_integration_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Create integration")
+        .description("Creates a new integration with an external service for the project.")
+        .response::<201, Json<Integration>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Lists all integrations for a project.
@@ -105,10 +116,18 @@ async fn list_integrations(
     tracing::debug!(
         target: TRACING_TARGET,
         integration_count = integrations.len(),
-        "Project integrations listed successfully",
+        "Project integrations listed ",
     );
 
     Ok((StatusCode::OK, Json(integrations)))
+}
+
+fn list_integrations_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List integrations")
+        .description("Returns all configured integrations for the project.")
+        .response::<200, Json<Integrations>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Retrieves a specific project integration.
@@ -139,9 +158,18 @@ async fn read_integration(
 
     let integration = find_project_integration(&mut conn, &path_params).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Project integration retrieved successfully");
+    tracing::debug!(target: TRACING_TARGET, "Project integration read");
 
     Ok((StatusCode::OK, Json(integration.into())))
+}
+
+fn read_integration_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get integration")
+        .description("Returns details for a specific project integration.")
+        .response::<200, Json<Integration>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates a project integration.
@@ -161,7 +189,7 @@ async fn update_integration(
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateProjectIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating project integration");
+    tracing::debug!(target: TRACING_TARGET, "Updating project integration");
 
     auth_state
         .authorize_project(
@@ -196,8 +224,19 @@ async fn update_integration(
         .update_integration(path_params.integration_id, request.into_model())
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Integration updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Integration updated");
     Ok((StatusCode::OK, Json(integration.into())))
+}
+
+fn update_integration_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update integration")
+        .description("Updates integration configuration such as name or settings.")
+        .response::<200, Json<Integration>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Updates integration credentials.
@@ -217,7 +256,7 @@ async fn update_integration_credentials(
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateIntegrationCredentials>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating integration credentials");
+    tracing::debug!(target: TRACING_TARGET, "Updating integration credentials");
 
     auth_state
         .authorize_project(
@@ -238,9 +277,19 @@ async fn update_integration_credentials(
         )
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Integration credentials updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Integration credentials updated");
 
     Ok((StatusCode::OK, Json(integration.into())))
+}
+
+fn update_integration_credentials_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update integration credentials")
+        .description("Updates only the authentication credentials for an integration.")
+        .response::<200, Json<Integration>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes a project integration.
@@ -259,7 +308,7 @@ async fn delete_integration(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Deleting project integration");
+    tracing::debug!(target: TRACING_TARGET, "Deleting project integration");
 
     auth_state
         .authorize_project(
@@ -274,9 +323,18 @@ async fn delete_integration(
 
     conn.delete_integration(path_params.integration_id).await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Integration deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Integration deleted");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn delete_integration_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete integration")
+        .description("Permanently removes the integration from the project.")
+        .response::<204, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Finds an integration by ID and verifies it belongs to the specified project.
@@ -309,27 +367,21 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
             "/projects/{project_id}/integrations/",
-            post(create_integration),
-        )
-        .api_route(
-            "/projects/{project_id}/integrations/",
-            get(list_integrations),
+            post_with(create_integration, create_integration_docs)
+                .get_with(list_integrations, list_integrations_docs),
         )
         .api_route(
             "/projects/{project_id}/integrations/{integration_id}/",
-            get(read_integration),
-        )
-        .api_route(
-            "/projects/{project_id}/integrations/{integration_id}/",
-            put(update_integration),
+            get_with(read_integration, read_integration_docs)
+                .put_with(update_integration, update_integration_docs)
+                .delete_with(delete_integration, delete_integration_docs),
         )
         .api_route(
             "/projects/{project_id}/integrations/{integration_id}/credentials/",
-            patch(update_integration_credentials),
-        )
-        .api_route(
-            "/projects/{project_id}/integrations/{integration_id}/",
-            delete(delete_integration),
+            patch_with(
+                update_integration_credentials,
+                update_integration_credentials_docs,
+            ),
         )
         .with_path_items(|item| item.tag("Integrations"))
 }

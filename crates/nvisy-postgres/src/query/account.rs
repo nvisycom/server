@@ -57,11 +57,12 @@ pub trait AccountRepository {
     /// Soft deletes an account by setting the deletion timestamp.
     ///
     /// Marks an account as deleted without permanently removing it,
-    /// preserving data for audit purposes.
+    /// preserving data for audit purposes. Returns `None` if the account
+    /// was not found.
     fn delete_account(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
 
     /// Lists all active accounts with pagination support.
     ///
@@ -135,6 +136,15 @@ pub trait AccountRepository {
     /// Used during registration to prevent duplicate accounts.
     fn email_exists(&mut self, email: &str) -> impl Future<Output = PgResult<bool>> + Send;
 
+    /// Checks if an email address is used by another account.
+    ///
+    /// Used during account updates to prevent duplicate emails.
+    fn email_exists_for_other(
+        &mut self,
+        email: &str,
+        exclude_account_id: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+
     /// Finds accounts filtered by their verification status.
     ///
     /// Useful for finding unverified accounts that may need reminder emails.
@@ -201,8 +211,15 @@ pub trait AccountRepository {
 }
 
 impl AccountRepository for PgConnection {
-    async fn create_account(&mut self, new_account: NewAccount) -> PgResult<Account> {
+    async fn create_account(&mut self, mut new_account: NewAccount) -> PgResult<Account> {
         use schema::accounts;
+
+        // Normalize fields: trim whitespace
+        new_account.display_name = new_account.display_name.trim().to_owned();
+        new_account.email_address = new_account.email_address.trim().to_lowercase();
+        if let Some(ref mut company) = new_account.company_name {
+            *company = company.trim().to_owned();
+        }
 
         diesel::insert_into(accounts::table)
             .values(&new_account)
@@ -229,7 +246,7 @@ impl AccountRepository for PgConnection {
         use schema::accounts::{self, dsl};
 
         accounts::table
-            .filter(dsl::email_address.eq(email.to_lowercase()))
+            .filter(dsl::email_address.eq(email.trim().to_lowercase()))
             .filter(dsl::deleted_at.is_null())
             .select(Account::as_select())
             .first(self)
@@ -241,9 +258,20 @@ impl AccountRepository for PgConnection {
     async fn update_account(
         &mut self,
         account_id: Uuid,
-        updates: UpdateAccount,
+        mut updates: UpdateAccount,
     ) -> PgResult<Account> {
         use schema::accounts::{self, dsl};
+
+        // Normalize fields: trim whitespace
+        if let Some(name) = updates.display_name.as_mut() {
+            *name = name.trim().to_owned();
+        }
+        if let Some(email) = updates.email_address.as_mut() {
+            *email = email.trim().to_lowercase();
+        }
+        if let Some(company) = updates.company_name.as_mut() {
+            *company = company.trim().to_owned();
+        }
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
             .set(&updates)
@@ -253,7 +281,7 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn delete_account(&mut self, account_id: Uuid) -> PgResult<Account> {
+    async fn delete_account(&mut self, account_id: Uuid) -> PgResult<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
@@ -261,6 +289,7 @@ impl AccountRepository for PgConnection {
             .returning(Account::as_returning())
             .get_result(self)
             .await
+            .optional()
             .map_err(PgError::from)
     }
 
@@ -385,7 +414,26 @@ impl AccountRepository for PgConnection {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
-            .filter(dsl::email_address.eq(email.to_lowercase()))
+            .filter(dsl::email_address.eq(email.trim().to_lowercase()))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(count > 0)
+    }
+
+    async fn email_exists_for_other(
+        &mut self,
+        email: &str,
+        exclude_account_id: Uuid,
+    ) -> PgResult<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::email_address.eq(email.trim().to_lowercase()))
+            .filter(dsl::id.ne(exclude_account_id))
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(self)

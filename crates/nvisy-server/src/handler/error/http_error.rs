@@ -6,8 +6,6 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use aide::generate::GenContext;
-use aide::openapi::{Operation, Response as ApiResponse};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
@@ -348,43 +346,23 @@ impl IntoResponse for ErrorKind {
     }
 }
 
-// Aide OpenAPI support for Error type
 impl<'a> aide::OperationOutput for Error<'a> {
     type Inner = ErrorResponse<'static>;
 
-    fn operation_response(ctx: &mut GenContext, _operation: &mut Operation) -> Option<ApiResponse> {
-        use aide::openapi::*;
-
-        // Generate schema for ErrorResponse
-        let schema = ctx.schema.subschema_for::<ErrorResponse>();
-
-        let media_type = MediaType {
-            schema: Some(SchemaObject {
-                json_schema: schema,
-                example: None,
-                external_docs: None,
-            }),
-            ..Default::default()
-        };
-
-        let response = Response {
-            description: "Error response".to_string(),
-            content: [("application/json".to_string(), media_type)].into(),
-            ..Default::default()
-        };
-
-        Some(response)
+    fn operation_response(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Option<aide::openapi::Response> {
+        axum::Json::<ErrorResponse<'static>>::operation_response(ctx, operation)
     }
 
     fn inferred_responses(
-        ctx: &mut GenContext,
-        operation: &mut Operation,
-    ) -> Vec<(Option<u16>, ApiResponse)> {
-        if let Some(response) = Self::operation_response(ctx, operation) {
-            vec![(None, response)]
-        } else {
-            vec![]
-        }
+        _ctx: &mut aide::generate::GenContext,
+        _operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        // Return empty vec to prevent aide from adding a default 200 response.
+        // Error responses should be explicitly documented via TransformOperation.
+        Vec::new()
     }
 }
 

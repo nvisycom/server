@@ -5,6 +5,7 @@
 //! follow security best practices including:
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
@@ -13,7 +14,7 @@ use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
 
 use super::request::{Login, Signup};
-use super::response::AuthToken;
+use super::response::{AuthToken, ErrorResponse};
 use crate::extract::{
     AuthClaims, AuthHeader, AuthState, ClientIp, Json, PgPool, TypedHeader, ValidateJson,
 };
@@ -25,6 +26,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 
 /// Tracing target for authentication cleanup operations.
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
+
+/// Builds user inputs for password strength validation.
+fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str) -> Vec<&'a str> {
+    let mut inputs = vec![display_name];
+    inputs.extend(email_address.split('@'));
+    inputs
+}
 
 /// Creates a new authentication header.
 fn create_auth_header(
@@ -47,10 +55,9 @@ async fn login(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::info!(target: TRACING_TARGET, "Login attempt");
+    tracing::debug!(target: TRACING_TARGET, "Logging in");
 
-    let normalized_email = request.email_address.to_lowercase();
-    let account = conn.find_account_by_email(&normalized_email).await?;
+    let account = conn.find_account_by_email(&request.email_address).await?;
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
@@ -131,6 +138,14 @@ async fn login(
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
+fn login_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Login")
+        .description("Authenticates a user and returns an access token.")
+        .response::<201, Json<AuthToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
@@ -143,32 +158,22 @@ async fn signup(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
 ) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::info!(target: TRACING_TARGET, "Signup attempt");
+    tracing::debug!(target: TRACING_TARGET, "Signing up");
 
-    let normalized_email = request.email_address.to_lowercase();
-
-    // Validate password strength
-    let email_parts: Vec<&str> = normalized_email.split('@').collect();
-    let mut user_inputs = vec![request.display_name.as_str()];
-    user_inputs.extend(email_parts);
-
-    password_strength
-        .validate_password(&request.password, &user_inputs)
-        .map_err(|_| ErrorKind::BadRequest.into_error())?;
-
-    let password_hash = auth_hasher
-        .hash_password(&request.password)
-        .map_err(|_| ErrorKind::InternalServerError.into_error())?;
+    // Validate password strength and hash
+    let user_inputs = build_password_user_inputs(&request.display_name, &request.email_address);
+    password_strength.validate_password(&request.password, &user_inputs)?;
+    let password_hash = auth_hasher.hash_password(&request.password)?;
 
     // Check if email already exists
-    if conn.email_exists(&normalized_email).await? {
+    if conn.email_exists(&request.email_address).await? {
         tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
         return Err(ErrorKind::Conflict.into_error());
     }
 
     let new_account = NewAccount {
         display_name: request.display_name,
-        email_address: normalized_email,
+        email_address: request.email_address,
         password_hash,
         ..Default::default()
     };
@@ -216,6 +221,14 @@ async fn signup(
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
+fn signup_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Signup")
+        .description("Creates a new account and returns an access token.")
+        .response::<201, Json<AuthToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
 /// Deletes an API token by its ID (logout).
 #[tracing::instrument(
     skip_all,
@@ -225,7 +238,7 @@ async fn signup(
     )
 )]
 async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> Result<StatusCode> {
-    tracing::info!(target: TRACING_TARGET, "Logout requested");
+    tracing::debug!(target: TRACING_TARGET, "Logging out");
 
     // Verify API token exists before attempting to delete
     let token_exists = conn
@@ -234,7 +247,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
         .is_some();
 
     if !token_exists {
-        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent API token");
+        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent token");
         return Ok(StatusCode::OK); // Consider it successful if token doesn't exist
     }
 
@@ -244,7 +257,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
     if deleted {
         tracing::info!(target: TRACING_TARGET, "Logout successful");
     } else {
-        tracing::warn!(target: TRACING_TARGET, "Logout completed but API token was not found");
+        tracing::warn!(target: TRACING_TARGET, "Logout completed but token was not found");
     }
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
@@ -261,6 +274,13 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
     Ok(StatusCode::OK)
 }
 
+fn logout_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Logout")
+        .description("Invalidates the current access token.")
+        .response_with::<200, (), _>(|res| res.description("Logged out."))
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -268,8 +288,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/auth/login", post(login))
-        .api_route("/auth/signup", post(signup))
-        .api_route("/auth/logout", post(logout))
+        .api_route("/auth/login", post_with(login, login_docs))
+        .api_route("/auth/signup", post_with(signup, signup_docs))
+        .api_route("/auth/logout", post_with(logout, logout_docs))
         .with_path_items(|item| item.tag("Authentication"))
 }

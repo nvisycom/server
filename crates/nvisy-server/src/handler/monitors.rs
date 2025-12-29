@@ -5,6 +5,7 @@
 //! authenticated detailed status information with simple caching.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use jiff::Timestamp;
@@ -125,6 +126,13 @@ async fn health_status(
     Ok((status_code, Json(response)))
 }
 
+fn health_status_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Health status")
+        .description("Returns system health status. Unauthenticated requests use cache; authenticated requests perform real-time checks.")
+        .response::<200, Json<MonitorStatus>>()
+        .response::<503, Json<MonitorStatus>>()
+}
+
 /// Returns a [`Router`] with all health monitoring routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -132,6 +140,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/health", post(health_status))
+        .api_route("/health", get_with(health_status, health_status_docs))
         .with_path_items(|item| item.tag("Health"))
 }

@@ -5,13 +5,16 @@
 //! practices with proper authorization, input validation, and audit logging.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model;
+use nvisy_postgres::PgConn;
+use nvisy_postgres::model::Account as AccountModel;
 use nvisy_postgres::query::AccountRepository;
+use uuid::Uuid;
 
 use super::request::UpdateAccount;
-use super::response::Account;
+use super::response::{Account, ErrorResponse};
 use crate::extract::{AuthState, Json, PgPool, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
@@ -32,9 +35,16 @@ async fn get_own_account(
 
     let account = find_account(&mut conn, auth_claims.account_id).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Account retrieved successfully");
+    tracing::info!(target: TRACING_TARGET, "Account read");
 
     Ok((StatusCode::OK, Json(Account::from_model(account))))
+}
+
+fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get account")
+        .description("Returns the authenticated user's account details.")
+        .response::<200, Json<Account>>()
+        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Updates the authenticated account.
@@ -49,71 +59,59 @@ async fn update_own_account(
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateAccount>,
 ) -> Result<(StatusCode, Json<Account>)> {
-    tracing::info!(target: TRACING_TARGET, "Updating account");
+    tracing::debug!(target: TRACING_TARGET, "Updating account");
 
     let current_account = find_account(&mut conn, auth_claims.account_id).await?;
 
-    // Validate password strength if password is being updated
-    let password_hash = if let Some(ref password) = request.password {
-        let display_name = request
-            .display_name
-            .as_ref()
-            .unwrap_or(&current_account.display_name);
-        let email_address = request
-            .email_address
-            .as_ref()
-            .unwrap_or(&current_account.email_address);
+    // Validate and hash password if provided
+    let password_hash = match request.password.as_ref() {
+        Some(password) => {
+            let display_name = request
+                .display_name
+                .as_deref()
+                .unwrap_or(&current_account.display_name);
+            let email_address = request
+                .email_address
+                .as_deref()
+                .unwrap_or(&current_account.email_address);
 
-        // Validate password strength
-        let email_parts: Vec<&str> = email_address.split('@').collect();
-        let mut user_inputs = vec![display_name.as_str()];
-        user_inputs.extend(email_parts);
-        password_strength
-            .validate_password(password, &user_inputs)
-            .map_err(|_| {
-                ErrorKind::BadRequest
-                    .with_message("Password does not meet strength requirements")
-                    .with_resource("account")
-            })?;
+            let user_inputs = build_password_user_inputs(display_name, email_address);
+            password_strength.validate_password(password, &user_inputs)?;
 
-        Some(auth_hasher.hash_password(password)?)
-    } else {
-        None
+            Some(auth_hasher.hash_password(password)?)
+        }
+        None => None,
     };
-
-    // Normalize email address if provided
-    let normalized_email = request
-        .email_address
-        .as_ref()
-        .map(|email| email.to_lowercase());
 
     // Check if email already exists for another account
-    if let Some(ref email) = normalized_email
-        && conn.email_exists(email).await?
-        && current_account.email_address != *email
-    {
-        tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
-        return Err(ErrorKind::Conflict
-            .with_message("Account with this email already exists")
-            .with_resource("account"));
+    if let Some(ref email) = request.email_address {
+        if conn
+            .email_exists_for_other(email, auth_claims.account_id)
+            .await?
+        {
+            tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
+            return Err(ErrorKind::Conflict
+                .with_message("Account with this email already exists")
+                .with_resource("account"));
+        }
     }
 
-    let update_account = model::UpdateAccount {
-        display_name: request.display_name,
-        email_address: normalized_email,
-        password_hash,
-        company_name: request.company_name,
-        phone_number: request.phone_number,
-        ..Default::default()
-    };
-
     let account = conn
-        .update_account(auth_claims.account_id, update_account)
+        .update_account(auth_claims.account_id, request.into_model(password_hash))
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Account updated successfully");
+    tracing::info!(target: TRACING_TARGET, "Account updated");
 
     Ok((StatusCode::OK, Json(Account::from_model(account))))
+}
+
+fn update_own_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update account")
+        .description("Updates the authenticated user's account details.")
+        .response::<200, Json<Account>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Deletes the authenticated account.
@@ -122,26 +120,41 @@ async fn update_own_account(
     fields(account_id = %auth_claims.account_id)
 )]
 async fn delete_own_account(
-    mut conn: PgPool,
+    PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Account deletion requested");
+    tracing::debug!(target: TRACING_TARGET, "Deleting account");
 
-    // Verify account exists
-    let _ = find_account(&mut conn, auth_claims.account_id).await?;
+    conn.delete_account(auth_claims.account_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Account not found.")
+                .with_resource("account")
+        })?;
 
-    conn.delete_account(auth_claims.account_id).await?;
-
-    tracing::warn!(target: TRACING_TARGET, "Account deleted successfully");
+    tracing::info!(target: TRACING_TARGET, "Account deleted");
 
     Ok(StatusCode::OK)
 }
 
+fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete account")
+        .description("Deletes the authenticated user's account.")
+        .response_with::<200, (), _>(|res| res.description("Account deleted."))
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Builds user inputs for password strength validation.
+fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str) -> Vec<&'a str> {
+    let mut inputs = vec![display_name];
+    inputs.extend(email_address.split('@'));
+    inputs
+}
+
 /// Finds an account by ID or returns NotFound error.
-async fn find_account(
-    conn: &mut nvisy_postgres::PgConn,
-    account_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::Account> {
+async fn find_account(conn: &mut PgConn, account_id: Uuid) -> Result<AccountModel> {
     conn.find_account_by_id(account_id).await?.ok_or_else(|| {
         ErrorKind::NotFound
             .with_message("Account not found")
@@ -156,8 +169,11 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/me", get(get_own_account))
-        .api_route("/me", patch(update_own_account))
-        .api_route("/me", delete(delete_own_account))
+        .api_route(
+            "/account",
+            get_with(get_own_account, get_own_account_docs)
+                .patch_with(update_own_account, update_own_account_docs)
+                .delete_with(delete_own_account, delete_own_account_docs),
+        )
         .with_path_items(|item| item.tag("Accounts"))
 }
