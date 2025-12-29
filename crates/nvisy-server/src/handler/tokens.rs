@@ -5,6 +5,7 @@
 //! practices with proper authorization, input validation, and audit logging.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -14,7 +15,7 @@ use nvisy_postgres::query::{AccountApiTokenRepository, Pagination as QueryPagina
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, Pagination, UpdateApiToken};
-use super::response::{ApiToken, ApiTokenWithSecret, ApiTokens};
+use super::response::{ApiToken, ApiTokenWithSecret, ApiTokens, ErrorResponse};
 use crate::extract::{AuthState, ClientIp, Json, Path, PgPool, Query, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -46,6 +47,14 @@ async fn create_api_token(
     );
 
     Ok((StatusCode::CREATED, Json(token.into())))
+}
+
+fn create_api_token_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Create API token")
+        .description("Creates a new API token. The full token is only shown once upon creation.")
+        .response::<201, Json<ApiTokenWithSecret>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Lists API tokens for the authenticated account.
@@ -87,6 +96,14 @@ async fn list_api_tokens(
     Ok((StatusCode::OK, Json(api_tokens)))
 }
 
+fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List API tokens")
+        .description("Returns all API tokens for the authenticated account.")
+        .response::<200, Json<ApiTokens>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Gets a specific API token by access token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn read_api_token(
@@ -101,6 +118,14 @@ async fn read_api_token(
     tracing::debug!(target: TRACING_TARGET, "API token read");
 
     Ok((StatusCode::OK, Json(token.into())))
+}
+
+fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get API token")
+        .description("Returns details for a specific API token.")
+        .response::<200, Json<ApiToken>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates an existing API token.
@@ -130,6 +155,15 @@ async fn update_api_token(
     Ok((StatusCode::OK, Json(updated_token.into())))
 }
 
+fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update API token")
+        .description("Updates an existing API token's name or description.")
+        .response::<200, Json<ApiToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Revokes (soft deletes) an API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn revoke_api_token(
@@ -153,6 +187,15 @@ async fn revoke_api_token(
     tracing::warn!(target: TRACING_TARGET, "API token revoked");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn revoke_api_token_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Revoke API token")
+        .description("Revokes an API token. This action cannot be undone.")
+        .response::<204, ()>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Finds an API token and verifies it belongs to the specified account.
@@ -197,10 +240,16 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/api-tokens/", post(create_api_token))
-        .api_route("/api-tokens/", get(list_api_tokens))
-        .api_route("/api-tokens/{access_token}/", get(read_api_token))
-        .api_route("/api-tokens/{access_token}/", patch(update_api_token))
-        .api_route("/api-tokens/{access_token}/", delete(revoke_api_token))
+        .api_route(
+            "/api-tokens/",
+            post_with(create_api_token, create_api_token_docs)
+                .get_with(list_api_tokens, list_api_tokens_docs),
+        )
+        .api_route(
+            "/api-tokens/{access_token}/",
+            get_with(read_api_token, read_api_token_docs)
+                .patch_with(update_api_token, update_api_token_docs)
+                .delete_with(revoke_api_token, revoke_api_token_docs),
+        )
         .with_path_items(|item| item.tag("API Tokens"))
 }

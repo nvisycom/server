@@ -357,10 +357,12 @@ impl<'a> aide::OperationOutput for Error<'a> {
     }
 
     fn inferred_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
+        _ctx: &mut aide::generate::GenContext,
+        _operation: &mut aide::openapi::Operation,
     ) -> Vec<(Option<u16>, aide::openapi::Response)> {
-        axum::Json::<ErrorResponse<'static>>::inferred_responses(ctx, operation)
+        // Return empty vec to prevent aide from adding a default 200 response.
+        // Error responses should be explicitly documented via TransformOperation.
+        Vec::new()
     }
 }
 

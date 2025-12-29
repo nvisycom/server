@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
@@ -16,8 +17,9 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{AccountRepository, ProjectRepository};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Path, Permission, PgPool};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
 use crate::handler::request::ProjectPathParams;
+use crate::handler::response::ErrorResponse;
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -783,6 +785,17 @@ async fn project_websocket_handler(
     }))
 }
 
+fn project_websocket_handler_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Connect to project WebSocket")
+        .description(
+            "Establishes a WebSocket connection for real-time project events and collaboration.",
+        )
+        .response::<101, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with WebSocket routes for projects.
 ///
 /// [`Router`]: axum::routing::Router
@@ -790,6 +803,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/{project_id}/ws/", get(project_websocket_handler))
+        .api_route(
+            "/projects/{project_id}/ws/",
+            get_with(project_websocket_handler, project_websocket_handler_docs),
+        )
         .with_path_items(|item| item.tag("WebSocket"))
 }

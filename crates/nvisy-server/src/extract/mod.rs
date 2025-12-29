@@ -1,4 +1,4 @@
-//! Enhanced HTTP request extractors with improved error handling and validation.
+//! Request extractors with improved error handling and validation.
 //!
 //! This module provides a comprehensive suite of custom Axum extractors that enhance
 //! the default functionality with better error messages, validation, logging, and

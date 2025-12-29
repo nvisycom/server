@@ -6,6 +6,7 @@
 //! authorization and follow role-based access control principles.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{Pagination, ProjectWebhookRepository};
 
@@ -13,7 +14,7 @@ use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, Va
 use crate::handler::request::{
     CreateWebhook, ProjectPathParams, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
 };
-use crate::handler::response::{Webhook, WebhookWithSecret, Webhooks};
+use crate::handler::response::{ErrorResponse, Webhook, WebhookWithSecret, Webhooks};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -59,6 +60,15 @@ async fn create_webhook(
     Ok((StatusCode::CREATED, Json(webhook.into())))
 }
 
+fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Create webhook")
+        .description("Creates a new webhook. The secret is only shown once at creation.")
+        .response::<201, Json<WebhookWithSecret>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
 /// Lists all webhooks for a project.
 ///
 /// Returns all configured webhooks without secrets. Requires `ViewIntegrations` permission.
@@ -99,6 +109,14 @@ async fn list_webhooks(
     Ok((StatusCode::OK, Json(webhooks)))
 }
 
+fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List webhooks")
+        .description("Returns all configured webhooks for the project without secrets.")
+        .response::<200, Json<Webhooks>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
 /// Retrieves a specific project webhook.
 ///
 /// Returns webhook details without secret. Requires `ViewIntegrations` permission.
@@ -130,6 +148,15 @@ async fn read_webhook(
     tracing::debug!(target: TRACING_TARGET, "Project webhook read");
 
     Ok((StatusCode::OK, Json(webhook.into())))
+}
+
+fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get webhook")
+        .description("Returns webhook details without the secret.")
+        .response::<200, Json<Webhook>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates a project webhook.
@@ -172,6 +199,16 @@ async fn update_webhook(
     Ok((StatusCode::OK, Json(webhook.into())))
 }
 
+fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update webhook")
+        .description("Updates webhook configuration such as URL or event subscriptions.")
+        .response::<200, Json<Webhook>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Deletes a project webhook.
 ///
 /// Permanently removes the webhook. Requires `ManageIntegrations` permission.
@@ -208,6 +245,15 @@ async fn delete_webhook(
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete webhook")
+        .description("Permanently removes the webhook from the project.")
+        .response::<204, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Finds a webhook by ID and verifies it belongs to the specified project.
 async fn find_project_webhook(
     conn: &mut nvisy_postgres::PgConn,
@@ -236,19 +282,16 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/{project_id}/webhooks/", post(create_webhook))
-        .api_route("/projects/{project_id}/webhooks/", get(list_webhooks))
         .api_route(
-            "/projects/{project_id}/webhooks/{webhook_id}/",
-            get(read_webhook),
+            "/projects/{project_id}/webhooks/",
+            post_with(create_webhook, create_webhook_docs)
+                .get_with(list_webhooks, list_webhooks_docs),
         )
         .api_route(
             "/projects/{project_id}/webhooks/{webhook_id}/",
-            put(update_webhook),
-        )
-        .api_route(
-            "/projects/{project_id}/webhooks/{webhook_id}/",
-            delete(delete_webhook),
+            get_with(read_webhook, read_webhook_docs)
+                .put_with(update_webhook, update_webhook_docs)
+                .delete_with(delete_webhook, delete_webhook_docs),
         )
         .with_path_items(|item| item.tag("Webhooks"))
 }

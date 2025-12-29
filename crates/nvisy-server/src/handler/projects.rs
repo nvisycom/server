@@ -5,6 +5,7 @@
 //! with role-based access control.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::PgError;
 use nvisy_postgres::model::{NewProjectMember, Project as ProjectModel, ProjectMember};
@@ -12,7 +13,7 @@ use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{CreateProject, Pagination, ProjectPathParams, UpdateProject};
-use crate::handler::response::{Project, Projects};
+use crate::handler::response::{ErrorResponse, Project, Projects};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -56,6 +57,16 @@ async fn create_project(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+fn create_project_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Create project")
+        .description(
+            "Creates a new project. The creator is automatically added as an admin member.",
+        )
+        .response::<201, Json<Project>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Lists all projects the authenticated user is a member of.
 ///
 /// Returns projects with membership details including the user's role
@@ -82,6 +93,13 @@ async fn list_projects(
     );
 
     Ok((StatusCode::OK, Json(projects)))
+}
+
+fn list_projects_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List projects")
+        .description("Returns all projects the authenticated user is a member of.")
+        .response::<200, Json<Projects>>()
+        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Retrieves details for a specific project.
@@ -115,6 +133,15 @@ async fn read_project(
     Ok((StatusCode::OK, Json(project)))
 }
 
+fn read_project_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get project")
+        .description("Returns details for a specific project.")
+        .response::<200, Json<Project>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Updates an existing project's configuration.
 ///
 /// Requires `UpdateProject` permission. Only provided fields are updated.
@@ -146,6 +173,17 @@ async fn update_project(
 
     let project = Project::from_model(project);
     Ok((StatusCode::OK, Json(project)))
+}
+
+fn update_project_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update project")
+        .description(
+            "Updates an existing project's configuration. Only provided fields are updated.",
+        )
+        .response::<200, Json<Project>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Soft-deletes a project.
@@ -188,6 +226,15 @@ async fn delete_project(
     Ok(StatusCode::OK)
 }
 
+fn delete_project_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete project")
+        .description("Soft-deletes a project. Data is retained for potential recovery.")
+        .response::<200, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all project-related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -195,10 +242,16 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/", post(create_project))
-        .api_route("/projects/", get(list_projects))
-        .api_route("/projects/{project_id}/", get(read_project))
-        .api_route("/projects/{project_id}/", patch(update_project))
-        .api_route("/projects/{project_id}/", delete(delete_project))
+        .api_route(
+            "/projects/",
+            post_with(create_project, create_project_docs)
+                .get_with(list_projects, list_projects_docs),
+        )
+        .api_route(
+            "/projects/{project_id}/",
+            get_with(read_project, read_project_docs)
+                .patch_with(update_project, update_project_docs)
+                .delete_with(delete_project, delete_project_docs),
+        )
         .with_path_items(|item| item.tag("Projects"))
 }

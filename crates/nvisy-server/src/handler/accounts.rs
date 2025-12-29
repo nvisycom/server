@@ -5,6 +5,7 @@
 //! practices with proper authorization, input validation, and audit logging.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgConn;
@@ -13,7 +14,7 @@ use nvisy_postgres::query::AccountRepository;
 use uuid::Uuid;
 
 use super::request::UpdateAccount;
-use super::response::Account;
+use super::response::{Account, ErrorResponse};
 use crate::extract::{AuthState, Json, PgPool, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
@@ -37,6 +38,13 @@ async fn get_own_account(
     tracing::info!(target: TRACING_TARGET, "Account read");
 
     Ok((StatusCode::OK, Json(Account::from_model(account))))
+}
+
+fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get account")
+        .description("Returns the authenticated user's account details.")
+        .response::<200, Json<Account>>()
+        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Updates the authenticated account.
@@ -97,6 +105,15 @@ async fn update_own_account(
     Ok((StatusCode::OK, Json(Account::from_model(account))))
 }
 
+fn update_own_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update account")
+        .description("Updates the authenticated user's account details.")
+        .response::<200, Json<Account>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
 /// Deletes the authenticated account.
 #[tracing::instrument(
     skip_all,
@@ -119,6 +136,14 @@ async fn delete_own_account(
     tracing::info!(target: TRACING_TARGET, "Account deleted");
 
     Ok(StatusCode::OK)
+}
+
+fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete account")
+        .description("Deletes the authenticated user's account.")
+        .response_with::<200, (), _>(|res| res.description("Account deleted."))
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Builds user inputs for password strength validation.
@@ -144,8 +169,11 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/account", get(get_own_account))
-        .api_route("/account", patch(update_own_account))
-        .api_route("/account", delete(delete_own_account))
+        .api_route(
+            "/account",
+            get_with(get_own_account, get_own_account_docs)
+                .patch_with(update_own_account, update_own_account_docs)
+                .delete_with(delete_own_account, delete_own_account_docs),
+        )
         .with_path_items(|item| item.tag("Accounts"))
 }

@@ -5,6 +5,7 @@
 //! follow security best practices including:
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
@@ -13,7 +14,7 @@ use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
 
 use super::request::{Login, Signup};
-use super::response::AuthToken;
+use super::response::{AuthToken, ErrorResponse};
 use crate::extract::{
     AuthClaims, AuthHeader, AuthState, ClientIp, Json, PgPool, TypedHeader, ValidateJson,
 };
@@ -137,6 +138,14 @@ async fn login(
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
+fn login_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Login")
+        .description("Authenticates a user and returns an access token.")
+        .response::<201, Json<AuthToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
@@ -212,6 +221,14 @@ async fn signup(
     Ok((StatusCode::CREATED, auth_header, Json(response)))
 }
 
+fn signup_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Signup")
+        .description("Creates a new account and returns an access token.")
+        .response::<201, Json<AuthToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
 /// Deletes an API token by its ID (logout).
 #[tracing::instrument(
     skip_all,
@@ -221,7 +238,7 @@ async fn signup(
     )
 )]
 async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> Result<StatusCode> {
-    tracing::info!(target: TRACING_TARGET, "Logout requested");
+    tracing::debug!(target: TRACING_TARGET, "Logging out");
 
     // Verify API token exists before attempting to delete
     let token_exists = conn
@@ -230,7 +247,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
         .is_some();
 
     if !token_exists {
-        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent API token");
+        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent token");
         return Ok(StatusCode::OK); // Consider it successful if token doesn't exist
     }
 
@@ -240,7 +257,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
     if deleted {
         tracing::info!(target: TRACING_TARGET, "Logout successful");
     } else {
-        tracing::warn!(target: TRACING_TARGET, "Logout completed but API token was not found");
+        tracing::warn!(target: TRACING_TARGET, "Logout completed but token was not found");
     }
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
@@ -257,6 +274,13 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
     Ok(StatusCode::OK)
 }
 
+fn logout_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Logout")
+        .description("Invalidates the current access token.")
+        .response_with::<200, (), _>(|res| res.description("Logged out."))
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -264,8 +288,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/auth/login", post(login))
-        .api_route("/auth/signup", post(signup))
-        .api_route("/auth/logout", post(logout))
+        .api_route("/auth/login", post_with(login, login_docs))
+        .api_route("/auth/signup", post_with(signup, signup_docs))
+        .api_route("/auth/logout", post_with(logout, logout_docs))
         .with_path_items(|item| item.tag("Authentication"))
 }

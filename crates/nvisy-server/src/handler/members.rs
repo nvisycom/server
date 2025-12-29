@@ -6,13 +6,14 @@
 //! role-based access control principles.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{ProjectMemberRepository, ProjectRepository};
 use nvisy_postgres::types::{ProjectRole, ProjectVisibility};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{MemberPathParams, Pagination, ProjectPathParams, UpdateMemberRole};
-use crate::handler::response::{Member, Members};
+use crate::handler::response::{ErrorResponse, Member, Members};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -69,6 +70,15 @@ async fn list_members(
     Ok((StatusCode::OK, Json(members)))
 }
 
+fn list_members_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List members")
+        .description("Returns a paginated list of project members with their roles and status.")
+        .response::<200, Json<Members>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Gets detailed information about a specific project member.
 ///
 /// Returns comprehensive information about a project member, including their role,
@@ -122,6 +132,15 @@ async fn get_member(
     Ok((StatusCode::OK, Json(project_member.into())))
 }
 
+fn get_member_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get member")
+        .description("Returns detailed information about a specific project member.")
+        .response::<200, Json<Member>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Removes a member from a project.
 ///
 /// Permanently removes a member from the project. This action cannot be undone.
@@ -172,6 +191,18 @@ async fn delete_member(
     tracing::warn!(target: TRACING_TARGET, "Project member removed");
 
     Ok(StatusCode::OK)
+}
+
+fn delete_member_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Remove member")
+        .description(
+            "Permanently removes a member from the project. Cannot remove admins or yourself.",
+        )
+        .response::<200, ()>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates a project member's role.
@@ -238,6 +269,18 @@ async fn update_member(
     Ok((StatusCode::OK, Json(updated_member.into())))
 }
 
+fn update_member_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update member role")
+        .description(
+            "Updates a project member's role. Cannot update your own role or demote admins.",
+        )
+        .response::<200, Json<Member>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Leaves a project.
 ///
 /// Allows a member to voluntarily leave a project. This action cannot be undone.
@@ -274,6 +317,15 @@ async fn leave_project(
     Ok(StatusCode::OK)
 }
 
+fn leave_project_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Leave project")
+        .description("Allows a member to voluntarily leave a project.")
+        .response::<200, ()>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all project member related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -281,19 +333,21 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/projects/{project_id}/members/", get(list_members))
-        .api_route("/projects/{project_id}/members/leave", post(leave_project))
         .api_route(
-            "/projects/{project_id}/members/{account_id}/",
-            get(get_member),
+            "/projects/{project_id}/members/",
+            get_with(list_members, list_members_docs),
+        )
+        .api_route(
+            "/projects/{project_id}/members/leave",
+            post_with(leave_project, leave_project_docs),
         )
         .api_route(
             "/projects/{project_id}/members/{account_id}/",
-            delete(delete_member),
+            get_with(get_member, get_member_docs).delete_with(delete_member, delete_member_docs),
         )
         .api_route(
             "/projects/{project_id}/members/{account_id}/role",
-            patch(update_member),
+            patch_with(update_member, update_member_docs),
         )
         .with_path_items(|item| item.tag("Members"))
 }

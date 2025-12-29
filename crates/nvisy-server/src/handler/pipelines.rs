@@ -5,11 +5,12 @@
 //! Currently a stub implementation pending database schema.
 
 use aide::axum::ApiRouter;
+use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
 use crate::handler::request::{CreatePipeline, PipelinePathParams, ProjectPathParams};
-use crate::handler::response::{Pipeline, Pipelines};
+use crate::handler::response::{ErrorResponse, Pipeline, Pipelines};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -49,6 +50,14 @@ async fn list_project_pipelines(
     Ok((StatusCode::OK, Json(pipelines)))
 }
 
+fn list_project_pipelines_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List pipelines")
+        .description("Returns all configured pipelines for the project.")
+        .response::<200, Json<Pipelines>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
 /// Gets details of a specific pipeline.
 ///
 /// Returns pipeline configuration. Requires `ViewPipelines` permission.
@@ -75,6 +84,15 @@ async fn get_project_pipeline(
     Err(ErrorKind::NotFound
         .with_message("Pipeline not found")
         .with_resource("pipeline"))
+}
+
+fn get_project_pipeline_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get pipeline")
+        .description("Returns details of a specific pipeline configuration.")
+        .response::<200, Json<Pipeline>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Creates a new pipeline for a project.
@@ -107,6 +125,15 @@ async fn create_project_pipeline(
     Err(ErrorKind::InternalServerError
         .with_message("Pipeline creation not yet implemented")
         .with_resource("pipeline"))
+}
+
+fn create_project_pipeline_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Create pipeline")
+        .description("Creates a new processing pipeline configuration for the project.")
+        .response::<201, Json<Pipeline>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Updates an existing pipeline.
@@ -142,6 +169,16 @@ async fn update_project_pipeline(
         .with_resource("pipeline"))
 }
 
+fn update_project_pipeline_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update pipeline")
+        .description("Updates an existing pipeline configuration.")
+        .response::<200, Json<Pipeline>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Deletes a pipeline.
 ///
 /// Permanently removes the pipeline. Requires `ManagePipelines` permission.
@@ -174,6 +211,15 @@ async fn delete_project_pipeline(
         .with_resource("pipeline"))
 }
 
+fn delete_project_pipeline_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete pipeline")
+        .description("Permanently removes a pipeline from the project.")
+        .response::<204, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Returns an [`ApiRouter`] with project pipeline routes.
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
@@ -181,23 +227,14 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
             "/projects/{project_id}/pipelines",
-            get(list_project_pipelines),
+            get_with(list_project_pipelines, list_project_pipelines_docs)
+                .post_with(create_project_pipeline, create_project_pipeline_docs),
         )
         .api_route(
             "/projects/{project_id}/pipelines/{pipeline_id}",
-            get(get_project_pipeline),
-        )
-        .api_route(
-            "/projects/{project_id}/pipelines",
-            post(create_project_pipeline),
-        )
-        .api_route(
-            "/projects/{project_id}/pipelines/{pipeline_id}",
-            put(update_project_pipeline),
-        )
-        .api_route(
-            "/projects/{project_id}/pipelines/{pipeline_id}",
-            delete(delete_project_pipeline),
+            get_with(get_project_pipeline, get_project_pipeline_docs)
+                .put_with(update_project_pipeline, update_project_pipeline_docs)
+                .delete_with(delete_project_pipeline, delete_project_pipeline_docs),
         )
         .with_path_items(|item| item.tag("Pipelines"))
 }
