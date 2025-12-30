@@ -177,9 +177,9 @@ impl WorkspaceInvite {
         self.invitee_id.is_none()
     }
 
-    /// Returns whether the invitation grants admin privileges.
-    pub fn grants_admin_access(&self) -> bool {
-        matches!(self.invited_role, WorkspaceRole::Admin)
+    /// Returns whether the invitation grants owner privileges.
+    pub fn grants_owner_access(&self) -> bool {
+        matches!(self.invited_role, WorkspaceRole::Owner)
     }
 
     /// Returns whether the invitation can be canceled.

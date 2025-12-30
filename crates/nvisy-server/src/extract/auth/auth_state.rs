@@ -133,7 +133,7 @@ where
             token_id = %auth_claims.token_id,
             account_id = %auth_claims.account_id,
             expires_at = %auth_claims.expires_at,
-            is_admin_claim = auth_claims.is_administrator,
+            is_admin_claim = auth_claims.is_owner,
             "beginning authentication verification"
         );
 
@@ -380,12 +380,12 @@ where
     ///
     /// Returns [`ErrorKind::Unauthorized`] if privilege claims don't match database.
     fn verify_privilege_consistency(auth_claims: &AuthClaims<T>, account: &Account) -> Result<()> {
-        if auth_claims.is_administrator != account.is_admin {
+        if auth_claims.is_owner != account.is_admin {
             tracing::error!(
                 target: TRACING_TARGET_AUTHENTICATION,
                 account_id = %auth_claims.account_id,
                 token_id = %auth_claims.token_id,
-                token_admin_claim = auth_claims.is_administrator,
+                token_admin_claim = auth_claims.is_owner,
                 current_admin_status = account.is_admin,
                 email = %account.email_address,
                 "critical: admin privilege mismatch detected between token and database"

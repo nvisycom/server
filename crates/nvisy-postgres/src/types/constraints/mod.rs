@@ -26,7 +26,7 @@ pub mod document_versions;
 pub mod documents;
 
 // Workspace run constraint modules
-pub mod workspace_runs;
+pub mod workspace_integration_runs;
 
 use std::fmt;
 
@@ -46,7 +46,7 @@ pub use workspace_activities::WorkspaceActivitiesConstraints;
 pub use workspace_integrations::WorkspaceIntegrationConstraints;
 pub use workspace_invites::WorkspaceInviteConstraints;
 pub use workspace_members::WorkspaceMemberConstraints;
-pub use workspace_runs::WorkspaceRunConstraints;
+pub use workspace_integration_runs::WorkspaceIntegrationRunConstraints;
 pub use workspace_webhooks::WorkspaceWebhookConstraints;
 pub use workspaces::WorkspaceConstraints;
 
@@ -71,7 +71,7 @@ pub enum ConstraintViolation {
     WorkspaceActivityLog(WorkspaceActivitiesConstraints),
     WorkspaceIntegration(WorkspaceIntegrationConstraints),
     WorkspaceWebhook(WorkspaceWebhookConstraints),
-    WorkspaceRun(WorkspaceRunConstraints),
+    WorkspaceIntegrationRun(WorkspaceIntegrationRunConstraints),
 
     // Document-related constraints
     Document(DocumentConstraints),
@@ -146,7 +146,7 @@ impl ConstraintViolation {
                 WorkspaceActivitiesConstraints::new => WorkspaceActivityLog,
                 WorkspaceIntegrationConstraints::new => WorkspaceIntegration,
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
-                WorkspaceRunConstraints::new => WorkspaceRun,
+                WorkspaceIntegrationRunConstraints::new => WorkspaceIntegrationRun,
             },
             "documents" => try_parse!(DocumentConstraints::new => Document),
             "document" => try_parse! {
@@ -178,7 +178,7 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceActivityLog(_) => "workspace_activities",
             ConstraintViolation::WorkspaceIntegration(_) => "workspace_integrations",
             ConstraintViolation::WorkspaceWebhook(_) => "workspace_webhooks",
-            ConstraintViolation::WorkspaceRun(_) => "workspace_runs",
+            ConstraintViolation::WorkspaceIntegrationRun(_) => "workspace_integration_runs",
 
             // Document-related tables
             ConstraintViolation::Document(_) => "documents",
@@ -207,7 +207,7 @@ impl ConstraintViolation {
             | ConstraintViolation::WorkspaceActivityLog(_)
             | ConstraintViolation::WorkspaceIntegration(_)
             | ConstraintViolation::WorkspaceWebhook(_)
-            | ConstraintViolation::WorkspaceRun(_) => "workspaces",
+            | ConstraintViolation::WorkspaceIntegrationRun(_) => "workspaces",
 
             ConstraintViolation::Document(_)
             | ConstraintViolation::DocumentAnnotation(_)
@@ -234,7 +234,7 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceActivityLog(c) => c.categorize(),
             ConstraintViolation::WorkspaceIntegration(c) => c.categorize(),
             ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
-            ConstraintViolation::WorkspaceRun(c) => c.categorize(),
+            ConstraintViolation::WorkspaceIntegrationRun(c) => c.categorize(),
 
             ConstraintViolation::Document(c) => c.categorize(),
             ConstraintViolation::DocumentAnnotation(c) => c.categorize(),
@@ -266,7 +266,7 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::WorkspaceActivityLog(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceIntegration(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceRun(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceIntegrationRun(c) => write!(f, "{}", c),
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentAnnotation(c) => write!(f, "{}", c),

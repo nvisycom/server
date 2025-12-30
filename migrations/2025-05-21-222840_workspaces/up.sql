@@ -145,9 +145,9 @@ COMMENT ON COLUMN workspaces.deleted_at IS 'Timestamp when the workspace was sof
 
 -- Enum types for workspace_members table
 CREATE TYPE WORKSPACE_ROLE AS ENUM (
-    'admin',        -- Administrative access with full workspace management
-    'editor',       -- Can edit content and manage files
-    'viewer'        -- Read-only access to workspace content
+    'owner',        -- Full workspace ownership and management
+    'member',       -- Can edit content and manage files
+    'guest'         -- Read-only access to workspace content
 );
 
 COMMENT ON TYPE WORKSPACE_ROLE IS
@@ -162,7 +162,7 @@ CREATE TABLE workspace_members (
     PRIMARY KEY (workspace_id, account_id),
 
     -- Role and permissions
-    member_role        WORKSPACE_ROLE NOT NULL DEFAULT 'viewer',
+    member_role        WORKSPACE_ROLE NOT NULL DEFAULT 'guest',
     custom_permissions JSONB        NOT NULL DEFAULT '{}',
 
     CONSTRAINT workspace_members_custom_permissions_size CHECK (length(custom_permissions::TEXT) BETWEEN 2 AND 2048),
@@ -265,7 +265,7 @@ CREATE TABLE workspace_invites (
     invitee_id     UUID          DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
 
     -- Invitation details
-    invited_role   WORKSPACE_ROLE  NOT NULL DEFAULT 'viewer',
+    invited_role   WORKSPACE_ROLE  NOT NULL DEFAULT 'guest',
     invite_message TEXT          NOT NULL DEFAULT '',
     invite_token   TEXT          NOT NULL DEFAULT generate_secure_token(32),
 
@@ -624,10 +624,10 @@ COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was c
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
 COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft deletion timestamp';
 
--- WORKSPACE_RUNS TABLE
+-- WORKSPACE_INTEGRATION_RUNS TABLE
 
--- Workspace runs table definition
-CREATE TABLE workspace_runs (
+-- Workspace integration runs table definition
+CREATE TABLE workspace_integration_runs (
     -- Primary identifier
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -640,8 +640,8 @@ CREATE TABLE workspace_runs (
     run_name            TEXT             NOT NULL DEFAULT 'Untitled Run',
     run_type            TEXT             NOT NULL DEFAULT 'manual',
 
-    CONSTRAINT workspace_runs_run_name_length CHECK (length(trim(run_name)) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_runs_run_type_format CHECK (run_type ~ '^[a-z_]+$'),
+    CONSTRAINT workspace_integration_runs_run_name_length CHECK (length(trim(run_name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_integration_runs_run_type_format CHECK (run_type ~ '^[a-z_]+$'),
 
     -- Run status
     run_status          INTEGRATION_STATUS NOT NULL DEFAULT 'pending',
@@ -651,63 +651,63 @@ CREATE TABLE workspace_runs (
     completed_at        TIMESTAMPTZ      DEFAULT NULL,
     duration_ms         INTEGER          DEFAULT NULL,
 
-    CONSTRAINT workspace_runs_duration_positive CHECK (duration_ms IS NULL OR duration_ms >= 0),
-    CONSTRAINT workspace_runs_completed_after_started CHECK (completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at),
+    CONSTRAINT workspace_integration_runs_duration_positive CHECK (duration_ms IS NULL OR duration_ms >= 0),
+    CONSTRAINT workspace_integration_runs_completed_after_started CHECK (completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at),
 
     -- Run results and metadata
     result_summary      TEXT             DEFAULT NULL,
     metadata            JSONB            NOT NULL DEFAULT '{}',
     error_details       JSONB            DEFAULT NULL,
 
-    CONSTRAINT workspace_runs_result_summary_length CHECK (length(result_summary) <= 2000),
-    CONSTRAINT workspace_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
-    CONSTRAINT workspace_runs_error_details_size CHECK (length(error_details::TEXT) BETWEEN 2 AND 8192),
+    CONSTRAINT workspace_integration_runs_result_summary_length CHECK (length(result_summary) <= 2000),
+    CONSTRAINT workspace_integration_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
+    CONSTRAINT workspace_integration_runs_error_details_size CHECK (length(error_details::TEXT) BETWEEN 2 AND 8192),
 
     -- Lifecycle timestamps
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
 
-    CONSTRAINT workspace_runs_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_runs_started_after_created CHECK (started_at IS NULL OR started_at >= created_at)
+    CONSTRAINT workspace_integration_runs_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_integration_runs_started_after_created CHECK (started_at IS NULL OR started_at >= created_at)
 );
 
--- Triggers for workspace_runs table
-SELECT setup_updated_at('workspace_runs');
+-- Triggers for workspace_integration_runs table
+SELECT setup_updated_at('workspace_integration_runs');
 
--- Indexes for workspace_runs table
-CREATE INDEX workspace_runs_workspace_recent_idx
-    ON workspace_runs (workspace_id, created_at DESC);
+-- Indexes for workspace_integration_runs table
+CREATE INDEX workspace_integration_runs_workspace_recent_idx
+    ON workspace_integration_runs (workspace_id, created_at DESC);
 
-CREATE INDEX workspace_runs_integration_idx
-    ON workspace_runs (integration_id, run_status, created_at DESC)
+CREATE INDEX workspace_integration_runs_integration_idx
+    ON workspace_integration_runs (integration_id, run_status, created_at DESC)
     WHERE integration_id IS NOT NULL;
 
-CREATE INDEX workspace_runs_status_idx
-    ON workspace_runs (run_status, workspace_id, created_at DESC);
+CREATE INDEX workspace_integration_runs_status_idx
+    ON workspace_integration_runs (run_status, workspace_id, created_at DESC);
 
-CREATE INDEX workspace_runs_account_idx
-    ON workspace_runs (account_id, created_at DESC)
+CREATE INDEX workspace_integration_runs_account_idx
+    ON workspace_integration_runs (account_id, created_at DESC)
     WHERE account_id IS NOT NULL;
 
--- Comments for workspace_runs table
-COMMENT ON TABLE workspace_runs IS
+-- Comments for workspace_integration_runs table
+COMMENT ON TABLE workspace_integration_runs IS
     'Integration run tracking and execution history for workspaces.';
 
-COMMENT ON COLUMN workspace_runs.id IS 'Unique run identifier';
-COMMENT ON COLUMN workspace_runs.workspace_id IS 'Reference to the workspace';
-COMMENT ON COLUMN workspace_runs.integration_id IS 'Reference to the integration (NULL for manual runs)';
-COMMENT ON COLUMN workspace_runs.account_id IS 'Account that triggered the run (NULL for automated runs)';
-COMMENT ON COLUMN workspace_runs.run_name IS 'Human-readable run name (1-255 chars)';
-COMMENT ON COLUMN workspace_runs.run_type IS 'Type of run (manual, scheduled, triggered, etc.)';
-COMMENT ON COLUMN workspace_runs.run_status IS 'Current run status (pending, executing, failure)';
-COMMENT ON COLUMN workspace_runs.started_at IS 'Timestamp when run execution started';
-COMMENT ON COLUMN workspace_runs.completed_at IS 'Timestamp when run execution completed';
-COMMENT ON COLUMN workspace_runs.duration_ms IS 'Run duration in milliseconds';
-COMMENT ON COLUMN workspace_runs.result_summary IS 'Summary of run results (up to 2000 chars)';
-COMMENT ON COLUMN workspace_runs.metadata IS 'Run metadata and configuration (JSON, 2B-16KB)';
-COMMENT ON COLUMN workspace_runs.error_details IS 'Error details for failed runs (JSON, 2B-8KB)';
-COMMENT ON COLUMN workspace_runs.created_at IS 'Timestamp when run was created';
-COMMENT ON COLUMN workspace_runs.updated_at IS 'Timestamp when run was last modified';
+COMMENT ON COLUMN workspace_integration_runs.id IS 'Unique run identifier';
+COMMENT ON COLUMN workspace_integration_runs.workspace_id IS 'Reference to the workspace';
+COMMENT ON COLUMN workspace_integration_runs.integration_id IS 'Reference to the integration (NULL for manual runs)';
+COMMENT ON COLUMN workspace_integration_runs.account_id IS 'Account that triggered the run (NULL for automated runs)';
+COMMENT ON COLUMN workspace_integration_runs.run_name IS 'Human-readable run name (1-255 chars)';
+COMMENT ON COLUMN workspace_integration_runs.run_type IS 'Type of run (manual, scheduled, triggered, etc.)';
+COMMENT ON COLUMN workspace_integration_runs.run_status IS 'Current run status (pending, executing, failure)';
+COMMENT ON COLUMN workspace_integration_runs.started_at IS 'Timestamp when run execution started';
+COMMENT ON COLUMN workspace_integration_runs.completed_at IS 'Timestamp when run execution completed';
+COMMENT ON COLUMN workspace_integration_runs.duration_ms IS 'Run duration in milliseconds';
+COMMENT ON COLUMN workspace_integration_runs.result_summary IS 'Summary of run results (up to 2000 chars)';
+COMMENT ON COLUMN workspace_integration_runs.metadata IS 'Run metadata and configuration (JSON, 2B-16KB)';
+COMMENT ON COLUMN workspace_integration_runs.error_details IS 'Error details for failed runs (JSON, 2B-8KB)';
+COMMENT ON COLUMN workspace_integration_runs.created_at IS 'Timestamp when run was created';
+COMMENT ON COLUMN workspace_integration_runs.updated_at IS 'Timestamp when run was last modified';
 
 -- VIEWS
 
@@ -718,9 +718,9 @@ SELECT
     p.display_name,
     p.status                                              AS workspace_status,
     COUNT(pm.account_id)                                  AS total_members,
-    COUNT(CASE WHEN pm.member_role = 'admin' THEN 1 END)  AS admins,
-    COUNT(CASE WHEN pm.member_role = 'editor' THEN 1 END) AS editors,
-    COUNT(CASE WHEN pm.member_role = 'viewer' THEN 1 END) AS viewers,
+    COUNT(CASE WHEN pm.member_role = 'owner' THEN 1 END)  AS owners,
+    COUNT(CASE WHEN pm.member_role = 'member' THEN 1 END) AS members,
+    COUNT(CASE WHEN pm.member_role = 'guest' THEN 1 END)  AS guests,
     COUNT(CASE WHEN pm.is_active = FALSE THEN 1 END)      AS inactive_members,
     MAX(pm.last_accessed_at)                              AS last_member_access
 FROM workspaces p

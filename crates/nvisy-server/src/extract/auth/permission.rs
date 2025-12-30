@@ -82,32 +82,32 @@ impl Permission {
     #[must_use]
     pub const fn minimum_required_role(self) -> WorkspaceRole {
         match self {
-            // Viewer-level permissions
+            // Guest-level permissions
             Self::ViewWorkspace
             | Self::ViewDocuments
             | Self::ViewFiles
             | Self::ViewMembers
             | Self::ViewIntegrations
-            | Self::ViewSettings => WorkspaceRole::Viewer,
+            | Self::ViewSettings => WorkspaceRole::Guest,
 
-            // Editor-level permissions
+            // Member-level permissions
             Self::CreateDocuments
             | Self::UpdateDocuments
             | Self::DeleteDocuments
             | Self::UploadFiles
             | Self::UpdateFiles
             | Self::DownloadFiles
-            | Self::DeleteFiles => WorkspaceRole::Editor,
+            | Self::DeleteFiles => WorkspaceRole::Member,
 
-            // Admin-level permissions
+            // Owner-level permissions
             Self::UpdateWorkspace
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageIntegrations
-            | Self::ManageSettings => WorkspaceRole::Admin,
+            | Self::ManageSettings => WorkspaceRole::Owner,
 
-            // Admin-only permissions (highest level)
-            Self::DeleteWorkspace | Self::ManageRoles => WorkspaceRole::Admin,
+            // Owner-only permissions (highest level)
+            Self::DeleteWorkspace | Self::ManageRoles => WorkspaceRole::Owner,
         }
     }
 

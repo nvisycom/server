@@ -20,7 +20,7 @@ pub async fn require_admin(
     request: Request,
     next: Next,
 ) -> Response {
-    if !auth_claims.is_administrator {
+    if !auth_claims.is_owner {
         tracing::warn!(
             target: tracing_targets::AUTHORIZATION,
             account_id = %auth_claims.account_id,

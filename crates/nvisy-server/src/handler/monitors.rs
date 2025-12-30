@@ -40,7 +40,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
     skip_all,
     fields(
         authenticated = auth_state.is_some(),
-        is_administrator = auth_state.as_ref().map(|a| a.is_administrator).unwrap_or(false),
+        is_owner = auth_state.as_ref().map(|a| a.is_owner).unwrap_or(false),
         account_id = auth_state.as_ref().map(|a| a.account_id.to_string()),
     )
 )]
@@ -54,16 +54,16 @@ async fn health_status(
     let Json(request) = request.unwrap_or_default();
 
     let is_authenticated = auth_state.is_some();
-    let is_administrator = auth_state
+    let is_owner = auth_state
         .as_ref()
-        .is_some_and(|auth| auth.is_administrator);
+        .is_some_and(|auth| auth.is_owner);
     let account_id = auth_state.as_ref().map(|auth| auth.account_id);
 
     tracing::debug!(
         target: TRACING_TARGET,
         ?account_id,
         is_authenticated,
-        is_administrator,
+        is_owner,
         version = %version,
         use_cache = request.use_cache,
         timeout_ms = request.timeout.unwrap_or(5000),

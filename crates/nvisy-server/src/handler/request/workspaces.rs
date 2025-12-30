@@ -13,7 +13,7 @@ use validator::Validate;
 /// Request payload for creating a new workspace.
 ///
 /// Creates a new workspace with the specified configuration. The creator is
-/// automatically added as an admin member of the workspace.
+/// automatically added as an owner of the workspace.
 ///
 /// # Example
 ///

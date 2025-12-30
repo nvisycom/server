@@ -9,7 +9,7 @@ DROP VIEW IF EXISTS pending_workspace_invites;
 DROP VIEW IF EXISTS workspace_member_summary;
 
 -- Drop tables (indexes and triggers dropped automatically with tables)
-DROP TABLE IF EXISTS workspace_runs;
+DROP TABLE IF EXISTS workspace_integration_runs;
 DROP TABLE IF EXISTS workspace_webhooks;
 DROP TABLE IF EXISTS workspace_integrations;
 DROP TABLE IF EXISTS workspace_activities;

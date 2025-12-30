@@ -11,7 +11,7 @@ pub use constraints::{
     DocumentAnnotationConstraints, DocumentChunkConstraints, DocumentCommentConstraints,
     DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
     WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
-    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceRunConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceIntegrationRunConstraints,
     WorkspaceWebhookConstraints,
 };
 pub use enums::{

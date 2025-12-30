@@ -52,7 +52,7 @@ pub struct AuthClaims<T = ()> {
     pub custom_claims: T,
     /// Is administrator flag.
     #[serde(rename = "cre")]
-    pub is_administrator: bool,
+    pub is_owner: bool,
 }
 
 impl AuthClaims<()> {
@@ -109,7 +109,7 @@ impl<T> AuthClaims<T> {
             issued_at: account_api_token.issued_at.into(),
             expires_at: account_api_token.expired_at.into(),
             custom_claims,
-            is_administrator: account_model.is_admin,
+            is_owner: account_model.is_admin,
         }
     }
 
@@ -276,7 +276,7 @@ where
             target: TRACING_TARGET_AUTHENTICATION,
             token_id = %claims.token_id,
             account_id = %claims.account_id,
-            is_admin = claims.is_administrator,
+            is_admin = claims.is_owner,
             expires_soon = claims.expires_soon(),
             remaining = ?claims.remaining_lifetime(),
             "JWT token validation completed successfully"

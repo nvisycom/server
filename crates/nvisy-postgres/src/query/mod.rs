@@ -25,7 +25,7 @@ pub mod workspace_activity;
 pub mod workspace_integration;
 pub mod workspace_invite;
 pub mod workspace_member;
-pub mod workspace_run;
+pub mod workspace_integration_run;
 pub mod workspace_webhook;
 
 pub use account::AccountRepository;

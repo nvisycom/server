@@ -90,13 +90,13 @@ impl NewWorkspaceMember {
 
     /// Creates a new owner membership for a workspace.
     ///
-    /// The owner is automatically set as an Admin with all notifications enabled.
+    /// The owner is automatically set with all notifications enabled.
     pub fn new_owner(workspace_id: Uuid, account_id: Uuid) -> Self {
         Self {
             notify_updates: true,
             notify_comments: true,
             notify_mentions: true,
-            ..Self::new(workspace_id, account_id, WorkspaceRole::Admin)
+            ..Self::new(workspace_id, account_id, WorkspaceRole::Owner)
         }
     }
 }
@@ -129,34 +129,37 @@ pub struct UpdateWorkspaceMember {
 }
 
 impl WorkspaceMember {
-    /// Returns whether the member has admin privileges.
-    pub fn is_admin(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Admin)
+    /// Returns whether the member has owner privileges.
+    pub fn is_owner(&self) -> bool {
+        matches!(self.member_role, WorkspaceRole::Owner)
     }
 
     /// Returns whether the member can invite others.
     pub fn can_invite(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Admin)
+        matches!(self.member_role, WorkspaceRole::Owner)
     }
 
-    /// Returns whether the member is an editor.
-    pub fn is_editor(&self) -> bool {
-        self.member_role == WorkspaceRole::Editor
+    /// Returns whether the member is a regular member.
+    pub fn is_member(&self) -> bool {
+        self.member_role == WorkspaceRole::Member
     }
 
-    /// Returns whether the member is a viewer.
-    pub fn is_viewer(&self) -> bool {
-        self.member_role == WorkspaceRole::Viewer
+    /// Returns whether the member is a guest.
+    pub fn is_guest(&self) -> bool {
+        self.member_role == WorkspaceRole::Guest
     }
 
     /// Returns whether the member can edit workspace content.
     pub fn can_edit(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Admin | WorkspaceRole::Editor)
+        matches!(
+            self.member_role,
+            WorkspaceRole::Owner | WorkspaceRole::Member
+        )
     }
 
     /// Returns whether the member can manage other members.
     pub fn can_manage_members(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Admin)
+        matches!(self.member_role, WorkspaceRole::Owner)
     }
 
     /// Returns whether the member has notifications enabled for updates.
@@ -224,17 +227,17 @@ impl WorkspaceMember {
 
     /// Returns whether the member can perform administrative actions.
     pub fn can_administrate(&self) -> bool {
-        self.is_admin()
+        self.is_owner()
     }
 
     /// Returns whether the member can modify workspace settings.
     pub fn can_modify_settings(&self) -> bool {
-        self.is_admin()
+        self.is_owner()
     }
 
     /// Returns whether the member can delete the workspace.
     pub fn can_delete_workspace(&self) -> bool {
-        self.is_admin()
+        self.is_owner()
     }
 
     /// Returns whether the member can be promoted to the given role.

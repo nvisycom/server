@@ -12,7 +12,9 @@ use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
 use nvisy_postgres::types::{WorkspaceRole, WorkspaceVisibility};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
-use crate::handler::request::{MemberPathParams, Pagination, WorkspacePathParams, UpdateMemberRole};
+use crate::handler::request::{
+    MemberPathParams, Pagination, UpdateMemberRole, WorkspacePathParams,
+};
 use crate::handler::response::{ErrorResponse, Member, Members};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -145,7 +147,7 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// Permanently removes a member from the workspace. This action cannot be undone.
 /// The member will lose all access to the workspace and its resources.
-/// Requires `RemoveMembers` permission. Cannot remove the last admin.
+/// Requires `RemoveMembers` permission. Cannot remove an owner.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -162,7 +164,11 @@ async fn delete_member(
     tracing::warn!(target: TRACING_TARGET, "Removing workspace member");
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::RemoveMembers)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::RemoveMembers,
+        )
         .await?;
 
     // Prevent self-removal (use leave endpoint instead)
@@ -178,11 +184,11 @@ async fn delete_member(
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
     };
 
-    // Admins cannot be removed, they can only leave
-    if member_to_remove.member_role == WorkspaceRole::Admin {
+    // Owners cannot be removed, they can only leave
+    if member_to_remove.member_role == WorkspaceRole::Owner {
         return Err(ErrorKind::BadRequest
-            .with_message("Cannot remove an admin")
-            .with_context("Admins can only leave the workspace themselves"));
+            .with_message("Cannot remove an owner")
+            .with_context("Owners can only leave the workspace themselves"));
     }
 
     conn.remove_workspace_member(path_params.workspace_id, path_params.account_id)
@@ -196,7 +202,7 @@ async fn delete_member(
 fn delete_member_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Remove member")
         .description(
-            "Permanently removes a member from the workspace. Cannot remove admins or yourself.",
+            "Permanently removes a member from the workspace. Cannot remove owners or yourself.",
         )
         .response::<200, ()>()
         .response::<400, Json<ErrorResponse>>()
@@ -207,8 +213,8 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 
 /// Updates a workspace member's role.
 ///
-/// Allows workspace admins to change a member's permission level.
-/// Cannot update your own role. Cannot demote the last admin.
+/// Allows workspace owners to change a member's permission level.
+/// Cannot update your own role. Cannot demote an owner.
 /// Requires `ManageRoles` permission.
 #[tracing::instrument(
     skip_all,
@@ -235,7 +241,7 @@ async fn update_member(
     if auth_state.account_id == path_params.account_id {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot update your own role")
-            .with_context("Ask another admin to update your role"));
+            .with_context("Ask another owner to update your role"));
     }
 
     let Some(current_member) = conn
@@ -245,11 +251,11 @@ async fn update_member(
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
     };
 
-    // Admins cannot be demoted, they can only leave
-    if current_member.member_role == WorkspaceRole::Admin && request.role != WorkspaceRole::Admin {
+    // Owners cannot be demoted, they can only leave
+    if current_member.member_role == WorkspaceRole::Owner && request.role != WorkspaceRole::Owner {
         return Err(ErrorKind::BadRequest
-            .with_message("Cannot demote an admin")
-            .with_context("Admins can only leave the workspace themselves"));
+            .with_message("Cannot demote an owner")
+            .with_context("Owners can only leave the workspace themselves"));
     }
 
     let updated_member = conn
@@ -272,7 +278,7 @@ async fn update_member(
 fn update_member_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update member role")
         .description(
-            "Updates a workspace member's role. Cannot update your own role or demote admins.",
+            "Updates a workspace member's role. Cannot update your own role or demote owners.",
         )
         .response::<200, Json<Member>>()
         .response::<400, Json<ErrorResponse>>()
@@ -285,7 +291,7 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// Allows a member to voluntarily leave a workspace. This action cannot be undone.
 /// The member will lose all access to the workspace and its resources.
-/// The last admin cannot leave - they must transfer ownership first.
+/// The last owner cannot leave - they must transfer ownership first.
 #[tracing::instrument(
     skip_all,
     fields(

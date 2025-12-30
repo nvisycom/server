@@ -20,9 +20,9 @@ use crate::service::ServiceState;
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
 
-/// Creates a new workspace with the authenticated user as admin.
+/// Creates a new workspace with the authenticated user as owner.
 ///
-/// The creator is automatically added as an admin member of the workspace,
+/// The creator is automatically added as an owner of the workspace,
 /// granting full management permissions.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_workspace(
@@ -59,9 +59,7 @@ async fn create_workspace(
 
 fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create workspace")
-        .description(
-            "Creates a new workspace. The creator is automatically added as an admin member.",
-        )
+        .description("Creates a new workspace. The creator is automatically added as an owner.")
         .response::<201, Json<Workspace>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()

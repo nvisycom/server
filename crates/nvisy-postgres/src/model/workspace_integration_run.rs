@@ -4,14 +4,14 @@ use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::workspace_runs;
+use crate::schema::workspace_integration_runs;
 use crate::types::{HasCreatedAt, HasUpdatedAt, IntegrationStatus};
 
 /// Workspace run model representing integration run tracking.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = workspace_runs)]
+#[diesel(table_name = workspace_integration_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct WorkspaceRun {
+pub struct WorkspaceIntegrationRun {
     /// Unique run identifier.
     pub id: Uuid,
     /// Reference to the workspace this run belongs to.
@@ -46,9 +46,9 @@ pub struct WorkspaceRun {
 
 /// Data for creating a new workspace run.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = workspace_runs)]
+#[diesel(table_name = workspace_integration_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewWorkspaceRun {
+pub struct NewWorkspaceIntegrationRun {
     /// Workspace ID.
     pub workspace_id: Uuid,
     /// Integration ID.
@@ -67,9 +67,9 @@ pub struct NewWorkspaceRun {
 
 /// Data for updating a workspace run.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = workspace_runs)]
+#[diesel(table_name = workspace_integration_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateWorkspaceRun {
+pub struct UpdateWorkspaceIntegrationRun {
     /// Run name.
     pub run_name: Option<String>,
     /// Run status.
@@ -88,7 +88,7 @@ pub struct UpdateWorkspaceRun {
     pub error_details: Option<Option<serde_json::Value>>,
 }
 
-impl WorkspaceRun {
+impl WorkspaceIntegrationRun {
     /// Returns whether the run was created recently.
     pub fn is_recent(&self) -> bool {
         self.was_created_within(jiff::Span::new().hours(24))
@@ -188,13 +188,13 @@ impl WorkspaceRun {
     }
 }
 
-impl HasCreatedAt for WorkspaceRun {
+impl HasCreatedAt for WorkspaceIntegrationRun {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }
 }
 
-impl HasUpdatedAt for WorkspaceRun {
+impl HasUpdatedAt for WorkspaceIntegrationRun {
     fn updated_at(&self) -> jiff::Timestamp {
         self.updated_at.into()
     }

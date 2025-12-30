@@ -26,7 +26,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspaceInvite(c) => c.into(),
             ConstraintViolation::WorkspaceActivityLog(c) => c.into(),
             ConstraintViolation::WorkspaceIntegration(c) => c.into(),
-            ConstraintViolation::WorkspaceRun(c) => c.into(),
+            ConstraintViolation::WorkspaceIntegrationRun(c) => c.into(),
             ConstraintViolation::Document(c) => c.into(),
             ConstraintViolation::DocumentChunk(c) => c.into(),
             ConstraintViolation::DocumentComment(c) => c.into(),

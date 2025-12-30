@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::{
     WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
-    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceRunConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceIntegrationRunConstraints,
     WorkspaceWebhookConstraints,
 };
 
@@ -129,35 +129,35 @@ impl From<WorkspaceIntegrationConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspaceRunConstraints> for Error<'static> {
-    fn from(c: WorkspaceRunConstraints) -> Self {
+impl From<WorkspaceIntegrationRunConstraints> for Error<'static> {
+    fn from(c: WorkspaceIntegrationRunConstraints) -> Self {
         let error = match c {
-            WorkspaceRunConstraints::RunNameLength => {
+            WorkspaceIntegrationRunConstraints::RunNameLength => {
                 ErrorKind::BadRequest.with_message("Run name length is invalid")
             }
-            WorkspaceRunConstraints::RunTypeFormat => {
+            WorkspaceIntegrationRunConstraints::RunTypeFormat => {
                 ErrorKind::BadRequest.with_message("Run type format is invalid")
             }
-            WorkspaceRunConstraints::DurationPositive => {
+            WorkspaceIntegrationRunConstraints::DurationPositive => {
                 ErrorKind::BadRequest.with_message("Run duration must be positive")
             }
-            WorkspaceRunConstraints::ResultSummaryLength => {
+            WorkspaceIntegrationRunConstraints::ResultSummaryLength => {
                 ErrorKind::BadRequest.with_message("Run result summary is too long")
             }
-            WorkspaceRunConstraints::MetadataSize => {
+            WorkspaceIntegrationRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Run metadata size is invalid")
             }
-            WorkspaceRunConstraints::ErrorDetailsSize => {
+            WorkspaceIntegrationRunConstraints::ErrorDetailsSize => {
                 ErrorKind::BadRequest.with_message("Run error details size is invalid")
             }
-            WorkspaceRunConstraints::CompletedAfterStarted
-            | WorkspaceRunConstraints::UpdatedAfterCreated
-            | WorkspaceRunConstraints::StartedAfterCreated => {
+            WorkspaceIntegrationRunConstraints::CompletedAfterStarted
+            | WorkspaceIntegrationRunConstraints::UpdatedAfterCreated
+            | WorkspaceIntegrationRunConstraints::StartedAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
 
-        error.with_resource("workspace_run")
+        error.with_resource("workspace_integration_run")
     }
 }
 

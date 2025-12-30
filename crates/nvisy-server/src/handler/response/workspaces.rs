@@ -51,7 +51,7 @@ impl Workspace {
             max_members: workspace.max_members,
             max_storage: workspace.max_storage,
             enable_comments: workspace.enable_comments,
-            member_role: WorkspaceRole::Admin,
+            member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
         }

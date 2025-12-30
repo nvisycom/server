@@ -297,6 +297,30 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::IntegrationStatus;
+
+    workspace_integration_runs (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        integration_id -> Nullable<Uuid>,
+        account_id -> Nullable<Uuid>,
+        run_name -> Text,
+        run_type -> Text,
+        run_status -> IntegrationStatus,
+        started_at -> Nullable<Timestamptz>,
+        completed_at -> Nullable<Timestamptz>,
+        duration_ms -> Nullable<Int4>,
+        result_summary -> Nullable<Text>,
+        metadata -> Jsonb,
+        error_details -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::IntegrationType;
     use super::sql_types::IntegrationStatus;
 
@@ -360,30 +384,6 @@ diesel::table! {
         last_accessed_at -> Nullable<Timestamptz>,
         created_by -> Uuid,
         updated_by -> Uuid,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::IntegrationStatus;
-
-    workspace_runs (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        integration_id -> Nullable<Uuid>,
-        account_id -> Nullable<Uuid>,
-        run_name -> Text,
-        run_type -> Text,
-        run_status -> IntegrationStatus,
-        started_at -> Nullable<Timestamptz>,
-        completed_at -> Nullable<Timestamptz>,
-        duration_ms -> Nullable<Int4>,
-        result_summary -> Nullable<Text>,
-        metadata -> Jsonb,
-        error_details -> Nullable<Jsonb>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -460,13 +460,13 @@ diesel::joinable!(documents -> accounts (account_id));
 diesel::joinable!(documents -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
+diesel::joinable!(workspace_integration_runs -> accounts (account_id));
+diesel::joinable!(workspace_integration_runs -> workspace_integrations (integration_id));
+diesel::joinable!(workspace_integration_runs -> workspaces (workspace_id));
 diesel::joinable!(workspace_integrations -> accounts (created_by));
 diesel::joinable!(workspace_integrations -> workspaces (workspace_id));
 diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
-diesel::joinable!(workspace_runs -> accounts (account_id));
-diesel::joinable!(workspace_runs -> workspace_integrations (integration_id));
-diesel::joinable!(workspace_runs -> workspaces (workspace_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
 diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
@@ -482,10 +482,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     document_files,
     documents,
     workspace_activities,
+    workspace_integration_runs,
     workspace_integrations,
     workspace_invites,
     workspace_members,
-    workspace_runs,
     workspace_webhooks,
     workspaces,
 );
