@@ -8,12 +8,14 @@
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::http::StatusCode;
-use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
-use nvisy_postgres::types::{WorkspaceRole, WorkspaceVisibility};
+use nvisy_postgres::query::WorkspaceMemberRepository;
+use nvisy_postgres::types::WorkspaceRole;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+};
 use crate::handler::request::{
-    MemberPathParams, Pagination, UpdateMemberRole, WorkspacePathParams,
+    ListMembersQuery, MemberPathParams, Pagination, UpdateMemberRole, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Member, Members};
 use crate::handler::{ErrorKind, Result};
@@ -37,6 +39,7 @@ async fn list_members(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
+    Query(query): Query<ListMembersQuery>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Members>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
@@ -45,23 +48,16 @@ async fn list_members(
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
         .await?;
 
-    let Some(workspace) = conn.find_workspace_by_id(path_params.workspace_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("workspace")
-            .with_message("Workspace not found"));
-    };
+    let workspace_members = conn
+        .list_workspace_members_filtered(
+            path_params.workspace_id,
+            pagination.into(),
+            query.to_sort(),
+            query.to_filter(),
+        )
+        .await?;
 
-    // Return empty list for private workspaces
-    let members: Members = if workspace.visibility == WorkspaceVisibility::Private {
-        tracing::debug!(target: TRACING_TARGET, "Workspace is private, returning empty list");
-        Vec::new()
-    } else {
-        let workspace_members = conn
-            .list_workspace_members(path_params.workspace_id, pagination.into())
-            .await?;
-
-        workspace_members.into_iter().map(Member::from).collect()
-    };
+    let members: Members = workspace_members.into_iter().map(Member::from).collect();
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -103,18 +99,6 @@ async fn get_member(
     auth_state
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
         .await?;
-
-    let Some(workspace) = conn.find_workspace_by_id(path_params.workspace_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("workspace")
-            .with_message("Workspace not found"));
-    };
-
-    if workspace.visibility.is_private() {
-        return Err(ErrorKind::Forbidden
-            .with_resource("workspace")
-            .with_message("Cannot view members of a private workspace"));
-    }
 
     let Some(workspace_member) = conn
         .find_workspace_member(path_params.workspace_id, path_params.account_id)

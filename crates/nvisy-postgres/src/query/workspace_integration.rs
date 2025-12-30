@@ -8,8 +8,8 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
-use crate::model::{NewWorkspaceIntegration, WorkspaceIntegration, UpdateWorkspaceIntegration};
-use crate::types::IntegrationStatus;
+use crate::model::{NewWorkspaceIntegration, UpdateWorkspaceIntegration, WorkspaceIntegration};
+use crate::types::{IntegrationFilter, IntegrationStatus};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace integration database operations.
@@ -46,6 +46,15 @@ pub trait WorkspaceIntegrationRepository {
     fn list_workspace_integrations(
         &mut self,
         proj_id: Uuid,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
+
+    /// Lists integrations for a workspace with filtering options.
+    ///
+    /// Supports filtering by integration type.
+    fn list_workspace_integrations_filtered(
+        &mut self,
+        proj_id: Uuid,
+        filter: IntegrationFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
 
     /// Finds all integrations matching a specific sync status.
@@ -214,6 +223,32 @@ impl WorkspaceIntegrationRepository for PgConnection {
 
         let integrations = workspace_integrations
             .filter(workspace_id.eq(proj_id))
+            .select(WorkspaceIntegration::as_select())
+            .order(created_at.desc())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(integrations)
+    }
+
+    async fn list_workspace_integrations_filtered(
+        &mut self,
+        proj_id: Uuid,
+        filter: IntegrationFilter,
+    ) -> PgResult<Vec<WorkspaceIntegration>> {
+        use schema::workspace_integrations::dsl::*;
+
+        let mut query = workspace_integrations
+            .filter(workspace_id.eq(proj_id))
+            .into_boxed();
+
+        // Apply integration type filter
+        if let Some(int_type) = filter.integration_type {
+            query = query.filter(integration_type.eq(int_type));
+        }
+
+        let integrations = query
             .select(WorkspaceIntegration::as_select())
             .order(created_at.desc())
             .load(self)

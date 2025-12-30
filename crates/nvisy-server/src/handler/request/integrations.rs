@@ -6,7 +6,7 @@
 use nvisy_postgres::model::{
     NewWorkspaceIntegration, UpdateWorkspaceIntegration as UpdateWorkspaceIntegrationModel,
 };
-use nvisy_postgres::types::IntegrationType;
+use nvisy_postgres::types::{IntegrationFilter, IntegrationType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -112,4 +112,23 @@ impl UpdateWorkspaceIntegration {
 pub struct UpdateIntegrationCredentials {
     /// Updated authentication credentials for the external service.
     pub credentials: serde_json::Value,
+}
+
+/// Query parameters for listing workspace integrations.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListIntegrationsQuery {
+    /// Filter by integration type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration_type: Option<IntegrationType>,
+}
+
+impl ListIntegrationsQuery {
+    /// Converts to filter model.
+    pub fn to_filter(&self) -> IntegrationFilter {
+        IntegrationFilter {
+            integration_type: self.integration_type,
+        }
+    }
 }

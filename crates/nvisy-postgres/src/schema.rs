@@ -56,14 +56,6 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "workspace_role"))]
     pub struct WorkspaceRole;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "workspace_status"))]
-    pub struct WorkspaceStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "workspace_visibility"))]
-    pub struct WorkspaceVisibility;
 }
 
 diesel::table! {
@@ -419,16 +411,12 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::WorkspaceStatus;
-    use super::sql_types::WorkspaceVisibility;
 
     workspaces (id) {
         id -> Uuid,
         display_name -> Text,
         description -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
-        status -> WorkspaceStatus,
-        visibility -> WorkspaceVisibility,
         keep_for_sec -> Nullable<Int4>,
         auto_cleanup -> Bool,
         max_members -> Nullable<Int4>,

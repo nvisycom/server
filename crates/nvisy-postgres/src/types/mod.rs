@@ -3,6 +3,7 @@
 pub mod constants;
 mod constraints;
 mod enums;
+mod options;
 mod utilities;
 
 pub use constraints::{
@@ -11,14 +12,17 @@ pub use constraints::{
     DocumentAnnotationConstraints, DocumentChunkConstraints, DocumentCommentConstraints,
     DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
     WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
-    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceIntegrationRunConstraints,
+    WorkspaceIntegrationRunConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
     WorkspaceWebhookConstraints,
 };
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, ApiTokenType, ContentSegmentation,
     DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus, NotificationType,
-    ProcessingStatus, RequireMode, VirusScanStatus, WebhookStatus, WorkspaceRole, WorkspaceStatus,
-    WorkspaceVisibility,
+    ProcessingStatus, RequireMode, VirusScanStatus, WebhookStatus, WorkspaceRole,
+};
+pub use options::{
+    FileFilter, FileFormat, FileSortBy, IntegrationFilter, InviteFilter, InviteSortBy,
+    MemberFilter, MemberSortBy, SortOrder,
 };
 pub use utilities::{
     HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext, HasLastActivityAt,

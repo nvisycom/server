@@ -14,10 +14,8 @@ pub mod activity_type;
 pub mod integration_status;
 pub mod integration_type;
 pub mod invite_status;
-pub mod workspace_role;
-pub mod workspace_status;
-pub mod workspace_visibility;
 pub mod webhook_status;
+pub mod workspace_role;
 
 // Document-related enumerations
 pub mod content_segmentation;
@@ -36,9 +34,7 @@ pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;
 pub use notification_type::NotificationType;
 pub use processing_status::ProcessingStatus;
-pub use workspace_role::WorkspaceRole;
-pub use workspace_status::WorkspaceStatus;
-pub use workspace_visibility::WorkspaceVisibility;
 pub use require_mode::RequireMode;
 pub use virus_scan_status::VirusScanStatus;
 pub use webhook_status::WebhookStatus;
+pub use workspace_role::WorkspaceRole;

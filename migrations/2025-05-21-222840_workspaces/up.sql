@@ -1,25 +1,5 @@
 -- This migration creates tables for workspaces, members, invites, and related functionality
 
--- WORKSPACES TABLE
-
--- Enum types for workspaces table
-CREATE TYPE WORKSPACE_STATUS AS ENUM (
-    'active',       -- Workspace is active and accessible
-    'archived',     -- Workspace is archived but accessible
-    'suspended'     -- Workspace is temporarily suspended
-);
-
-COMMENT ON TYPE WORKSPACE_STATUS IS
-    'Defines the operational status of workspaces in the system.';
-
-CREATE TYPE WORKSPACE_VISIBILITY AS ENUM (
-    'private',      -- Only members can access
-    'public'        -- Anyone can discover (read permissions still apply)
-);
-
-COMMENT ON TYPE WORKSPACE_VISIBILITY IS
-    'Defines workspace visibility and discovery settings.';
-
 -- Workspaces table definition
 CREATE TABLE workspaces (
     -- Primary identifiers
@@ -32,10 +12,6 @@ CREATE TABLE workspaces (
 
     CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 32),
     CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 2000),
-
-    -- Workspace status and visibility
-    status           WORKSPACE_STATUS     NOT NULL DEFAULT 'active',
-    visibility       WORKSPACE_VISIBILITY NOT NULL DEFAULT 'private',
 
     -- Data retention and cleanup
     keep_for_sec     INTEGER            DEFAULT NULL,
@@ -77,11 +53,7 @@ CREATE TABLE workspaces (
     CONSTRAINT workspaces_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
     CONSTRAINT workspaces_archived_after_created CHECK (archived_at IS NULL OR archived_at >= created_at),
     CONSTRAINT workspaces_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT workspaces_deleted_after_archived CHECK (deleted_at IS NULL OR archived_at IS NULL OR deleted_at >= archived_at),
-
-    -- Business logic constraints
-    CONSTRAINT workspaces_active_status_not_archived CHECK (NOT (status = 'active' AND archived_at IS NOT NULL)),
-    CONSTRAINT workspaces_archive_status_consistency CHECK ((archived_at IS NULL) = (status != 'archived'))
+    CONSTRAINT workspaces_deleted_after_archived CHECK (deleted_at IS NULL OR archived_at IS NULL OR deleted_at >= archived_at)
 );
 
 -- Triggers for workspaces table
@@ -93,16 +65,12 @@ CREATE UNIQUE INDEX workspaces_display_name_owner_unique_idx
     WHERE deleted_at IS NULL;
 
 CREATE INDEX workspaces_active_lookup_idx
-    ON workspaces (id, status, visibility)
+    ON workspaces (id)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX workspaces_owner_lookup_idx
-    ON workspaces (created_by, status, created_at DESC)
+    ON workspaces (created_by, created_at DESC)
     WHERE deleted_at IS NULL;
-
-CREATE INDEX workspaces_visibility_lookup_idx
-    ON workspaces (visibility, status, updated_at DESC)
-    WHERE deleted_at IS NULL AND visibility = 'public';
 
 CREATE INDEX workspaces_tags_lookup_idx
     ON workspaces USING gin (tags)
@@ -124,8 +92,7 @@ COMMENT ON COLUMN workspaces.id IS 'Unique workspace identifier (UUID)';
 COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (3-32 characters)';
 COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 2000 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
-COMMENT ON COLUMN workspaces.status IS 'Current operational status of the workspace';
-COMMENT ON COLUMN workspaces.visibility IS 'Workspace visibility and discovery settings';
+
 COMMENT ON COLUMN workspaces.keep_for_sec IS 'Data retention period in seconds (1 hour to 1 year)';
 COMMENT ON COLUMN workspaces.auto_cleanup IS 'Enable automatic cleanup of old workspace data';
 COMMENT ON COLUMN workspaces.max_members IS 'Maximum number of members allowed (NULL = unlimited)';
@@ -140,8 +107,6 @@ COMMENT ON COLUMN workspaces.created_at IS 'Timestamp when the workspace was cre
 COMMENT ON COLUMN workspaces.updated_at IS 'Timestamp when the workspace was last modified (auto-updated)';
 COMMENT ON COLUMN workspaces.archived_at IS 'Timestamp when the workspace was archived';
 COMMENT ON COLUMN workspaces.deleted_at IS 'Timestamp when the workspace was soft-deleted (NULL if active)';
-
--- WORKSPACE_MEMBERS TABLE
 
 -- Enum types for workspace_members table
 CREATE TYPE WORKSPACE_ROLE AS ENUM (
@@ -240,8 +205,6 @@ COMMENT ON COLUMN workspace_members.updated_by IS 'Account that last modified th
 COMMENT ON COLUMN workspace_members.created_at IS 'Timestamp when the membership was created';
 COMMENT ON COLUMN workspace_members.updated_at IS 'Timestamp when the membership was last modified';
 
--- WORKSPACE_INVITES TABLE
-
 -- Enum types for workspace_invites table
 CREATE TYPE INVITE_STATUS AS ENUM (
     'pending',      -- Invitation sent, awaiting response
@@ -323,8 +286,6 @@ COMMENT ON COLUMN workspace_invites.created_by IS 'Account that sent the invitat
 COMMENT ON COLUMN workspace_invites.updated_by IS 'Account that last modified the invitation';
 COMMENT ON COLUMN workspace_invites.created_at IS 'Timestamp when the invitation was created';
 COMMENT ON COLUMN workspace_invites.updated_at IS 'Timestamp when the invitation was last modified';
-
--- WORKSPACE_ACTIVITIES TABLE
 
 -- Enum types for workspace_activities table
 CREATE TYPE ACTIVITY_TYPE AS ENUM (
@@ -438,8 +399,6 @@ COMMENT ON COLUMN workspace_activities.ip_address IS 'IP address where activity 
 COMMENT ON COLUMN workspace_activities.user_agent IS 'User agent of the client';
 COMMENT ON COLUMN workspace_activities.created_at IS 'Timestamp when the activity occurred';
 
--- WORKSPACE_INTEGRATIONS TABLE
-
 -- Enum types for workspace_integrations table
 CREATE TYPE INTEGRATION_STATUS AS ENUM (
     'pending',      -- Integration is being set up
@@ -526,8 +485,6 @@ COMMENT ON COLUMN workspace_integrations.sync_status IS 'Current integration sta
 COMMENT ON COLUMN workspace_integrations.created_by IS 'Account that created the integration';
 COMMENT ON COLUMN workspace_integrations.created_at IS 'Timestamp when integration was created';
 COMMENT ON COLUMN workspace_integrations.updated_at IS 'Timestamp when integration was last modified';
-
--- WORKSPACE_WEBHOOKS TABLE
 
 -- Webhook status enum
 CREATE TYPE WEBHOOK_STATUS AS ENUM (
@@ -624,8 +581,6 @@ COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was c
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
 COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft deletion timestamp';
 
--- WORKSPACE_INTEGRATION_RUNS TABLE
-
 -- Workspace integration runs table definition
 CREATE TABLE workspace_integration_runs (
     -- Primary identifier
@@ -709,14 +664,11 @@ COMMENT ON COLUMN workspace_integration_runs.error_details IS 'Error details for
 COMMENT ON COLUMN workspace_integration_runs.created_at IS 'Timestamp when run was created';
 COMMENT ON COLUMN workspace_integration_runs.updated_at IS 'Timestamp when run was last modified';
 
--- VIEWS
-
 -- Create workspace member summary view
 CREATE VIEW workspace_member_summary AS
 SELECT
     p.id                                                  AS workspace_id,
     p.display_name,
-    p.status                                              AS workspace_status,
     COUNT(pm.account_id)                                  AS total_members,
     COUNT(CASE WHEN pm.member_role = 'owner' THEN 1 END)  AS owners,
     COUNT(CASE WHEN pm.member_role = 'member' THEN 1 END) AS members,
@@ -726,7 +678,7 @@ SELECT
 FROM workspaces p
     LEFT JOIN workspace_members pm ON p.id = pm.workspace_id
 WHERE p.deleted_at IS NULL
-GROUP BY p.id, p.display_name, p.status;
+GROUP BY p.id, p.display_name;
 
 COMMENT ON VIEW workspace_member_summary IS
     'Summary of workspace membership statistics and activity.';
@@ -753,8 +705,6 @@ WHERE pi.invite_status = 'pending'
 
 COMMENT ON VIEW pending_workspace_invites IS
     'Active workspace invitations with workspace and inviter details.';
-
--- FUNCTIONS
 
 -- Function to check if user has specific permission on workspace
 

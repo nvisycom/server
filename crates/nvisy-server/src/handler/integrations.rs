@@ -10,10 +10,12 @@ use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::query::WorkspaceIntegrationRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+};
 use crate::handler::request::{
-    CreateWorkspaceIntegration, IntegrationPathParams, Pagination, WorkspacePathParams,
-    UpdateIntegrationCredentials, UpdateWorkspaceIntegration,
+    CreateWorkspaceIntegration, IntegrationPathParams, ListIntegrationsQuery, Pagination,
+    UpdateIntegrationCredentials, UpdateWorkspaceIntegration, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
@@ -56,7 +58,9 @@ async fn create_integration(
         .await?;
 
     if !name_is_unique {
-        return Err(ErrorKind::Conflict.with_message("Integration name already exists in workspace"));
+        return Err(
+            ErrorKind::Conflict.with_message("Integration name already exists in workspace")
+        );
     }
 
     let new_integration = request.into_model(path_params.workspace_id, auth_state.account_id);
@@ -95,6 +99,7 @@ async fn list_integrations(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
+    Query(query): Query<ListIntegrationsQuery>,
     Json(_pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Integrations>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace integrations");
@@ -108,7 +113,7 @@ async fn list_integrations(
         .await?;
 
     let integrations = conn
-        .list_workspace_integrations(path_params.workspace_id)
+        .list_workspace_integrations_filtered(path_params.workspace_id, query.to_filter())
         .await?;
 
     let integrations: Integrations = integrations.into_iter().map(Into::into).collect();

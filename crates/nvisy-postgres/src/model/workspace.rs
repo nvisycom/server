@@ -5,10 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspaces;
-use crate::types::{
-    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Tags, WorkspaceStatus,
-    WorkspaceVisibility,
-};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Tags};
 
 /// Main workspace model representing a workspace workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -23,10 +20,6 @@ pub struct Workspace {
     pub description: Option<String>,
     /// URL to workspace avatar/logo image.
     pub avatar_url: Option<String>,
-    /// Current status of the workspace (active, archived, etc.).
-    pub status: WorkspaceStatus,
-    /// Workspace visibility level (public, private, etc.).
-    pub visibility: WorkspaceVisibility,
     /// Data retention period in seconds (NULL for indefinite retention).
     pub keep_for_sec: Option<i32>,
     /// Whether automatic cleanup is enabled.
@@ -68,10 +61,6 @@ pub struct NewWorkspace {
     pub description: Option<String>,
     /// Optional avatar URL.
     pub avatar_url: Option<String>,
-    /// Workspace status.
-    pub status: Option<WorkspaceStatus>,
-    /// Workspace visibility.
-    pub visibility: Option<WorkspaceVisibility>,
     /// Data retention period.
     pub keep_for_sec: Option<i32>,
     /// Auto cleanup enabled.
@@ -105,10 +94,6 @@ pub struct UpdateWorkspace {
     pub description: Option<String>,
     /// Avatar URL.
     pub avatar_url: Option<String>,
-    /// Status.
-    pub status: Option<WorkspaceStatus>,
-    /// Visibility.
-    pub visibility: Option<WorkspaceVisibility>,
     /// Data retention period.
     pub keep_for_sec: Option<i32>,
     /// Auto cleanup enabled.
@@ -130,61 +115,14 @@ pub struct UpdateWorkspace {
 }
 
 impl Workspace {
-    /// Returns whether the workspace is currently active.
-    pub fn is_active(&self) -> bool {
-        self.deleted_at.is_none()
-            && self.archived_at.is_none()
-            && self.status == WorkspaceStatus::Active
-    }
-
-    /// Returns whether the workspace is archived.
-    pub fn is_archived(&self) -> bool {
-        self.archived_at.is_some() || self.status == WorkspaceStatus::Archived
-    }
-
     /// Returns whether the workspace is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
     }
 
-    /// Returns whether the workspace is suspended.
-    pub fn is_suspended(&self) -> bool {
-        matches!(self.status, WorkspaceStatus::Suspended)
-    }
-
-    /// Returns whether the workspace is public.
-    pub fn is_public(&self) -> bool {
-        matches!(self.visibility, WorkspaceVisibility::Public)
-    }
-
-    /// Returns whether the workspace is private.
-    pub fn is_private(&self) -> bool {
-        matches!(self.visibility, WorkspaceVisibility::Private)
-    }
-
-    /// Returns whether the workspace allows read operations.
-    pub fn allows_reads(&self) -> bool {
-        self.status.allows_reads() && !self.is_deleted()
-    }
-
-    /// Returns whether the workspace allows write operations.
-    pub fn allows_writes(&self) -> bool {
-        self.status.allows_writes() && !self.is_deleted()
-    }
-
-    /// Returns whether the workspace can be restored from archive.
-    pub fn can_be_restored(&self) -> bool {
-        self.is_archived() && !self.is_deleted()
-    }
-
     /// Returns whether the workspace has auto cleanup enabled.
     pub fn has_auto_cleanup(&self) -> bool {
         self.auto_cleanup
-    }
-
-    /// Returns whether the workspace allows invitations.
-    pub fn allows_invitations(&self) -> bool {
-        self.is_active() || self.is_archived()
     }
 
     /// Returns the tags as a Tags helper.
@@ -270,12 +208,12 @@ impl Workspace {
 
     /// Returns whether the workspace allows file uploads.
     pub fn allows_file_uploads(&self) -> bool {
-        self.is_active() && !self.is_deleted()
+        !self.is_deleted()
     }
 
     /// Returns whether the workspace allows collaboration.
     pub fn allows_collaboration(&self) -> bool {
-        self.is_active() && self.enable_comments
+        !self.is_deleted() && self.enable_comments
     }
 
     /// Returns the age of the workspace since creation.

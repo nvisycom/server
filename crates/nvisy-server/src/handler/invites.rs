@@ -14,10 +14,12 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::InviteStatus;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+};
 use crate::handler::request::{
-    CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, Pagination,
-    WorkspacePathParams, ReplyInvite,
+    CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, ListInvitesQuery,
+    Pagination, ReplyInvite, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Invite, InviteCode, Invites, Member};
 use crate::handler::{ErrorKind, Result};
@@ -48,7 +50,11 @@ async fn send_invite(
     tracing::debug!(target: TRACING_TARGET, "Creating workspace invitation");
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::InviteMembers)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::InviteMembers,
+        )
         .await?;
 
     // Check if user is already a member
@@ -74,7 +80,8 @@ async fn send_invite(
         .await?;
 
     let has_pending = all_invites.iter().any(|invite| {
-        invite.workspace_id == path_params.workspace_id && invite.invite_status == InviteStatus::Pending
+        invite.workspace_id == path_params.workspace_id
+            && invite.invite_status == InviteStatus::Pending
     });
 
     if has_pending {
@@ -126,6 +133,7 @@ async fn list_invites(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
+    Query(query): Query<ListInvitesQuery>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Invites>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace invitations");
@@ -135,7 +143,12 @@ async fn list_invites(
         .await?;
 
     let workspace_invites = conn
-        .list_workspace_invites(path_params.workspace_id, pagination.into())
+        .list_workspace_invites_filtered(
+            path_params.workspace_id,
+            pagination.into(),
+            query.to_sort(),
+            query.to_filter(),
+        )
         .await?;
 
     let invites: Invites = workspace_invites.into_iter().map(Invite::from).collect();
@@ -177,7 +190,11 @@ async fn cancel_invite(
     tracing::info!(target: TRACING_TARGET, "Cancelling workspace invitation");
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::InviteMembers)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::InviteMembers,
+        )
         .await?;
 
     conn.cancel_invite(path_params.invite_id, auth_state.account_id)
@@ -289,11 +306,17 @@ async fn generate_invite_code(
     tracing::info!(target: TRACING_TARGET, "Generating invite code");
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::InviteMembers)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::InviteMembers,
+        )
         .await?;
 
     let workspace_invite = conn
-        .create_workspace_invite(request.into_model(path_params.workspace_id, auth_state.account_id))
+        .create_workspace_invite(
+            request.into_model(path_params.workspace_id, auth_state.account_id),
+        )
         .await?;
 
     tracing::info!(

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-use crate::types::{ProcessingStatus, VirusScanStatus};
+use crate::types::{FileFilter, FileSortBy, ProcessingStatus, SortOrder, VirusScanStatus};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document file database operations.
@@ -96,6 +96,17 @@ pub trait DocumentFileRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    /// Finds all files in a workspace with sorting and filtering options.
+    ///
+    /// Supports filtering by file format and sorting by name, date, or size.
+    fn find_workspace_files_filtered(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: Pagination,
+        sort_by: FileSortBy,
+        filter: FileFilter,
     ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
 
     /// Finds files with a matching SHA-256 hash.
@@ -365,6 +376,49 @@ impl DocumentFileRepository for PgConnection {
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(DocumentFile::as_select())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(files)
+    }
+
+    async fn find_workspace_files_filtered(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: Pagination,
+        sort_by: FileSortBy,
+        filter: FileFilter,
+    ) -> PgResult<Vec<DocumentFile>> {
+        use schema::document_files::{self, dsl};
+
+        // Build base query
+        let mut query = document_files::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .into_boxed();
+
+        // Apply format filter using file extensions
+        if !filter.is_empty() {
+            let extensions: Vec<String> =
+                filter.extensions().iter().map(|s| s.to_string()).collect();
+            query = query.filter(dsl::file_extension.eq_any(extensions));
+        }
+
+        // Apply sorting
+        let query = match sort_by {
+            FileSortBy::Name(SortOrder::Asc) => query.order(dsl::display_name.asc()),
+            FileSortBy::Name(SortOrder::Desc) => query.order(dsl::display_name.desc()),
+            FileSortBy::Date(SortOrder::Asc) => query.order(dsl::created_at.asc()),
+            FileSortBy::Date(SortOrder::Desc) => query.order(dsl::created_at.desc()),
+            FileSortBy::Size(SortOrder::Asc) => query.order(dsl::file_size_bytes.asc()),
+            FileSortBy::Size(SortOrder::Desc) => query.order(dsl::file_size_bytes.desc()),
+        };
+
+        let files = query
+            .select(DocumentFile::as_select())
+            .limit(pagination.limit)
+            .offset(pagination.offset)
             .load(self)
             .await
             .map_err(PgError::from)?;

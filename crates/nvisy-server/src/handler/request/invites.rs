@@ -1,6 +1,6 @@
 //! Workspace invite request types.
 
-use nvisy_postgres::types::WorkspaceRole;
+use nvisy_postgres::types::{InviteFilter, InviteSortBy, SortOrder, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -117,6 +117,50 @@ impl GenerateInviteCode {
             created_by,
             updated_by: created_by,
             ..Default::default()
+        }
+    }
+}
+
+/// Query parameters for listing workspace invites.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListInvitesQuery {
+    /// Filter by invited role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<WorkspaceRole>,
+
+    /// Sort by field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<InviteSortField>,
+
+    /// Sort order (asc or desc).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<SortOrder>,
+}
+
+/// Fields to sort invites by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InviteSortField {
+    /// Sort by invitee email.
+    Email,
+    /// Sort by creation date.
+    Date,
+}
+
+impl ListInvitesQuery {
+    /// Converts to filter model.
+    pub fn to_filter(&self) -> InviteFilter {
+        InviteFilter { role: self.role }
+    }
+
+    /// Converts to sort model.
+    pub fn to_sort(&self) -> InviteSortBy {
+        let order = self.order.unwrap_or_default();
+        match self.sort_by {
+            Some(InviteSortField::Email) => InviteSortBy::Email(order),
+            Some(InviteSortField::Date) | None => InviteSortBy::Date(order),
         }
     }
 }

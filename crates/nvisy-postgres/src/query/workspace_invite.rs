@@ -8,8 +8,8 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
-use crate::model::{NewWorkspaceInvite, WorkspaceInvite, UpdateWorkspaceInvite};
-use crate::types::InviteStatus;
+use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
+use crate::types::{InviteFilter, InviteSortBy, InviteStatus, SortOrder};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace invitation database operations.
@@ -70,6 +70,18 @@ pub trait WorkspaceInviteRepository {
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
+    /// Lists invitations for a workspace with sorting and filtering options.
+    ///
+    /// Supports filtering by role and sorting by email or date.
+    /// Note: Sorting by email requires a JOIN with accounts table.
+    fn list_workspace_invites_filtered(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: InviteSortBy,
+        filter: InviteFilter,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
+
     /// Lists invitations for a specific user with pagination support.
     fn list_user_invites(
         &mut self,
@@ -115,7 +127,10 @@ pub trait WorkspaceInviteRepository {
 }
 
 impl WorkspaceInviteRepository for PgConnection {
-    async fn create_workspace_invite(&mut self, invite: NewWorkspaceInvite) -> PgResult<WorkspaceInvite> {
+    async fn create_workspace_invite(
+        &mut self,
+        invite: NewWorkspaceInvite,
+    ) -> PgResult<WorkspaceInvite> {
         use schema::workspace_invites;
 
         let invite = diesel::insert_into(workspace_invites::table)
@@ -227,6 +242,53 @@ impl WorkspaceInviteRepository for PgConnection {
             .filter(workspace_id.eq(proj_id))
             .select(WorkspaceInvite::as_select())
             .order(created_at.desc())
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(invites)
+    }
+
+    async fn list_workspace_invites_filtered(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: InviteSortBy,
+        filter: InviteFilter,
+    ) -> PgResult<Vec<WorkspaceInvite>> {
+        use schema::{accounts, workspace_invites};
+
+        // Build base query with LEFT JOIN for email sorting (invitee_id may be NULL)
+        let mut query = workspace_invites::table
+            .left_join(
+                accounts::table.on(accounts::id.nullable().eq(workspace_invites::invitee_id)),
+            )
+            .filter(workspace_invites::workspace_id.eq(proj_id))
+            .into_boxed();
+
+        // Apply role filter
+        if let Some(role) = filter.role {
+            query = query.filter(workspace_invites::invited_role.eq(role));
+        }
+
+        // Apply sorting
+        let query = match sort_by {
+            InviteSortBy::Email(SortOrder::Asc) => {
+                query.order(accounts::email_address.asc().nulls_last())
+            }
+            InviteSortBy::Email(SortOrder::Desc) => {
+                query.order(accounts::email_address.desc().nulls_last())
+            }
+            InviteSortBy::Date(SortOrder::Asc) => query.order(workspace_invites::created_at.asc()),
+            InviteSortBy::Date(SortOrder::Desc) => {
+                query.order(workspace_invites::created_at.desc())
+            }
+        };
+
+        let invites = query
+            .select(WorkspaceInvite::as_select())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .load(self)

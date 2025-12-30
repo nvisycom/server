@@ -9,13 +9,12 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::types::{WorkspaceStatus, WorkspaceVisibility};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace database operations.
 ///
-/// Handles workspace lifecycle management including creation, updates, status changes,
-/// archiving, and search functionality.
+/// Handles workspace lifecycle management including creation, updates,
+/// and search functionality.
 pub trait WorkspaceRepository {
     /// Creates a new workspace.
     ///
@@ -51,29 +50,15 @@ pub trait WorkspaceRepository {
     fn delete_workspace(&mut self, workspace_id: Uuid)
     -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Archives a workspace by changing status from Active to Archived.
-    fn archive_workspace(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Workspace>> + Send;
-
-    /// Unarchives a workspace by changing status from Archived to Active.
-    fn unarchive_workspace(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Workspace>> + Send;
-
-    /// Lists workspaces with optional visibility and status filters.
+    /// Lists workspaces.
     ///
     /// Returns workspaces ordered by update time with most recent first.
     fn list_workspaces(
         &mut self,
-        visibility_filter: Option<WorkspaceVisibility>,
-        status_filter: Option<WorkspaceStatus>,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 
-    /// Searches public workspaces by name or description.
+    /// Searches workspaces by name or description.
     ///
     /// Performs case-insensitive search across workspace names and descriptions.
     fn search_workspaces(
@@ -173,63 +158,11 @@ impl WorkspaceRepository for PgConnection {
         Ok(())
     }
 
-    async fn archive_workspace(&mut self, workspace_id: Uuid) -> PgResult<Workspace> {
+    async fn list_workspaces(&mut self, pagination: Pagination) -> PgResult<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
-        let workspace = diesel::update(workspaces)
-            .filter(id.eq(workspace_id))
+        let workspace_list = workspaces
             .filter(deleted_at.is_null())
-            .filter(status.eq(WorkspaceStatus::Active))
-            .set((
-                status.eq(WorkspaceStatus::Archived),
-                archived_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
-            ))
-            .returning(Workspace::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(workspace)
-    }
-
-    async fn unarchive_workspace(&mut self, workspace_id: Uuid) -> PgResult<Workspace> {
-        use schema::workspaces::dsl::*;
-
-        let workspace = diesel::update(workspaces)
-            .filter(id.eq(workspace_id))
-            .filter(deleted_at.is_null())
-            .filter(status.eq(WorkspaceStatus::Archived))
-            .set((
-                status.eq(WorkspaceStatus::Active),
-                archived_at.eq(None::<jiff_diesel::Timestamp>),
-            ))
-            .returning(Workspace::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(workspace)
-    }
-
-    async fn list_workspaces(
-        &mut self,
-        visibility_filter: Option<WorkspaceVisibility>,
-        status_filter: Option<WorkspaceStatus>,
-        pagination: Pagination,
-    ) -> PgResult<Vec<Workspace>> {
-        use schema::workspaces::dsl::*;
-
-        let mut query = workspaces.filter(deleted_at.is_null()).into_boxed();
-
-        if let Some(vis) = visibility_filter {
-            query = query.filter(visibility.eq(vis));
-        }
-
-        if let Some(stat) = status_filter {
-            query = query.filter(status.eq(stat));
-        }
-
-        let workspace_list = query
             .select(Workspace::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)
@@ -256,7 +189,6 @@ impl WorkspaceRepository for PgConnection {
                 display_name.ilike(&search_pattern),
                 description.ilike(&search_pattern),
             ))
-            .filter(visibility.eq(WorkspaceVisibility::Public))
             .select(Workspace::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)
@@ -278,7 +210,6 @@ impl WorkspaceRepository for PgConnection {
         let workspace_list = workspaces
             .filter(tags.overlaps_with(search_tags))
             .filter(deleted_at.is_null())
-            .filter(status.ne(WorkspaceStatus::Suspended))
             .select(Workspace::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)

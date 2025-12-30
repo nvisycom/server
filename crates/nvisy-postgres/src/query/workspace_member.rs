@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember};
-use crate::types::WorkspaceRole;
+use crate::types::{MemberFilter, MemberSortBy, SortOrder, WorkspaceRole};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace member database operations.
@@ -52,6 +52,18 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         proj_id: Uuid,
         pagination: Pagination,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+
+    /// Lists members of a workspace with sorting and filtering options.
+    ///
+    /// Supports filtering by role and 2FA status, and sorting by name or date.
+    /// Note: Sorting by name requires a JOIN with accounts table.
+    fn list_workspace_members_filtered(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: MemberSortBy,
+        filter: MemberFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
 
     /// Lists workspaces where a user is a member.
@@ -205,6 +217,50 @@ impl WorkspaceMemberRepository for PgConnection {
             .filter(workspace_id.eq(proj_id))
             .select(WorkspaceMember::as_select())
             .order((member_role.asc(), created_at.asc()))
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(members)
+    }
+
+    async fn list_workspace_members_filtered(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: MemberSortBy,
+        filter: MemberFilter,
+    ) -> PgResult<Vec<WorkspaceMember>> {
+        use schema::{accounts, workspace_members};
+
+        // Build base query with JOIN for name sorting
+        let mut query = workspace_members::table
+            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
+            .filter(workspace_members::workspace_id.eq(proj_id))
+            .into_boxed();
+
+        // Apply role filter
+        if let Some(role) = filter.role {
+            query = query.filter(workspace_members::member_role.eq(role));
+        }
+
+        // Note: has_2fa filter is not yet implemented as accounts table
+        // doesn't have a 2FA field. Will be added when 2FA is implemented.
+
+        // Apply sorting
+        let query = match sort_by {
+            MemberSortBy::Name(SortOrder::Asc) => query.order(accounts::display_name.asc()),
+            MemberSortBy::Name(SortOrder::Desc) => query.order(accounts::display_name.desc()),
+            MemberSortBy::Date(SortOrder::Asc) => query.order(workspace_members::created_at.asc()),
+            MemberSortBy::Date(SortOrder::Desc) => {
+                query.order(workspace_members::created_at.desc())
+            }
+        };
+
+        let members = query
+            .select(WorkspaceMember::as_select())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .load(self)
