@@ -23,9 +23,9 @@ pub mod document_file;
 pub mod workspace;
 pub mod workspace_activity;
 pub mod workspace_integration;
+pub mod workspace_integration_run;
 pub mod workspace_invite;
 pub mod workspace_member;
-pub mod workspace_integration_run;
 pub mod workspace_webhook;
 
 pub use account::AccountRepository;
@@ -33,16 +33,18 @@ pub use account_action_token::AccountActionTokenRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
 pub use document::DocumentRepository;
+pub use document_annotation::DocumentAnnotationRepository;
 pub use document_chunk::DocumentChunkRepository;
 pub use document_comment::DocumentCommentRepository;
 pub use document_file::DocumentFileRepository;
+use serde::{Deserialize, Serialize};
 pub use workspace::WorkspaceRepository;
 pub use workspace_activity::WorkspaceActivityRepository;
 pub use workspace_integration::WorkspaceIntegrationRepository;
+pub use workspace_integration_run::WorkspaceIntegrationRunRepository;
 pub use workspace_invite::WorkspaceInviteRepository;
 pub use workspace_member::WorkspaceMemberRepository;
 pub use workspace_webhook::WorkspaceWebhookRepository;
-use serde::{Deserialize, Serialize};
 
 /// Pagination parameters for database queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

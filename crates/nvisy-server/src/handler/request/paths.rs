@@ -123,3 +123,27 @@ pub struct WebhookPathParams {
     /// Unique identifier of the webhook.
     pub webhook_id: Uuid,
 }
+
+/// Path parameters for annotation operations (annotation ID only).
+///
+/// Since annotation IDs are globally unique UUIDs, file/workspace context can be
+/// derived from the annotation record itself for authorization purposes.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationPathParams {
+    /// Unique identifier of the annotation.
+    pub annotation_id: Uuid,
+}
+
+/// Path parameters for integration run operations (run ID only).
+///
+/// Since run IDs are globally unique UUIDs, workspace context can be
+/// derived from the run record itself for authorization purposes.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationRunPathParams {
+    /// Unique identifier of the integration run.
+    pub run_id: Uuid,
+}

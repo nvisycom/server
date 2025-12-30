@@ -4,6 +4,8 @@
 //! [`Handler`]: axum::handler::Handler
 
 mod accounts;
+mod activities;
+mod annotations;
 mod authentication;
 mod comments;
 mod documents;
@@ -13,13 +15,15 @@ mod integrations;
 mod invites;
 mod members;
 mod monitors;
-mod workspaces;
+mod notifications;
 pub mod request;
 pub mod response;
+mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
 mod websocket;
+mod workspaces;
 
 use aide::axum::ApiRouter;
 use axum::middleware::from_fn_with_state;
@@ -45,13 +49,17 @@ fn private_routes(
         .merge(tokens::routes())
         .merge(workspaces::routes())
         .merge(integrations::routes())
+        .merge(runs::routes())
         .merge(invites::routes())
         .merge(members::routes())
         .merge(webhooks::routes())
         .merge(websocket::routes())
         .merge(files::routes())
         .merge(documents::routes())
-        .merge(comments::routes());
+        .merge(comments::routes())
+        .merge(annotations::routes())
+        .merge(activities::routes())
+        .merge(notifications::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);
