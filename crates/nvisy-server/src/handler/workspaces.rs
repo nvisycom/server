@@ -11,7 +11,9 @@ use nvisy_postgres::PgError;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
 use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+};
 use crate::handler::request::{CreateWorkspace, Pagination, UpdateWorkspace, WorkspacePathParams};
 use crate::handler::response::{ErrorResponse, Workspace, Workspaces};
 use crate::handler::{ErrorKind, Result};
@@ -73,7 +75,7 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
 async fn list_workspaces(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Json(pagination): Json<Pagination>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<Workspaces>)> {
     let workspace_memberships = conn
         .list_user_workspaces_with_details(auth_state.account_id, pagination.into())

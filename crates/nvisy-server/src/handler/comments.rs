@@ -8,10 +8,9 @@ use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{DocumentCommentRepository, DocumentFileRepository};
 
-use crate::extract::{AuthState, Json, Path, PgPool, ValidateJson};
+use crate::extract::{AuthState, Json, Path, PgPool, Query, ValidateJson};
 use crate::handler::request::{
-    CreateComment, FileCommentPathParams, FilePathParams, Pagination,
-    UpdateComment as UpdateCommentRequest,
+    CreateComment, FileCommentPathParams, FilePathParams, Pagination, UpdateComment,
 };
 use crate::handler::response::{Comment, Comments, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -85,7 +84,7 @@ async fn list_comments(
     PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Json(pagination): Json<Pagination>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<Comments>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing comments");
 
@@ -129,7 +128,7 @@ async fn update_comment(
     PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FileCommentPathParams>,
-    ValidateJson(request): ValidateJson<UpdateCommentRequest>,
+    ValidateJson(request): ValidateJson<UpdateComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating comment");
 

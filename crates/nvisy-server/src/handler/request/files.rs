@@ -1,7 +1,7 @@
 //! Document file request types.
 
 use nvisy_postgres::model::UpdateDocumentFile;
-use nvisy_postgres::types::ContentSegmentation;
+use nvisy_postgres::types::{ContentSegmentation, FileFilter, FileFormat, FileSortBy, SortOrder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -80,4 +80,53 @@ pub struct DownloadArchivedFilesRequest {
     /// Optional specific file IDs (if None, downloads all workspace files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_ids: Option<Vec<Uuid>>,
+}
+
+/// Query parameters for listing files.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListFilesQuery {
+    /// Filter by file formats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formats: Option<Vec<FileFormat>>,
+
+    /// Sort by field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<FileSortField>,
+
+    /// Sort order (asc or desc).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<SortOrder>,
+}
+
+/// Fields to sort files by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FileSortField {
+    /// Sort by file name.
+    Name,
+    /// Sort by upload date.
+    Date,
+    /// Sort by file size.
+    Size,
+}
+
+impl ListFilesQuery {
+    /// Converts to filter model.
+    pub fn to_filter(&self) -> FileFilter {
+        FileFilter {
+            formats: self.formats.clone(),
+        }
+    }
+
+    /// Converts to sort model.
+    pub fn to_sort(&self) -> FileSortBy {
+        let order = self.order.unwrap_or_default();
+        match self.sort_by {
+            Some(FileSortField::Name) => FileSortBy::Name(order),
+            Some(FileSortField::Date) | None => FileSortBy::Date(order),
+            Some(FileSortField::Size) => FileSortBy::Size(order),
+        }
+    }
 }

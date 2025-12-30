@@ -11,9 +11,11 @@ use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::query::DocumentRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+};
 use crate::handler::request::{
-    CreateDocument, DocumentPathParams, Pagination, WorkspacePathParams, UpdateDocument,
+    CreateDocument, DocumentPathParams, Pagination, UpdateDocument, WorkspacePathParams,
 };
 use crate::handler::response::{Document, Documents, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -79,12 +81,16 @@ async fn get_all_documents(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Json(pagination): Json<Pagination>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<Documents>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewDocuments)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewDocuments,
+        )
         .await?;
 
     let documents = conn

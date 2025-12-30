@@ -14,8 +14,8 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CreateIntegration, IntegrationPathParams, ListIntegrationsQuery, Pagination,
-    UpdateIntegrationCredentials, UpdateIntegration, WorkspacePathParams,
+    CreateIntegration, IntegrationPathParams, ListIntegrationsQuery, Pagination, UpdateIntegration,
+    UpdateIntegrationCredentials, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
@@ -100,7 +100,7 @@ async fn list_integrations(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     Query(query): Query<ListIntegrationsQuery>,
-    Json(_pagination): Json<Pagination>,
+    Query(_pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<Integrations>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace integrations");
 

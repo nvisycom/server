@@ -40,7 +40,7 @@ async fn list_members(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     Query(query): Query<ListMembersQuery>,
-    Json(pagination): Json<Pagination>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<Members>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
 

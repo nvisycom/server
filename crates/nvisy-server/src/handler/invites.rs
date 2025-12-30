@@ -134,7 +134,7 @@ async fn list_invites(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     Query(query): Query<ListInvitesQuery>,
-    Json(pagination): Json<Pagination>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<(StatusCode, Json<Invites>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace invitations");
 

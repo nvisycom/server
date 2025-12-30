@@ -16,13 +16,15 @@ use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-use nvisy_postgres::query::{DocumentFileRepository, Pagination, WorkspaceRepository};
+use nvisy_postgres::query::{DocumentFileRepository, WorkspaceRepository};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+};
 use crate::handler::request::{
-    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams,
-    UpdateFile as UpdateFileRequest, WorkspacePathParams,
+    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ListFilesQuery,
+    Pagination, UpdateFile as UpdateFileRequest, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, File, Files};
 use crate::handler::{ErrorKind, Result};
@@ -43,6 +45,67 @@ async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<D
                 .with_message("File not found")
                 .with_resource("file")
         })
+}
+
+/// Lists files in a workspace with optional filtering and sorting.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        workspace_id = %path_params.workspace_id,
+    )
+)]
+async fn list_files(
+    PgPool(mut conn): PgPool,
+    Path(path_params): Path<WorkspacePathParams>,
+    AuthState(auth_claims): AuthState,
+    Query(query): Query<ListFilesQuery>,
+    Query(pagination): Query<Pagination>,
+) -> Result<(StatusCode, Json<Files>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing files");
+
+    auth_claims
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewFiles)
+        .await?;
+
+    let files = conn
+        .find_workspace_files_filtered(
+            path_params.workspace_id,
+            pagination.into(),
+            query.to_sort(),
+            query.to_filter(),
+        )
+        .await?;
+
+    let response: Files = files
+        .into_iter()
+        .map(|f| File {
+            file_id: f.id,
+            display_name: f.display_name,
+            file_size: f.file_size_bytes,
+            status: f.processing_status,
+            processing_priority: Some(f.processing_priority),
+            updated_at: Some(f.updated_at.into()),
+        })
+        .collect();
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        file_count = response.len(),
+        "Files listed"
+    );
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn list_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List files")
+        .description(
+            "Lists all files in a workspace with optional filtering by format and sorting.",
+        )
+        .response::<200, Json<Files>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Uploads input files to a workspace for processing.
@@ -637,8 +700,11 @@ async fn download_archived_files(
         conn.find_document_files_by_ids(&specific_ids).await?
     } else {
         // Get all workspace files using the workspace-scoped query
-        conn.find_document_files_by_workspace(path_params.workspace_id, Pagination::default())
-            .await?
+        conn.find_document_files_by_workspace(
+            path_params.workspace_id,
+            Pagination::default().into(),
+        )
+        .await?
     };
 
     // Filter to only files belonging to this workspace and not deleted
@@ -756,7 +822,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspace_id}/files/",
-            post_with(upload_file, upload_file_docs),
+            get_with(list_files, list_files_docs).post_with(upload_file, upload_file_docs),
         )
         .api_route(
             "/workspaces/{workspace_id}/files/download",
