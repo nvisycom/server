@@ -178,7 +178,6 @@ fn list_invites_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         invite_id = %path_params.invite_id,
     )
 )]
@@ -189,12 +188,11 @@ async fn cancel_invite(
 ) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Cancelling workspace invitation");
 
+    // Fetch the invite first to get workspace context for authorization
+    let invite = find_invite(&mut conn, path_params.invite_id).await?;
+
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::InviteMembers,
-        )
+        .authorize_workspace(&mut conn, invite.workspace_id, Permission::InviteMembers)
         .await?;
 
     conn.cancel_invite(path_params.invite_id, auth_state.account_id)
@@ -223,7 +221,6 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         invite_id = %path_params.invite_id,
         accept = request.accept_invite,
     )
@@ -236,18 +233,7 @@ async fn reply_to_invite(
 ) -> Result<(StatusCode, Json<Invite>)> {
     tracing::info!(target: TRACING_TARGET, "Responding to workspace invitation");
 
-    let Some(invite) = conn.find_invite_by_id(path_params.invite_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("workspace_invite")
-            .with_message("Invitation not found"));
-    };
-
-    // Verify invitation belongs to this workspace
-    if invite.workspace_id != path_params.workspace_id {
-        return Err(ErrorKind::NotFound
-            .with_resource("workspace_invite")
-            .with_message("Invitation not found in this workspace"));
-    }
+    let invite = find_invite(&mut conn, path_params.invite_id).await?;
 
     // Verify invitation is still valid
     if !invite.can_be_used() {
@@ -406,6 +392,18 @@ fn join_via_invite_code_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
+/// Finds an invite by ID or returns NotFound error.
+async fn find_invite(
+    conn: &mut nvisy_postgres::PgConn,
+    invite_id: uuid::Uuid,
+) -> Result<nvisy_postgres::model::WorkspaceInvite> {
+    conn.find_invite_by_id(invite_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("Invitation not found")
+            .with_resource("workspace_invite")
+    })
+}
+
 /// Returns a [`Router`] with all workspace invite related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -413,21 +411,23 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
+        // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspace_id}/invites/",
             post_with(send_invite, send_invite_docs).get_with(list_invites, list_invites_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/invites/{invite_id}/",
+            "/workspaces/{workspace_id}/invites/code/",
+            post_with(generate_invite_code, generate_invite_code_docs),
+        )
+        // Invite-specific routes (invite ID is globally unique)
+        .api_route(
+            "/invites/{invite_id}/",
             delete_with(cancel_invite, cancel_invite_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/invites/{invite_id}/reply/",
+            "/invites/{invite_id}/reply/",
             patch_with(reply_to_invite, reply_to_invite_docs),
-        )
-        .api_route(
-            "/workspaces/{workspace_id}/invites/code/",
-            post_with(generate_invite_code, generate_invite_code_docs),
         )
         .api_route(
             "/invites/{invite_code}/join/",

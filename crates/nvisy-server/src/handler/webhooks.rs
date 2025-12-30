@@ -12,7 +12,7 @@ use nvisy_postgres::query::{Pagination, WorkspaceWebhookRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
-    CreateWebhook, WorkspacePathParams, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
+    CreateWebhook, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Webhook, WebhookWithSecret, Webhooks};
 use crate::handler::{ErrorKind, Result};
@@ -124,7 +124,6 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -135,15 +134,16 @@ async fn read_webhook(
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace webhook");
 
+    // Fetch the webhook first to get workspace context for authorization
+    let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
+
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            webhook.workspace_id,
             Permission::ViewIntegrations,
         )
         .await?;
-
-    let webhook = find_workspace_webhook(&mut conn, &path_params).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace webhook read");
 
@@ -166,7 +166,6 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -178,16 +177,16 @@ async fn update_webhook(
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace webhook");
 
+    // Fetch the webhook first to get workspace context for authorization
+    let existing = find_webhook(&mut conn, path_params.webhook_id).await?;
+
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            existing.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
-
-    // Verify webhook exists and belongs to the workspace
-    let _ = find_workspace_webhook(&mut conn, &path_params).await?;
 
     let update_data = request.into_model();
     let webhook = conn
@@ -216,7 +215,6 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -227,18 +225,19 @@ async fn delete_webhook(
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace webhook");
 
+    // Fetch the webhook first to get workspace context for authorization
+    let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
+
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            webhook.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
-    // Verify webhook exists and belongs to the workspace
-    let _ = find_workspace_webhook(&mut conn, &path_params).await?;
-
-    conn.delete_workspace_webhook(path_params.webhook_id).await?;
+    conn.delete_workspace_webhook(path_params.webhook_id)
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, "Webhook deleted");
 
@@ -254,27 +253,18 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a webhook by ID and verifies it belongs to the specified workspace.
-async fn find_workspace_webhook(
+/// Finds a webhook by ID or returns NotFound error.
+async fn find_webhook(
     conn: &mut nvisy_postgres::PgConn,
-    path_params: &WebhookPathParams,
+    webhook_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::WorkspaceWebhook> {
-    let Some(webhook) = conn
-        .find_workspace_webhook_by_id(path_params.webhook_id)
+    conn.find_workspace_webhook_by_id(webhook_id)
         .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message("Webhook not found")
-            .with_resource("webhook"));
-    };
-
-    if webhook.workspace_id != path_params.workspace_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Webhook not found")
-            .with_resource("webhook"));
-    }
-
-    Ok(webhook)
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Webhook not found")
+                .with_resource("webhook")
+        })
 }
 
 /// Returns routes for workspace webhook management.
@@ -282,13 +272,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
+        // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspace_id}/webhooks/",
             post_with(create_webhook, create_webhook_docs)
                 .get_with(list_webhooks, list_webhooks_docs),
         )
+        // Webhook-specific routes (webhook ID is globally unique)
         .api_route(
-            "/workspaces/{workspace_id}/webhooks/{webhook_id}/",
+            "/webhooks/{webhook_id}/",
             get_with(read_webhook, read_webhook_docs)
                 .put_with(update_webhook, update_webhook_docs)
                 .delete_with(delete_webhook, delete_webhook_docs),

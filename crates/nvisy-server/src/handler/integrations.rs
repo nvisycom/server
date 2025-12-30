@@ -14,8 +14,8 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CreateWorkspaceIntegration, IntegrationPathParams, ListIntegrationsQuery, Pagination,
-    UpdateIntegrationCredentials, UpdateWorkspaceIntegration, WorkspacePathParams,
+    CreateIntegration, IntegrationPathParams, ListIntegrationsQuery, Pagination,
+    UpdateIntegrationCredentials, UpdateIntegration, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
@@ -40,7 +40,7 @@ async fn create_integration(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    ValidateJson(request): ValidateJson<CreateWorkspaceIntegration>,
+    ValidateJson(request): ValidateJson<CreateIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace integration");
 
@@ -142,7 +142,6 @@ fn list_integrations_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -153,15 +152,16 @@ async fn read_integration(
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace integration");
 
+    // Fetch the integration first to get workspace context for authorization
+    let integration = find_integration(&mut conn, path_params.integration_id).await?;
+
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            integration.workspace_id,
             Permission::ViewIntegrations,
         )
         .await?;
-
-    let integration = find_workspace_integration(&mut conn, &path_params).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace integration read");
 
@@ -184,7 +184,6 @@ fn read_integration_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -192,19 +191,20 @@ async fn update_integration(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(request): ValidateJson<UpdateWorkspaceIntegration>,
+    ValidateJson(request): ValidateJson<UpdateIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace integration");
+
+    // Fetch the integration first to get workspace context for authorization
+    let existing = find_integration(&mut conn, path_params.integration_id).await?;
 
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            existing.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
-
-    let existing = find_workspace_integration(&mut conn, &path_params).await?;
 
     // Check if new name conflicts with existing integrations
     if let Some(ref new_name) = request.integration_name
@@ -212,7 +212,7 @@ async fn update_integration(
     {
         let name_is_unique = conn
             .is_integration_name_unique(
-                path_params.workspace_id,
+                existing.workspace_id,
                 new_name,
                 Some(path_params.integration_id),
             )
@@ -251,7 +251,6 @@ fn update_integration_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -263,16 +262,16 @@ async fn update_integration_credentials(
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating integration credentials");
 
+    // Fetch the integration first to get workspace context for authorization
+    let existing = find_integration(&mut conn, path_params.integration_id).await?;
+
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            existing.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
-
-    // Verify integration exists and belongs to the workspace
-    let _ = find_workspace_integration(&mut conn, &path_params).await?;
 
     let integration = conn
         .update_integration_auth(
@@ -304,7 +303,6 @@ fn update_integration_credentials_docs(op: TransformOperation) -> TransformOpera
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -315,16 +313,16 @@ async fn delete_integration(
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace integration");
 
+    // Fetch the integration first to get workspace context for authorization
+    let integration = find_integration(&mut conn, path_params.integration_id).await?;
+
     auth_state
         .authorize_workspace(
             &mut conn,
-            path_params.workspace_id,
+            integration.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
-
-    // Verify integration exists and belongs to the workspace
-    let _ = find_workspace_integration(&mut conn, &path_params).await?;
 
     conn.delete_integration(path_params.integration_id).await?;
 
@@ -342,27 +340,18 @@ fn delete_integration_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds an integration by ID and verifies it belongs to the specified workspace.
-async fn find_workspace_integration(
+/// Finds an integration by ID or returns NotFound error.
+async fn find_integration(
     conn: &mut nvisy_postgres::PgConn,
-    path_params: &IntegrationPathParams,
+    integration_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::WorkspaceIntegration> {
-    let Some(integration) = conn
-        .find_integration_by_id(path_params.integration_id)
+    conn.find_integration_by_id(integration_id)
         .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message("Integration not found")
-            .with_resource("integration"));
-    };
-
-    if integration.workspace_id != path_params.workspace_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Integration not found")
-            .with_resource("integration"));
-    }
-
-    Ok(integration)
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Integration not found")
+                .with_resource("integration")
+        })
 }
 
 /// Returns routes for workspace integration management.
@@ -370,19 +359,21 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
+        // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspace_id}/integrations/",
             post_with(create_integration, create_integration_docs)
                 .get_with(list_integrations, list_integrations_docs),
         )
+        // Integration-specific routes (integration ID is globally unique)
         .api_route(
-            "/workspaces/{workspace_id}/integrations/{integration_id}/",
+            "/integrations/{integration_id}/",
             get_with(read_integration, read_integration_docs)
                 .put_with(update_integration, update_integration_docs)
                 .delete_with(delete_integration, delete_integration_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/integrations/{integration_id}/credentials/",
+            "/integrations/{integration_id}/credentials/",
             patch_with(
                 update_integration_credentials,
                 update_integration_credentials_docs,

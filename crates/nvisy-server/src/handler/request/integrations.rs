@@ -3,9 +3,7 @@
 //! This module provides request DTOs for workspace integration management including
 //! creation, updates, and credential management.
 
-use nvisy_postgres::model::{
-    NewWorkspaceIntegration, UpdateWorkspaceIntegration as UpdateWorkspaceIntegrationModel,
-};
+use nvisy_postgres::model::{NewWorkspaceIntegration, UpdateWorkspaceIntegration};
 use nvisy_postgres::types::{IntegrationFilter, IntegrationType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,7 +14,7 @@ use validator::Validate;
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateWorkspaceIntegration {
+pub struct CreateIntegration {
     /// Human-readable name for the integration (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub integration_name: String,
@@ -38,7 +36,7 @@ pub struct CreateWorkspaceIntegration {
     pub is_active: Option<bool>,
 }
 
-impl CreateWorkspaceIntegration {
+impl CreateIntegration {
     /// Converts this request into a [`NewWorkspaceIntegration`] model.
     ///
     /// # Arguments
@@ -66,7 +64,7 @@ impl CreateWorkspaceIntegration {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateWorkspaceIntegration {
+pub struct UpdateIntegration {
     /// Updated human-readable name for the integration (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub integration_name: Option<String>,
@@ -88,11 +86,11 @@ pub struct UpdateWorkspaceIntegration {
     pub is_active: Option<bool>,
 }
 
-impl UpdateWorkspaceIntegration {
-    /// Converts this request into an [`UpdateWorkspaceIntegrationModel`].
+impl UpdateIntegration {
+    /// Converts this request into an [`UpdateWorkspaceIntegration`].
     #[inline]
-    pub fn into_model(self) -> UpdateWorkspaceIntegrationModel {
-        UpdateWorkspaceIntegrationModel {
+    pub fn into_model(self) -> UpdateWorkspaceIntegration {
+        UpdateWorkspaceIntegration {
             integration_name: self.integration_name,
             description: self.description,
             integration_type: self.integration_type,

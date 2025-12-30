@@ -10,8 +10,8 @@ use nvisy_postgres::query::{DocumentCommentRepository, DocumentFileRepository};
 
 use crate::extract::{AuthState, Json, Path, PgPool, ValidateJson};
 use crate::handler::request::{
-    CreateDocumentComment, FileCommentPathParams, FilePathParams, Pagination,
-    UpdateDocumentComment as UpdateCommentRequest,
+    CreateComment, FileCommentPathParams, FilePathParams, Pagination,
+    UpdateComment as UpdateCommentRequest,
 };
 use crate::handler::response::{Comment, Comments, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -32,7 +32,7 @@ async fn post_comment(
     PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
-    ValidateJson(request): ValidateJson<CreateDocumentComment>,
+    ValidateJson(request): ValidateJson<CreateComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating comment");
 
@@ -258,11 +258,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspace_id}/files/{file_id}/comments",
+            "/files/{file_id}/comments",
             post_with(post_comment, post_comment_docs).get_with(list_comments, list_comments_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/files/{file_id}/comments/{comment_id}",
+            "/files/{file_id}/comments/{comment_id}",
             patch_with(update_comment, update_comment_docs)
                 .delete_with(delete_comment, delete_comment_docs),
         )

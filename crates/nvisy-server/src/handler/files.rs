@@ -19,12 +19,10 @@ use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::{DocumentFileRepository, Pagination, WorkspaceRepository};
 use uuid::Uuid;
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson, Version,
-};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
-    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, WorkspacePathParams,
-    UpdateFile as UpdateFileRequest,
+    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams,
+    UpdateFile as UpdateFileRequest, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, File, Files};
 use crate::handler::{ErrorKind, Result};
@@ -36,13 +34,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 /// Maximum file size: 100MB
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
-/// Finds a file by ID within a workspace or returns NotFound error.
-async fn find_workspace_file(
-    conn: &mut nvisy_postgres::PgConn,
-    workspace_id: Uuid,
-    file_id: Uuid,
-) -> Result<DocumentFile> {
-    conn.find_workspace_file(workspace_id, file_id)
+/// Finds a file by ID or returns NotFound error.
+async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<DocumentFile> {
+    conn.find_document_file_by_id(file_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -302,7 +296,6 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -310,16 +303,16 @@ async fn update_file(
     PgPool(mut conn): PgPool,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
-    _version: Version,
     ValidateJson(request): ValidateJson<UpdateFileRequest>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating file");
 
-    auth_claims
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UpdateFiles)
-        .await?;
+    // Fetch the file first to get workspace context for authorization
+    let file = find_file(&mut conn, path_params.file_id).await?;
 
-    let _file = find_workspace_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
+    auth_claims
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::UpdateFiles)
+        .await?;
 
     let updates = request.into_model();
 
@@ -355,12 +348,11 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Downloads a workspace file with streaming support for large files.
+/// Downloads a file with streaming support for large files.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -374,11 +366,12 @@ async fn download_file(
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
-    auth_claims
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DownloadFiles)
-        .await?;
+    // Fetch the file first to get workspace context for authorization
+    let file = find_file(&mut conn, path_params.file_id).await?;
 
-    let file = find_workspace_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
+    auth_claims
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::DownloadFiles)
+        .await?;
 
     // Create object key from storage path
     let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
@@ -451,12 +444,11 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Deletes a workspace file (soft delete).
+/// Deletes a file (soft delete).
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -464,15 +456,15 @@ async fn delete_file(
     PgPool(mut conn): PgPool,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
-    _version: Version,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "File Deleting");
 
-    auth_claims
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DeleteFiles)
-        .await?;
+    // Fetch the file first to get workspace context for authorization
+    let file = find_file(&mut conn, path_params.file_id).await?;
 
-    let _file = find_workspace_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
+    auth_claims
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::DeleteFiles)
+        .await?;
 
     // Soft delete by setting deleted_at timestamp
     let updates = UpdateDocumentFile {
@@ -522,7 +514,11 @@ async fn download_multiple_files(
     tracing::debug!(target: TRACING_TARGET, "Downloading multiple files as archive");
 
     auth_claims
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DownloadFiles)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::DownloadFiles,
+        )
         .await?;
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
@@ -626,7 +622,11 @@ async fn download_archived_files(
     tracing::debug!(target: TRACING_TARGET, "Downloading archived files");
 
     auth_claims
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DownloadFiles)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::DownloadFiles,
+        )
         .await?;
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
@@ -753,15 +753,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
+        // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspace_id}/files/",
             post_with(upload_file, upload_file_docs),
-        )
-        .api_route(
-            "/workspaces/{workspace_id}/files/{file_id}",
-            patch_with(update_file, update_file_docs)
-                .get_with(download_file, download_file_docs)
-                .delete_with(delete_file, delete_file_docs),
         )
         .api_route(
             "/workspaces/{workspace_id}/files/download",
@@ -770,6 +765,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspace_id}/files/archive",
             post_with(download_archived_files, download_archived_files_docs),
+        )
+        // File-specific routes (file ID is globally unique)
+        .api_route(
+            "/files/{file_id}",
+            patch_with(update_file, update_file_docs)
+                .get_with(download_file, download_file_docs)
+                .delete_with(delete_file, delete_file_docs),
         )
         .with_path_items(|item| item.tag("Files"))
 }
