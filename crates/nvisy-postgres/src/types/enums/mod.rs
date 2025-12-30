@@ -9,14 +9,14 @@ pub mod action_token_type;
 pub mod api_token_type;
 pub mod notification_type;
 
-// Project-related enumerations
+// Workspace-related enumerations
 pub mod activity_type;
 pub mod integration_status;
 pub mod integration_type;
 pub mod invite_status;
-pub mod project_role;
-pub mod project_status;
-pub mod project_visibility;
+pub mod workspace_role;
+pub mod workspace_status;
+pub mod workspace_visibility;
 pub mod webhook_status;
 
 // Document-related enumerations
@@ -36,9 +36,9 @@ pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;
 pub use notification_type::NotificationType;
 pub use processing_status::ProcessingStatus;
-pub use project_role::ProjectRole;
-pub use project_status::ProjectStatus;
-pub use project_visibility::ProjectVisibility;
+pub use workspace_role::WorkspaceRole;
+pub use workspace_status::WorkspaceStatus;
+pub use workspace_visibility::WorkspaceVisibility;
 pub use require_mode::RequireMode;
 pub use virus_scan_status::VirusScanStatus;
 pub use webhook_status::WebhookStatus;

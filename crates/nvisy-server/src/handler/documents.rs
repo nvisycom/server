@@ -1,8 +1,8 @@
 //! Document management handlers for document CRUD operations.
 //!
-//! This module provides comprehensive document management functionality within projects,
+//! This module provides comprehensive document management functionality within workspaces,
 //! including creation, reading, updating, and deletion of documents. All operations
-//! are secured with proper authorization and follow project-based access control.
+//! are secured with proper authorization and follow workspace-based access control.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -13,7 +13,7 @@ use nvisy_postgres::query::DocumentRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
-    CreateDocument, DocumentPathParams, Pagination, ProjectPathParams, UpdateDocument,
+    CreateDocument, DocumentPathParams, Pagination, WorkspacePathParams, UpdateDocument,
 };
 use crate::handler::response::{Document, Documents, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -27,26 +27,26 @@ const TRACING_TARGET: &str = "nvisy_server::handler::documents";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn create_document(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating document");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::CreateDocuments,
         )
         .await?;
 
-    let new_document = request.into_model(path_params.project_id, auth_state.account_id);
+    let new_document = request.into_model(path_params.workspace_id, auth_state.account_id);
     let document = conn.create_document(new_document).await?;
 
     tracing::info!(
@@ -67,28 +67,28 @@ fn create_document_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Returns all documents for a project.
+/// Returns all documents for a workspace.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn get_all_documents(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     Json(pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Documents>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
     auth_state
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewDocuments)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewDocuments)
         .await?;
 
     let documents = conn
-        .find_documents_by_project(path_params.project_id, pagination.into())
+        .find_documents_by_workspace(path_params.workspace_id, pagination.into())
         .await?;
 
     let response: Documents = documents.into_iter().map(Document::from).collect();
@@ -104,7 +104,7 @@ async fn get_all_documents(
 
 fn get_all_documents_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List documents")
-        .description("Lists all documents in a project with pagination.")
+        .description("Lists all documents in a workspace with pagination.")
         .response::<200, Json<Documents>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -259,7 +259,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/{project_id}/documents",
+            "/workspaces/{workspace_id}/documents",
             post_with(create_document, create_document_docs)
                 .get_with(get_all_documents, get_all_documents_docs),
         )

@@ -9,13 +9,13 @@ pub mod account_api_tokens;
 pub mod account_notifications;
 pub mod accounts;
 
-// Project-related constraint modules
-pub mod project_activities;
-pub mod project_integrations;
-pub mod project_invites;
-pub mod project_members;
-pub mod project_webhooks;
-pub mod projects;
+// Workspace-related constraint modules
+pub mod workspace_activities;
+pub mod workspace_integrations;
+pub mod workspace_invites;
+pub mod workspace_members;
+pub mod workspace_webhooks;
+pub mod workspaces;
 
 // Document-related constraint modules
 pub mod document_annotations;
@@ -25,8 +25,8 @@ pub mod document_files;
 pub mod document_versions;
 pub mod documents;
 
-// Project run constraint modules
-pub mod project_runs;
+// Workspace run constraint modules
+pub mod workspace_runs;
 
 use std::fmt;
 
@@ -41,14 +41,14 @@ pub use document_comments::DocumentCommentConstraints;
 pub use document_files::DocumentFileConstraints;
 pub use document_versions::DocumentVersionConstraints;
 pub use documents::DocumentConstraints;
-pub use project_activities::ProjectActivitiesConstraints;
-pub use project_integrations::ProjectIntegrationConstraints;
-pub use project_invites::ProjectInviteConstraints;
-pub use project_members::ProjectMemberConstraints;
-pub use project_runs::ProjectRunConstraints;
-pub use project_webhooks::ProjectWebhookConstraints;
-pub use projects::ProjectConstraints;
 use serde::{Deserialize, Serialize};
+pub use workspace_activities::WorkspaceActivitiesConstraints;
+pub use workspace_integrations::WorkspaceIntegrationConstraints;
+pub use workspace_invites::WorkspaceInviteConstraints;
+pub use workspace_members::WorkspaceMemberConstraints;
+pub use workspace_runs::WorkspaceRunConstraints;
+pub use workspace_webhooks::WorkspaceWebhookConstraints;
+pub use workspaces::WorkspaceConstraints;
 
 /// Unified constraint violation enum that can represent any database constraint.
 ///
@@ -64,14 +64,14 @@ pub enum ConstraintViolation {
     AccountApiToken(AccountApiTokenConstraints),
     AccountActionToken(AccountActionTokenConstraints),
 
-    // Project-related constraints
-    Project(ProjectConstraints),
-    ProjectMember(ProjectMemberConstraints),
-    ProjectInvite(ProjectInviteConstraints),
-    ProjectActivityLog(ProjectActivitiesConstraints),
-    ProjectIntegration(ProjectIntegrationConstraints),
-    ProjectWebhook(ProjectWebhookConstraints),
-    ProjectRun(ProjectRunConstraints),
+    // Workspace-related constraints
+    Workspace(WorkspaceConstraints),
+    WorkspaceMember(WorkspaceMemberConstraints),
+    WorkspaceInvite(WorkspaceInviteConstraints),
+    WorkspaceActivityLog(WorkspaceActivitiesConstraints),
+    WorkspaceIntegration(WorkspaceIntegrationConstraints),
+    WorkspaceWebhook(WorkspaceWebhookConstraints),
+    WorkspaceRun(WorkspaceRunConstraints),
 
     // Document-related constraints
     Document(DocumentConstraints),
@@ -139,14 +139,14 @@ impl ConstraintViolation {
                 AccountApiTokenConstraints::new => AccountApiToken,
                 AccountActionTokenConstraints::new => AccountActionToken,
             },
-            "projects" => try_parse!(ProjectConstraints::new => Project),
-            "project" => try_parse! {
-                ProjectMemberConstraints::new => ProjectMember,
-                ProjectInviteConstraints::new => ProjectInvite,
-                ProjectActivitiesConstraints::new => ProjectActivityLog,
-                ProjectIntegrationConstraints::new => ProjectIntegration,
-                ProjectWebhookConstraints::new => ProjectWebhook,
-                ProjectRunConstraints::new => ProjectRun,
+            "workspaces" => try_parse!(WorkspaceConstraints::new => Workspace),
+            "workspace" => try_parse! {
+                WorkspaceMemberConstraints::new => WorkspaceMember,
+                WorkspaceInviteConstraints::new => WorkspaceInvite,
+                WorkspaceActivitiesConstraints::new => WorkspaceActivityLog,
+                WorkspaceIntegrationConstraints::new => WorkspaceIntegration,
+                WorkspaceWebhookConstraints::new => WorkspaceWebhook,
+                WorkspaceRunConstraints::new => WorkspaceRun,
             },
             "documents" => try_parse!(DocumentConstraints::new => Document),
             "document" => try_parse! {
@@ -171,14 +171,14 @@ impl ConstraintViolation {
             ConstraintViolation::AccountApiToken(_) => "account_api_tokens",
             ConstraintViolation::AccountActionToken(_) => "account_action_tokens",
 
-            // Project-related tables
-            ConstraintViolation::Project(_) => "projects",
-            ConstraintViolation::ProjectMember(_) => "project_members",
-            ConstraintViolation::ProjectInvite(_) => "project_invites",
-            ConstraintViolation::ProjectActivityLog(_) => "project_activities",
-            ConstraintViolation::ProjectIntegration(_) => "project_integrations",
-            ConstraintViolation::ProjectWebhook(_) => "project_webhooks",
-            ConstraintViolation::ProjectRun(_) => "project_runs",
+            // Workspace-related tables
+            ConstraintViolation::Workspace(_) => "workspaces",
+            ConstraintViolation::WorkspaceMember(_) => "workspace_members",
+            ConstraintViolation::WorkspaceInvite(_) => "workspace_invites",
+            ConstraintViolation::WorkspaceActivityLog(_) => "workspace_activities",
+            ConstraintViolation::WorkspaceIntegration(_) => "workspace_integrations",
+            ConstraintViolation::WorkspaceWebhook(_) => "workspace_webhooks",
+            ConstraintViolation::WorkspaceRun(_) => "workspace_runs",
 
             // Document-related tables
             ConstraintViolation::Document(_) => "documents",
@@ -201,13 +201,13 @@ impl ConstraintViolation {
             | ConstraintViolation::AccountApiToken(_)
             | ConstraintViolation::AccountActionToken(_) => "accounts",
 
-            ConstraintViolation::Project(_)
-            | ConstraintViolation::ProjectMember(_)
-            | ConstraintViolation::ProjectInvite(_)
-            | ConstraintViolation::ProjectActivityLog(_)
-            | ConstraintViolation::ProjectIntegration(_)
-            | ConstraintViolation::ProjectWebhook(_)
-            | ConstraintViolation::ProjectRun(_) => "projects",
+            ConstraintViolation::Workspace(_)
+            | ConstraintViolation::WorkspaceMember(_)
+            | ConstraintViolation::WorkspaceInvite(_)
+            | ConstraintViolation::WorkspaceActivityLog(_)
+            | ConstraintViolation::WorkspaceIntegration(_)
+            | ConstraintViolation::WorkspaceWebhook(_)
+            | ConstraintViolation::WorkspaceRun(_) => "workspaces",
 
             ConstraintViolation::Document(_)
             | ConstraintViolation::DocumentAnnotation(_)
@@ -228,13 +228,13 @@ impl ConstraintViolation {
             ConstraintViolation::AccountApiToken(c) => c.categorize(),
             ConstraintViolation::AccountActionToken(c) => c.categorize(),
 
-            ConstraintViolation::Project(c) => c.categorize(),
-            ConstraintViolation::ProjectMember(c) => c.categorize(),
-            ConstraintViolation::ProjectInvite(c) => c.categorize(),
-            ConstraintViolation::ProjectActivityLog(c) => c.categorize(),
-            ConstraintViolation::ProjectIntegration(c) => c.categorize(),
-            ConstraintViolation::ProjectWebhook(c) => c.categorize(),
-            ConstraintViolation::ProjectRun(c) => c.categorize(),
+            ConstraintViolation::Workspace(c) => c.categorize(),
+            ConstraintViolation::WorkspaceMember(c) => c.categorize(),
+            ConstraintViolation::WorkspaceInvite(c) => c.categorize(),
+            ConstraintViolation::WorkspaceActivityLog(c) => c.categorize(),
+            ConstraintViolation::WorkspaceIntegration(c) => c.categorize(),
+            ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
+            ConstraintViolation::WorkspaceRun(c) => c.categorize(),
 
             ConstraintViolation::Document(c) => c.categorize(),
             ConstraintViolation::DocumentAnnotation(c) => c.categorize(),
@@ -260,13 +260,13 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::AccountApiToken(c) => write!(f, "{}", c),
             ConstraintViolation::AccountActionToken(c) => write!(f, "{}", c),
 
-            ConstraintViolation::Project(c) => write!(f, "{}", c),
-            ConstraintViolation::ProjectMember(c) => write!(f, "{}", c),
-            ConstraintViolation::ProjectInvite(c) => write!(f, "{}", c),
-            ConstraintViolation::ProjectActivityLog(c) => write!(f, "{}", c),
-            ConstraintViolation::ProjectIntegration(c) => write!(f, "{}", c),
-            ConstraintViolation::ProjectWebhook(c) => write!(f, "{}", c),
-            ConstraintViolation::ProjectRun(c) => write!(f, "{}", c),
+            ConstraintViolation::Workspace(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceMember(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceInvite(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceActivityLog(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceIntegration(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceRun(c) => write!(f, "{}", c),
 
             ConstraintViolation::Document(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentAnnotation(c) => write!(f, "{}", c),
@@ -321,8 +321,8 @@ mod tests {
         let violation = ConstraintViolation::Account(AccountConstraints::EmailAddressUnique);
         assert_eq!(violation.table_name(), "accounts");
 
-        let violation = ConstraintViolation::Project(ProjectConstraints::DisplayNameLength);
-        assert_eq!(violation.table_name(), "projects");
+        let violation = ConstraintViolation::Workspace(WorkspaceConstraints::DisplayNameLength);
+        assert_eq!(violation.table_name(), "workspaces");
 
         let violation =
             ConstraintViolation::DocumentFile(DocumentFileConstraints::StoragePathNotEmpty);
@@ -339,8 +339,8 @@ mod tests {
         assert_eq!(violation.functional_area(), "accounts");
 
         let violation =
-            ConstraintViolation::ProjectMember(ProjectMemberConstraints::ShowOrderRange);
-        assert_eq!(violation.functional_area(), "projects");
+            ConstraintViolation::WorkspaceMember(WorkspaceMemberConstraints::ShowOrderRange);
+        assert_eq!(violation.functional_area(), "workspaces");
 
         let violation =
             ConstraintViolation::DocumentVersion(DocumentVersionConstraints::VersionNumberMin);
@@ -364,10 +364,11 @@ mod tests {
 
     #[test]
     fn test_constraint_name_method() {
-        let violation = ConstraintViolation::Project(ProjectConstraints::ActiveStatusNotArchived);
+        let violation =
+            ConstraintViolation::Workspace(WorkspaceConstraints::ActiveStatusNotArchived);
         assert_eq!(
             violation.constraint_name(),
-            "projects_active_status_not_archived"
+            "workspaces_active_status_not_archived"
         );
     }
 }

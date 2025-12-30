@@ -14,8 +14,8 @@ use uuid::Uuid;
 pub struct Document {
     /// ID of the document.
     pub document_id: Uuid,
-    /// ID of the project that the document belongs to.
-    pub project_id: Uuid,
+    /// ID of the workspace that the document belongs to.
+    pub workspace_id: Uuid,
     /// ID of the account that owns the document.
     pub account_id: Uuid,
     /// Display name of the document.
@@ -42,7 +42,7 @@ impl From<model::Document> for Document {
             tags: document.tags(),
 
             document_id: document.id,
-            project_id: document.project_id,
+            workspace_id: document.workspace_id,
             account_id: document.account_id,
             display_name: document.display_name,
             description: document.description,
@@ -55,7 +55,7 @@ impl From<model::Document> for Document {
     }
 }
 
-/// Response for listing all documents in a project.
+/// Response for listing all documents in a workspace.
 pub type Documents = Vec<Document>;
 
 /// Document search results with relevance scoring.

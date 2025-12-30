@@ -301,7 +301,7 @@ CREATE TYPE NOTIFICATION_TYPE AS ENUM (
     'document_upload',      -- Document was uploaded
     'document_download',    -- Document was downloaded
     'document_verify',      -- Document verification completed
-    'project_invite',       -- User was invited to a project
+    'workspace_invite',       -- User was invited to a workspace
     'system_announcement'   -- System-wide announcement
 );
 

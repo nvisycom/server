@@ -42,18 +42,6 @@ pub mod sql_types {
     pub struct ProcessingStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "project_role"))]
-    pub struct ProjectRole;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "project_status"))]
-    pub struct ProjectStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "project_visibility"))]
-    pub struct ProjectVisibility;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "require_mode"))]
     pub struct RequireMode;
 
@@ -64,6 +52,18 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_status"))]
     pub struct WebhookStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "workspace_role"))]
+    pub struct WorkspaceRole;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "workspace_status"))]
+    pub struct WorkspaceStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "workspace_visibility"))]
+    pub struct WorkspaceVisibility;
 }
 
 diesel::table! {
@@ -227,7 +227,7 @@ diesel::table! {
 
     document_files (id) {
         id -> Uuid,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         document_id -> Nullable<Uuid>,
         account_id -> Uuid,
         parent_id -> Nullable<Uuid>,
@@ -262,7 +262,7 @@ diesel::table! {
 
     documents (id) {
         id -> Uuid,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         account_id -> Uuid,
         display_name -> Text,
         description -> Nullable<Text>,
@@ -281,9 +281,9 @@ diesel::table! {
     use pgvector::sql_types::*;
     use super::sql_types::ActivityType;
 
-    project_activities (id) {
+    workspace_activities (id) {
         id -> Int8,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         account_id -> Nullable<Uuid>,
         activity_type -> ActivityType,
         description -> Text,
@@ -300,9 +300,9 @@ diesel::table! {
     use super::sql_types::IntegrationType;
     use super::sql_types::IntegrationStatus;
 
-    project_integrations (id) {
+    workspace_integrations (id) {
         id -> Uuid,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         integration_name -> Text,
         description -> Text,
         integration_type -> IntegrationType,
@@ -320,14 +320,14 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::ProjectRole;
+    use super::sql_types::WorkspaceRole;
     use super::sql_types::InviteStatus;
 
-    project_invites (id) {
+    workspace_invites (id) {
         id -> Uuid,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         invitee_id -> Nullable<Uuid>,
-        invited_role -> ProjectRole,
+        invited_role -> WorkspaceRole,
         invite_message -> Text,
         invite_token -> Text,
         invite_status -> InviteStatus,
@@ -343,12 +343,12 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::ProjectRole;
+    use super::sql_types::WorkspaceRole;
 
-    project_members (project_id, account_id) {
-        project_id -> Uuid,
+    workspace_members (workspace_id, account_id) {
+        workspace_id -> Uuid,
         account_id -> Uuid,
-        member_role -> ProjectRole,
+        member_role -> WorkspaceRole,
         custom_permissions -> Jsonb,
         show_order -> Int4,
         is_favorite -> Bool,
@@ -368,32 +368,11 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-
-    project_pipelines (id) {
-        id -> Uuid,
-        project_id -> Uuid,
-        display_name -> Text,
-        description -> Nullable<Text>,
-        pipeline_type -> Text,
-        is_active -> Bool,
-        is_default -> Bool,
-        configuration -> Jsonb,
-        settings -> Jsonb,
-        created_by -> Uuid,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
     use super::sql_types::IntegrationStatus;
 
-    project_runs (id) {
+    workspace_runs (id) {
         id -> Uuid,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         integration_id -> Nullable<Uuid>,
         account_id -> Nullable<Uuid>,
         run_name -> Text,
@@ -413,32 +392,11 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-
-    project_templates (id) {
-        id -> Uuid,
-        display_name -> Text,
-        description -> Nullable<Text>,
-        category -> Text,
-        is_public -> Bool,
-        is_featured -> Bool,
-        template_data -> Jsonb,
-        default_settings -> Jsonb,
-        usage_count -> Int4,
-        created_by -> Uuid,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
     use super::sql_types::WebhookStatus;
 
-    project_webhooks (id) {
+    workspace_webhooks (id) {
         id -> Uuid,
-        project_id -> Uuid,
+        workspace_id -> Uuid,
         display_name -> Text,
         description -> Text,
         url -> Text,
@@ -461,16 +419,16 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::ProjectStatus;
-    use super::sql_types::ProjectVisibility;
+    use super::sql_types::WorkspaceStatus;
+    use super::sql_types::WorkspaceVisibility;
 
-    projects (id) {
+    workspaces (id) {
         id -> Uuid,
         display_name -> Text,
         description -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
-        status -> ProjectStatus,
-        visibility -> ProjectVisibility,
+        status -> WorkspaceStatus,
+        visibility -> WorkspaceVisibility,
         keep_for_sec -> Nullable<Int4>,
         auto_cleanup -> Bool,
         max_members -> Nullable<Int4>,
@@ -497,24 +455,21 @@ diesel::joinable!(document_chunks -> document_files (file_id));
 diesel::joinable!(document_comments -> document_files (file_id));
 diesel::joinable!(document_files -> accounts (account_id));
 diesel::joinable!(document_files -> documents (document_id));
-diesel::joinable!(document_files -> projects (project_id));
+diesel::joinable!(document_files -> workspaces (workspace_id));
 diesel::joinable!(documents -> accounts (account_id));
-diesel::joinable!(documents -> projects (project_id));
-diesel::joinable!(project_activities -> accounts (account_id));
-diesel::joinable!(project_activities -> projects (project_id));
-diesel::joinable!(project_integrations -> accounts (created_by));
-diesel::joinable!(project_integrations -> projects (project_id));
-diesel::joinable!(project_invites -> projects (project_id));
-diesel::joinable!(project_members -> projects (project_id));
-diesel::joinable!(project_pipelines -> accounts (created_by));
-diesel::joinable!(project_pipelines -> projects (project_id));
-diesel::joinable!(project_runs -> accounts (account_id));
-diesel::joinable!(project_runs -> project_integrations (integration_id));
-diesel::joinable!(project_runs -> projects (project_id));
-diesel::joinable!(project_templates -> accounts (created_by));
-diesel::joinable!(project_webhooks -> accounts (created_by));
-diesel::joinable!(project_webhooks -> projects (project_id));
-diesel::joinable!(projects -> accounts (created_by));
+diesel::joinable!(documents -> workspaces (workspace_id));
+diesel::joinable!(workspace_activities -> accounts (account_id));
+diesel::joinable!(workspace_activities -> workspaces (workspace_id));
+diesel::joinable!(workspace_integrations -> accounts (created_by));
+diesel::joinable!(workspace_integrations -> workspaces (workspace_id));
+diesel::joinable!(workspace_invites -> workspaces (workspace_id));
+diesel::joinable!(workspace_members -> workspaces (workspace_id));
+diesel::joinable!(workspace_runs -> accounts (account_id));
+diesel::joinable!(workspace_runs -> workspace_integrations (integration_id));
+diesel::joinable!(workspace_runs -> workspaces (workspace_id));
+diesel::joinable!(workspace_webhooks -> accounts (created_by));
+diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
+diesel::joinable!(workspaces -> accounts (created_by));
 
 diesel::allow_tables_to_appear_in_same_query!(
     account_action_tokens,
@@ -526,13 +481,11 @@ diesel::allow_tables_to_appear_in_same_query!(
     document_comments,
     document_files,
     documents,
-    project_activities,
-    project_integrations,
-    project_invites,
-    project_members,
-    project_pipelines,
-    project_runs,
-    project_templates,
-    project_webhooks,
-    projects,
+    workspace_activities,
+    workspace_integrations,
+    workspace_invites,
+    workspace_members,
+    workspace_runs,
+    workspace_webhooks,
+    workspaces,
 );

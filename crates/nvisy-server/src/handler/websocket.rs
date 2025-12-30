@@ -1,4 +1,4 @@
-//! WebSocket handler for real-time project communication via NATS.
+//! WebSocket handler for real-time workspace communication via NATS.
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -12,19 +12,19 @@ use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures::{SinkExt, StreamExt};
 use nvisy_nats::NatsClient;
-use nvisy_nats::stream::{ProjectEventPublisher, ProjectEventSubscriber, ProjectWsMessage};
+use nvisy_nats::stream::{WorkspaceEventPublisher, WorkspaceEventSubscriber, WorkspaceWsMessage};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::query::{AccountRepository, ProjectRepository};
+use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
-use crate::handler::request::ProjectPathParams;
+use crate::handler::request::WorkspacePathParams;
 use crate::handler::response::ErrorResponse;
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
-/// Tracing target for project websocket operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::project_websocket";
+/// Tracing target for workspace websocket operations.
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_websocket";
 
 /// Maximum size of a WebSocket message in bytes (1 MB).
 const MAX_MESSAGE_SIZE: usize = 1_024 * 1_024;
@@ -40,18 +40,18 @@ const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 struct WsContext {
     /// Unique connection identifier for logging/debugging.
     connection_id: Uuid,
-    /// The project this connection belongs to.
-    project_id: Uuid,
+    /// The workspace this connection belongs to.
+    workspace_id: Uuid,
     /// The authenticated account ID.
     account_id: Uuid,
 }
 
 impl WsContext {
     /// Creates a new WebSocket connection context.
-    fn new(project_id: Uuid, account_id: Uuid) -> Self {
+    fn new(workspace_id: Uuid, account_id: Uuid) -> Self {
         Self {
             connection_id: Uuid::new_v4(),
-            project_id,
+            workspace_id,
             account_id,
         }
     }
@@ -133,44 +133,44 @@ fn validate_message_size(ctx: &WsContext, size: usize, metrics: &ConnectionMetri
 async fn check_event_permission(
     conn: &mut nvisy_postgres::PgConn,
     ctx: &WsContext,
-    msg: &ProjectWsMessage,
+    msg: &WorkspaceWsMessage,
 ) -> Result<()> {
     // Determine required permission based on message type
     let permission = match msg {
         // Read-only events - require ViewDocuments permission
-        ProjectWsMessage::Typing(_) | ProjectWsMessage::MemberPresence(_) => {
+        WorkspaceWsMessage::Typing(_) | WorkspaceWsMessage::MemberPresence(_) => {
             Permission::ViewDocuments
         }
 
         // Document write events - require UpdateDocuments permission
-        ProjectWsMessage::DocumentUpdate(_) => Permission::UpdateDocuments,
-        ProjectWsMessage::DocumentCreated(_) => Permission::CreateDocuments,
-        ProjectWsMessage::DocumentDeleted(_) => Permission::DeleteDocuments,
+        WorkspaceWsMessage::DocumentUpdate(_) => Permission::UpdateDocuments,
+        WorkspaceWsMessage::DocumentCreated(_) => Permission::CreateDocuments,
+        WorkspaceWsMessage::DocumentDeleted(_) => Permission::DeleteDocuments,
 
         // File events - require appropriate file permissions
-        ProjectWsMessage::FileProcessed(_) | ProjectWsMessage::FileVerified(_) => {
+        WorkspaceWsMessage::FileProcessed(_) | WorkspaceWsMessage::FileVerified(_) => {
             Permission::ViewFiles
         }
-        ProjectWsMessage::FileRedacted(_) => Permission::DeleteFiles,
+        WorkspaceWsMessage::FileRedacted(_) => Permission::DeleteFiles,
 
         // Member management - require InviteMembers/RemoveMembers permission
-        ProjectWsMessage::MemberAdded(_) => Permission::InviteMembers,
-        ProjectWsMessage::MemberRemoved(_) => Permission::RemoveMembers,
+        WorkspaceWsMessage::MemberAdded(_) => Permission::InviteMembers,
+        WorkspaceWsMessage::MemberRemoved(_) => Permission::RemoveMembers,
 
-        // Project settings - require UpdateProject permission
-        ProjectWsMessage::ProjectUpdated(_) => Permission::UpdateProject,
+        // Workspace settings - require UpdateWorkspace permission
+        WorkspaceWsMessage::WorkspaceUpdated(_) => Permission::UpdateWorkspace,
 
         // System events - always allowed (sent by server)
-        ProjectWsMessage::Join(_) | ProjectWsMessage::Leave(_) | ProjectWsMessage::Error(_) => {
+        WorkspaceWsMessage::Join(_) | WorkspaceWsMessage::Leave(_) | WorkspaceWsMessage::Error(_) => {
             return Ok(());
         }
     };
 
-    // Fetch project membership directly
-    use nvisy_postgres::query::ProjectMemberRepository;
+    // Fetch workspace membership directly
+    use nvisy_postgres::query::WorkspaceMemberRepository;
 
     let member = conn
-        .find_project_member(ctx.project_id, ctx.account_id)
+        .find_workspace_member(ctx.workspace_id, ctx.account_id)
         .await?;
 
     // Check if member exists and has the required permission
@@ -180,7 +180,7 @@ async fn check_event_permission(
             tracing::debug!(
                 target: TRACING_TARGET,
                 account_id = %ctx.account_id,
-                project_id = %ctx.project_id,
+                workspace_id = %ctx.workspace_id,
                 required_permission = ?permission,
                 current_role = ?m.member_role,
                 "insufficient permissions for event"
@@ -194,10 +194,10 @@ async fn check_event_permission(
             tracing::debug!(
                 target: TRACING_TARGET,
                 account_id = %ctx.account_id,
-                project_id = %ctx.project_id,
-                "not a member of project"
+                workspace_id = %ctx.workspace_id,
+                "not a member of workspace"
             );
-            Err(ErrorKind::Forbidden.with_context("Not a project member"))
+            Err(ErrorKind::Forbidden.with_context("Not a workspace member"))
         }
     }
 }
@@ -206,7 +206,7 @@ async fn check_event_permission(
 async fn process_client_message(
     ctx: &WsContext,
     msg: Message,
-    publisher: &ProjectEventPublisher,
+    publisher: &WorkspaceEventPublisher,
     conn: &mut nvisy_postgres::PgConn,
     metrics: &ConnectionMetrics,
 ) -> ControlFlow<(), ()> {
@@ -225,7 +225,7 @@ async fn process_client_message(
                 "received text message"
             );
 
-            match serde_json::from_str::<ProjectWsMessage>(&text) {
+            match serde_json::from_str::<WorkspaceWsMessage>(&text) {
                 Ok(ws_msg) => {
                     handle_client_message(ctx, ws_msg, publisher, conn, metrics).await;
                     ControlFlow::Continue(())
@@ -301,8 +301,8 @@ async fn process_client_message(
 /// Handles parsed messages from the client with permission checking.
 async fn handle_client_message(
     ctx: &WsContext,
-    msg: ProjectWsMessage,
-    publisher: &ProjectEventPublisher,
+    msg: WorkspaceWsMessage,
+    publisher: &WorkspaceEventPublisher,
     conn: &mut nvisy_postgres::PgConn,
     metrics: &ConnectionMetrics,
 ) {
@@ -322,7 +322,7 @@ async fn handle_client_message(
     }
 
     match &msg {
-        ProjectWsMessage::Typing(_) => {
+        WorkspaceWsMessage::Typing(_) => {
             tracing::trace!(
                 target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
@@ -330,9 +330,9 @@ async fn handle_client_message(
             );
 
             // Publish with fresh timestamp
-            let msg_with_ts = ProjectWsMessage::typing(ctx.account_id, None);
+            let msg_with_ts = WorkspaceWsMessage::typing(ctx.account_id, None);
 
-            if let Err(e) = publisher.publish_message(ctx.project_id, msg_with_ts).await {
+            if let Err(e) = publisher.publish_message(ctx.workspace_id, msg_with_ts).await {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
@@ -344,16 +344,16 @@ async fn handle_client_message(
                 metrics.increment_published();
             }
         }
-        ProjectWsMessage::DocumentUpdate(_)
-        | ProjectWsMessage::DocumentCreated(_)
-        | ProjectWsMessage::DocumentDeleted(_)
-        | ProjectWsMessage::FileProcessed(_)
-        | ProjectWsMessage::FileRedacted(_)
-        | ProjectWsMessage::FileVerified(_)
-        | ProjectWsMessage::MemberPresence(_)
-        | ProjectWsMessage::MemberAdded(_)
-        | ProjectWsMessage::MemberRemoved(_)
-        | ProjectWsMessage::ProjectUpdated(_) => {
+        WorkspaceWsMessage::DocumentUpdate(_)
+        | WorkspaceWsMessage::DocumentCreated(_)
+        | WorkspaceWsMessage::DocumentDeleted(_)
+        | WorkspaceWsMessage::FileProcessed(_)
+        | WorkspaceWsMessage::FileRedacted(_)
+        | WorkspaceWsMessage::FileVerified(_)
+        | WorkspaceWsMessage::MemberPresence(_)
+        | WorkspaceWsMessage::MemberAdded(_)
+        | WorkspaceWsMessage::MemberRemoved(_)
+        | WorkspaceWsMessage::WorkspaceUpdated(_) => {
             tracing::debug!(
                 target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
@@ -361,7 +361,7 @@ async fn handle_client_message(
                 "publishing event to NATS"
             );
 
-            if let Err(e) = publisher.publish_message(ctx.project_id, msg).await {
+            if let Err(e) = publisher.publish_message(ctx.workspace_id, msg).await {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
@@ -373,7 +373,7 @@ async fn handle_client_message(
                 metrics.increment_published();
             }
         }
-        ProjectWsMessage::Join(_) | ProjectWsMessage::Leave(_) | ProjectWsMessage::Error(_) => {
+        WorkspaceWsMessage::Join(_) | WorkspaceWsMessage::Leave(_) | WorkspaceWsMessage::Error(_) => {
             tracing::debug!(
                 target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
@@ -394,22 +394,22 @@ async fn handle_client_message(
 /// 4. Spawns separate tasks for sending and receiving
 /// 5. Uses `tokio::select!` to handle whichever task completes first
 /// 6. Publishes a leave message and cleans up
-async fn handle_project_websocket(
+async fn handle_workspace_websocket(
     socket: WebSocket,
-    project_id: Uuid,
+    workspace_id: Uuid,
     account_id: Uuid,
     nats_client: NatsClient,
     pg_client: PgClient,
 ) {
     let start_time = std::time::Instant::now();
-    let ctx = WsContext::new(project_id, account_id);
+    let ctx = WsContext::new(workspace_id, account_id);
     let metrics = ConnectionMetrics::new();
 
     tracing::info!(
         target: TRACING_TARGET,
         connection_id = %ctx.connection_id,
         account_id = %ctx.account_id,
-        project_id = %ctx.project_id,
+        workspace_id = %ctx.workspace_id,
         "websocket connection established"
     );
 
@@ -455,7 +455,7 @@ async fn handle_project_websocket(
     let jetstream = nats_client.jetstream();
 
     // Create publisher for this connection
-    let publisher = match ProjectEventPublisher::new(jetstream).await {
+    let publisher = match WorkspaceEventPublisher::new(jetstream).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(
@@ -470,10 +470,10 @@ async fn handle_project_websocket(
 
     // Create subscriber with unique consumer name for this connection
     let consumer_name = format!("ws-{}", ctx.connection_id);
-    let subscriber = match ProjectEventSubscriber::new_for_project(
+    let subscriber = match WorkspaceEventSubscriber::new_for_workspace(
         jetstream,
         &consumer_name,
-        project_id,
+        workspace_id,
     )
     .await
     {
@@ -514,10 +514,10 @@ async fn handle_project_websocket(
     let (mut sender, mut receiver) = socket.split();
 
     // Create and publish join message
-    let join_msg = ProjectWsMessage::join(ctx.account_id, display_name);
+    let join_msg = WorkspaceWsMessage::join(ctx.account_id, display_name);
 
     if let Err(e) = publisher
-        .publish_message(ctx.project_id, join_msg.clone())
+        .publish_message(ctx.workspace_id, join_msg.clone())
         .await
     {
         tracing::error!(
@@ -709,8 +709,8 @@ async fn handle_project_websocket(
     }
 
     // Publish leave message
-    let leave_msg = ProjectWsMessage::leave(ctx.account_id);
-    if let Err(e) = publisher.publish_message(ctx.project_id, leave_msg).await {
+    let leave_msg = WorkspaceWsMessage::leave(ctx.account_id);
+    if let Err(e) = publisher.publish_message(ctx.workspace_id, leave_msg).await {
         tracing::warn!(
             target: TRACING_TARGET,
             connection_id = %ctx.connection_id,
@@ -726,7 +726,7 @@ async fn handle_project_websocket(
         target: TRACING_TARGET,
         connection_id = %ctx.connection_id,
         account_id = %ctx.account_id,
-        project_id = %ctx.project_id,
+        workspace_id = %ctx.workspace_id,
         duration_ms = duration.as_millis(),
         messages_sent = final_metrics.sent,
         messages_received = final_metrics.received,
@@ -737,58 +737,58 @@ async fn handle_project_websocket(
     );
 }
 
-/// Establishes a WebSocket connection for a project.
+/// Establishes a WebSocket connection for a workspace.
 #[tracing::instrument(skip_all, fields(
     account_id = %auth_claims.account_id,
-    project_id = %path_params.project_id
+    workspace_id = %path_params.workspace_id
 ))]
-async fn project_websocket_handler(
+async fn workspace_websocket_handler(
     PgPool(mut conn): PgPool,
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     AuthState(auth_claims): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     ws: WebSocketUpgrade,
 ) -> Result<Response> {
-    let project_id = path_params.project_id;
+    let workspace_id = path_params.workspace_id;
     let account_id = auth_claims.account_id;
 
     tracing::debug!(
         target: TRACING_TARGET,
         account_id = %account_id,
-        project_id = %project_id,
+        workspace_id = %workspace_id,
         "websocket connection requested"
     );
 
-    // Verify project exists and user has basic access
+    // Verify workspace exists and user has basic access
 
     // Check if user has minimum permission to view documents
     auth_claims
-        .authorize_project(&mut conn, project_id, Permission::ViewDocuments)
+        .authorize_workspace(&mut conn, workspace_id, Permission::ViewDocuments)
         .await?;
 
-    // Verify the project exists
-    if conn.find_project_by_id(project_id).await?.is_none() {
-        return Err(ErrorKind::NotFound.with_resource("project"));
+    // Verify the workspace exists
+    if conn.find_workspace_by_id(workspace_id).await?.is_none() {
+        return Err(ErrorKind::NotFound.with_resource("workspace"));
     }
 
     tracing::info!(
         target: TRACING_TARGET,
         account_id = %account_id,
-        project_id = %project_id,
+        workspace_id = %workspace_id,
         "websocket upgrade authorized"
     );
 
     // Upgrade the connection to WebSocket
     Ok(ws.on_upgrade(move |socket| {
-        handle_project_websocket(socket, project_id, account_id, nats_client, pg_client)
+        handle_workspace_websocket(socket, workspace_id, account_id, nats_client, pg_client)
     }))
 }
 
-fn project_websocket_handler_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Connect to project WebSocket")
+fn workspace_websocket_handler_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Connect to workspace WebSocket")
         .description(
-            "Establishes a WebSocket connection for real-time project events and collaboration.",
+            "Establishes a WebSocket connection for real-time workspace events and collaboration.",
         )
         .response::<101, ()>()
         .response::<401, Json<ErrorResponse>>()
@@ -796,7 +796,7 @@ fn project_websocket_handler_docs(op: TransformOperation) -> TransformOperation 
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Returns a [`Router`] with WebSocket routes for projects.
+/// Returns a [`Router`] with WebSocket routes for workspaces.
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
@@ -804,8 +804,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/{project_id}/ws/",
-            get_with(project_websocket_handler, project_websocket_handler_docs),
+            "/workspaces/{workspace_id}/ws/",
+            get_with(workspace_websocket_handler, workspace_websocket_handler_docs),
         )
         .with_path_items(|item| item.tag("WebSocket"))
 }

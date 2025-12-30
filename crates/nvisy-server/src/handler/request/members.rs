@@ -1,6 +1,6 @@
-//! Project member request types.
+//! Workspace member request types.
 
-use nvisy_postgres::types::ProjectRole;
+use nvisy_postgres::types::WorkspaceRole;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -11,13 +11,13 @@ use validator::Validate;
 #[serde(rename_all = "camelCase")]
 pub struct UpdateMemberRole {
     /// New role for the member.
-    pub role: ProjectRole,
+    pub role: WorkspaceRole,
 }
 
 impl UpdateMemberRole {
     /// Converts to database model.
-    pub fn into_model(self) -> nvisy_postgres::model::UpdateProjectMember {
-        nvisy_postgres::model::UpdateProjectMember {
+    pub fn into_model(self) -> nvisy_postgres::model::UpdateWorkspaceMember {
+        nvisy_postgres::model::UpdateWorkspaceMember {
             member_role: Some(self.role),
             ..Default::default()
         }

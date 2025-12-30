@@ -1,12 +1,12 @@
-//! Project invite request types.
+//! Workspace invite request types.
 
-use nvisy_postgres::types::ProjectRole;
+use nvisy_postgres::types::WorkspaceRole;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-/// Request payload for creating a new project invite.
+/// Request payload for creating a new workspace invite.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -18,7 +18,7 @@ pub struct CreateInvite {
 
     /// Role the invitee will have if they accept the invitation.
     #[serde(default)]
-    pub invited_role: ProjectRole,
+    pub invited_role: WorkspaceRole,
 
     /// When the invitation expires.
     #[serde(default)]
@@ -29,12 +29,12 @@ impl CreateInvite {
     /// Converts to database model.
     pub fn into_model(
         self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         invitee_id: Option<Uuid>,
         created_by: Uuid,
-    ) -> nvisy_postgres::model::NewProjectInvite {
-        nvisy_postgres::model::NewProjectInvite {
-            project_id,
+    ) -> nvisy_postgres::model::NewWorkspaceInvite {
+        nvisy_postgres::model::NewWorkspaceInvite {
+            workspace_id,
             invitee_id,
             invited_role: Some(self.invited_role),
             expires_at: self.expires.to_expiry_timestamp().map(Into::into),
@@ -45,7 +45,7 @@ impl CreateInvite {
     }
 }
 
-/// Request to respond to a project invitation.
+/// Request to respond to a workspace invitation.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -88,14 +88,14 @@ impl InviteExpiration {
     }
 }
 
-/// Request to generate a shareable invite code for a project.
+/// Request to generate a shareable invite code for a workspace.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateInviteCode {
     /// Role to assign when someone joins via this invite code.
     #[serde(default)]
-    pub role: ProjectRole,
+    pub role: WorkspaceRole,
 
     /// When the invite code expires.
     #[serde(default)]
@@ -106,11 +106,11 @@ impl GenerateInviteCode {
     /// Converts to database model.
     pub fn into_model(
         self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         created_by: Uuid,
-    ) -> nvisy_postgres::model::NewProjectInvite {
-        nvisy_postgres::model::NewProjectInvite {
-            project_id,
+    ) -> nvisy_postgres::model::NewWorkspaceInvite {
+        nvisy_postgres::model::NewWorkspaceInvite {
+            workspace_id,
             invitee_id: None,
             invited_role: Some(self.role),
             expires_at: self.expires.to_expiry_timestamp().map(Into::into),

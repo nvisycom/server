@@ -77,7 +77,7 @@ pub struct DownloadArchivedFilesRequest {
     #[serde(default)]
     pub format: ArchiveFormat,
 
-    /// Optional specific file IDs (if None, downloads all project files).
+    /// Optional specific file IDs (if None, downloads all workspace files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_ids: Option<Vec<Uuid>>,
 }

@@ -17,7 +17,7 @@ CREATE TABLE documents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    project_id      UUID             NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    workspace_id      UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Core attributes
@@ -51,8 +51,8 @@ CREATE TABLE documents (
 SELECT setup_updated_at('documents');
 
 -- Create indexes for documents
-CREATE INDEX documents_project_status_idx
-    ON documents (project_id, status, created_at DESC)
+CREATE INDEX documents_workspace_status_idx
+    ON documents (workspace_id, status, created_at DESC)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX documents_account_recent_idx
@@ -72,7 +72,7 @@ COMMENT ON TABLE documents IS
     'Document containers for organizing and managing file collections with metadata and settings.';
 
 COMMENT ON COLUMN documents.id IS 'Unique document identifier';
-COMMENT ON COLUMN documents.project_id IS 'Parent project reference';
+COMMENT ON COLUMN documents.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN documents.account_id IS 'Creating account reference';
 COMMENT ON COLUMN documents.display_name IS 'Human-readable document name (1-255 chars)';
 COMMENT ON COLUMN documents.description IS 'Document description (up to 2048 chars)';
@@ -136,7 +136,7 @@ CREATE TABLE document_files (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    project_id              UUID             NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    workspace_id              UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     document_id             UUID             DEFAULT NULL REFERENCES documents (id) ON DELETE CASCADE,
     account_id              UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     parent_id               UUID             DEFAULT NULL REFERENCES document_files (id) ON DELETE SET NULL,
@@ -246,7 +246,7 @@ COMMENT ON TABLE document_files IS
     'Source files for document processing with pipeline management and security scanning.';
 
 COMMENT ON COLUMN document_files.id IS 'Unique file identifier';
-COMMENT ON COLUMN document_files.project_id IS 'Parent project reference (required)';
+COMMENT ON COLUMN document_files.workspace_id IS 'Parent workspace reference (required)';
 COMMENT ON COLUMN document_files.document_id IS 'Parent document reference (optional)';
 COMMENT ON COLUMN document_files.account_id IS 'Uploading account reference';
 COMMENT ON COLUMN document_files.display_name IS 'Display name (1-255 chars)';
@@ -487,14 +487,14 @@ SELECT
     d.id,
     d.display_name,
     d.status,
-    d.project_id,
+    d.workspace_id,
     COUNT(df.id) FILTER (WHERE df.deleted_at IS NULL) AS input_files_count,
     d.created_at,
     d.updated_at
 FROM documents d
     LEFT JOIN document_files df ON d.id = df.document_id
 WHERE d.deleted_at IS NULL
-GROUP BY d.id, d.display_name, d.status, d.project_id, d.created_at, d.updated_at;
+GROUP BY d.id, d.display_name, d.status, d.workspace_id, d.created_at, d.updated_at;
 
 COMMENT ON VIEW document_processing_summary IS
     'Overview of document processing status, metrics, and costs.';
@@ -505,7 +505,7 @@ SELECT
     df.id,
     df.document_id,
     d.display_name AS document_name,
-    d.project_id,
+    d.workspace_id,
     df.display_name AS file_name,
     df.require_mode,
     df.processing_priority,

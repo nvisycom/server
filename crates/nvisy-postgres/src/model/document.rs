@@ -7,15 +7,15 @@ use uuid::Uuid;
 use crate::schema::documents;
 use crate::types::{DocumentStatus, HasCreatedAt, HasDeletedAt, HasUpdatedAt, Tags};
 
-/// Main document model representing a document within a project.
+/// Main document model representing a document within a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = documents)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Document {
     /// Unique document identifier.
     pub id: Uuid,
-    /// Reference to the project this document belongs to.
-    pub project_id: Uuid,
+    /// Reference to the workspace this document belongs to.
+    pub workspace_id: Uuid,
     /// Reference to the account that owns this document.
     pub account_id: Uuid,
     /// Human-readable document name.
@@ -43,8 +43,8 @@ pub struct Document {
 #[diesel(table_name = documents)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocument {
-    /// Project ID.
-    pub project_id: Uuid,
+    /// Workspace ID.
+    pub workspace_id: Uuid,
     /// Account ID.
     pub account_id: Uuid,
     /// Document name.

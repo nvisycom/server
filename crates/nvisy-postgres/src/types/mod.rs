@@ -10,15 +10,15 @@ pub use constraints::{
     AccountNotificationConstraints, ConstraintCategory, ConstraintViolation,
     DocumentAnnotationConstraints, DocumentChunkConstraints, DocumentCommentConstraints,
     DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
-    ProjectActivitiesConstraints, ProjectConstraints, ProjectIntegrationConstraints,
-    ProjectInviteConstraints, ProjectMemberConstraints, ProjectRunConstraints,
-    ProjectWebhookConstraints,
+    WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceRunConstraints,
+    WorkspaceWebhookConstraints,
 };
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, ApiTokenType, ContentSegmentation,
     DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus, NotificationType,
-    ProcessingStatus, ProjectRole, ProjectStatus, ProjectVisibility, RequireMode, VirusScanStatus,
-    WebhookStatus,
+    ProcessingStatus, RequireMode, VirusScanStatus, WebhookStatus, WorkspaceRole, WorkspaceStatus,
+    WorkspaceVisibility,
 };
 pub use utilities::{
     HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext, HasLastActivityAt,

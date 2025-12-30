@@ -139,7 +139,7 @@ impl AccountNotification {
             self.notify_type,
             NotificationType::CommentMention
                 | NotificationType::CommentReply
-                | NotificationType::ProjectInvite
+                | NotificationType::WorkspaceInvite
         )
     }
 
@@ -162,7 +162,7 @@ impl AccountNotification {
     pub fn requires_action(&self) -> bool {
         matches!(
             self.notify_type,
-            NotificationType::ProjectInvite | NotificationType::SystemAnnouncement
+            NotificationType::WorkspaceInvite | NotificationType::SystemAnnouncement
         )
     }
 

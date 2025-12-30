@@ -224,9 +224,6 @@ pub struct AnnotationSet {
     /// Source document or content ID.
     pub source_id: Option<Uuid>,
 
-    /// Processing pipeline or workflow that created these annotations.
-    pub pipeline: Option<String>,
-
     /// Timestamp when this set was created.
     pub created_at: jiff::Timestamp,
 
@@ -495,7 +492,6 @@ impl AnnotationSet {
             id: Uuid::new_v4(),
             annotations: Vec::new(),
             source_id: None,
-            pipeline: None,
             created_at: jiff::Timestamp::now(),
             metadata: HashMap::new(),
         }

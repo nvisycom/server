@@ -1,15 +1,15 @@
-//! Project webhook request types.
+//! Workspace webhook request types.
 //!
-//! This module provides request DTOs for project webhook management including
+//! This module provides request DTOs for workspace webhook management including
 //! creation and updates.
 
-use nvisy_postgres::model::{NewProjectWebhook, UpdateProjectWebhook as UpdateProjectWebhookModel};
+use nvisy_postgres::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-/// Request payload for creating a new project webhook.
+/// Request payload for creating a new workspace webhook.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -43,18 +43,18 @@ pub struct CreateWebhook {
 }
 
 impl CreateWebhook {
-    /// Converts this request into a [`NewProjectWebhook`] model.
+    /// Converts this request into a [`NewWorkspaceWebhook`] model.
     ///
     /// # Arguments
     ///
-    /// * `project_id` - The project this webhook belongs to.
+    /// * `workspace_id` - The workspace this webhook belongs to.
     /// * `account_id` - The account creating the webhook.
     #[inline]
-    pub fn into_model(self, project_id: Uuid, account_id: Uuid) -> NewProjectWebhook {
+    pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewWorkspaceWebhook {
         let events = self.events.into_iter().map(Some).collect();
 
-        NewProjectWebhook {
-            project_id,
+        NewWorkspaceWebhook {
+            workspace_id,
             display_name: self.display_name,
             description: self.description,
             url: self.url,
@@ -68,7 +68,7 @@ impl CreateWebhook {
     }
 }
 
-/// Request payload for updating an existing project webhook.
+/// Request payload for updating an existing workspace webhook.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -101,12 +101,12 @@ pub struct UpdateWebhook {
 }
 
 impl UpdateWebhook {
-    /// Converts this request into an [`UpdateProjectWebhookModel`].
+    /// Converts this request into an [`UpdateWorkspaceWebhookModel`].
     #[inline]
-    pub fn into_model(self) -> UpdateProjectWebhookModel {
+    pub fn into_model(self) -> UpdateWorkspaceWebhookModel {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
 
-        UpdateProjectWebhookModel {
+        UpdateWorkspaceWebhookModel {
             display_name: self.display_name,
             description: self.description,
             url: self.url,

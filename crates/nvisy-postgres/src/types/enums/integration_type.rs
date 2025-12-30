@@ -1,4 +1,4 @@
-//! Integration type enumeration for categorizing project integrations.
+//! Integration type enumeration for categorizing workspace integrations.
 
 use diesel_derive_enum::DbEnum;
 #[cfg(feature = "schema")]
@@ -6,10 +6,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the type/category of a project integration.
+/// Defines the type/category of a workspace integration.
 ///
 /// This enumeration corresponds to the `INTEGRATION_TYPE` PostgreSQL enum and is used
-/// to categorize different types of third-party integrations that can be connected to projects.
+/// to categorize different types of third-party integrations that can be connected to workspaces.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]

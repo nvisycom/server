@@ -13,24 +13,24 @@ use crate::Result;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize)]
 pub struct ObjectKeyData {
-    /// Unique identifier for the project
-    project_uuid: Uuid,
+    /// Unique identifier for the workspace
+    workspace_uuid: Uuid,
     /// Unique identifier for the file
     file_uuid: Uuid,
 }
 
 impl ObjectKeyData {
     /// Creates a new ObjectKeyData with required fields.
-    pub fn new(project_uuid: Uuid, file_uuid: Uuid) -> Self {
+    pub fn new(workspace_uuid: Uuid, file_uuid: Uuid) -> Self {
         Self {
-            project_uuid,
+            workspace_uuid,
             file_uuid,
         }
     }
 
-    /// Get the project UUID
-    pub fn project_uuid(&self) -> Uuid {
-        self.project_uuid
+    /// Get the workspace UUID
+    pub fn workspace_uuid(&self) -> Uuid {
+        self.workspace_uuid
     }
 
     /// Get the file UUID
@@ -43,9 +43,9 @@ impl ObjectKeyData {
         ObjectKey::from_data(self)
     }
 
-    /// Creates a prefix for listing objects under a project
-    pub fn create_prefix(project_uuid: Uuid) -> String {
-        format!("{}/", project_uuid)
+    /// Creates a prefix for listing objects under a workspace
+    pub fn create_prefix(workspace_uuid: Uuid) -> String {
+        format!("{}/", workspace_uuid)
     }
 }
 
@@ -56,43 +56,43 @@ mod tests {
 
     #[test]
     fn test_object_key_data_creation() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
 
-        assert_eq!(data.project_uuid(), project_uuid);
+        assert_eq!(data.workspace_uuid(), workspace_uuid);
         assert_eq!(data.file_uuid(), file_uuid);
     }
 
     #[test]
     fn test_build_with_stage() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
         let key = data.build::<InputFiles>().unwrap();
 
-        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+        assert_eq!(key.workspace_uuid().unwrap(), workspace_uuid);
         assert_eq!(key.file_uuid().unwrap(), file_uuid);
     }
 
     #[test]
     fn test_prefix_utilities() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
 
-        let prefix = ObjectKeyData::create_prefix(project_uuid);
-        assert_eq!(prefix, format!("{}/", project_uuid));
+        let prefix = ObjectKeyData::create_prefix(workspace_uuid);
+        assert_eq!(prefix, format!("{}/", workspace_uuid));
     }
 
     #[test]
     fn test_build_key_with_version() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
         // Test key building
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
         let key = data.build::<InputFiles>().unwrap();
-        assert_eq!(key.as_str(), format!("{}/{}", project_uuid, file_uuid));
+        assert_eq!(key.as_str(), format!("{}/{}", workspace_uuid, file_uuid));
     }
 }

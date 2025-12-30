@@ -44,9 +44,9 @@ pub struct CreateDocument {
 
 impl CreateDocument {
     /// Converts this request into a database model.
-    pub fn into_model(self, project_id: Uuid, account_id: Uuid) -> NewDocument {
+    pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewDocument {
         NewDocument {
-            project_id,
+            workspace_id,
             account_id,
             display_name: Some(self.display_name),
             description: self.description,
@@ -152,8 +152,8 @@ pub struct SearchDocuments {
     /// Search in content.
     pub search_in_content: Option<bool>,
 
-    /// Project ID filter.
-    pub project_id: Option<Uuid>,
+    /// Workspace ID filter.
+    pub workspace_id: Option<Uuid>,
 
     /// Author ID filter.
     pub author_id: Option<Uuid>,

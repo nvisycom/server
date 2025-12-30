@@ -18,8 +18,8 @@ use crate::types::{
 pub struct DocumentFile {
     /// Unique file identifier.
     pub id: Uuid,
-    /// Reference to the project this file belongs to (required).
-    pub project_id: Uuid,
+    /// Reference to the workspace this file belongs to (required).
+    pub workspace_id: Uuid,
     /// Reference to the document this file belongs to (optional).
     pub document_id: Option<Uuid>,
     /// Reference to the account that owns this file.
@@ -75,8 +75,8 @@ pub struct DocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentFile {
-    /// Project ID (required).
-    pub project_id: Uuid,
+    /// Workspace ID (required).
+    pub workspace_id: Uuid,
     /// Document ID (optional).
     pub document_id: Option<Uuid>,
     /// Account ID.
@@ -126,7 +126,7 @@ pub struct NewDocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateDocumentFile {
-    // Note: project_id is required and should not be updated after creation
+    // Note: workspace_id is required and should not be updated after creation
     /// Document ID
     pub document_id: Option<Option<Uuid>>,
     /// Display name

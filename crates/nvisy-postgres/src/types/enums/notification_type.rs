@@ -41,10 +41,10 @@ pub enum NotificationType {
     #[serde(rename = "document_verify")]
     DocumentVerify,
 
-    /// User was invited to a project
-    #[db_rename = "project_invite"]
-    #[serde(rename = "project_invite")]
-    ProjectInvite,
+    /// User was invited to a workspace
+    #[db_rename = "workspace_invite"]
+    #[serde(rename = "workspace_invite")]
+    WorkspaceInvite,
 
     /// System-wide announcement
     #[db_rename = "system_announcement"]
@@ -60,7 +60,7 @@ impl NotificationType {
             self,
             NotificationType::CommentMention
                 | NotificationType::CommentReply
-                | NotificationType::ProjectInvite
+                | NotificationType::WorkspaceInvite
         )
     }
 

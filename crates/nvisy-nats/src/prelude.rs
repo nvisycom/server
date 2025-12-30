@@ -30,7 +30,7 @@ pub use crate::object::{
 // Stream types
 pub use crate::stream::{
     DocumentJob, DocumentJobPublisher, DocumentJobSubscriber, EventStatus, ProcessingStatus,
-    ProjectEvent, ProjectEventPublisher, ProjectEventSubscriber, StreamPublisher, StreamSubscriber,
+    WorkspaceEvent, WorkspaceEventPublisher, WorkspaceEventSubscriber, StreamPublisher, StreamSubscriber,
 };
 // Error types
 pub use crate::{Error, Result};

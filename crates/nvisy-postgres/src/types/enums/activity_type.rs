@@ -1,4 +1,4 @@
-//! Activity type enumeration for project audit logging.
+//! Activity type enumeration for workspace audit logging.
 
 use diesel_derive_enum::DbEnum;
 #[cfg(feature = "schema")]
@@ -6,64 +6,64 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the type of activity performed in a project for audit logging.
+/// Defines the type of activity performed in a workspace for audit logging.
 ///
 /// This enumeration corresponds to the `ACTIVITY_TYPE` PostgreSQL enum and is used
-/// to categorize different types of activities that occur within projects for comprehensive
+/// to categorize different types of activities that occur within workspaces for comprehensive
 /// audit trail and activity tracking.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ActivityType"]
 pub enum ActivityType {
-    // Project activities
-    /// Project was created
-    #[db_rename = "project:created"]
-    #[serde(rename = "project:created")]
-    ProjectCreated,
+    // Workspace activities
+    /// Workspace was created
+    #[db_rename = "workspace:created"]
+    #[serde(rename = "workspace:created")]
+    WorkspaceCreated,
 
-    /// Project settings or metadata were updated
-    #[db_rename = "project:updated"]
-    #[serde(rename = "project:updated")]
-    ProjectUpdated,
+    /// Workspace settings or metadata were updated
+    #[db_rename = "workspace:updated"]
+    #[serde(rename = "workspace:updated")]
+    WorkspaceUpdated,
 
-    /// Project was deleted
-    #[db_rename = "project:deleted"]
-    #[serde(rename = "project:deleted")]
-    ProjectDeleted,
+    /// Workspace was deleted
+    #[db_rename = "workspace:deleted"]
+    #[serde(rename = "workspace:deleted")]
+    WorkspaceDeleted,
 
-    /// Project was archived
-    #[db_rename = "project:archived"]
-    #[serde(rename = "project:archived")]
-    ProjectArchived,
+    /// Workspace was archived
+    #[db_rename = "workspace:archived"]
+    #[serde(rename = "workspace:archived")]
+    WorkspaceArchived,
 
-    /// Project was restored from archived state
-    #[db_rename = "project:restored"]
-    #[serde(rename = "project:restored")]
-    ProjectRestored,
+    /// Workspace was restored from archived state
+    #[db_rename = "workspace:restored"]
+    #[serde(rename = "workspace:restored")]
+    WorkspaceRestored,
 
-    /// Project settings were changed
-    #[db_rename = "project:settings_changed"]
-    #[serde(rename = "project:settings_changed")]
-    ProjectSettingsChanged,
+    /// Workspace settings were changed
+    #[db_rename = "workspace:settings_changed"]
+    #[serde(rename = "workspace:settings_changed")]
+    WorkspaceSettingsChanged,
 
-    /// Project was exported
-    #[db_rename = "project:exported"]
-    #[serde(rename = "project:exported")]
-    ProjectExported,
+    /// Workspace was exported
+    #[db_rename = "workspace:exported"]
+    #[serde(rename = "workspace:exported")]
+    WorkspaceExported,
 
-    /// Project was imported
-    #[db_rename = "project:imported"]
-    #[serde(rename = "project:imported")]
-    ProjectImported,
+    /// Workspace was imported
+    #[db_rename = "workspace:imported"]
+    #[serde(rename = "workspace:imported")]
+    WorkspaceImported,
 
     // Member activities
-    /// Member was added to the project
+    /// Member was added to the workspace
     #[db_rename = "member:added"]
     #[serde(rename = "member:added")]
     MemberAdded,
 
-    /// Member was kicked from the project
+    /// Member was kicked from the workspace
     #[db_rename = "member:kicked"]
     #[serde(rename = "member:kicked")]
     MemberKicked,
@@ -73,7 +73,7 @@ pub enum ActivityType {
     #[serde(rename = "member:updated")]
     MemberUpdated,
 
-    /// Member was invited to the project
+    /// Member was invited to the workspace
     #[db_rename = "member:invited"]
     #[serde(rename = "member:invited")]
     MemberInvited,
@@ -240,14 +240,14 @@ impl ActivityType {
     #[inline]
     pub fn category(self) -> ActivityCategory {
         match self {
-            ActivityType::ProjectCreated
-            | ActivityType::ProjectUpdated
-            | ActivityType::ProjectDeleted
-            | ActivityType::ProjectArchived
-            | ActivityType::ProjectRestored
-            | ActivityType::ProjectSettingsChanged
-            | ActivityType::ProjectExported
-            | ActivityType::ProjectImported => ActivityCategory::Project,
+            ActivityType::WorkspaceCreated
+            | ActivityType::WorkspaceUpdated
+            | ActivityType::WorkspaceDeleted
+            | ActivityType::WorkspaceArchived
+            | ActivityType::WorkspaceRestored
+            | ActivityType::WorkspaceSettingsChanged
+            | ActivityType::WorkspaceExported
+            | ActivityType::WorkspaceImported => ActivityCategory::Workspace,
 
             ActivityType::MemberAdded
             | ActivityType::MemberKicked
@@ -296,7 +296,7 @@ impl ActivityType {
     pub fn is_creation(self) -> bool {
         matches!(
             self,
-            ActivityType::ProjectCreated
+            ActivityType::WorkspaceCreated
                 | ActivityType::MemberAdded
                 | ActivityType::MemberInvited
                 | ActivityType::IntegrationCreated
@@ -311,7 +311,7 @@ impl ActivityType {
     pub fn is_deletion(self) -> bool {
         matches!(
             self,
-            ActivityType::ProjectDeleted
+            ActivityType::WorkspaceDeleted
                 | ActivityType::MemberKicked
                 | ActivityType::IntegrationDeleted
                 | ActivityType::WebhookDeleted
@@ -330,8 +330,8 @@ impl ActivityType {
 /// Categories for grouping activity types.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ActivityCategory {
-    /// Project-related activities
-    Project,
+    /// Workspace-related activities
+    Workspace,
     /// Member-related activities
     Member,
     /// Integration-related activities

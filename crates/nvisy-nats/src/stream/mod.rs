@@ -3,8 +3,8 @@
 //! This module provides type-safe streaming capabilities for:
 //!
 //! - Document processing jobs
-//! - Project import/export jobs
-//! - Project event jobs
+//! - Workspace import/export jobs
+//! - Workspace event jobs
 
 // Base types
 mod event;
@@ -16,20 +16,20 @@ mod document_job;
 mod document_job_pub;
 mod document_job_sub;
 
-// Project import
-mod project_import;
-mod project_import_pub;
-mod project_import_sub;
+// Workspace import
+mod workspace_import;
+mod workspace_import_pub;
+mod workspace_import_sub;
 
-// Project export
-mod project_export;
-mod project_export_pub;
-mod project_export_sub;
+// Workspace export
+mod workspace_export;
+mod workspace_export_pub;
+mod workspace_export_sub;
 
-// Project event
-mod project_event;
-mod project_event_pub;
-mod project_event_sub;
+// Workspace event
+mod workspace_event;
+mod workspace_event_pub;
+mod workspace_event_sub;
 
 // Re-export event types
 // Re-export document job types
@@ -43,28 +43,28 @@ pub use document_job_sub::{
 pub use event::{
     CancelledStatus, CompletedStatus, EventPriority, EventStatus, FailedStatus, ProcessingStatus,
 };
-// Re-export project event types (WebSocket real-time communication)
-pub use project_event::{
+// Re-export workspace event types (WebSocket real-time communication)
+pub use workspace_event::{
     DocumentCreatedEvent, DocumentDeletedEvent, DocumentUpdateEvent, ErrorEvent,
     FileProcessedEvent, FileRedactedEvent, FileVerifiedEvent, JoinEvent, LeaveEvent,
-    MemberAddedEvent, MemberPresenceEvent, MemberRemovedEvent, ProjectEvent, ProjectUpdatedEvent,
-    ProjectWsMessage, TypingEvent,
+    MemberAddedEvent, MemberPresenceEvent, MemberRemovedEvent, WorkspaceEvent, WorkspaceUpdatedEvent,
+    WorkspaceWsMessage, TypingEvent,
 };
-pub use project_event_pub::ProjectEventPublisher;
-pub use project_event_sub::{
-    ProjectEventBatchStream, ProjectEventMessage, ProjectEventStream, ProjectEventSubscriber,
+pub use workspace_event_pub::WorkspaceEventPublisher;
+pub use workspace_event_sub::{
+    WorkspaceEventBatchStream, WorkspaceEventMessage, WorkspaceEventStream, WorkspaceEventSubscriber,
 };
-// Re-export project export types
-pub use project_export::{ProjectExportJob, ProjectExportPayload};
-pub use project_export_pub::ProjectExportPublisher;
-pub use project_export_sub::{
-    ProjectExportBatchStream, ProjectExportMessage, ProjectExportStream, ProjectExportSubscriber,
+// Re-export workspace export types
+pub use workspace_export::{WorkspaceExportJob, WorkspaceExportPayload};
+pub use workspace_export_pub::WorkspaceExportPublisher;
+pub use workspace_export_sub::{
+    WorkspaceExportBatchStream, WorkspaceExportMessage, WorkspaceExportStream, WorkspaceExportSubscriber,
 };
-// Re-export project import types
-pub use project_import::{ProjectImportJob, ProjectImportPayload};
-pub use project_import_pub::ProjectImportPublisher;
-pub use project_import_sub::{
-    ProjectImportBatchStream, ProjectImportMessage, ProjectImportStream, ProjectImportSubscriber,
+// Re-export workspace import types
+pub use workspace_import::{WorkspaceImportJob, WorkspaceImportPayload};
+pub use workspace_import_pub::WorkspaceImportPublisher;
+pub use workspace_import_sub::{
+    WorkspaceImportBatchStream, WorkspaceImportMessage, WorkspaceImportStream, WorkspaceImportSubscriber,
 };
 // Re-export base publisher/subscriber types
 pub use publisher::StreamPublisher;

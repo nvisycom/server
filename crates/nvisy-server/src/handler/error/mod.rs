@@ -5,6 +5,6 @@ mod nats_error;
 mod pg_account;
 mod pg_document;
 mod pg_error;
-mod pg_project;
+mod pg_workspace;
 
 pub use http_error::{Error, ErrorKind, Result};

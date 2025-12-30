@@ -30,12 +30,12 @@ pub trait DocumentFileRepository {
         file_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentFile>>> + Send;
 
-    /// Finds a file by ID within a specific project.
+    /// Finds a file by ID within a specific workspace.
     ///
-    /// Provides project-scoped access control at the database level.
-    fn find_project_file(
+    /// Provides workspace-scoped access control at the database level.
+    fn find_workspace_file(
         &mut self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         file_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentFile>>> + Send;
 
@@ -91,10 +91,10 @@ pub trait DocumentFileRepository {
         file_ids: &[Uuid],
     ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
 
-    /// Finds all files belonging to a specific project.
-    fn find_document_files_by_project(
+    /// Finds all files belonging to a specific workspace.
+    fn find_document_files_by_workspace(
         &mut self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
 
@@ -188,16 +188,16 @@ impl DocumentFileRepository for PgConnection {
         Ok(file)
     }
 
-    async fn find_project_file(
+    async fn find_workspace_file(
         &mut self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         file_id: Uuid,
     ) -> PgResult<Option<DocumentFile>> {
         use schema::document_files::{self, dsl};
 
         let file = document_files::table
             .filter(dsl::id.eq(file_id))
-            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(DocumentFile::as_select())
             .first(self)
@@ -351,15 +351,15 @@ impl DocumentFileRepository for PgConnection {
         Ok(files)
     }
 
-    async fn find_document_files_by_project(
+    async fn find_document_files_by_workspace(
         &mut self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentFile>> {
         use schema::document_files::{self, dsl};
 
         let files = document_files::table
-            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
             .limit(pagination.limit)

@@ -43,8 +43,8 @@ impl<S: DocumentLabel> DocumentFileStore<S> {
     }
 
     /// Create a key for a new file in this store
-    pub fn create_key(&self, project_uuid: Uuid, file_uuid: Uuid) -> ObjectKey<S> {
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+    pub fn create_key(&self, workspace_uuid: Uuid, file_uuid: Uuid) -> ObjectKey<S> {
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
         data.build::<S>()
             .expect("Valid ObjectKeyData should build successfully")
     }
@@ -92,13 +92,13 @@ impl<S: DocumentLabel> DocumentFileStore<S> {
         content_data.with_metadata(metadata).with_headers(headers)
     }
 
-    /// List all files in this store for a specific project
-    pub async fn list_project_files(&self, project_uuid: Uuid) -> Result<Vec<String>> {
+    /// List all files in this store for a specific workspace
+    pub async fn list_workspace_files(&self, workspace_uuid: Uuid) -> Result<Vec<String>> {
         // Get all files in the store
         let all_files = self.store.list().await?;
 
-        // Filter by project
-        let prefix = ObjectKeyData::create_prefix(project_uuid);
+        // Filter by workspace
+        let prefix = ObjectKeyData::create_prefix(workspace_uuid);
 
         Ok(all_files
             .into_iter()
@@ -119,14 +119,14 @@ mod tests {
 
     #[test]
     fn test_create_key() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
 
         let key = data.build::<InputFiles>().unwrap();
 
-        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+        assert_eq!(key.workspace_uuid().unwrap(), workspace_uuid);
         assert_eq!(key.file_uuid().unwrap(), file_uuid);
     }
 

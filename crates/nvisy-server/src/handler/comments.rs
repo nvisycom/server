@@ -258,11 +258,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/{project_id}/files/{file_id}/comments",
+            "/workspaces/{workspace_id}/files/{file_id}/comments",
             post_with(post_comment, post_comment_docs).get_with(list_comments, list_comments_docs),
         )
         .api_route(
-            "/projects/{project_id}/files/{file_id}/comments/{comment_id}",
+            "/workspaces/{workspace_id}/files/{file_id}/comments/{comment_id}",
             patch_with(update_comment, update_comment_docs)
                 .delete_with(delete_comment, delete_comment_docs),
         )

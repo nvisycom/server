@@ -1,8 +1,8 @@
-//! Project file upload and management handlers.
+//! Workspace file upload and management handlers.
 //!
-//! This module provides comprehensive file management functionality for projects,
+//! This module provides comprehensive file management functionality for workspaces,
 //! including upload, download, metadata management, and file operations. All
-//! operations are secured with project-level authorization and include virus
+//! operations are secured with workspace-level authorization and include virus
 //! scanning and content validation.
 
 use std::collections::HashMap;
@@ -16,33 +16,33 @@ use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-use nvisy_postgres::query::{DocumentFileRepository, Pagination, ProjectRepository};
+use nvisy_postgres::query::{DocumentFileRepository, Pagination, WorkspaceRepository};
 use uuid::Uuid;
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson, Version,
 };
 use crate::handler::request::{
-    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ProjectPathParams,
+    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, WorkspacePathParams,
     UpdateFile as UpdateFileRequest,
 };
 use crate::handler::response::{ErrorResponse, File, Files};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
 
-/// Tracing target for project file operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::project_files";
+/// Tracing target for workspace file operations.
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 
 /// Maximum file size: 100MB
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
-/// Finds a file by ID within a project or returns NotFound error.
-async fn find_project_file(
+/// Finds a file by ID within a workspace or returns NotFound error.
+async fn find_workspace_file(
     conn: &mut nvisy_postgres::PgConn,
-    project_id: Uuid,
+    workspace_id: Uuid,
     file_id: Uuid,
 ) -> Result<DocumentFile> {
-    conn.find_project_file(project_id, file_id)
+    conn.find_workspace_file(workspace_id, file_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -51,18 +51,18 @@ async fn find_project_file(
         })
 }
 
-/// Uploads input files to a project for processing.
+/// Uploads input files to a workspace for processing.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn upload_file(
     PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
@@ -71,12 +71,12 @@ async fn upload_file(
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::UploadFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
         .await?;
 
-    // Load project keep_for_sec setting
-    let project_keep_for_sec = conn
-        .find_project_by_id(path_params.project_id)
+    // Load workspace keep_for_sec setting
+    let workspace_keep_for_sec = conn
+        .find_workspace_by_id(path_params.workspace_id)
         .await?
         .and_then(|p| p.keep_for_sec);
 
@@ -149,11 +149,11 @@ async fn upload_file(
 
         // Generate a temporary ID to create the storage path
         let temp_file_id = Uuid::now_v7();
-        let object_key = input_fs.create_key(path_params.project_id, temp_file_id);
+        let object_key = input_fs.create_key(path_params.workspace_id, temp_file_id);
 
         // Create file record in database with storage path
         let file_record = NewDocumentFile {
-            project_id: path_params.project_id,
+            workspace_id: path_params.workspace_id,
             document_id: None,
             account_id: auth_claims.account_id,
             display_name: Some(filename.clone()),
@@ -163,7 +163,7 @@ async fn upload_file(
             storage_path: object_key.as_str().to_string(),
             storage_bucket: Some(InputFiles::bucket_name().to_string()),
             file_hash_sha256: sha256_bytes,
-            keep_for_sec: project_keep_for_sec,
+            keep_for_sec: workspace_keep_for_sec,
             auto_delete_at: None,
             ..Default::default()
         };
@@ -233,7 +233,7 @@ async fn upload_file(
         // Publish file processing job to queue
         let job = nvisy_nats::stream::DocumentJob::new_file_processing(
             created_file.id,
-            path_params.project_id,
+            path_params.workspace_id,
             auth_claims.account_id,
             object_key.as_str().to_string(),
             file_extension.clone(),
@@ -302,7 +302,7 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -316,10 +316,10 @@ async fn update_file(
     tracing::debug!(target: TRACING_TARGET, "Updating file");
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::UpdateFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UpdateFiles)
         .await?;
 
-    let _file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
+    let _file = find_workspace_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     let updates = request.into_model();
 
@@ -355,12 +355,12 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Downloads a project file with streaming support for large files.
+/// Downloads a workspace file with streaming support for large files.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -375,10 +375,10 @@ async fn download_file(
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::DownloadFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DownloadFiles)
         .await?;
 
-    let file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
+    let file = find_workspace_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     // Create object key from storage path
     let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
@@ -451,12 +451,12 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Deletes a project file (soft delete).
+/// Deletes a workspace file (soft delete).
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -469,10 +469,10 @@ async fn delete_file(
     tracing::warn!(target: TRACING_TARGET, "File Deleting");
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::DeleteFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DeleteFiles)
         .await?;
 
-    let _file = find_project_file(&mut conn, path_params.project_id, path_params.file_id).await?;
+    let _file = find_workspace_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     // Soft delete by setting deleted_at timestamp
     let updates = UpdateDocumentFile {
@@ -508,32 +508,32 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn download_multiple_files(
     PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
     State(archive): State<ArchiveService>,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<DownloadMultipleFilesRequest>,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading multiple files as archive");
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::DownloadFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DownloadFiles)
         .await?;
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
 
-    // Batch fetch all requested files that belong to this project
+    // Batch fetch all requested files that belong to this workspace
     let files = conn.find_document_files_by_ids(&request.file_ids).await?;
 
-    // Create a map for quick lookup and verify all files belong to project
+    // Create a map for quick lookup and verify all files belong to workspace
     let files_map: HashMap<Uuid, DocumentFile> = files
         .into_iter()
-        .filter(|f| f.project_id == path_params.project_id && f.deleted_at.is_none())
+        .filter(|f| f.workspace_id == path_params.workspace_id && f.deleted_at.is_none())
         .map(|f| (f.id, f))
         .collect();
 
@@ -576,8 +576,8 @@ async fn download_multiple_files(
     headers.insert(
         "content-disposition",
         format!(
-            "attachment; filename=\"project_{}_files.zip\"",
-            path_params.project_id
+            "attachment; filename=\"workspace_{}_files.zip\"",
+            path_params.workspace_id
         )
         .parse()
         .unwrap(),
@@ -607,16 +607,16 @@ fn download_multiple_files_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Downloads all or specific project files as an archive.
+/// Downloads all or specific workspace files as an archive.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn download_archived_files(
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
     PgPool(mut conn): PgPool,
     State(nats_client): State<NatsClient>,
@@ -626,7 +626,7 @@ async fn download_archived_files(
     tracing::debug!(target: TRACING_TARGET, "Downloading archived files");
 
     auth_claims
-        .authorize_project(&mut conn, path_params.project_id, Permission::DownloadFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DownloadFiles)
         .await?;
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
@@ -636,15 +636,15 @@ async fn download_archived_files(
         // Batch fetch specific files
         conn.find_document_files_by_ids(&specific_ids).await?
     } else {
-        // Get all project files using the project-scoped query
-        conn.find_document_files_by_project(path_params.project_id, Pagination::default())
+        // Get all workspace files using the workspace-scoped query
+        conn.find_document_files_by_workspace(path_params.workspace_id, Pagination::default())
             .await?
     };
 
-    // Filter to only files belonging to this project and not deleted
+    // Filter to only files belonging to this workspace and not deleted
     let valid_files: Vec<_> = files
         .into_iter()
-        .filter(|f| f.project_id == path_params.project_id && f.deleted_at.is_none())
+        .filter(|f| f.workspace_id == path_params.workspace_id && f.deleted_at.is_none())
         .collect();
 
     if valid_files.is_empty() {
@@ -687,8 +687,8 @@ async fn download_archived_files(
     headers.insert(
         "content-disposition",
         format!(
-            "attachment; filename=\"project_{}_archive.{}\"",
-            path_params.project_id, extension
+            "attachment; filename=\"workspace_{}_archive.{}\"",
+            path_params.workspace_id, extension
         )
         .parse()
         .unwrap(),
@@ -702,7 +702,7 @@ async fn download_archived_files(
     tracing::debug!(
         target: TRACING_TARGET,
         file_count = valid_files.len(),
-        "Project files downloaded as archive",
+        "Workspace files downloaded as archive",
     );
 
     Ok((StatusCode::OK, headers, archive_bytes))
@@ -710,7 +710,7 @@ async fn download_archived_files(
 
 fn download_archived_files_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Download archived files")
-        .description("Downloads all or specific project files as a compressed archive. Supports zip and tar.gz formats.")
+        .description("Downloads all or specific workspace files as a compressed archive. Supports zip and tar.gz formats.")
         .response::<200, ()>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -754,21 +754,21 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/{project_id}/files/",
+            "/workspaces/{workspace_id}/files/",
             post_with(upload_file, upload_file_docs),
         )
         .api_route(
-            "/projects/{project_id}/files/{file_id}",
+            "/workspaces/{workspace_id}/files/{file_id}",
             patch_with(update_file, update_file_docs)
                 .get_with(download_file, download_file_docs)
                 .delete_with(delete_file, delete_file_docs),
         )
         .api_route(
-            "/projects/{project_id}/files/download",
+            "/workspaces/{workspace_id}/files/download",
             post_with(download_multiple_files, download_multiple_files_docs),
         )
         .api_route(
-            "/projects/{project_id}/files/archive",
+            "/workspaces/{workspace_id}/files/archive",
             post_with(download_archived_files, download_archived_files_docs),
         )
         .with_path_items(|item| item.tag("Files"))

@@ -29,10 +29,10 @@ pub trait DocumentRepository {
         document_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Document>>> + Send;
 
-    /// Finds documents associated with a specific project.
-    fn find_documents_by_project(
+    /// Finds documents associated with a specific workspace.
+    fn find_documents_by_workspace(
         &mut self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
@@ -59,11 +59,11 @@ pub trait DocumentRepository {
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
-    /// Searches documents by name or description with optional project filtering.
+    /// Searches documents by name or description with optional workspace filtering.
     fn search_documents(
         &mut self,
         search_query: &str,
-        project_id: Option<Uuid>,
+        workspace_id: Option<Uuid>,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
@@ -104,15 +104,15 @@ impl DocumentRepository for PgConnection {
         Ok(document)
     }
 
-    async fn find_documents_by_project(
+    async fn find_documents_by_workspace(
         &mut self,
-        project_id: Uuid,
+        workspace_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
         let documents = documents::table
-            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::updated_at.desc())
             .limit(pagination.limit)
@@ -194,7 +194,7 @@ impl DocumentRepository for PgConnection {
     async fn search_documents(
         &mut self,
         search_query: &str,
-        project_id: Option<Uuid>,
+        workspace_id: Option<Uuid>,
         pagination: Pagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
@@ -213,8 +213,8 @@ impl DocumentRepository for PgConnection {
             .select(Document::as_select())
             .into_boxed();
 
-        if let Some(proj_id) = project_id {
-            query = query.filter(dsl::project_id.eq(proj_id));
+        if let Some(proj_id) = workspace_id {
+            query = query.filter(dsl::workspace_id.eq(proj_id));
         }
 
         let documents = query.load(self).await.map_err(PgError::from)?;

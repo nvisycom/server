@@ -1,28 +1,28 @@
-//! Project integration management handlers.
+//! Workspace integration management handlers.
 //!
-//! This module provides comprehensive project integration management functionality,
-//! allowing project administrators to create, configure, and manage integrations
+//! This module provides comprehensive workspace integration management functionality,
+//! allowing workspace administrators to create, configure, and manage integrations
 //! with external services. All operations are secured with proper authorization
 //! and follow role-based access control principles.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::http::StatusCode;
-use nvisy_postgres::query::ProjectIntegrationRepository;
+use nvisy_postgres::query::WorkspaceIntegrationRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
-    CreateProjectIntegration, IntegrationPathParams, Pagination, ProjectPathParams,
-    UpdateIntegrationCredentials, UpdateProjectIntegration,
+    CreateWorkspaceIntegration, IntegrationPathParams, Pagination, WorkspacePathParams,
+    UpdateIntegrationCredentials, UpdateWorkspaceIntegration,
 };
 use crate::handler::response::{ErrorResponse, Integration, Integrations};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
-/// Tracing target for project integration operations.
+/// Tracing target for workspace integration operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::integrations";
 
-/// Creates a new project integration.
+/// Creates a new workspace integration.
 ///
 /// Creates an integration with an external service. Requires `ManageIntegrations`
 /// permission.
@@ -30,36 +30,36 @@ const TRACING_TARGET: &str = "nvisy_server::handler::integrations";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         integration_type = ?request.integration_type,
     )
 )]
 async fn create_integration(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
-    ValidateJson(request): ValidateJson<CreateProjectIntegration>,
+    Path(path_params): Path<WorkspacePathParams>,
+    ValidateJson(request): ValidateJson<CreateWorkspaceIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(target: TRACING_TARGET, "Creating project integration");
+    tracing::debug!(target: TRACING_TARGET, "Creating workspace integration");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
-    // Check if integration name is already used in this project
+    // Check if integration name is already used in this workspace
     let name_is_unique = conn
-        .is_integration_name_unique(path_params.project_id, &request.integration_name, None)
+        .is_integration_name_unique(path_params.workspace_id, &request.integration_name, None)
         .await?;
 
     if !name_is_unique {
-        return Err(ErrorKind::Conflict.with_message("Integration name already exists in project"));
+        return Err(ErrorKind::Conflict.with_message("Integration name already exists in workspace"));
     }
 
-    let new_integration = request.into_model(path_params.project_id, auth_state.account_id);
+    let new_integration = request.into_model(path_params.workspace_id, auth_state.account_id);
     let integration = conn.create_integration(new_integration).await?;
 
     tracing::info!(
@@ -73,7 +73,7 @@ async fn create_integration(
 
 fn create_integration_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create integration")
-        .description("Creates a new integration with an external service for the project.")
+        .description("Creates a new integration with an external service for the workspace.")
         .response::<201, Json<Integration>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -81,34 +81,34 @@ fn create_integration_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Lists all integrations for a project.
+/// Lists all integrations for a workspace.
 ///
 /// Returns all configured integrations. Requires `ViewIntegrations` permission.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn list_integrations(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     Json(_pagination): Json<Pagination>,
 ) -> Result<(StatusCode, Json<Integrations>)> {
-    tracing::debug!(target: TRACING_TARGET, "Listing project integrations");
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace integrations");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::ViewIntegrations,
         )
         .await?;
 
     let integrations = conn
-        .list_project_integrations(path_params.project_id)
+        .list_workspace_integrations(path_params.workspace_id)
         .await?;
 
     let integrations: Integrations = integrations.into_iter().map(Into::into).collect();
@@ -116,7 +116,7 @@ async fn list_integrations(
     tracing::debug!(
         target: TRACING_TARGET,
         integration_count = integrations.len(),
-        "Project integrations listed ",
+        "Workspace integrations listed ",
     );
 
     Ok((StatusCode::OK, Json(integrations)))
@@ -124,20 +124,20 @@ async fn list_integrations(
 
 fn list_integrations_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List integrations")
-        .description("Returns all configured integrations for the project.")
+        .description("Returns all configured integrations for the workspace.")
         .response::<200, Json<Integrations>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Retrieves a specific project integration.
+/// Retrieves a specific workspace integration.
 ///
 /// Returns integration details. Requires `ViewIntegrations` permission.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -146,40 +146,40 @@ async fn read_integration(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(target: TRACING_TARGET, "Reading project integration");
+    tracing::debug!(target: TRACING_TARGET, "Reading workspace integration");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::ViewIntegrations,
         )
         .await?;
 
-    let integration = find_project_integration(&mut conn, &path_params).await?;
+    let integration = find_workspace_integration(&mut conn, &path_params).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Project integration read");
+    tracing::debug!(target: TRACING_TARGET, "Workspace integration read");
 
     Ok((StatusCode::OK, Json(integration.into())))
 }
 
 fn read_integration_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get integration")
-        .description("Returns details for a specific project integration.")
+        .description("Returns details for a specific workspace integration.")
         .response::<200, Json<Integration>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Updates a project integration.
+/// Updates a workspace integration.
 ///
 /// Updates integration configuration. Requires `ManageIntegrations` permission.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -187,19 +187,19 @@ async fn update_integration(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
-    ValidateJson(request): ValidateJson<UpdateProjectIntegration>,
+    ValidateJson(request): ValidateJson<UpdateWorkspaceIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
-    tracing::debug!(target: TRACING_TARGET, "Updating project integration");
+    tracing::debug!(target: TRACING_TARGET, "Updating workspace integration");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
-    let existing = find_project_integration(&mut conn, &path_params).await?;
+    let existing = find_workspace_integration(&mut conn, &path_params).await?;
 
     // Check if new name conflicts with existing integrations
     if let Some(ref new_name) = request.integration_name
@@ -207,7 +207,7 @@ async fn update_integration(
     {
         let name_is_unique = conn
             .is_integration_name_unique(
-                path_params.project_id,
+                path_params.workspace_id,
                 new_name,
                 Some(path_params.integration_id),
             )
@@ -215,7 +215,7 @@ async fn update_integration(
 
         if !name_is_unique {
             return Err(
-                ErrorKind::Conflict.with_message("Integration name already exists in project")
+                ErrorKind::Conflict.with_message("Integration name already exists in workspace")
             );
         }
     }
@@ -246,7 +246,7 @@ fn update_integration_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -259,15 +259,15 @@ async fn update_integration_credentials(
     tracing::debug!(target: TRACING_TARGET, "Updating integration credentials");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
-    // Verify integration exists and belongs to the project
-    let _ = find_project_integration(&mut conn, &path_params).await?;
+    // Verify integration exists and belongs to the workspace
+    let _ = find_workspace_integration(&mut conn, &path_params).await?;
 
     let integration = conn
         .update_integration_auth(
@@ -292,14 +292,14 @@ fn update_integration_credentials_docs(op: TransformOperation) -> TransformOpera
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Deletes a project integration.
+/// Deletes a workspace integration.
 ///
 /// Permanently removes the integration. Requires `ManageIntegrations` permission.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
         integration_id = %path_params.integration_id,
     )
 )]
@@ -308,18 +308,18 @@ async fn delete_integration(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<StatusCode> {
-    tracing::debug!(target: TRACING_TARGET, "Deleting project integration");
+    tracing::debug!(target: TRACING_TARGET, "Deleting workspace integration");
 
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::ManageIntegrations,
         )
         .await?;
 
-    // Verify integration exists and belongs to the project
-    let _ = find_project_integration(&mut conn, &path_params).await?;
+    // Verify integration exists and belongs to the workspace
+    let _ = find_workspace_integration(&mut conn, &path_params).await?;
 
     conn.delete_integration(path_params.integration_id).await?;
 
@@ -330,18 +330,18 @@ async fn delete_integration(
 
 fn delete_integration_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete integration")
-        .description("Permanently removes the integration from the project.")
+        .description("Permanently removes the integration from the workspace.")
         .response::<204, ()>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds an integration by ID and verifies it belongs to the specified project.
-async fn find_project_integration(
+/// Finds an integration by ID and verifies it belongs to the specified workspace.
+async fn find_workspace_integration(
     conn: &mut nvisy_postgres::PgConn,
     path_params: &IntegrationPathParams,
-) -> Result<nvisy_postgres::model::ProjectIntegration> {
+) -> Result<nvisy_postgres::model::WorkspaceIntegration> {
     let Some(integration) = conn
         .find_integration_by_id(path_params.integration_id)
         .await?
@@ -351,7 +351,7 @@ async fn find_project_integration(
             .with_resource("integration"));
     };
 
-    if integration.project_id != path_params.project_id {
+    if integration.workspace_id != path_params.workspace_id {
         return Err(ErrorKind::NotFound
             .with_message("Integration not found")
             .with_resource("integration"));
@@ -360,24 +360,24 @@ async fn find_project_integration(
     Ok(integration)
 }
 
-/// Returns routes for project integration management.
+/// Returns routes for workspace integration management.
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
         .api_route(
-            "/projects/{project_id}/integrations/",
+            "/workspaces/{workspace_id}/integrations/",
             post_with(create_integration, create_integration_docs)
                 .get_with(list_integrations, list_integrations_docs),
         )
         .api_route(
-            "/projects/{project_id}/integrations/{integration_id}/",
+            "/workspaces/{workspace_id}/integrations/{integration_id}/",
             get_with(read_integration, read_integration_docs)
                 .put_with(update_integration, update_integration_docs)
                 .delete_with(delete_integration, delete_integration_docs),
         )
         .api_route(
-            "/projects/{project_id}/integrations/{integration_id}/credentials/",
+            "/workspaces/{workspace_id}/integrations/{integration_id}/credentials/",
             patch_with(
                 update_integration_credentials,
                 update_integration_credentials_docs,

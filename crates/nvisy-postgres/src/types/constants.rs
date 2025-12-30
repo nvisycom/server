@@ -23,7 +23,7 @@ pub mod storage {
     /// Maximum file size in MB.
     pub const MAX_FILE_SIZE_MB: i32 = 100;
 
-    /// Maximum total storage per project in MB.
+    /// Maximum total storage per workspace in MB.
     pub const MAX_PROJECT_STORAGE_MB: i32 = 1000;
 }
 
@@ -78,12 +78,12 @@ pub mod comment {
     pub const RECENTLY_UPDATED_HOURS: i64 = 1;
 }
 
-/// Constants related to projects and project management.
-pub mod project {
-    /// Number of days within which project access is considered "recent".
+/// Constants related to workspaces and workspace management.
+pub mod workspace {
+    /// Number of days within which workspace access is considered "recent".
     pub const RECENT_ACCESS_DAYS: i64 = 7;
 
-    /// Number of hours within which a project is considered "recently created".
+    /// Number of hours within which a workspace is considered "recently created".
     pub const RECENTLY_CREATED_HOURS: i64 = 24;
 }
 

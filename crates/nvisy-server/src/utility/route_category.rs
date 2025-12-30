@@ -14,7 +14,7 @@ use axum::http::Uri;
 pub enum RouteCategory {
     Authentication,
     UserManagement,
-    ProjectManagement,
+    WorkspaceManagement,
     DocumentProcessing,
     FileOperations,
     Automation,
@@ -33,8 +33,8 @@ impl RouteCategory {
             Self::Authentication
         } else if path.starts_with("/accounts/") {
             Self::UserManagement
-        } else if path.starts_with("/projects/") {
-            Self::ProjectManagement
+        } else if path.starts_with("/workspaces/") {
+            Self::WorkspaceManagement
         } else if path.contains("/documents/") {
             Self::DocumentProcessing
         } else if path.contains("/inputs/") || path.contains("/outputs/") {
@@ -57,7 +57,7 @@ impl RouteCategory {
         match self {
             Self::Authentication => "auth",
             Self::UserManagement => "users",
-            Self::ProjectManagement => "projects",
+            Self::WorkspaceManagement => "workspaces",
             Self::DocumentProcessing => "documents",
             Self::FileOperations => "files",
             Self::Automation => "automation",
@@ -84,12 +84,12 @@ mod tests {
             RouteCategory::UserManagement
         );
         assert_eq!(
-            RouteCategory::from_uri(&"/projects/456".parse().unwrap()),
-            RouteCategory::ProjectManagement
+            RouteCategory::from_uri(&"/workspaces/456".parse().unwrap()),
+            RouteCategory::WorkspaceManagement
         );
         assert_eq!(
-            RouteCategory::from_uri(&"/projects/456/documents/789".parse().unwrap()),
-            RouteCategory::ProjectManagement
+            RouteCategory::from_uri(&"/workspaces/456/documents/789".parse().unwrap()),
+            RouteCategory::WorkspaceManagement
         );
         assert_eq!(
             RouteCategory::from_uri(&"/documents/789/inputs/".parse().unwrap()),

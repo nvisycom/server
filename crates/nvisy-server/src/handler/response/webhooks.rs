@@ -1,4 +1,4 @@
-//! Project webhook response types.
+//! Workspace webhook response types.
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Project webhook response.
+/// Workspace webhook response.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -15,8 +15,8 @@ pub struct Webhook {
     /// Unique webhook identifier.
     pub webhook_id: Uuid,
 
-    /// Reference to the project this webhook belongs to.
-    pub project_id: Uuid,
+    /// Reference to the workspace this webhook belongs to.
+    pub workspace_id: Uuid,
 
     /// Human-readable name for the webhook.
     pub display_name: String,
@@ -61,7 +61,7 @@ pub struct Webhook {
     pub updated_at: Timestamp,
 }
 
-/// Project webhook response with secret (returned only at creation).
+/// Workspace webhook response with secret (returned only at creation).
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -81,10 +81,10 @@ fn flatten_events(events: Vec<Option<String>>) -> Vec<String> {
 
 impl Webhook {
     /// Creates a new instance of [`Webhook`] from database model.
-    pub fn new(webhook: &model::ProjectWebhook) -> Self {
+    pub fn new(webhook: &model::WorkspaceWebhook) -> Self {
         Self {
             webhook_id: webhook.id,
-            project_id: webhook.project_id,
+            workspace_id: webhook.workspace_id,
             display_name: webhook.display_name.clone(),
             description: webhook.description.clone(),
             url: webhook.url.clone(),
@@ -105,7 +105,7 @@ impl Webhook {
 
 impl WebhookWithSecret {
     /// Creates a new instance of [`WebhookWithSecret`] from database model.
-    pub fn from_model(webhook: model::ProjectWebhook) -> Self {
+    pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
         Self {
             secret: webhook.secret.clone(),
             webhook: Webhook::new(&webhook),
@@ -113,19 +113,19 @@ impl WebhookWithSecret {
     }
 }
 
-impl From<model::ProjectWebhook> for Webhook {
+impl From<model::WorkspaceWebhook> for Webhook {
     #[inline]
-    fn from(webhook: model::ProjectWebhook) -> Self {
+    fn from(webhook: model::WorkspaceWebhook) -> Self {
         Self::new(&webhook)
     }
 }
 
-impl From<model::ProjectWebhook> for WebhookWithSecret {
+impl From<model::WorkspaceWebhook> for WebhookWithSecret {
     #[inline]
-    fn from(webhook: model::ProjectWebhook) -> Self {
+    fn from(webhook: model::WorkspaceWebhook) -> Self {
         Self::from_model(webhook)
     }
 }
 
-/// Response for listing project webhooks.
+/// Response for listing workspace webhooks.
 pub type Webhooks = Vec<Webhook>;

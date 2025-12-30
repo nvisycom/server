@@ -13,11 +13,9 @@ mod integrations;
 mod invites;
 mod members;
 mod monitors;
-mod pipelines;
-mod projects;
+mod workspaces;
 pub mod request;
 pub mod response;
-mod templates;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -45,12 +43,10 @@ fn private_routes(
     let mut router = ApiRouter::new()
         .merge(accounts::routes(service_state.clone()))
         .merge(tokens::routes())
-        .merge(projects::routes())
+        .merge(workspaces::routes())
         .merge(integrations::routes())
         .merge(invites::routes())
         .merge(members::routes())
-        .merge(pipelines::routes())
-        .merge(templates::routes())
         .merge(webhooks::routes())
         .merge(websocket::routes())
         .merge(files::routes())

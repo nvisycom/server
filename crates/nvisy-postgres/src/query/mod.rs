@@ -20,15 +20,13 @@ pub mod document_chunk;
 pub mod document_comment;
 pub mod document_file;
 
-pub mod project;
-pub mod project_activity;
-pub mod project_integration;
-pub mod project_invite;
-pub mod project_member;
-pub mod project_pipeline;
-pub mod project_run;
-pub mod project_template;
-pub mod project_webhook;
+pub mod workspace;
+pub mod workspace_activity;
+pub mod workspace_integration;
+pub mod workspace_invite;
+pub mod workspace_member;
+pub mod workspace_run;
+pub mod workspace_webhook;
 
 pub use account::AccountRepository;
 pub use account_action_token::AccountActionTokenRepository;
@@ -38,14 +36,12 @@ pub use document::DocumentRepository;
 pub use document_chunk::DocumentChunkRepository;
 pub use document_comment::DocumentCommentRepository;
 pub use document_file::DocumentFileRepository;
-pub use project::ProjectRepository;
-pub use project_activity::ProjectActivityRepository;
-pub use project_integration::ProjectIntegrationRepository;
-pub use project_invite::ProjectInviteRepository;
-pub use project_member::ProjectMemberRepository;
-pub use project_pipeline::ProjectPipelineRepository;
-pub use project_template::ProjectTemplateRepository;
-pub use project_webhook::ProjectWebhookRepository;
+pub use workspace::WorkspaceRepository;
+pub use workspace_activity::WorkspaceActivityRepository;
+pub use workspace_integration::WorkspaceIntegrationRepository;
+pub use workspace_invite::WorkspaceInviteRepository;
+pub use workspace_member::WorkspaceMemberRepository;
+pub use workspace_webhook::WorkspaceWebhookRepository;
 use serde::{Deserialize, Serialize};
 
 /// Pagination parameters for database queries.

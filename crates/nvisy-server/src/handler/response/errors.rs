@@ -261,10 +261,10 @@ mod tests {
     #[test]
     fn error_response_merging_resource() {
         let response = ErrorResponse::NOT_FOUND
-            .with_resource("project")
+            .with_resource("workspace")
             .with_resource("document");
 
-        assert_eq!(response.resource.as_deref(), Some("project/document"));
+        assert_eq!(response.resource.as_deref(), Some("workspace/document"));
     }
 
     #[test]

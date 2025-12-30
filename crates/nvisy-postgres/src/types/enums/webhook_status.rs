@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the operational status of a project webhook.
+/// Defines the operational status of a workspace webhook.
 ///
 /// This enumeration corresponds to the `WEBHOOK_STATUS` PostgreSQL enum and is used
 /// to manage webhook states from active operation through pausing and disabling.

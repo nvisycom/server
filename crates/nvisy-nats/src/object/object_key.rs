@@ -91,7 +91,7 @@ impl DocumentLabel for OutputFiles {
 
 /// A validated string wrapper representing an object key in NATS object storage.
 ///
-/// The key follows the format: `{project_uuid}/{file_uuid}`
+/// The key follows the format: `{workspace_uuid}/{file_uuid}`
 ///
 /// # Type Parameters
 /// * `S` - The stage type that implements `DocumentLabel` (used for bucket selection)
@@ -113,7 +113,7 @@ impl<S: DocumentLabel> ObjectKey<S> {
 
     /// Constructs an ObjectKey from ObjectKeyData
     pub fn from_data(data: ObjectKeyData) -> Result<Self> {
-        let key_string = format!("{}/{}", data.project_uuid(), data.file_uuid());
+        let key_string = format!("{}/{}", data.workspace_uuid(), data.file_uuid());
         Ok(Self {
             key: key_string,
             _phantom: PhantomData,
@@ -134,30 +134,30 @@ impl<S: DocumentLabel> ObjectKey<S> {
     pub fn parse(&self) -> Result<ObjectKeyData> {
         let parts: Vec<&str> = self.key.split('/').collect();
 
-        // Handle 2-part keys (project_uuid/file_uuid)
-        let (project_uuid, file_uuid) = match parts.len() {
+        // Handle 2-part keys (workspace_uuid/file_uuid)
+        let (workspace_uuid, file_uuid) = match parts.len() {
             2 => {
-                let project_uuid = parse_uuid(parts[0], "project")?;
+                let workspace_uuid = parse_uuid(parts[0], "workspace")?;
                 let file_uuid = parse_uuid(parts[1], "file")?;
-                (project_uuid, file_uuid)
+                (workspace_uuid, file_uuid)
             }
             _ => {
                 return Err(Error::operation(
                     "parse_key",
                     format!(
-                        "Invalid key format '{}'. Expected: project_uuid/file_uuid",
+                        "Invalid key format '{}'. Expected: workspace_uuid/file_uuid",
                         self.key
                     ),
                 ));
             }
         };
 
-        Ok(ObjectKeyData::new(project_uuid, file_uuid))
+        Ok(ObjectKeyData::new(workspace_uuid, file_uuid))
     }
 
-    /// Extracts the project UUID from the key
-    pub fn project_uuid(&self) -> Result<Uuid> {
-        self.parse().map(|data| data.project_uuid())
+    /// Extracts the workspace UUID from the key
+    pub fn workspace_uuid(&self) -> Result<Uuid> {
+        self.parse().map(|data| data.workspace_uuid())
     }
 
     /// Extracts the file UUID from the key
@@ -227,13 +227,13 @@ mod tests {
 
     #[test]
     fn test_object_key_from_data() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
 
         let key = ObjectKey::<IntermediateFiles>::from_data(data.clone()).unwrap();
-        let expected = format!("{}/{}", project_uuid, file_uuid);
+        let expected = format!("{}/{}", workspace_uuid, file_uuid);
 
         assert_eq!(key.as_str(), expected);
         assert_eq!(key.to_string(), expected);
@@ -241,23 +241,23 @@ mod tests {
 
     #[test]
     fn test_object_key_accessor_methods() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let key_str = format!("{}/{}", project_uuid, file_uuid);
+        let key_str = format!("{}/{}", workspace_uuid, file_uuid);
 
         let key: ObjectKey<OutputFiles> = ObjectKey::new(key_str);
 
-        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+        assert_eq!(key.workspace_uuid().unwrap(), workspace_uuid);
         assert_eq!(key.file_uuid().unwrap(), file_uuid);
     }
 
     #[test]
     fn test_object_key_from_str() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let key_str = format!("{}/{}", project_uuid, file_uuid);
+        let key_str = format!("{}/{}", workspace_uuid, file_uuid);
 
         let key: ObjectKey<InputFiles> = ObjectKey::from_str(&key_str).unwrap();
         assert_eq!(key.as_str(), key_str);
@@ -269,10 +269,10 @@ mod tests {
 
     #[test]
     fn test_derive_more_display_and_as_ref() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
-        let key_str = format!("{}/{}", project_uuid, file_uuid);
+        let key_str = format!("{}/{}", workspace_uuid, file_uuid);
         let key: ObjectKey<InputFiles> = ObjectKey::new(key_str.clone());
 
         // Test Display derive
@@ -296,34 +296,34 @@ mod tests {
 
     #[test]
     fn test_object_key_creation() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
         // Create key
-        let data = ObjectKeyData::new(project_uuid, file_uuid);
+        let data = ObjectKeyData::new(workspace_uuid, file_uuid);
 
         let key = ObjectKey::<InputFiles>::from_data(data).unwrap();
-        let expected = format!("{}/{}", project_uuid, file_uuid);
+        let expected = format!("{}/{}", workspace_uuid, file_uuid);
 
         assert_eq!(key.as_str(), expected);
 
         // Test accessors
-        assert_eq!(key.project_uuid().unwrap(), project_uuid);
+        assert_eq!(key.workspace_uuid().unwrap(), workspace_uuid);
         assert_eq!(key.file_uuid().unwrap(), file_uuid);
     }
 
     #[test]
     fn test_parse_key_invalid_format() {
-        let project_uuid = Uuid::new_v4();
+        let workspace_uuid = Uuid::new_v4();
         let file_uuid = Uuid::new_v4();
 
         // Too many parts
-        let key_str = format!("{}/{}/extra", project_uuid, file_uuid);
+        let key_str = format!("{}/{}/extra", workspace_uuid, file_uuid);
         let result = ObjectKey::<InputFiles>::from_str(&key_str);
         assert!(result.is_err());
 
         // Too few parts
-        let key_str = format!("{}", project_uuid);
+        let key_str = format!("{}", workspace_uuid);
         let result = ObjectKey::<InputFiles>::from_str(&key_str);
         assert!(result.is_err());
     }

@@ -84,16 +84,15 @@ async fn update_own_account(
     };
 
     // Check if email already exists for another account
-    if let Some(ref email) = request.email_address {
-        if conn
+    if let Some(ref email) = request.email_address
+        && conn
             .email_exists_for_other(email, auth_claims.account_id)
             .await?
-        {
-            tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
-            return Err(ErrorKind::Conflict
-                .with_message("Account with this email already exists")
-                .with_resource("account"));
-        }
+    {
+        tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
+        return Err(ErrorKind::Conflict
+            .with_message("Account with this email already exists")
+            .with_resource("account"));
     }
 
     let account = conn
