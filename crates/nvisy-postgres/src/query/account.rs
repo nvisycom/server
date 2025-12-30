@@ -4,7 +4,6 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use ipnet::IpNet;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
@@ -72,32 +71,6 @@ pub trait AccountRepository {
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
-    /// Records a failed login attempt and applies automatic locking if needed.
-    ///
-    /// Increments the failed login counter and locks the account for one hour
-    /// after five failed attempts.
-    fn record_failed_login(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
-
-    /// Records a successful login and resets security counters.
-    ///
-    /// Clears failed login attempts and removes any account locks.
-    fn record_successful_login(
-        &mut self,
-        account_id: Uuid,
-        ip_address: IpNet,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
-
-    /// Unlocks an account by clearing security locks and resetting counters.
-    ///
-    /// Removes any temporary locks and resets failed login attempts to zero.
-    fn unlock_account(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
-
     /// Updates the account password and records the change timestamp.
     ///
     /// Sets a new password hash and updates the password_changed_at field.
@@ -163,14 +136,6 @@ pub trait AccountRepository {
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
-    /// Finds accounts that are currently locked due to failed login attempts.
-    ///
-    /// Returns accounts with active locks ordered by lock expiration time.
-    fn find_locked_accounts(
-        &mut self,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
     /// Finds accounts created within the last 30 days.
     ///
     /// Useful for onboarding analytics and new user tracking.
@@ -195,19 +160,6 @@ pub trait AccountRepository {
         domain: &str,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Finds accounts with high numbers of failed login attempts.
-    ///
-    /// Useful for security monitoring and identifying potential attacks.
-    fn find_accounts_with_high_failed_attempts(
-        &mut self,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Automatically unlocks accounts whose lock period has expired.
-    ///
-    /// Should be run periodically to restore access to locked accounts.
-    fn unlock_expired_accounts(&mut self) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 }
 
 impl AccountRepository for PgConnection {
@@ -305,60 +257,6 @@ impl AccountRepository for PgConnection {
             .load(self)
             .await
             .map_err(PgError::from)
-    }
-
-    async fn record_failed_login(&mut self, account_id: Uuid) -> PgResult<Account> {
-        use schema::accounts::{self, dsl};
-
-        let account = diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
-            .set(dsl::failed_login_attempts.eq(dsl::failed_login_attempts + 1))
-            .returning(Account::as_returning())
-            .get_result::<Account>(self)
-            .await
-            .map_err(PgError::from)?;
-
-        if account.failed_login_attempts >= 5 {
-            let lock_until = Timestamp::now() + Span::new().hours(1);
-            let lock_until = jiff_diesel::Timestamp::from(lock_until);
-            self.update_account(
-                account_id,
-                UpdateAccount {
-                    locked_until: Some(lock_until),
-                    ..Default::default()
-                },
-            )
-            .await
-        } else {
-            Ok(account)
-        }
-    }
-
-    async fn record_successful_login(
-        &mut self,
-        account_id: Uuid,
-        _ip_address: IpNet,
-    ) -> PgResult<Account> {
-        self.update_account(
-            account_id,
-            UpdateAccount {
-                failed_login_attempts: Some(0),
-                locked_until: None,
-                ..Default::default()
-            },
-        )
-        .await
-    }
-
-    async fn unlock_account(&mut self, account_id: Uuid) -> PgResult<Account> {
-        self.update_account(
-            account_id,
-            UpdateAccount {
-                failed_login_attempts: Some(0),
-                locked_until: None,
-                ..Default::default()
-            },
-        )
-        .await
     }
 
     async fn update_password(
@@ -481,21 +379,6 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_locked_accounts(&mut self, pagination: Pagination) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        accounts::table
-            .filter(dsl::locked_until.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::locked_until.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
     async fn find_recently_created_accounts(
         &mut self,
         pagination: Pagination,
@@ -554,43 +437,5 @@ impl AccountRepository for PgConnection {
             .load(self)
             .await
             .map_err(PgError::from)
-    }
-
-    async fn find_accounts_with_high_failed_attempts(
-        &mut self,
-        pagination: Pagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        accounts::table
-            .filter(dsl::failed_login_attempts.ge(3))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::failed_login_attempts.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
-    async fn unlock_expired_accounts(&mut self) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        diesel::update(
-            accounts::table.filter(
-                dsl::locked_until
-                    .is_not_null()
-                    .and(dsl::locked_until.le(jiff_diesel::Timestamp::from(Timestamp::now()))),
-            ),
-        )
-        .set((
-            dsl::locked_until.eq(None::<jiff_diesel::Timestamp>),
-            dsl::failed_login_attempts.eq(0),
-        ))
-        .returning(Account::as_returning())
-        .get_results(self)
-        .await
-        .map_err(PgError::from)
     }
 }

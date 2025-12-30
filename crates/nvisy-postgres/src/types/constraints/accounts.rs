@@ -30,12 +30,6 @@ pub enum AccountConstraints {
     #[strum(serialize = "accounts_locale_format")]
     LocaleFormat,
 
-    // Account security constraints
-    #[strum(serialize = "accounts_failed_login_attempts_range")]
-    FailedLoginAttemptsRange,
-    #[strum(serialize = "accounts_locked_until_future")]
-    LockedUntilFuture,
-
     // Account chronological constraints
     #[strum(serialize = "accounts_updated_after_created")]
     UpdatedAfterCreated,
@@ -74,15 +68,13 @@ impl AccountConstraints {
             | AccountConstraints::PasswordHashLengthMin
             | AccountConstraints::CompanyNameLengthMax
             | AccountConstraints::TimezoneFormat
-            | AccountConstraints::LocaleFormat
-            | AccountConstraints::FailedLoginAttemptsRange => ConstraintCategory::Validation,
+            | AccountConstraints::LocaleFormat => ConstraintCategory::Validation,
 
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
             | AccountConstraints::DeletedAfterUpdated
             | AccountConstraints::PasswordChangedAfterCreated
-            | AccountConstraints::LastLoginAfterCreated
-            | AccountConstraints::LockedUntilFuture => ConstraintCategory::Chronological,
+            | AccountConstraints::LastLoginAfterCreated => ConstraintCategory::Chronological,
 
             AccountConstraints::SuspendedNotAdmin => ConstraintCategory::BusinessLogic,
 

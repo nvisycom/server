@@ -36,10 +36,6 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::LocaleFormat => {
                 ErrorKind::BadRequest.with_message("Invalid locale format")
             }
-            AccountConstraints::FailedLoginAttemptsRange => {
-                ErrorKind::BadRequest.with_message("Invalid number of failed login attempts")
-            }
-            AccountConstraints::LockedUntilFuture => ErrorKind::InternalServerError.into_error(),
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
             | AccountConstraints::DeletedAfterUpdated

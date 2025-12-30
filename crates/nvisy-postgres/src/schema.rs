@@ -84,22 +84,13 @@ diesel::table! {
     use pgvector::sql_types::*;
     use super::sql_types::ApiTokenType;
 
-    account_api_tokens (access_seq) {
-        access_seq -> Uuid,
-        refresh_seq -> Uuid,
+    account_api_tokens (id) {
+        id -> Uuid,
         account_id -> Uuid,
         name -> Text,
-        description -> Nullable<Text>,
-        #[max_length = 2]
-        region_code -> Bpchar,
-        #[max_length = 2]
-        country_code -> Nullable<Bpchar>,
-        city_name -> Nullable<Text>,
+        session_type -> ApiTokenType,
         ip_address -> Inet,
         user_agent -> Text,
-        device_id -> Nullable<Text>,
-        session_type -> ApiTokenType,
-        is_suspicious -> Bool,
         is_remembered -> Bool,
         issued_at -> Timestamptz,
         expired_at -> Timestamptz,
@@ -145,8 +136,6 @@ diesel::table! {
         avatar_url -> Nullable<Text>,
         timezone -> Text,
         locale -> Text,
-        failed_login_attempts -> Int4,
-        locked_until -> Nullable<Timestamptz>,
         password_changed_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,

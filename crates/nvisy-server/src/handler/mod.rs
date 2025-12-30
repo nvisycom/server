@@ -31,7 +31,7 @@ use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
 pub use utility::{CustomRoutes, RouterMapFn};
 
-use crate::middleware::{refresh_token_middleware, require_authentication};
+use crate::middleware::{require_authentication, validate_token_middleware};
 use crate::service::ServiceState;
 
 #[inline]
@@ -92,14 +92,14 @@ fn public_routes(
 /// Returns an [`ApiRouter`] with all routes.
 pub fn routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
-    let refresh_token_middleware = from_fn_with_state(state.clone(), refresh_token_middleware);
+    let validate_token_middleware = from_fn_with_state(state.clone(), validate_token_middleware);
 
     // Private routes.
     let mut private_router = private_routes(routes.private_routes.take(), state.clone());
     private_router = routes.map_private_before_middleware(private_router);
     private_router = private_router
         .route_layer(require_authentication)
-        .route_layer(refresh_token_middleware);
+        .route_layer(validate_token_middleware);
     private_router = routes.map_private_after_middleware(private_router);
 
     // Public routes.

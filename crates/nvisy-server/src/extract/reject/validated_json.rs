@@ -197,33 +197,16 @@ impl From<ValidationErrors> for Error<'static> {
             })
             .collect();
 
-        let (user_message, error_context) = match error_messages.as_slice() {
-            [] => (
-                "Validation failed",
-                "Unknown validation errors occurred".to_string(),
-            ),
-            [single_error] => (
-                "Request validation failed",
-                format!("Validation error: {}", single_error),
-            ),
-            multiple => {
-                let field_count = errors.field_errors().len();
-                let summary = if field_count == 1 {
-                    format!("Field has {} validation errors", multiple.len())
-                } else {
-                    format!("{} fields have validation errors", field_count)
-                };
-
-                (
-                    "Multiple validation errors in request",
-                    format!("{}: {}", summary, multiple.join("; ")),
-                )
-            }
+        // Show validation details in the user-facing message
+        let user_message = match error_messages.as_slice() {
+            [] => "Validation failed".to_string(),
+            [single_error] => single_error.clone(),
+            multiple => multiple.join(". "),
         };
 
         ErrorKind::BadRequest
             .with_message(user_message)
-            .with_context(format!("Request body validation failed: {}", error_context))
+            .with_resource("request")
     }
 }
 

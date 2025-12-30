@@ -127,7 +127,7 @@ async fn read_workspace(
 
     let Some(workspace) = conn.find_workspace_by_id(path_params.workspace_id).await? else {
         return Err(ErrorKind::NotFound
-            .with_message(format!("Workspace not found: {}", path_params.workspace_id))
+            .with_message("Workspace not found")
             .with_resource("workspace"));
     };
 
@@ -227,7 +227,7 @@ async fn delete_workspace(
         .is_none()
     {
         return Err(ErrorKind::NotFound
-            .with_message(format!("Workspace not found: {}", path_params.workspace_id))
+            .with_message("Workspace not found")
             .with_resource("workspace"));
     }
 

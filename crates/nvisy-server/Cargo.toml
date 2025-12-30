@@ -69,6 +69,7 @@ validator = { workspace = true, features = [] }
 
 # Text processing
 regex = { workspace = true, features = [] }
+woothee = { workspace = true, features = [] }
 
 # Archive/Compression
 tar = { workspace = true, features = [] }

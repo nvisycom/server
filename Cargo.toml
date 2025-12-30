@@ -112,6 +112,7 @@ url = { version = "2.5", features = [] }
 
 # Text processing
 regex = { version = "1.0", features = [] }
+woothee = { version = "0.13", features = [] }
 
 # Archive/Compression
 tar = { version = "0.4", features = [] }

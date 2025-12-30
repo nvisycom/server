@@ -599,7 +599,8 @@ async fn download_multiple_files(
     // Verify all requested files were found
     for file_id in &request.file_ids {
         if !files_map.contains_key(file_id) {
-            return Err(ErrorKind::NotFound.with_message(format!("File {} not found", file_id)));
+            tracing::warn!(target: TRACING_TARGET, %file_id, "File not found during batch download");
+            return Err(ErrorKind::NotFound.with_message("One or more requested files not found"));
         }
     }
 
@@ -616,7 +617,8 @@ async fn download_multiple_files(
         })?;
 
         let content_data = input_fs.get(&object_key).await?.ok_or_else(|| {
-            ErrorKind::NotFound.with_message(format!("File {} content not found", file_id))
+            tracing::error!(target: TRACING_TARGET, %file_id, "File content missing from storage");
+            ErrorKind::NotFound.with_message("File content not found")
         })?;
 
         files_data.push((

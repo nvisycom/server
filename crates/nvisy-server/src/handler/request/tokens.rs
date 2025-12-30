@@ -3,7 +3,6 @@
 //! This module provides request DTOs for API token management including
 //! creation and updates.
 
-use std::net::IpAddr;
 use std::time::Duration;
 
 use nvisy_postgres::model::NewAccountApiToken;
@@ -14,7 +13,6 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::handler::Result;
-use crate::handler::tokens::ip_to_net;
 
 /// Expiration options for API tokens.
 #[must_use]
@@ -72,10 +70,6 @@ pub struct CreateApiToken {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
 
-    /// Optional description for the API token (max 500 characters).
-    #[validate(length(max = 500))]
-    pub description: Option<String>,
-
     /// When the token expires.
     #[serde(default)]
     pub expires: TokenExpiration,
@@ -87,14 +81,8 @@ impl CreateApiToken {
     /// # Arguments
     ///
     /// * `account_id` - The account this token belongs to.
-    /// * `ip_address` - The IP address of the client creating the token.
     /// * `user_agent` - The user agent string of the client.
-    pub fn into_model(
-        self,
-        account_id: Uuid,
-        ip_address: IpAddr,
-        user_agent: String,
-    ) -> Result<NewAccountApiToken> {
+    pub fn into_model(self, account_id: Uuid, user_agent: String) -> Result<NewAccountApiToken> {
         let sanitized_name = self.name.trim().to_string();
         if sanitized_name.is_empty() {
             return Err(crate::handler::ErrorKind::BadRequest
@@ -103,18 +91,12 @@ impl CreateApiToken {
         }
 
         let expires_at = self.expires.to_expiry_timestamp();
-        let ip_net = ip_to_net(ip_address)?;
 
         Ok(NewAccountApiToken {
             account_id,
             name: sanitized_name,
-            description: self.description,
-            region_code: None,
-            country_code: None,
-            city_name: None,
-            ip_address: ip_net,
+            ip_address: crate::utility::placeholder_ip(),
             user_agent,
-            device_id: None,
             session_type: Some(ApiTokenType::Api),
             is_remembered: Some(true),
             expired_at: expires_at.map(Into::into),
@@ -129,8 +111,4 @@ pub struct UpdateApiToken {
     /// Updated name for the API token (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub name: Option<String>,
-
-    /// Updated description for the API token (max 500 characters).
-    #[validate(length(max = 500))]
-    pub description: Option<String>,
 }

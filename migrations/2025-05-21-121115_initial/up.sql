@@ -1,6 +1,10 @@
 -- This migration provides core utility functions for database management and common operations
 -- Foundation functions required by all subsequent migrations
 
+-- Enable pgcrypto extension for cryptographic functions
+-- Required for secure token generation (gen_random_bytes)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Enable pgvector extension for vector similarity search
 -- Required for embedding storage and semantic search capabilities
 CREATE EXTENSION IF NOT EXISTS vector;

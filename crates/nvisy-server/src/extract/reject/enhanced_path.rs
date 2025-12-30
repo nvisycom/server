@@ -94,6 +94,10 @@ impl From<PathRejection> for Error<'static> {
                 let error_message = err.to_string();
                 let enhanced_context = enhance_deserialization_error(&error_message);
 
+                tracing::warn!(
+                    error = %error_message,
+                    "Path parameter deserialization failed"
+                );
 
                 ErrorKind::BadRequest
                     .with_message("Invalid path parameter format")
@@ -106,6 +110,10 @@ impl From<PathRejection> for Error<'static> {
             PathRejection::MissingPathParams(err) => {
                 let error_message = err.to_string();
 
+                tracing::warn!(
+                    error = %error_message,
+                    "Missing path parameter"
+                );
 
                 ErrorKind::MissingPathParam
                     .with_message("Required path parameter missing")
@@ -115,6 +123,7 @@ impl From<PathRejection> for Error<'static> {
                     ))
             }
             _ => {
+                tracing::error!("Unexpected path rejection error");
 
                 ErrorKind::InternalServerError
                     .with_message("Path processing failed")

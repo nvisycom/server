@@ -73,6 +73,19 @@ impl<T> AuthHeader<T> {
     pub fn into_auth_claims(self) -> AuthClaims<T> {
         self.auth_claims
     }
+
+    /// Returns the encoded JWT token string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if JWT encoding fails.
+    pub fn into_string(&self) -> Result<String>
+    where
+        T: Clone + Serialize,
+    {
+        let encoding_key = self.auth_secret_keys.encoding_key();
+        self.auth_claims.clone().into_string(encoding_key)
+    }
 }
 
 impl<T> AuthHeader<T>
@@ -226,8 +239,3 @@ impl From<JwtError> for Error<'static> {
         error.with_resource("authentication")
     }
 }
-
-// Aide OpenAPI support - AuthHeader generates a response header
-// Note: For now, we don't implement OperationOutput for AuthHeader since it's only used
-// in responses where the Authorization header is added manually via TypedHeader.
-// If needed in the future, we can implement this using aide's header support.

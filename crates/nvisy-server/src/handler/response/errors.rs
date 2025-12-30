@@ -43,7 +43,7 @@ pub struct ErrorResponse<'a> {
     pub suggestion: Option<Cow<'a, str>>,
     /// Validation error details for field-specific errors
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation_errors: Option<Vec<ValidationErrorDetail>>,
+    pub validation: Option<Vec<ValidationErrorDetail>>,
 
     /// Error correlation ID for tracking
     #[serde(skip)]
@@ -142,7 +142,7 @@ impl<'a> ErrorResponse<'a> {
             resource: None,
             context: None,
             suggestion: None,
-            validation_errors: None,
+            validation: None,
             correlation_id: None,
             status,
         }
@@ -192,7 +192,7 @@ impl<'a> ErrorResponse<'a> {
 
     /// Adds validation errors to the error response.
     pub fn with_validation_errors(mut self, errors: Vec<ValidationErrorDetail>) -> Self {
-        self.validation_errors = Some(errors);
+        self.validation = Some(errors);
         self
     }
 
