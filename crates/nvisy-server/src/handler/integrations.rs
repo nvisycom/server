@@ -72,7 +72,10 @@ async fn create_integration(
         "Integration created ",
     );
 
-    Ok((StatusCode::CREATED, Json(integration.into())))
+    Ok((
+        StatusCode::CREATED,
+        Json(Integration::from_model(integration)),
+    ))
 }
 
 fn create_integration_docs(op: TransformOperation) -> TransformOperation {
@@ -116,7 +119,7 @@ async fn list_integrations(
         .list_workspace_integrations_filtered(path_params.workspace_id, query.to_filter())
         .await?;
 
-    let integrations: Integrations = integrations.into_iter().map(Into::into).collect();
+    let integrations: Integrations = Integration::from_models(integrations);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -165,7 +168,7 @@ async fn read_integration(
 
     tracing::debug!(target: TRACING_TARGET, "Workspace integration read");
 
-    Ok((StatusCode::OK, Json(integration.into())))
+    Ok((StatusCode::OK, Json(Integration::from_model(integration))))
 }
 
 fn read_integration_docs(op: TransformOperation) -> TransformOperation {
@@ -230,7 +233,7 @@ async fn update_integration(
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Integration updated");
-    Ok((StatusCode::OK, Json(integration.into())))
+    Ok((StatusCode::OK, Json(Integration::from_model(integration))))
 }
 
 fn update_integration_docs(op: TransformOperation) -> TransformOperation {
@@ -283,7 +286,7 @@ async fn update_integration_credentials(
 
     tracing::info!(target: TRACING_TARGET, "Integration credentials updated");
 
-    Ok((StatusCode::OK, Json(integration.into())))
+    Ok((StatusCode::OK, Json(Integration::from_model(integration))))
 }
 
 fn update_integration_credentials_docs(op: TransformOperation) -> TransformOperation {

@@ -8,7 +8,7 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
-use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
+use crate::model::{Account, NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 use crate::types::{InviteFilter, InviteSortBy, InviteStatus, SortOrder};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -124,6 +124,17 @@ pub trait WorkspaceInviteRepository {
         &mut self,
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
+
+    /// Lists invitations for a workspace with account details.
+    ///
+    /// Returns invites with their associated invitee account information (if invitee exists).
+    fn list_workspace_invites_with_accounts(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: InviteSortBy,
+        filter: InviteFilter,
+    ) -> impl Future<Output = PgResult<Vec<(WorkspaceInvite, Option<Account>)>>> + Send;
 }
 
 impl WorkspaceInviteRepository for PgConnection {
@@ -423,5 +434,53 @@ impl WorkspaceInviteRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(invite)
+    }
+
+    async fn list_workspace_invites_with_accounts(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: InviteSortBy,
+        filter: InviteFilter,
+    ) -> PgResult<Vec<(WorkspaceInvite, Option<Account>)>> {
+        use schema::accounts;
+
+        // First get the invites
+        let invites = self
+            .list_workspace_invites_filtered(proj_id, pagination, sort_by, filter)
+            .await?;
+
+        // Collect invitee IDs that exist
+        let invitee_ids: Vec<Uuid> = invites.iter().filter_map(|i| i.invitee_id).collect();
+
+        if invitee_ids.is_empty() {
+            return Ok(invites.into_iter().map(|i| (i, None)).collect());
+        }
+
+        // Fetch accounts for those IDs
+        let accounts_list: Vec<Account> = accounts::table
+            .filter(accounts::id.eq_any(&invitee_ids))
+            .filter(accounts::deleted_at.is_null())
+            .select(Account::as_select())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        // Build a map for quick lookup
+        let accounts_map: std::collections::HashMap<Uuid, Account> =
+            accounts_list.into_iter().map(|a| (a.id, a)).collect();
+
+        // Combine results
+        let results = invites
+            .into_iter()
+            .map(|invite| {
+                let account = invite
+                    .invitee_id
+                    .and_then(|id| accounts_map.get(&id).cloned());
+                (invite, account)
+            })
+            .collect();
+
+        Ok(results)
     }
 }

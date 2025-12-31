@@ -185,10 +185,15 @@ impl HasCreatedAt for AccountNotification {
 }
 
 impl HasExpiresAt for AccountNotification {
-    fn expires_at(&self) -> jiff::Timestamp {
-        self.expires_at.map(Into::into).unwrap_or(
-            jiff::Timestamp::now()
-                + jiff::Span::new().days(notification::DEFAULT_RETENTION_DAYS as i64),
+    fn expires_at(&self) -> Option<jiff::Timestamp> {
+        Some(
+            self.expires_at.map(Into::into).unwrap_or(
+                jiff::Timestamp::now()
+                    .checked_add(
+                        jiff::Span::new().hours(notification::DEFAULT_RETENTION_DAYS as i64 * 24),
+                    )
+                    .expect("valid notification expiry"),
+            ),
         )
     }
 }

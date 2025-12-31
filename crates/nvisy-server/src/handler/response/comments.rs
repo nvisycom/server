@@ -29,8 +29,9 @@ pub struct Comment {
     pub updated_at: Timestamp,
 }
 
-impl From<model::DocumentComment> for Comment {
-    fn from(comment: model::DocumentComment) -> Self {
+impl Comment {
+    /// Creates a Comment response from a database model.
+    pub fn from_model(comment: model::DocumentComment) -> Self {
         Self {
             comment_id: comment.id,
             file_id: comment.file_id,
@@ -41,6 +42,11 @@ impl From<model::DocumentComment> for Comment {
             created_at: comment.created_at.into(),
             updated_at: comment.updated_at.into(),
         }
+    }
+
+    /// Creates a list of Comment responses from database models.
+    pub fn from_models(models: Vec<model::DocumentComment>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }
 

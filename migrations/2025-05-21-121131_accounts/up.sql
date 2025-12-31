@@ -121,11 +121,11 @@ CREATE TABLE account_api_tokens (
 
     -- Lifecycle timestamps
     issued_at             TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    expired_at            TIMESTAMPTZ NOT NULL DEFAULT current_timestamp + INTERVAL '7 days',
+    expired_at            TIMESTAMPTZ DEFAULT NULL,
     last_used_at          TIMESTAMPTZ DEFAULT NULL,
     deleted_at            TIMESTAMPTZ DEFAULT NULL,
 
-    CONSTRAINT account_api_tokens_expired_after_issued CHECK (expired_at > issued_at),
+    CONSTRAINT account_api_tokens_expired_after_issued CHECK (expired_at IS NULL OR expired_at > issued_at),
     CONSTRAINT account_api_tokens_deleted_after_issued CHECK (deleted_at IS NULL OR deleted_at >= issued_at),
     CONSTRAINT account_api_tokens_last_used_after_issued CHECK (last_used_at IS NULL OR last_used_at >= issued_at)
 );

@@ -9,6 +9,8 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
+use jiff::{Span, Timestamp};
+use nvisy_postgres::JiffTimestamp;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::{ApiTokenType, HasDeletedAt};
@@ -99,7 +101,7 @@ async fn login(
     }
 
     let account = account.unwrap(); // Safe because we verified above
-
+    let expired_at = Timestamp::now() + Span::new().hours(90 * 24);
     let new_token = NewAccountApiToken {
         account_id: account.id,
         name: ua_parser.parse(user_agent.as_str()),
@@ -107,6 +109,7 @@ async fn login(
         user_agent: user_agent.to_string(),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
+        expired_at: Some(expired_at.into()),
         ..Default::default()
     };
 
@@ -114,16 +117,15 @@ async fn login(
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
-    let access_token = auth_header.into_string()?;
+    let api_token = auth_header.into_string()?;
     let response = AuthToken {
-        access_token,
+        api_token,
+        token_id: auth_claims.token_id,
         account_id: auth_claims.account_id,
         display_name: account.display_name.clone(),
         email_address: account.email_address.clone(),
-        issued_at: jiff::Timestamp::from_second(auth_claims.issued_at)
-            .unwrap_or(jiff::Timestamp::now()),
-        expires_at: jiff::Timestamp::from_second(auth_claims.expires_at)
-            .unwrap_or(jiff::Timestamp::now()),
+        issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
+        expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };
 
     tracing::info!(
@@ -184,6 +186,11 @@ async fn signup(
         "Account created",
     );
 
+    let expired_at = Timestamp::now()
+        .checked_add(Span::new().hours(90 * 24))
+        .ok()
+        .map(JiffTimestamp::from);
+
     let user_agent_str = user_agent.to_string();
     let new_token = NewAccountApiToken {
         account_id: account.id,
@@ -192,6 +199,7 @@ async fn signup(
         user_agent: user_agent_str,
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
+        expired_at,
         ..Default::default()
     };
     let account_api_token = conn.create_token(new_token).await?;
@@ -203,16 +211,15 @@ async fn signup(
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
-    let access_token = auth_header.into_string()?;
+    let api_token = auth_header.into_string()?;
     let response = AuthToken {
-        access_token,
+        api_token,
+        token_id: auth_claims.token_id,
         account_id: auth_claims.account_id,
         display_name,
         email_address,
-        issued_at: jiff::Timestamp::from_second(auth_claims.issued_at)
-            .unwrap_or(jiff::Timestamp::now()),
-        expires_at: jiff::Timestamp::from_second(auth_claims.expires_at)
-            .unwrap_or(jiff::Timestamp::now()),
+        issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
+        expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };
 
     tracing::info!(

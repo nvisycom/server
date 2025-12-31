@@ -60,7 +60,7 @@ async fn post_comment(
         "Comment created",
     );
 
-    Ok((StatusCode::CREATED, Json(comment.into())))
+    Ok((StatusCode::CREATED, Json(Comment::from_model(comment))))
 }
 
 fn post_comment_docs(op: TransformOperation) -> TransformOperation {
@@ -101,10 +101,7 @@ async fn list_comments(
         "Comments listed",
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(comments.into_iter().map(Into::into).collect()),
-    ))
+    Ok((StatusCode::OK, Json(Comment::from_models(comments))))
 }
 
 fn list_comments_docs(op: TransformOperation) -> TransformOperation {
@@ -158,7 +155,7 @@ async fn update_comment(
 
     tracing::info!(target: TRACING_TARGET, "Comment updated");
 
-    Ok((StatusCode::OK, Json(comment.into())))
+    Ok((StatusCode::OK, Json(Comment::from_model(comment))))
 }
 
 fn update_comment_docs(op: TransformOperation) -> TransformOperation {

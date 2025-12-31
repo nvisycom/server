@@ -30,8 +30,8 @@ pub struct AccountApiToken {
     pub is_remembered: bool,
     /// Timestamp of token creation.
     pub issued_at: Timestamp,
-    /// Timestamp when the token expires and becomes invalid.
-    pub expired_at: Timestamp,
+    /// Timestamp when the token expires and becomes invalid (None = never expires).
+    pub expired_at: Option<Timestamp>,
     /// Timestamp of most recent token activity.
     pub last_used_at: Option<Timestamp>,
     /// Timestamp when the token was soft-deleted.
@@ -83,8 +83,12 @@ impl AccountApiToken {
     }
 
     /// Returns whether the token has expired.
+    /// Returns false if the token never expires (expired_at is None).
     pub fn is_expired(&self) -> bool {
-        jiff::Timestamp::now() > jiff::Timestamp::from(self.expired_at)
+        match self.expired_at {
+            Some(expired_at) => jiff::Timestamp::now() > jiff::Timestamp::from(expired_at),
+            None => false,
+        }
     }
 
     /// Returns whether the token is deleted.
@@ -93,9 +97,11 @@ impl AccountApiToken {
     }
 
     /// Returns the remaining time until token expires.
+    /// Returns None if the token never expires or has already expired.
     pub fn time_until_expiry(&self) -> Option<jiff::Span> {
+        let expired_at = self.expired_at?;
         let now = jiff::Timestamp::now();
-        let expired_at = jiff::Timestamp::from(self.expired_at);
+        let expired_at = jiff::Timestamp::from(expired_at);
         if expired_at > now {
             Some(expired_at - now)
         } else {
@@ -174,8 +180,8 @@ impl HasCreatedAt for AccountApiToken {
 }
 
 impl HasExpiresAt for AccountApiToken {
-    fn expires_at(&self) -> jiff::Timestamp {
-        self.expired_at.into()
+    fn expires_at(&self) -> Option<jiff::Timestamp> {
+        self.expired_at.map(Into::into)
     }
 }
 

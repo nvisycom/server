@@ -93,7 +93,7 @@ diesel::table! {
         user_agent -> Text,
         is_remembered -> Bool,
         issued_at -> Timestamptz,
-        expired_at -> Timestamptz,
+        expired_at -> Nullable<Timestamptz>,
         last_used_at -> Nullable<Timestamptz>,
         deleted_at -> Nullable<Timestamptz>,
     }
@@ -333,7 +333,6 @@ diesel::table! {
         workspace_id -> Uuid,
         invitee_id -> Nullable<Uuid>,
         invited_role -> WorkspaceRole,
-        invite_message -> Text,
         invite_token -> Text,
         invite_status -> InviteStatus,
         expires_at -> Timestamptz,

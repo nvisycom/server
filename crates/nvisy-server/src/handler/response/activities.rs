@@ -22,9 +22,6 @@ pub struct Activity {
     pub activity_type: ActivityType,
     /// Human-readable description.
     pub description: String,
-    /// Additional metadata.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
     /// When the activity occurred.
     pub created_at: Timestamp,
 }
@@ -32,26 +29,21 @@ pub struct Activity {
 /// List of activities.
 pub type Activities = Vec<Activity>;
 
-impl From<WorkspaceActivity> for Activity {
-    fn from(activity: WorkspaceActivity) -> Self {
-        let metadata = if activity
-            .metadata
-            .as_object()
-            .is_none_or(|obj| obj.is_empty())
-        {
-            None
-        } else {
-            Some(activity.metadata)
-        };
-
+impl Activity {
+    /// Creates an Activity response from a database model.
+    pub fn from_model(activity: WorkspaceActivity) -> Self {
         Self {
             id: activity.id,
             workspace_id: activity.workspace_id,
             account_id: activity.account_id,
             activity_type: activity.activity_type,
             description: activity.description,
-            metadata,
             created_at: activity.created_at.into(),
         }
+    }
+
+    /// Creates a list of Activity responses from database models.
+    pub fn from_models(models: Vec<WorkspaceActivity>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }

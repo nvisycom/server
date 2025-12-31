@@ -49,8 +49,9 @@ pub struct IntegrationRun {
 /// List of integration runs.
 pub type IntegrationRuns = Vec<IntegrationRun>;
 
-impl From<WorkspaceIntegrationRun> for IntegrationRun {
-    fn from(run: WorkspaceIntegrationRun) -> Self {
+impl IntegrationRun {
+    /// Creates an IntegrationRun response from a database model.
+    pub fn from_model(run: WorkspaceIntegrationRun) -> Self {
         Self {
             id: run.id,
             workspace_id: run.workspace_id,
@@ -66,5 +67,10 @@ impl From<WorkspaceIntegrationRun> for IntegrationRun {
             error_details: run.error_details,
             created_at: run.created_at.into(),
         }
+    }
+
+    /// Creates a list of IntegrationRun responses from database models.
+    pub fn from_models(models: Vec<WorkspaceIntegrationRun>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }

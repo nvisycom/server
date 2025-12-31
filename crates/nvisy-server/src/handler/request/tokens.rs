@@ -34,20 +34,24 @@ pub enum TokenExpiration {
 }
 
 impl TokenExpiration {
-    /// Returns the duration until expiration, or None if never expires.
+    /// Returns the duration until expiration in hours, or None if never expires.
+    ///
+    /// Uses hours instead of days because `jiff::Timestamp` only supports
+    /// units of hours or smaller for arithmetic operations.
     pub fn to_span(self) -> Option<jiff::Span> {
         match self {
             Self::Never => None,
-            Self::In7Days => Some(jiff::Span::new().days(7)),
-            Self::In30Days => Some(jiff::Span::new().days(30)),
-            Self::In90Days => Some(jiff::Span::new().days(90)),
-            Self::In1Year => Some(jiff::Span::new().days(365)),
+            Self::In7Days => Some(jiff::Span::new().hours(7 * 24)),
+            Self::In30Days => Some(jiff::Span::new().hours(30 * 24)),
+            Self::In90Days => Some(jiff::Span::new().hours(90 * 24)),
+            Self::In1Year => Some(jiff::Span::new().hours(365 * 24)),
         }
     }
 
     /// Returns the expiry timestamp from now, or None if never expires.
     pub fn to_expiry_timestamp(self) -> Option<jiff::Timestamp> {
-        self.to_span().map(|span| jiff::Timestamp::now() + span)
+        self.to_span()
+            .and_then(|span| jiff::Timestamp::now().checked_add(span).ok())
     }
 
     /// Returns the duration until expiration, or None if never expires.
@@ -90,8 +94,6 @@ impl CreateApiToken {
                 .with_message("Token name cannot be empty or whitespace only"));
         }
 
-        let expires_at = self.expires.to_expiry_timestamp();
-
         Ok(NewAccountApiToken {
             account_id,
             name: sanitized_name,
@@ -99,7 +101,7 @@ impl CreateApiToken {
             user_agent,
             session_type: Some(ApiTokenType::Api),
             is_remembered: Some(true),
-            expired_at: expires_at.map(Into::into),
+            expired_at: self.expires.to_expiry_timestamp().map(Into::into),
         })
     }
 }

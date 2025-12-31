@@ -49,7 +49,7 @@ async fn list_members(
         .await?;
 
     let workspace_members = conn
-        .list_workspace_members_filtered(
+        .list_workspace_members_with_accounts(
             path_params.workspace_id,
             pagination.into(),
             query.to_sort(),
@@ -57,7 +57,7 @@ async fn list_members(
         )
         .await?;
 
-    let members: Members = workspace_members.into_iter().map(Member::from).collect();
+    let members: Members = Member::from_models(workspace_members);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -100,8 +100,8 @@ async fn get_member(
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
         .await?;
 
-    let Some(workspace_member) = conn
-        .find_workspace_member(path_params.workspace_id, path_params.account_id)
+    let Some((workspace_member, account)) = conn
+        .find_workspace_member_with_account(path_params.workspace_id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -115,7 +115,10 @@ async fn get_member(
         "Workspace member read",
     );
 
-    Ok((StatusCode::OK, Json(workspace_member.into())))
+    Ok((
+        StatusCode::OK,
+        Json(Member::from_model(workspace_member, account)),
+    ))
 }
 
 fn get_member_docs(op: TransformOperation) -> TransformOperation {
@@ -242,13 +245,19 @@ async fn update_member(
             .with_context("Owners can only leave the workspace themselves"));
     }
 
-    let updated_member = conn
-        .update_workspace_member(
-            path_params.workspace_id,
-            path_params.account_id,
-            request.into_model(),
-        )
-        .await?;
+    conn.update_workspace_member(
+        path_params.workspace_id,
+        path_params.account_id,
+        request.into_model(),
+    )
+    .await?;
+
+    let Some((updated_member, account)) = conn
+        .find_workspace_member_with_account(path_params.workspace_id, path_params.account_id)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("workspace_member"));
+    };
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -256,7 +265,10 @@ async fn update_member(
         "Member role updated ",
     );
 
-    Ok((StatusCode::OK, Json(updated_member.into())))
+    Ok((
+        StatusCode::OK,
+        Json(Member::from_model(updated_member, account)),
+    ))
 }
 
 fn update_member_docs(op: TransformOperation) -> TransformOperation {

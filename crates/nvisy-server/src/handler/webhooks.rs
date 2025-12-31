@@ -57,7 +57,10 @@ async fn create_webhook(
         "Webhook created ",
     );
 
-    Ok((StatusCode::CREATED, Json(webhook.into())))
+    Ok((
+        StatusCode::CREATED,
+        Json(WebhookWithSecret::from_model(webhook)),
+    ))
 }
 
 fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
@@ -98,7 +101,7 @@ async fn list_webhooks(
         .list_workspace_webhooks(path_params.workspace_id, Pagination::default())
         .await?;
 
-    let webhooks: Webhooks = webhooks.into_iter().map(Into::into).collect();
+    let webhooks: Webhooks = Webhook::from_models(webhooks);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -147,7 +150,7 @@ async fn read_webhook(
 
     tracing::debug!(target: TRACING_TARGET, "Workspace webhook read");
 
-    Ok((StatusCode::OK, Json(webhook.into())))
+    Ok((StatusCode::OK, Json(Webhook::from_model(webhook))))
 }
 
 fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
@@ -195,7 +198,7 @@ async fn update_webhook(
 
     tracing::info!(target: TRACING_TARGET, "Webhook updated");
 
-    Ok((StatusCode::OK, Json(webhook.into())))
+    Ok((StatusCode::OK, Json(Webhook::from_model(webhook))))
 }
 
 fn update_webhook_docs(op: TransformOperation) -> TransformOperation {

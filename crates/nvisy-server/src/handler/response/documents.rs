@@ -36,11 +36,11 @@ pub struct Document {
     pub updated_at: Timestamp,
 }
 
-impl From<model::Document> for Document {
-    fn from(document: model::Document) -> Self {
+impl Document {
+    /// Creates a Document response from a database model.
+    pub fn from_model(document: model::Document) -> Self {
         Self {
             tags: document.tags(),
-
             document_id: document.id,
             workspace_id: document.workspace_id,
             account_id: document.account_id,
@@ -52,6 +52,11 @@ impl From<model::Document> for Document {
             created_at: document.created_at.into(),
             updated_at: document.updated_at.into(),
         }
+    }
+
+    /// Creates a list of Document responses from database models.
+    pub fn from_models(models: Vec<model::Document>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }
 

@@ -10,8 +10,11 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthToken {
-    /// The JWT access token for authentication.
-    pub access_token: String,
+    /// The JWT API token for authentication.
+    pub api_token: String,
+
+    /// ID of the token.
+    pub token_id: Uuid,
 
     /// ID of the account.
     pub account_id: Uuid,

@@ -10,7 +10,7 @@ use nvisy_postgres::query::AccountNotificationRepository;
 use crate::extract::{AuthState, Json, PgPool, Query};
 use crate::handler::Result;
 use crate::handler::request::Pagination;
-use crate::handler::response::{ErrorResponse, Notifications};
+use crate::handler::response::{ErrorResponse, Notification, Notifications};
 use crate::service::ServiceState;
 
 /// Tracing target for notification operations.
@@ -43,7 +43,7 @@ async fn list_notifications(
         );
     }
 
-    let notifications: Notifications = notifications.into_iter().map(Into::into).collect();
+    let notifications: Notifications = Notification::from_models(notifications);
 
     tracing::debug!(
         target: TRACING_TARGET,

@@ -57,7 +57,7 @@ async fn create_document(
         "Document created",
     );
 
-    Ok((StatusCode::CREATED, Json(document.into())))
+    Ok((StatusCode::CREATED, Json(Document::from_model(document))))
 }
 
 fn create_document_docs(op: TransformOperation) -> TransformOperation {
@@ -97,7 +97,7 @@ async fn get_all_documents(
         .find_documents_by_workspace(path_params.workspace_id, pagination.into())
         .await?;
 
-    let response: Documents = documents.into_iter().map(Document::from).collect();
+    let response: Documents = Document::from_models(documents);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -143,7 +143,7 @@ async fn get_document(
 
     tracing::info!(target: TRACING_TARGET, "Document read");
 
-    Ok((StatusCode::OK, Json(document.into())))
+    Ok((StatusCode::OK, Json(Document::from_model(document))))
 }
 
 fn get_document_docs(op: TransformOperation) -> TransformOperation {
@@ -189,7 +189,7 @@ async fn update_document(
 
     tracing::info!(target: TRACING_TARGET, "Document updated");
 
-    Ok((StatusCode::OK, Json(document.into())))
+    Ok((StatusCode::OK, Json(Document::from_model(document))))
 }
 
 fn update_document_docs(op: TransformOperation) -> TransformOperation {

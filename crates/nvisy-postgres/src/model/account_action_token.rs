@@ -213,8 +213,8 @@ impl HasCreatedAt for AccountActionToken {
 }
 
 impl HasExpiresAt for AccountActionToken {
-    fn expires_at(&self) -> jiff::Timestamp {
-        self.expired_at.into()
+    fn expires_at(&self) -> Option<jiff::Timestamp> {
+        Some(self.expired_at.into())
     }
 }
 

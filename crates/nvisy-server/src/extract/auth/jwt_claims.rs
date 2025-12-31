@@ -18,6 +18,9 @@ use uuid::Uuid;
 use crate::extract::auth::TRACING_TARGET_AUTHENTICATION;
 use crate::handler::{ErrorKind, Result};
 
+/// Far-future timestamp for tokens that never expire (100 years from now).
+const NEVER_EXPIRES_SECONDS: i64 = 100 * 365 * 24 * 60 * 60;
+
 /// JWT claims for authentication tokens.
 ///
 /// This structure contains both RFC 7519 standard JWT claims and service-specific claims.
@@ -107,7 +110,10 @@ impl<T> AuthClaims<T> {
             token_id: account_api_token.id,
             account_id: account_model.id,
             issued_at: Timestamp::from(account_api_token.issued_at).as_second(),
-            expires_at: Timestamp::from(account_api_token.expired_at).as_second(),
+            expires_at: account_api_token
+                .expired_at
+                .map(|ts| Timestamp::from(ts).as_second())
+                .unwrap_or_else(|| Timestamp::now().as_second() + NEVER_EXPIRES_SECONDS),
             custom_claims,
             is_admin: account_model.is_admin,
         }

@@ -105,12 +105,16 @@ impl AccountApiTokenRepository for PgConnection {
     ) -> PgResult<AccountApiToken> {
         use schema::account_api_tokens::{self, dsl};
 
-        diesel::update(account_api_tokens::table.filter(dsl::id.eq(token_id)))
-            .set(&updates)
-            .returning(AccountApiToken::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)
+        diesel::update(
+            account_api_tokens::table
+                .filter(dsl::id.eq(token_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(&updates)
+        .returning(AccountApiToken::as_returning())
+        .get_result(self)
+        .await
+        .map_err(PgError::from)
     }
 
     async fn touch_token(&mut self, token_id: Uuid) -> PgResult<AccountApiToken> {
@@ -161,7 +165,11 @@ impl AccountApiTokenRepository for PgConnection {
         account_api_tokens::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
-            .filter(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
+            .filter(
+                dsl::expired_at
+                    .is_null()
+                    .or(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now()))),
+            )
             .order(dsl::issued_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
@@ -195,6 +203,7 @@ impl AccountApiTokenRepository for PgConnection {
 
         diesel::update(
             account_api_tokens::table
+                .filter(dsl::expired_at.is_not_null())
                 .filter(dsl::expired_at.lt(jiff_diesel::Timestamp::from(Timestamp::now())))
                 .filter(dsl::deleted_at.is_null()),
         )

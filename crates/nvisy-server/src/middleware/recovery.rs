@@ -139,30 +139,29 @@ fn handle_error(err: tower::BoxError) -> ResponseFut {
 }
 
 fn catch_panic(err: Panic) -> Response {
-    if let Some(panic) = err.downcast_ref::<String>() {
+    // If the panic is an Error, return it directly.
+    if let Some(error) = err.downcast_ref::<Error>() {
         tracing::error!(
             target: tracing_targets::RECOVERY_PANIC,
-            message = %panic,
+            error = %error,
             "service panic"
         );
-    } else if let Some(panic) = err.downcast_ref::<&str>() {
-        tracing::error!(
-            target: tracing_targets::RECOVERY_PANIC,
-            message = %panic,
-            "service panic"
-        );
-    } else if let Some(panic) = err.downcast_ref::<Error>() {
-        tracing::error!(
-            target: tracing_targets::RECOVERY_PANIC,
-            error = %panic,
-            "service panic"
-        );
-    } else {
-        tracing::error!(
-            target: tracing_targets::RECOVERY_PANIC,
-            "service panic with unknown type"
-        );
+        return error.clone().into_response();
     }
 
-    ErrorKind::InternalServerError.into_response()
+    let message = err
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| err.downcast_ref::<&str>().copied())
+        .unwrap_or("unknown panic type");
+
+    tracing::error!(
+        target: tracing_targets::RECOVERY_PANIC,
+        message = %message,
+        "service panic"
+    );
+
+    Error::new(ErrorKind::InternalServerError)
+        .with_message("An unexpected panic occurred")
+        .into_response()
 }

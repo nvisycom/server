@@ -80,16 +80,16 @@ fn flatten_events(events: Vec<Option<String>>) -> Vec<String> {
 }
 
 impl Webhook {
-    /// Creates a new instance of [`Webhook`] from database model.
-    pub fn new(webhook: &model::WorkspaceWebhook) -> Self {
+    /// Creates a Webhook response from a database model.
+    pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
         Self {
             webhook_id: webhook.id,
             workspace_id: webhook.workspace_id,
-            display_name: webhook.display_name.clone(),
-            description: webhook.description.clone(),
-            url: webhook.url.clone(),
-            events: flatten_events(webhook.events.clone()),
-            headers: webhook.headers.clone(),
+            display_name: webhook.display_name,
+            description: webhook.description,
+            url: webhook.url,
+            events: flatten_events(webhook.events),
+            headers: webhook.headers,
             status: webhook.status,
             failure_count: webhook.failure_count,
             max_failures: webhook.max_failures,
@@ -101,29 +101,37 @@ impl Webhook {
             updated_at: webhook.updated_at.into(),
         }
     }
+
+    /// Creates a list of Webhook responses from database models.
+    pub fn from_models(models: Vec<model::WorkspaceWebhook>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
+    }
 }
 
 impl WebhookWithSecret {
-    /// Creates a new instance of [`WebhookWithSecret`] from database model.
+    /// Creates a WebhookWithSecret response from a database model.
     pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
         Self {
             secret: webhook.secret.clone(),
-            webhook: Webhook::new(&webhook),
+            webhook: Webhook {
+                webhook_id: webhook.id,
+                workspace_id: webhook.workspace_id,
+                display_name: webhook.display_name,
+                description: webhook.description,
+                url: webhook.url,
+                events: flatten_events(webhook.events),
+                headers: webhook.headers,
+                status: webhook.status,
+                failure_count: webhook.failure_count,
+                max_failures: webhook.max_failures,
+                last_triggered_at: webhook.last_triggered_at.map(Into::into),
+                last_success_at: webhook.last_success_at.map(Into::into),
+                last_failure_at: webhook.last_failure_at.map(Into::into),
+                created_by: webhook.created_by,
+                created_at: webhook.created_at.into(),
+                updated_at: webhook.updated_at.into(),
+            },
         }
-    }
-}
-
-impl From<model::WorkspaceWebhook> for Webhook {
-    #[inline]
-    fn from(webhook: model::WorkspaceWebhook) -> Self {
-        Self::new(&webhook)
-    }
-}
-
-impl From<model::WorkspaceWebhook> for WebhookWithSecret {
-    #[inline]
-    fn from(webhook: model::WorkspaceWebhook) -> Self {
-        Self::from_model(webhook)
     }
 }
 

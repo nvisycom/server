@@ -20,9 +20,6 @@ pub struct Annotation {
     pub content: String,
     /// Annotation type.
     pub annotation_type: String,
-    /// Additional metadata (position, selection, etc.).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
     /// When the annotation was created.
     pub created_at: Timestamp,
     /// When the annotation was last updated.
@@ -32,27 +29,22 @@ pub struct Annotation {
 /// List of annotations.
 pub type Annotations = Vec<Annotation>;
 
-impl From<DocumentAnnotation> for Annotation {
-    fn from(annotation: DocumentAnnotation) -> Self {
-        let metadata = if annotation
-            .metadata
-            .as_object()
-            .is_none_or(|obj| obj.is_empty())
-        {
-            None
-        } else {
-            Some(annotation.metadata)
-        };
-
+impl Annotation {
+    /// Creates an Annotation response from a database model.
+    pub fn from_model(annotation: DocumentAnnotation) -> Self {
         Self {
             id: annotation.id,
             file_id: annotation.document_file_id,
             account_id: annotation.account_id,
             content: annotation.content,
             annotation_type: annotation.annotation_type,
-            metadata,
             created_at: annotation.created_at.into(),
             updated_at: annotation.updated_at.into(),
         }
+    }
+
+    /// Creates a list of Annotation responses from database models.
+    pub fn from_models(models: Vec<DocumentAnnotation>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }

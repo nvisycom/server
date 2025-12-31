@@ -10,7 +10,7 @@ use nvisy_postgres::query::WorkspaceActivityRepository;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, Query};
 use crate::handler::Result;
 use crate::handler::request::{Pagination, WorkspacePathParams};
-use crate::handler::response::{Activities, ErrorResponse};
+use crate::handler::response::{Activities, Activity, ErrorResponse};
 use crate::service::ServiceState;
 
 /// Tracing target for activity operations.
@@ -44,7 +44,7 @@ async fn list_activities(
         .list_workspace_activity(path_params.workspace_id, pagination.into())
         .await?;
 
-    let activities: Activities = activities.into_iter().map(Into::into).collect();
+    let activities: Activities = Activity::from_models(activities);
 
     tracing::debug!(
         target: TRACING_TARGET,

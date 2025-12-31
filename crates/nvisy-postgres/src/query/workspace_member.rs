@@ -8,7 +8,9 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
-use crate::model::{NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember};
+use crate::model::{
+    Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
+};
 use crate::types::{MemberFilter, MemberSortBy, SortOrder, WorkspaceRole};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -131,6 +133,24 @@ pub trait WorkspaceMemberRepository {
         proj_id: Uuid,
         hours: i64,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+
+    /// Lists members of a workspace with account details.
+    ///
+    /// Returns members with their associated account information (email, display name).
+    fn list_workspace_members_with_accounts(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: MemberSortBy,
+        filter: MemberFilter,
+    ) -> impl Future<Output = PgResult<Vec<(WorkspaceMember, Account)>>> + Send;
+
+    /// Finds a workspace member with account details.
+    fn find_workspace_member_with_account(
+        &mut self,
+        proj_id: Uuid,
+        member_account_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceMember, Account)>>> + Send;
 }
 
 impl WorkspaceMemberRepository for PgConnection {
@@ -450,5 +470,65 @@ impl WorkspaceMemberRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(members)
+    }
+
+    async fn list_workspace_members_with_accounts(
+        &mut self,
+        proj_id: Uuid,
+        pagination: Pagination,
+        sort_by: MemberSortBy,
+        filter: MemberFilter,
+    ) -> PgResult<Vec<(WorkspaceMember, Account)>> {
+        use schema::{accounts, workspace_members};
+
+        let mut query = workspace_members::table
+            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
+            .filter(workspace_members::workspace_id.eq(proj_id))
+            .filter(accounts::deleted_at.is_null())
+            .into_boxed();
+
+        if let Some(role) = filter.role {
+            query = query.filter(workspace_members::member_role.eq(role));
+        }
+
+        let query = match sort_by {
+            MemberSortBy::Name(SortOrder::Asc) => query.order(accounts::display_name.asc()),
+            MemberSortBy::Name(SortOrder::Desc) => query.order(accounts::display_name.desc()),
+            MemberSortBy::Date(SortOrder::Asc) => query.order(workspace_members::created_at.asc()),
+            MemberSortBy::Date(SortOrder::Desc) => {
+                query.order(workspace_members::created_at.desc())
+            }
+        };
+
+        let results = query
+            .select((WorkspaceMember::as_select(), Account::as_select()))
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(results)
+    }
+
+    async fn find_workspace_member_with_account(
+        &mut self,
+        proj_id: Uuid,
+        member_account_id: Uuid,
+    ) -> PgResult<Option<(WorkspaceMember, Account)>> {
+        use schema::{accounts, workspace_members};
+
+        let result = workspace_members::table
+            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
+            .filter(workspace_members::workspace_id.eq(proj_id))
+            .filter(workspace_members::account_id.eq(member_account_id))
+            .filter(accounts::deleted_at.is_null())
+            .select((WorkspaceMember::as_select(), Account::as_select()))
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(result)
     }
 }

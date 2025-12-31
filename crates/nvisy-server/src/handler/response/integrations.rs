@@ -27,9 +27,6 @@ pub struct Integration {
     /// Type of third-party service this integration connects to.
     pub integration_type: IntegrationType,
 
-    /// Structured configuration and service-specific metadata.
-    pub metadata: serde_json::Value,
-
     /// Whether the integration is currently active and enabled.
     pub is_active: bool,
 
@@ -50,15 +47,14 @@ pub struct Integration {
 }
 
 impl Integration {
-    /// Creates a new instance of [`Integration`] from database model.
-    pub fn new(integration: model::WorkspaceIntegration) -> Self {
+    /// Creates an Integration response from a database model.
+    pub fn from_model(integration: model::WorkspaceIntegration) -> Self {
         Self {
             integration_id: integration.id,
             workspace_id: integration.workspace_id,
             integration_name: integration.integration_name,
             description: integration.description,
             integration_type: integration.integration_type,
-            metadata: integration.metadata,
             is_active: integration.is_active,
             last_sync_at: integration.last_sync_at.map(Into::into),
             sync_status: integration.sync_status,
@@ -67,12 +63,10 @@ impl Integration {
             updated_at: integration.updated_at.into(),
         }
     }
-}
 
-impl From<model::WorkspaceIntegration> for Integration {
-    #[inline]
-    fn from(integration: model::WorkspaceIntegration) -> Self {
-        Self::new(integration)
+    /// Creates a list of Integration responses from database models.
+    pub fn from_models(models: Vec<model::WorkspaceIntegration>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }
 

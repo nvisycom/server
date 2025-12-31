@@ -21,8 +21,6 @@ pub struct WorkspaceInvite {
     pub invitee_id: Option<Uuid>,
     /// Role to be assigned upon acceptance.
     pub invited_role: WorkspaceRole,
-    /// Optional message from the inviter.
-    pub invite_message: String,
     /// Unique token for accepting the invitation.
     pub invite_token: String,
     /// Current status of the invitation.
@@ -52,8 +50,6 @@ pub struct NewWorkspaceInvite {
     pub invitee_id: Option<Uuid>,
     /// Invited role.
     pub invited_role: Option<WorkspaceRole>,
-    /// Invite message.
-    pub invite_message: Option<String>,
     /// Invite token.
     pub invite_token: Option<String>,
     /// Expires at.
@@ -160,11 +156,6 @@ impl WorkspaceInvite {
         self.responded_at.map(|responded_at| {
             jiff::Timestamp::from(responded_at) - jiff::Timestamp::from(self.created_at)
         })
-    }
-
-    /// Returns whether the invitation has a custom message.
-    pub fn has_message(&self) -> bool {
-        !self.invite_message.is_empty()
     }
 
     /// Returns whether the invitation is for a specific user.

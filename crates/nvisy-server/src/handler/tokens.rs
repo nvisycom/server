@@ -9,7 +9,6 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
-use jiff::Timestamp;
 use nvisy_postgres::model::UpdateAccountApiToken;
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountRepository, Pagination as QueryPagination,
@@ -59,7 +58,7 @@ async fn create_api_token(
     let auth_header = AuthHeader::new(auth_claims, auth_keys);
     let jwt_token = auth_header.into_string()?;
 
-    let response = ApiToken::from(api_token.clone()).with_jwt(jwt_token);
+    let response = ApiToken::from_model(api_token.clone()).with_jwt(jwt_token);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -106,7 +105,7 @@ async fn list_api_tokens(
         .list_account_tokens(auth_state.account_id, QueryPagination::from(pagination))
         .await?;
 
-    let api_tokens: ApiTokens = tokens.into_iter().map(ApiToken::from).collect();
+    let api_tokens: ApiTokens = ApiToken::from_models(tokens);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -138,7 +137,7 @@ async fn read_api_token(
 
     tracing::debug!(target: TRACING_TARGET, "API token read");
 
-    Ok((StatusCode::OK, Json(token.into())))
+    Ok((StatusCode::OK, Json(ApiToken::from_model(token))))
 }
 
 fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
@@ -163,7 +162,6 @@ async fn update_api_token(
     let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
 
     let update_token = UpdateAccountApiToken {
-        last_used_at: Some(Timestamp::now().into()),
         name: request.name,
         ..Default::default()
     };
@@ -172,7 +170,7 @@ async fn update_api_token(
 
     tracing::info!(target: TRACING_TARGET, "API token updated");
 
-    Ok((StatusCode::OK, Json(updated_token.into())))
+    Ok((StatusCode::OK, Json(ApiToken::from_model(updated_token))))
 }
 
 fn update_api_token_docs(op: TransformOperation) -> TransformOperation {

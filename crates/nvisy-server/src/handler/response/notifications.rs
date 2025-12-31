@@ -30,9 +30,6 @@ pub struct Notification {
     /// Related entity type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub related_type: Option<String>,
-    /// Additional metadata.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
     /// When the notification was created.
     pub created_at: Timestamp,
     /// When the notification expires.
@@ -43,18 +40,9 @@ pub struct Notification {
 /// List of notifications.
 pub type Notifications = Vec<Notification>;
 
-impl From<AccountNotification> for Notification {
-    fn from(notification: AccountNotification) -> Self {
-        let metadata = if notification
-            .metadata
-            .as_object()
-            .is_none_or(|obj| obj.is_empty())
-        {
-            None
-        } else {
-            Some(notification.metadata)
-        };
-
+impl Notification {
+    /// Creates a Notification response from a database model.
+    pub fn from_model(notification: AccountNotification) -> Self {
         Self {
             id: notification.id,
             notify_type: notification.notify_type,
@@ -64,9 +52,13 @@ impl From<AccountNotification> for Notification {
             read_at: notification.read_at.map(Into::into),
             related_id: notification.related_id,
             related_type: notification.related_type,
-            metadata,
             created_at: notification.created_at.into(),
             expires_at: notification.expires_at.map(Into::into),
         }
+    }
+
+    /// Creates a list of Notification responses from database models.
+    pub fn from_models(models: Vec<AccountNotification>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }

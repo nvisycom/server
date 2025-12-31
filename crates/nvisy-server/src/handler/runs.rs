@@ -44,7 +44,7 @@ async fn list_workspace_runs(
         .find_runs_by_workspace(path_params.workspace_id, pagination.into())
         .await?;
 
-    let runs: IntegrationRuns = runs.into_iter().map(Into::into).collect();
+    let runs: IntegrationRuns = IntegrationRun::from_models(runs);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -93,7 +93,7 @@ async fn get_run(
 
     tracing::debug!(target: TRACING_TARGET, "Integration run retrieved");
 
-    Ok((StatusCode::OK, Json(run.into())))
+    Ok((StatusCode::OK, Json(IntegrationRun::from_model(run))))
 }
 
 fn get_run_docs(op: TransformOperation) -> TransformOperation {

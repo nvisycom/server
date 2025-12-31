@@ -97,7 +97,7 @@ async fn send_invite(
             auth_state.account_id,
         ))
         .await?;
-    let response = Invite::from(workspace_invite);
+    let response = Invite::from_model(workspace_invite, None);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -143,7 +143,7 @@ async fn list_invites(
         .await?;
 
     let workspace_invites = conn
-        .list_workspace_invites_filtered(
+        .list_workspace_invites_with_accounts(
             path_params.workspace_id,
             pagination.into(),
             query.to_sort(),
@@ -151,7 +151,7 @@ async fn list_invites(
         )
         .await?;
 
-    let invites: Invites = workspace_invites.into_iter().map(Invite::from).collect();
+    let invites: Invites = Invite::from_models(workspace_invites);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -258,7 +258,10 @@ async fn reply_to_invite(
         declined
     };
 
-    Ok((StatusCode::OK, Json(Invite::from(workspace_invite))))
+    Ok((
+        StatusCode::OK,
+        Json(Invite::from_model(workspace_invite, None)),
+    ))
 }
 
 fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
@@ -370,7 +373,14 @@ async fn join_via_invite_code(
         invite.invited_role,
     );
 
-    let workspace_member = conn.add_workspace_member(new_member).await?;
+    conn.add_workspace_member(new_member).await?;
+
+    let Some((workspace_member, account)) = conn
+        .find_workspace_member_with_account(invite.workspace_id, auth_state.account_id)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound.with_resource("workspace_member"));
+    };
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -379,7 +389,10 @@ async fn join_via_invite_code(
         "User joined workspace via invite code ",
     );
 
-    Ok((StatusCode::CREATED, Json(Member::from(workspace_member))))
+    Ok((
+        StatusCode::CREATED,
+        Json(Member::from_model(workspace_member, account)),
+    ))
 }
 
 fn join_via_invite_code_docs(op: TransformOperation) -> TransformOperation {

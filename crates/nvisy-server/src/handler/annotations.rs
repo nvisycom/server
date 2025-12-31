@@ -79,7 +79,10 @@ async fn create_annotation(
         "Annotation created"
     );
 
-    Ok((StatusCode::CREATED, Json(annotation.into())))
+    Ok((
+        StatusCode::CREATED,
+        Json(Annotation::from_model(annotation)),
+    ))
 }
 
 fn create_annotation_docs(op: TransformOperation) -> TransformOperation {
@@ -118,7 +121,7 @@ async fn list_annotations(
         .find_annotations_by_file(path_params.file_id, pagination.into())
         .await?;
 
-    let annotations: Annotations = annotations.into_iter().map(Into::into).collect();
+    let annotations: Annotations = Annotation::from_models(annotations);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -162,7 +165,7 @@ async fn get_annotation(
 
     tracing::debug!(target: TRACING_TARGET, "Annotation retrieved");
 
-    Ok((StatusCode::OK, Json(annotation.into())))
+    Ok((StatusCode::OK, Json(Annotation::from_model(annotation))))
 }
 
 fn get_annotation_docs(op: TransformOperation) -> TransformOperation {
@@ -209,7 +212,7 @@ async fn update_annotation(
 
     tracing::info!(target: TRACING_TARGET, "Annotation updated");
 
-    Ok((StatusCode::OK, Json(updated.into())))
+    Ok((StatusCode::OK, Json(Annotation::from_model(updated))))
 }
 
 fn update_annotation_docs(op: TransformOperation) -> TransformOperation {

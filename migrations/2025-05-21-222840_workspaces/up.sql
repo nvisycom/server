@@ -229,10 +229,8 @@ CREATE TABLE workspace_invites (
 
     -- Invitation details
     invited_role   WORKSPACE_ROLE  NOT NULL DEFAULT 'guest',
-    invite_message TEXT          NOT NULL DEFAULT '',
     invite_token   TEXT          NOT NULL DEFAULT generate_secure_token(32),
 
-    CONSTRAINT workspace_invites_invite_message_length_max CHECK (length(invite_message) <= 1000),
     CONSTRAINT workspace_invites_invite_token_not_empty CHECK (trim(invite_token) <> ''),
 
     -- Invite status and expiration
@@ -277,7 +275,6 @@ COMMENT ON COLUMN workspace_invites.id IS 'Unique invite identifier (UUID)';
 COMMENT ON COLUMN workspace_invites.workspace_id IS 'Reference to the workspace being invited to';
 COMMENT ON COLUMN workspace_invites.invitee_id IS 'Reference to invitee account (if exists)';
 COMMENT ON COLUMN workspace_invites.invited_role IS 'Role that will be assigned upon acceptance';
-COMMENT ON COLUMN workspace_invites.invite_message IS 'Custom message from inviter (up to 1000 chars)';
 COMMENT ON COLUMN workspace_invites.invite_token IS 'Secure token for invite validation';
 COMMENT ON COLUMN workspace_invites.invite_status IS 'Current status of the invitation';
 COMMENT ON COLUMN workspace_invites.expires_at IS 'Invitation expiration timestamp';
@@ -690,7 +687,6 @@ SELECT
     pi.workspace_id,
     p.display_name                      AS workspace_name,
     pi.invited_role,
-    pi.invite_message,
     pi.created_by,
     creator.display_name                AS inviter_name,
     pi.created_at,
