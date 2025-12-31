@@ -40,6 +40,14 @@ pub struct Notification {
 /// List of notifications.
 pub type Notifications = Vec<Notification>;
 
+/// Response type for unread notifications status.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadStatus {
+    /// Number of unread notifications.
+    pub unread_count: i64,
+}
+
 impl Notification {
     /// Creates a Notification response from a database model.
     pub fn from_model(notification: AccountNotification) -> Self {

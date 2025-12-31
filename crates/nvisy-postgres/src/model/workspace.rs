@@ -24,8 +24,6 @@ pub struct Workspace {
     pub keep_for_sec: Option<i32>,
     /// Whether automatic cleanup is enabled.
     pub auto_cleanup: bool,
-    /// Maximum number of members allowed.
-    pub max_members: Option<i32>,
     /// Maximum storage in MB.
     pub max_storage: Option<i32>,
     /// Whether approval is required.
@@ -65,8 +63,6 @@ pub struct NewWorkspace {
     pub keep_for_sec: Option<i32>,
     /// Auto cleanup enabled.
     pub auto_cleanup: Option<bool>,
-    /// Maximum members.
-    pub max_members: Option<i32>,
     /// Maximum storage.
     pub max_storage: Option<i32>,
     /// Require approval.
@@ -98,8 +94,6 @@ pub struct UpdateWorkspace {
     pub keep_for_sec: Option<i32>,
     /// Auto cleanup enabled.
     pub auto_cleanup: Option<bool>,
-    /// Maximum members.
-    pub max_members: Option<i32>,
     /// Maximum storage.
     pub max_storage: Option<i32>,
     /// Require approval.
@@ -171,24 +165,9 @@ impl Workspace {
         !self.settings.as_object().is_none_or(|obj| obj.is_empty())
     }
 
-    /// Returns whether the workspace has member limits.
-    pub fn has_member_limit(&self) -> bool {
-        self.max_members.is_some()
-    }
-
     /// Returns whether the workspace has storage limits.
     pub fn has_storage_limit(&self) -> bool {
         self.max_storage.is_some()
-    }
-
-    /// Returns whether the workspace is at or near member capacity.
-    pub fn is_near_member_capacity(&self, current_members: i32) -> bool {
-        if let Some(max_members) = self.max_members {
-            let usage_percentage = (current_members as f64 / max_members as f64) * 100.0;
-            usage_percentage >= 80.0 // 80% threshold
-        } else {
-            false
-        }
     }
 
     /// Returns whether the workspace is at or near storage capacity.

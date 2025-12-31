@@ -407,7 +407,6 @@ diesel::table! {
         avatar_url -> Nullable<Text>,
         keep_for_sec -> Nullable<Int4>,
         auto_cleanup -> Bool,
-        max_members -> Nullable<Int4>,
         max_storage -> Nullable<Int4>,
         require_approval -> Bool,
         enable_comments -> Bool,

@@ -10,7 +10,7 @@ use nvisy_postgres::query::AccountNotificationRepository;
 use crate::extract::{AuthState, Json, PgPool, Query};
 use crate::handler::Result;
 use crate::handler::request::Pagination;
-use crate::handler::response::{ErrorResponse, Notification, Notifications};
+use crate::handler::response::{ErrorResponse, Notification, Notifications, UnreadStatus};
 use crate::service::ServiceState;
 
 /// Tracing target for notification operations.
@@ -63,6 +63,37 @@ fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
+/// Returns the count of unread notifications for the authenticated account.
+#[tracing::instrument(
+    skip_all,
+    fields(account_id = %auth_state.account_id)
+)]
+async fn get_unread_status(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+) -> Result<(StatusCode, Json<UnreadStatus>)> {
+    tracing::debug!(target: TRACING_TARGET, "Checking unread notifications count");
+
+    let unread_count = conn
+        .count_unread_notifications(auth_state.account_id)
+        .await?;
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        unread_count,
+        "Unread notifications count retrieved"
+    );
+
+    Ok((StatusCode::OK, Json(UnreadStatus { unread_count })))
+}
+
+fn get_unread_status_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get unread notifications count")
+        .description("Returns the number of unread notifications for the authenticated account.")
+        .response::<200, Json<UnreadStatus>>()
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Returns routes for notification management.
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
@@ -71,6 +102,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/notifications/",
             get_with(list_notifications, list_notifications_docs),
+        )
+        .api_route(
+            "/notifications/unread",
+            get_with(get_unread_status, get_unread_status_docs),
         )
         .with_path_items(|item| item.tag("Notifications"))
 }

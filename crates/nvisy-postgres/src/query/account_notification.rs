@@ -84,6 +84,12 @@ pub trait AccountNotificationRepository {
     ///
     /// Returns the count of deleted notifications.
     fn delete_expired_notifications(&mut self) -> impl Future<Output = PgResult<usize>> + Send;
+
+    /// Counts unread notifications for an account.
+    fn count_unread_notifications(
+        &mut self,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
 impl AccountNotificationRepository for PgConnection {
@@ -244,5 +250,21 @@ impl AccountNotificationRepository for PgConnection {
         .execute(self)
         .await
         .map_err(PgError::from)
+    }
+
+    async fn count_unread_notifications(&mut self, account_id: Uuid) -> PgResult<i64> {
+        use diesel::dsl::count_star;
+        use schema::account_notifications::{self, dsl};
+
+        let now = jiff_diesel::Timestamp::from(Timestamp::now());
+
+        account_notifications::table
+            .filter(dsl::account_id.eq(account_id))
+            .filter(dsl::is_read.eq(false))
+            .filter(dsl::expires_at.is_null().or(dsl::expires_at.gt(now)))
+            .select(count_star())
+            .get_result(self)
+            .await
+            .map_err(PgError::from)
     }
 }

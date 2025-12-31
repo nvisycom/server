@@ -37,7 +37,7 @@ async fn create_workspace(
     let new_workspace = request.into_model(auth_state.account_id);
     let creator_id = auth_state.account_id;
 
-    let (workspace, _membership) = conn
+    let (workspace, membership) = conn
         .transaction(|conn| {
             Box::pin(async move {
                 let workspace = conn.create_workspace(new_workspace).await?;
@@ -48,7 +48,7 @@ async fn create_workspace(
         })
         .await?;
 
-    let response = Workspace::from_model(workspace);
+    let response = Workspace::from_model_with_membership(workspace, membership);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -117,7 +117,7 @@ async fn read_workspace(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
-    auth_state
+    let member = auth_state
         .authorize_workspace(
             &mut conn,
             path_params.workspace_id,
@@ -133,7 +133,10 @@ async fn read_workspace(
 
     tracing::info!(target: TRACING_TARGET, "Workspace read");
 
-    let workspace = Workspace::from_model(workspace);
+    let workspace = match member {
+        Some(member) => Workspace::from_model_with_membership(workspace, member),
+        None => Workspace::from_model(workspace),
+    };
     Ok((StatusCode::OK, Json(workspace)))
 }
 
@@ -164,7 +167,7 @@ async fn update_workspace(
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace");
 
-    auth_state
+    let member = auth_state
         .authorize_workspace(
             &mut conn,
             path_params.workspace_id,
@@ -179,7 +182,10 @@ async fn update_workspace(
 
     tracing::info!(target: TRACING_TARGET, "Workspace updated");
 
-    let workspace = Workspace::from_model(workspace);
+    let workspace = match member {
+        Some(member) => Workspace::from_model_with_membership(workspace, member),
+        None => Workspace::from_model(workspace),
+    };
     Ok((StatusCode::OK, Json(workspace)))
 }
 
@@ -219,17 +225,6 @@ async fn delete_workspace(
             Permission::DeleteWorkspace,
         )
         .await?;
-
-    // Verify workspace exists before deletion
-    if conn
-        .find_workspace_by_id(path_params.workspace_id)
-        .await?
-        .is_none()
-    {
-        return Err(ErrorKind::NotFound
-            .with_message("Workspace not found")
-            .with_resource("workspace"));
-    }
 
     conn.delete_workspace(path_params.workspace_id).await?;
 

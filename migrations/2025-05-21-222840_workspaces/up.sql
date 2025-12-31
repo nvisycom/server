@@ -20,11 +20,8 @@ CREATE TABLE workspaces (
     CONSTRAINT workspaces_keep_for_sec_range CHECK (keep_for_sec IS NULL OR keep_for_sec BETWEEN 3600 AND 31536000),
 
     -- Resource limits and quotas
-    max_members      INTEGER            DEFAULT NULL,
     max_storage      INTEGER            DEFAULT NULL,
 
-    CONSTRAINT workspaces_max_members_min CHECK (max_members IS NULL OR max_members >= 1),
-    CONSTRAINT workspaces_max_members_max CHECK (max_members IS NULL OR max_members <= 1000),
     CONSTRAINT workspaces_max_storage_min CHECK (max_storage IS NULL OR max_storage >= 1),
 
     -- Workspace settings
@@ -95,7 +92,6 @@ COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
 
 COMMENT ON COLUMN workspaces.keep_for_sec IS 'Data retention period in seconds (1 hour to 1 year)';
 COMMENT ON COLUMN workspaces.auto_cleanup IS 'Enable automatic cleanup of old workspace data';
-COMMENT ON COLUMN workspaces.max_members IS 'Maximum number of members allowed (NULL = unlimited)';
 COMMENT ON COLUMN workspaces.max_storage IS 'Maximum storage in megabytes (NULL = unlimited)';
 COMMENT ON COLUMN workspaces.require_approval IS 'Require approval for new member requests';
 COMMENT ON COLUMN workspaces.enable_comments IS 'Enable commenting features within the workspace';

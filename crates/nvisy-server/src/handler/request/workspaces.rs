@@ -47,10 +47,6 @@ pub struct CreateWorkspace {
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
 
-    /// Maximum number of members allowed in the workspace (1-1000).
-    #[validate(range(min = 1, max = 1000))]
-    pub max_members: Option<i32>,
-
     /// Maximum storage size in megabytes allowed for the workspace (1024-1048576 MB).
     #[validate(range(min = 1024, max = 1048576))]
     pub max_storage: Option<i32>,
@@ -73,7 +69,6 @@ impl CreateWorkspace {
             keep_for_sec: self.keep_for_sec,
             auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
-            max_members: self.max_members,
             max_storage: self.max_storage,
             enable_comments: self.enable_comments,
             created_by: account_id,
@@ -128,10 +123,6 @@ pub struct UpdateWorkspace {
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
 
-    /// Maximum number of members allowed in the workspace (1-1000).
-    #[validate(range(min = 1, max = 1000))]
-    pub max_members: Option<i32>,
-
     /// Maximum storage size in megabytes allowed for the workspace (1-1048576 MB).
     #[validate(range(min = 1, max = 1048576))]
     pub max_storage: Option<i32>,
@@ -150,7 +141,6 @@ impl UpdateWorkspace {
             keep_for_sec: self.keep_for_sec,
             auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
-            max_members: self.max_members,
             max_storage: self.max_storage,
             enable_comments: self.enable_comments,
             ..Default::default()

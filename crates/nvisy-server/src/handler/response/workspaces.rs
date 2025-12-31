@@ -24,12 +24,12 @@ pub struct Workspace {
     pub auto_cleanup: bool,
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
-    /// Maximum number of members allowed in the workspace.
-    pub max_members: Option<i32>,
     /// Maximum storage size in megabytes allowed for the workspace.
     pub max_storage: Option<i32>,
     /// Whether comments are enabled for this workspace.
     pub enable_comments: bool,
+    /// ID of the account that created the workspace.
+    pub created_by: Uuid,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
     /// Timestamp when the workspace was created.
@@ -48,9 +48,9 @@ impl Workspace {
             keep_for_sec: workspace.keep_for_sec,
             auto_cleanup: workspace.auto_cleanup,
             require_approval: workspace.require_approval,
-            max_members: workspace.max_members,
             max_storage: workspace.max_storage,
             enable_comments: workspace.enable_comments,
+            created_by: workspace.created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
@@ -69,9 +69,9 @@ impl Workspace {
             keep_for_sec: workspace.keep_for_sec,
             auto_cleanup: workspace.auto_cleanup,
             require_approval: workspace.require_approval,
-            max_members: workspace.max_members,
             max_storage: workspace.max_storage,
             enable_comments: workspace.enable_comments,
+            created_by: workspace.created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
