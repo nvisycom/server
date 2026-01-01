@@ -121,9 +121,6 @@ async fn login(
     let response = AuthToken {
         api_token,
         token_id: auth_claims.token_id,
-        account_id: auth_claims.account_id,
-        display_name: account.display_name.clone(),
-        email_address: account.email_address.clone(),
         issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
         expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };
@@ -204,10 +201,6 @@ async fn signup(
     };
     let account_api_token = conn.create_token(new_token).await?;
 
-    // Extract values before moving account
-    let display_name = account.display_name.clone();
-    let email_address = account.email_address.clone();
-
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
@@ -215,9 +208,6 @@ async fn signup(
     let response = AuthToken {
         api_token,
         token_id: auth_claims.token_id,
-        account_id: auth_claims.account_id,
-        display_name,
-        email_address,
         issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
         expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };

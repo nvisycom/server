@@ -1,7 +1,7 @@
 //! Monitor response types.
 
 use jiff::Timestamp;
-use nvisy_core::ServiceStatus;
+use nvisy_service::ServiceStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

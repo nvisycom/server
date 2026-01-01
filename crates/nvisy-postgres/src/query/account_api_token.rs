@@ -121,7 +121,7 @@ impl AccountApiTokenRepository for PgConnection {
         self.update_token_by_id(
             token_id,
             UpdateAccountApiToken {
-                last_used_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
+                last_used_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
                 ..Default::default()
             },
         )

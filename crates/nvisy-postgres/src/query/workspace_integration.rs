@@ -345,7 +345,7 @@ impl WorkspaceIntegrationRepository for PgConnection {
         _updated_by: Uuid,
     ) -> PgResult<WorkspaceIntegration> {
         let changes = UpdateWorkspaceIntegration {
-            sync_status: Some(new_status),
+            sync_status: Some(Some(new_status)),
             ..Default::default()
         };
 

@@ -123,7 +123,7 @@ pub struct UpdateWorkspaceMember {
     /// Notify mentions.
     pub notify_mentions: Option<bool>,
     /// Last accessed at.
-    pub last_accessed_at: Option<Timestamp>,
+    pub last_accessed_at: Option<Option<Timestamp>>,
     /// Updated by.
     pub updated_by: Option<Uuid>,
 }

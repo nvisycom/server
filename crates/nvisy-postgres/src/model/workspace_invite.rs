@@ -68,7 +68,7 @@ pub struct UpdateWorkspaceInvite {
     /// Invite status.
     pub invite_status: Option<InviteStatus>,
     /// Responded at.
-    pub responded_at: Option<Timestamp>,
+    pub responded_at: Option<Option<Timestamp>>,
     /// Updated by.
     pub updated_by: Option<Uuid>,
 }

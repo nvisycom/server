@@ -138,10 +138,10 @@ pub struct UpdateWorkspaceIntegration {
     pub is_active: Option<bool>,
 
     /// Updated timestamp of last successful synchronization.
-    pub last_sync_at: Option<Timestamp>,
+    pub last_sync_at: Option<Option<Timestamp>>,
 
     /// Updated synchronization status.
-    pub sync_status: Option<IntegrationStatus>,
+    pub sync_status: Option<Option<IntegrationStatus>>,
 }
 
 impl WorkspaceIntegration {

@@ -10,10 +10,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use nvisy_core::ocr::OcrService;
-use nvisy_core::vlm::VlmService;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
+use nvisy_service::InferenceService;
 use tokio::sync::RwLock;
 
 use crate::service::ServiceState;
@@ -208,7 +207,7 @@ impl HealthCache {
                 self.check_all_components(
                     &service_state.pg_client,
                     &service_state.nats_client,
-                    &service_state.ai_services,
+                    &service_state.inference,
                 )
             })
             .await
@@ -271,28 +270,26 @@ impl HealthCache {
         &self,
         pg_client: &PgClient,
         nats_client: &NatsClient,
-        ai_services: &nvisy_core::AiServices,
+        inference: &InferenceService,
     ) -> bool {
         let start = Instant::now();
 
         // Perform all health checks concurrently
-        let (db_healthy, nats_healthy, ocr_healthy, vlm_healthy) = tokio::join!(
+        let (db_healthy, nats_healthy, inference_healthy) = tokio::join!(
             self.check_database(pg_client),
             self.check_nats(nats_client),
-            self.check_ocr(&ai_services.ocr),
-            self.check_vlm(&ai_services.vlm)
+            self.check_inference(inference)
         );
 
         let check_duration = start.elapsed();
-        let overall_healthy = db_healthy && nats_healthy && ocr_healthy && vlm_healthy;
+        let overall_healthy = db_healthy && nats_healthy && inference_healthy;
 
         tracing::info!(
             target: TRACING_TARGET,
             duration_ms = check_duration.as_millis(),
             database_healthy = db_healthy,
             nats_healthy = nats_healthy,
-            ocr_healthy = ocr_healthy,
-            vlm_healthy = vlm_healthy,
+            inference_healthy = inference_healthy,
             overall_healthy = overall_healthy,
             "Health check completed"
         );
@@ -359,24 +356,30 @@ impl HealthCache {
         }
     }
 
-    /// Checks OCR service health.
-    ///
-    /// TODO: Implement proper health check for OCR service.
-    /// For now, we assume the service is healthy if the client is configured.
-    async fn check_ocr(&self, _ocr_client: &OcrService) -> bool {
-        // TODO: Implement actual OCR health check
-        tracing::debug!(target: TRACING_TARGET, "OCR health check skipped (not yet implemented)");
-        true
-    }
+    /// Checks inference service health.
+    async fn check_inference(&self, inference: &InferenceService) -> bool {
+        use nvisy_service::ServiceStatus;
 
-    /// Checks VLM service health.
-    ///
-    /// TODO: Implement proper health check for VLM service.
-    /// For now, we assume the service is healthy if the client is configured.
-    async fn check_vlm(&self, _vlm_client: &VlmService) -> bool {
-        // TODO: Implement actual VLM health check
-        tracing::debug!(target: TRACING_TARGET, "VLM health check skipped (not yet implemented)");
-        true
+        match inference.health_check().await {
+            Ok(health) => {
+                let healthy = health.status == ServiceStatus::Healthy;
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    healthy = healthy,
+                    status = ?health.status,
+                    "Inference health check completed"
+                );
+                healthy
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    error = %e,
+                    "Inference health check failed"
+                );
+                false
+            }
+        }
     }
 }
 

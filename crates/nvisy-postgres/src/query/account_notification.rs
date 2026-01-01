@@ -171,7 +171,7 @@ impl AccountNotificationRepository for PgConnection {
 
         let update_data = UpdateAccountNotification {
             is_read: Some(true),
-            read_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
+            read_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
         };
 
         diesel::update(account_notifications::table.filter(dsl::id.eq(notification_id)))
@@ -187,7 +187,7 @@ impl AccountNotificationRepository for PgConnection {
 
         let update_data = UpdateAccountNotification {
             is_read: Some(false),
-            read_at: None,
+            read_at: Some(None),
         };
 
         diesel::update(account_notifications::table.filter(dsl::id.eq(notification_id)))
@@ -203,7 +203,7 @@ impl AccountNotificationRepository for PgConnection {
 
         let update_data = UpdateAccountNotification {
             is_read: Some(true),
-            read_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
+            read_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
         };
 
         diesel::update(

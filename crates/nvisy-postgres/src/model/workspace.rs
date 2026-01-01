@@ -87,9 +87,9 @@ pub struct UpdateWorkspace {
     /// Display name.
     pub display_name: Option<String>,
     /// Description.
-    pub description: Option<String>,
+    pub description: Option<Option<String>>,
     /// Avatar URL.
-    pub avatar_url: Option<String>,
+    pub avatar_url: Option<Option<String>>,
     /// Data retention period.
     pub keep_for_sec: Option<i32>,
     /// Auto cleanup enabled.

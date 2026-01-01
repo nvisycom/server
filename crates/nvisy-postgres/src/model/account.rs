@@ -88,7 +88,7 @@ pub struct UpdateAccount {
     /// Securely hashed password.
     pub password_hash: Option<String>,
     /// Company affiliation for business accounts.
-    pub company_name: Option<String>,
+    pub company_name: Option<Option<String>>,
     /// URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.

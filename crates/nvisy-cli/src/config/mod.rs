@@ -75,7 +75,7 @@ pub struct Cli {
     /// Mock configuration for embeddings, VLM, and OCR.
     #[cfg(feature = "mock")]
     #[clap(flatten)]
-    pub mock: nvisy_core::MockConfig,
+    pub mock: nvisy_service::MockConfig,
 }
 
 impl Cli {

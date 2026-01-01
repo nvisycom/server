@@ -23,7 +23,7 @@ config = ["dep:clap"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true }
+nvisy-service = { workspace = true }
 
 # Ollama client
 ollama-rs = { version = "0.3", features = ["default"] }

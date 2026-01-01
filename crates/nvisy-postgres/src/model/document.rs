@@ -69,7 +69,7 @@ pub struct UpdateDocument {
     /// Document name.
     pub display_name: Option<String>,
     /// Document description.
-    pub description: Option<String>,
+    pub description: Option<Option<String>>,
     /// Document tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Document status.

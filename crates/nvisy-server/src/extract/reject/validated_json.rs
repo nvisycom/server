@@ -204,6 +204,11 @@ impl From<ValidationErrors> for Error<'static> {
             multiple => multiple.join(". "),
         };
 
+        tracing::warn!(
+            errors = ?errors.field_errors(),
+            "Request validation failed"
+        );
+
         ErrorKind::BadRequest
             .with_message(user_message)
             .with_resource("request")

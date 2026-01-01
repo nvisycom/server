@@ -33,14 +33,15 @@ otel = ["tracing-subscriber/env-filter"]
 dotenv = ["dep:dotenvy"]
 
 # AI service backends for embeddings, OCRs, and VLMs
-mock = ["nvisy-core/test-utils", "nvisy-core/config"]
+mock = ["nvisy-service/test-utils", "nvisy-service/config"]
 ollama = ["dep:nvisy-ollama"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true }
+nvisy-service = { workspace = true }
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
+nvisy-reqwest = { workspace = true }
 nvisy-server = { workspace = true, features = ["config"] }
 
 # AI service backends (optional)

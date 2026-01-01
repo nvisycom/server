@@ -70,7 +70,7 @@ pub struct UpdateAccountActionToken {
     /// Number of times this token has been attempted.
     pub attempt_count: Option<i32>,
     /// Timestamp when the token was successfully used.
-    pub used_at: Option<Timestamp>,
+    pub used_at: Option<Option<Timestamp>>,
 }
 
 impl AccountActionToken {

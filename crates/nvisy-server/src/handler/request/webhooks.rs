@@ -3,7 +3,10 @@
 //! This module provides request DTOs for workspace webhook management including
 //! creation and updates.
 
-use nvisy_postgres::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel};
+use nvisy_postgres::model::{
+    NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel,
+};
+use nvisy_postgres::types::WebhookEvent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,14 +35,10 @@ pub struct CreateWebhook {
     pub secret: Option<String>,
 
     /// List of event types this webhook should receive.
-    pub events: Vec<String>,
+    pub events: Vec<WebhookEvent>,
 
     /// Optional custom headers to include in webhook requests.
     pub headers: Option<serde_json::Value>,
-
-    /// Maximum number of consecutive failures before disabling (1-100).
-    #[validate(range(min = 1, max = 100))]
-    pub max_failures: Option<i32>,
 }
 
 impl CreateWebhook {
@@ -62,7 +61,6 @@ impl CreateWebhook {
             events,
             headers: self.headers,
             status: None,
-            max_failures: self.max_failures,
             created_by: account_id,
         }
     }
@@ -90,14 +88,10 @@ pub struct UpdateWebhook {
     pub secret: Option<String>,
 
     /// Updated list of event types this webhook should receive.
-    pub events: Option<Vec<String>>,
+    pub events: Option<Vec<WebhookEvent>>,
 
     /// Updated custom headers to include in webhook requests.
     pub headers: Option<serde_json::Value>,
-
-    /// Updated maximum number of consecutive failures before disabling (1-100).
-    #[validate(range(min = 1, max = 100))]
-    pub max_failures: Option<i32>,
 }
 
 impl UpdateWebhook {
@@ -114,8 +108,17 @@ impl UpdateWebhook {
             events,
             headers: self.headers,
             status: None,
-            max_failures: self.max_failures,
             ..Default::default()
         }
     }
+}
+
+/// Request payload for testing a webhook.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct TestWebhook {
+    /// Optional custom payload to send in the test request.
+    /// If not provided, a default test payload will be used.
+    pub payload: Option<serde_json::Value>,
 }

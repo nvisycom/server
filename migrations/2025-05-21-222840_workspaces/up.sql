@@ -483,11 +483,42 @@ COMMENT ON COLUMN workspace_integrations.updated_at IS 'Timestamp when integrati
 CREATE TYPE WEBHOOK_STATUS AS ENUM (
     'active',       -- Webhook is active and will receive events
     'paused',       -- Webhook is temporarily paused
-    'disabled'      -- Webhook is disabled (e.g., too many failures)
+    'disabled'      -- Webhook is disabled
 );
 
 COMMENT ON TYPE WEBHOOK_STATUS IS
     'Defines the operational status of workspace webhooks.';
+
+-- Webhook event types enum
+CREATE TYPE WEBHOOK_EVENT AS ENUM (
+    -- Document events
+    'document:created',
+    'document:updated',
+    'document:deleted',
+    'document:processed',
+    'document:uploaded',
+
+    -- Workspace events
+    'workspace:updated',
+    'workspace:archived',
+
+    -- Member events
+    'member:added',
+    'member:removed',
+    'member:updated',
+
+    -- Integration events
+    'integration:synced',
+    'integration:failed',
+
+    -- Run events
+    'run:started',
+    'run:completed',
+    'run:failed'
+);
+
+COMMENT ON TYPE WEBHOOK_EVENT IS
+    'Defines the types of events that can trigger webhook delivery.';
 
 -- Workspace webhooks table definition
 CREATE TABLE workspace_webhooks (
@@ -510,7 +541,7 @@ CREATE TABLE workspace_webhooks (
     CONSTRAINT workspace_webhooks_secret_length CHECK (secret IS NULL OR length(secret) BETWEEN 16 AND 256),
 
     -- Event configuration
-    events           TEXT[]           NOT NULL DEFAULT '{}',
+    events           WEBHOOK_EVENT[]  NOT NULL DEFAULT '{}',
     headers          JSONB            NOT NULL DEFAULT '{}',
 
     CONSTRAINT workspace_webhooks_events_not_empty CHECK (array_length(events, 1) > 0),
@@ -518,14 +549,9 @@ CREATE TABLE workspace_webhooks (
 
     -- Webhook status
     status           WEBHOOK_STATUS   NOT NULL DEFAULT 'active',
-    failure_count    INT              NOT NULL DEFAULT 0,
-    max_failures     INT              NOT NULL DEFAULT 10,
     last_triggered_at TIMESTAMPTZ     DEFAULT NULL,
     last_success_at  TIMESTAMPTZ      DEFAULT NULL,
     last_failure_at  TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT workspace_webhooks_failure_count_positive CHECK (failure_count >= 0),
-    CONSTRAINT workspace_webhooks_max_failures_positive CHECK (max_failures > 0),
 
     -- Audit tracking
     created_by       UUID             NOT NULL REFERENCES accounts (id),
@@ -547,8 +573,8 @@ CREATE INDEX workspace_webhooks_workspace_status_idx
     ON workspace_webhooks (workspace_id, status)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX workspace_webhooks_status_failures_idx
-    ON workspace_webhooks (status, failure_count)
+CREATE INDEX workspace_webhooks_events_idx
+    ON workspace_webhooks USING gin (events)
     WHERE deleted_at IS NULL AND status = 'active';
 
 -- Comments for workspace_webhooks table
@@ -564,8 +590,6 @@ COMMENT ON COLUMN workspace_webhooks.secret IS 'Shared secret for webhook signat
 COMMENT ON COLUMN workspace_webhooks.events IS 'Array of event types this webhook subscribes to';
 COMMENT ON COLUMN workspace_webhooks.headers IS 'Custom headers to include in webhook requests';
 COMMENT ON COLUMN workspace_webhooks.status IS 'Current webhook status (active, paused, disabled)';
-COMMENT ON COLUMN workspace_webhooks.failure_count IS 'Consecutive failure count';
-COMMENT ON COLUMN workspace_webhooks.max_failures IS 'Maximum failures before auto-disable';
 COMMENT ON COLUMN workspace_webhooks.last_triggered_at IS 'Timestamp of last webhook trigger';
 COMMENT ON COLUMN workspace_webhooks.last_success_at IS 'Timestamp of last successful delivery';
 COMMENT ON COLUMN workspace_webhooks.last_failure_at IS 'Timestamp of last failed delivery';

@@ -18,7 +18,7 @@ pub use constraints::{
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, ApiTokenType, ContentSegmentation,
     DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus, NotificationType,
-    ProcessingStatus, RequireMode, VirusScanStatus, WebhookStatus, WorkspaceRole,
+    ProcessingStatus, RequireMode, VirusScanStatus, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use options::{
     FileFilter, FileFormat, FileSortBy, IntegrationFilter, InviteFilter, InviteSortBy,

@@ -8,13 +8,15 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_webhooks;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, WebhookStatus};
+use crate::types::{
+    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, WebhookEvent, WebhookStatus,
+};
 
 /// Workspace webhook model representing a webhook configuration for a workspace.
 ///
 /// This model manages webhook endpoints that receive event notifications from
-/// workspaces. Each webhook maintains its own lifecycle with status tracking,
-/// failure handling, and delivery monitoring.
+/// workspaces. Each webhook maintains its own lifecycle with status tracking
+/// and delivery monitoring.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_webhooks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -38,19 +40,13 @@ pub struct WorkspaceWebhook {
     pub secret: Option<String>,
 
     /// Array of event types this webhook subscribes to.
-    pub events: Vec<Option<String>>,
+    pub events: Vec<Option<WebhookEvent>>,
 
     /// Custom headers to include in webhook requests.
     pub headers: serde_json::Value,
 
     /// Current status of the webhook.
     pub status: WebhookStatus,
-
-    /// Consecutive failure count.
-    pub failure_count: i32,
-
-    /// Maximum failures before auto-disable.
-    pub max_failures: i32,
 
     /// Timestamp of last webhook trigger.
     pub last_triggered_at: Option<Timestamp>,
@@ -95,16 +91,13 @@ pub struct NewWorkspaceWebhook {
     pub secret: Option<String>,
 
     /// Array of event types this webhook subscribes to.
-    pub events: Vec<Option<String>>,
+    pub events: Vec<Option<WebhookEvent>>,
 
     /// Custom headers to include in webhook requests.
     pub headers: Option<serde_json::Value>,
 
     /// Initial status of the webhook.
     pub status: Option<WebhookStatus>,
-
-    /// Maximum failures before auto-disable.
-    pub max_failures: Option<i32>,
 
     /// Account creating this webhook.
     pub created_by: Uuid,
@@ -128,19 +121,13 @@ pub struct UpdateWorkspaceWebhook {
     pub secret: Option<Option<String>>,
 
     /// Updated event subscriptions.
-    pub events: Option<Vec<Option<String>>>,
+    pub events: Option<Vec<Option<WebhookEvent>>>,
 
     /// Updated custom headers.
     pub headers: Option<serde_json::Value>,
 
     /// Updated status.
     pub status: Option<WebhookStatus>,
-
-    /// Updated failure count.
-    pub failure_count: Option<i32>,
-
-    /// Updated max failures.
-    pub max_failures: Option<i32>,
 
     /// Updated last triggered timestamp.
     pub last_triggered_at: Option<Option<Timestamp>>,
@@ -171,11 +158,6 @@ impl WorkspaceWebhook {
         self.status.is_disabled()
     }
 
-    /// Returns whether the webhook has reached its failure threshold.
-    pub fn has_exceeded_failures(&self) -> bool {
-        self.failure_count >= self.max_failures
-    }
-
     /// Returns whether the webhook has a secret configured.
     pub fn has_secret(&self) -> bool {
         self.secret.is_some()
@@ -186,14 +168,14 @@ impl WorkspaceWebhook {
         !self.headers.as_object().is_none_or(|obj| obj.is_empty())
     }
 
-    /// Returns the list of subscribed events as strings.
-    pub fn subscribed_events(&self) -> Vec<&str> {
-        self.events.iter().filter_map(|e| e.as_deref()).collect()
+    /// Returns the list of subscribed events.
+    pub fn subscribed_events(&self) -> Vec<WebhookEvent> {
+        self.events.iter().filter_map(|e| *e).collect()
     }
 
     /// Returns whether the webhook subscribes to a specific event type.
-    pub fn subscribes_to(&self, event: &str) -> bool {
-        self.events.iter().any(|e| e.as_deref() == Some(event))
+    pub fn subscribes_to(&self, event: WebhookEvent) -> bool {
+        self.events.contains(&Some(event))
     }
 
     /// Returns whether the webhook has been successfully triggered at least once.
@@ -203,7 +185,7 @@ impl WorkspaceWebhook {
 
     /// Returns whether the webhook is in a healthy state.
     pub fn is_healthy(&self) -> bool {
-        self.is_active() && !self.has_exceeded_failures()
+        self.is_active()
     }
 }
 

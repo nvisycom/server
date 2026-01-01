@@ -50,6 +50,10 @@ pub mod sql_types {
     pub struct VirusScanStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "webhook_event"))]
+    pub struct WebhookEvent;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_status"))]
     pub struct WebhookStatus;
 
@@ -372,6 +376,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::WebhookEvent;
     use super::sql_types::WebhookStatus;
 
     workspace_webhooks (id) {
@@ -381,11 +386,9 @@ diesel::table! {
         description -> Text,
         url -> Text,
         secret -> Nullable<Text>,
-        events -> Array<Nullable<Text>>,
+        events -> Array<Nullable<WebhookEvent>>,
         headers -> Jsonb,
         status -> WebhookStatus,
-        failure_count -> Int4,
-        max_failures -> Int4,
         last_triggered_at -> Nullable<Timestamptz>,
         last_success_at -> Nullable<Timestamptz>,
         last_failure_at -> Nullable<Timestamptz>,

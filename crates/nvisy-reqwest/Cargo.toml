@@ -1,0 +1,48 @@
+[package]
+name = "nvisy-reqwest"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+publish = { workspace = true }
+
+description = "HTTP client implementations for nvisy services"
+keywords = ["http", "client", "webhook", "reqwest"]
+categories = ["api-bindings", "web-programming::http-client"]
+
+[features]
+default = []
+
+[dependencies]
+# Internal crates
+nvisy-service = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true, features = ["json"] }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Security
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+# Data types
+uuid = { workspace = true }
+jiff = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

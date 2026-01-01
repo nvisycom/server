@@ -8,11 +8,13 @@ mod server;
 use std::process;
 
 use axum::Router;
+use nvisy_reqwest::{WebhookClient, WebhookClientConfig};
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::{
     RouterObservabilityExt, RouterOpenApiExt, RouterRecoveryExt, RouterSecurityExt,
 };
 use nvisy_server::service::{ServiceConfig, ServiceState};
+use nvisy_service::webhook::WebhookService;
 
 use crate::config::{Cli, MiddlewareConfig, create_services};
 
@@ -60,10 +62,18 @@ async fn run() -> anyhow::Result<()> {
 /// Creates the service state from configuration.
 async fn create_service_state(
     config: &ServiceConfig,
-    ai_services: nvisy_core::AiServices,
+    inference: nvisy_service::InferenceService,
 ) -> anyhow::Result<ServiceState> {
-    let state = ServiceState::new(config.clone(), ai_services).await?;
+    let webhook_service = create_webhook_service()?;
+    let state = ServiceState::new(config.clone(), inference, webhook_service).await?;
     Ok(state)
+}
+
+/// Creates the webhook service.
+fn create_webhook_service() -> anyhow::Result<WebhookService> {
+    let webhook_config = WebhookClientConfig::default();
+    let webhook_client = WebhookClient::new(webhook_config)?;
+    Ok(webhook_client.into_service())
 }
 
 /// Creates the router with all middleware layers applied.

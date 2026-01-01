@@ -9,7 +9,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use jiff::Timestamp;
-use nvisy_core::ServiceStatus;
+use nvisy_service::ServiceStatus;
 
 use super::request::CheckHealth;
 use super::response::MonitorStatus;

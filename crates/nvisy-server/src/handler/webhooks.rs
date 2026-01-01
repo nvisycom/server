@@ -7,14 +7,19 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{Pagination, WorkspaceWebhookRepository};
+use nvisy_service::webhook::{WebhookRequest, WebhookService};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
-    CreateWebhook, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams, WorkspacePathParams,
+    CreateWebhook, TestWebhook, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
+    WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, Webhook, WebhookWithSecret, Webhooks};
+use crate::handler::response::{
+    ErrorResponse, Webhook, WebhookTestResult, WebhookWithSecret, Webhooks,
+};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -256,6 +261,77 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Tests a webhook by sending a test payload.
+///
+/// Sends a test request to the webhook endpoint and returns the result.
+/// Requires `ManageIntegrations` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        webhook_id = %path_params.webhook_id,
+    )
+)]
+async fn test_webhook(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    State(webhook_service): State<WebhookService>,
+    Path(path_params): Path<WebhookPathParams>,
+    ValidateJson(request): ValidateJson<TestWebhook>,
+) -> Result<(StatusCode, Json<WebhookTestResult>)> {
+    tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
+
+    // Fetch the webhook to get URL and secret
+    let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
+
+    auth_state
+        .authorize_workspace(
+            &mut conn,
+            webhook.workspace_id,
+            Permission::ManageIntegrations,
+        )
+        .await?;
+
+    // Build the webhook request
+    let payload = request.payload.unwrap_or_else(|| {
+        serde_json::json!({
+            "event": "test",
+            "message": "This is a test webhook delivery"
+        })
+    });
+
+    let mut webhook_request = WebhookRequest::new(&webhook.url, payload);
+    if let Some(secret) = webhook.secret {
+        webhook_request = webhook_request.with_secret(secret);
+    }
+
+    let response = webhook_service
+        .deliver(&webhook_request)
+        .await
+        .map_err(|e| ErrorKind::InternalServerError.with_message(e.to_string()))?;
+
+    tracing::info!(
+        target: TRACING_TARGET,
+        success = response.success,
+        status_code = ?response.status_code,
+        "Webhook test completed"
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(WebhookTestResult::from_core_response(response)),
+    ))
+}
+
+fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Test webhook")
+        .description("Sends a test payload to the webhook endpoint and returns the result.")
+        .response::<200, Json<WebhookTestResult>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Finds a webhook by ID or returns NotFound error.
 async fn find_webhook(
     conn: &mut nvisy_postgres::PgConn,
@@ -287,6 +363,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(read_webhook, read_webhook_docs)
                 .put_with(update_webhook, update_webhook_docs)
                 .delete_with(delete_webhook, delete_webhook_docs),
+        )
+        .api_route(
+            "/webhooks/{webhook_id}/test/",
+            post_with(test_webhook, test_webhook_docs),
         )
         .with_path_items(|item| item.tag("Webhooks"))
 }

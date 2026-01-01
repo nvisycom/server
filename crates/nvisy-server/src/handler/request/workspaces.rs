@@ -137,7 +137,7 @@ impl UpdateWorkspace {
     pub fn into_model(self) -> UpdateWorkspaceModel {
         UpdateWorkspaceModel {
             display_name: self.display_name,
-            description: self.description,
+            description: self.description.map(Some),
             keep_for_sec: self.keep_for_sec,
             auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,

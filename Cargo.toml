@@ -4,11 +4,12 @@
 resolver = "2"
 members = [
     "./crates/nvisy-cli",
-    "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-ollama",
     "./crates/nvisy-postgres",
+    "./crates/nvisy-reqwest",
     "./crates/nvisy-server",
+    "./crates/nvisy-service",
 ]
 
 [workspace.package]
@@ -31,11 +32,12 @@ documentation = "https://docs.rs/nvisy-server"
 
 # External dependencies
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
+nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-reqwest = { path = "./crates/nvisy-reqwest", version = "0.1.0" }
 
 # Internal crates
-nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-service = { path = "./crates/nvisy-service", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 
 # CLI
@@ -47,6 +49,9 @@ futures = { version = "0.3", features = [] }
 futures-util = { version = "0.3", features = [] }
 async-stream = { version = "0.3", features = [] }
 async-trait = { version = "0.1", features = [] }
+
+# HTTP client
+reqwest = { version = "0.12", features = [] }
 
 # HTTP server
 axum = { version = "0.8", features = [] }
@@ -67,6 +72,7 @@ argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
 base64 = { version = "0.22", features = [] }
 rand = { version = "0.10.0-rc.5", features = ["serde"] }
 sha2 = { version = "0.10", features = [] }
+hmac = { version = "0.12", features = [] }
 hex = { version = "0.4", features = [] }
 zxcvbn = { version = "3.1", features = ["serde"] }
 

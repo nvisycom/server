@@ -14,6 +14,7 @@ pub mod activity_type;
 pub mod integration_status;
 pub mod integration_type;
 pub mod invite_status;
+pub mod webhook_event;
 pub mod webhook_status;
 pub mod workspace_role;
 
@@ -36,5 +37,6 @@ pub use notification_type::NotificationType;
 pub use processing_status::ProcessingStatus;
 pub use require_mode::RequireMode;
 pub use virus_scan_status::VirusScanStatus;
+pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
 pub use workspace_role::WorkspaceRole;

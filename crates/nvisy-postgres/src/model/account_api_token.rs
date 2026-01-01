@@ -65,15 +65,15 @@ pub struct NewAccountApiToken {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountApiToken {
     /// Timestamp of most recent token activity.
-    pub last_used_at: Option<Timestamp>,
+    pub last_used_at: Option<Option<Timestamp>>,
     /// Updated name for the API token.
     pub name: Option<String>,
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid.
-    pub expired_at: Option<Timestamp>,
+    pub expired_at: Option<Option<Timestamp>>,
     /// Timestamp when the token was soft-deleted.
-    pub deleted_at: Option<Timestamp>,
+    pub deleted_at: Option<Option<Timestamp>>,
 }
 
 impl AccountApiToken {

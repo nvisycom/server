@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::WebhookStatus;
+use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -28,19 +28,13 @@ pub struct Webhook {
     pub url: String,
 
     /// List of event types this webhook receives.
-    pub events: Vec<String>,
+    pub events: Vec<WebhookEvent>,
 
     /// Custom headers included in webhook requests.
     pub headers: serde_json::Value,
 
     /// Current status of the webhook.
     pub status: WebhookStatus,
-
-    /// Number of consecutive delivery failures.
-    pub failure_count: i32,
-
-    /// Maximum failures before automatic disabling.
-    pub max_failures: i32,
 
     /// Timestamp of the most recent webhook trigger.
     pub last_triggered_at: Option<Timestamp>,
@@ -74,8 +68,8 @@ pub struct WebhookWithSecret {
     pub secret: Option<String>,
 }
 
-/// Helper function to convert Vec<Option<String>> to Vec<String>.
-fn flatten_events(events: Vec<Option<String>>) -> Vec<String> {
+/// Helper function to convert Vec<Option<WebhookEvent>> to Vec<WebhookEvent>.
+fn flatten_events(events: Vec<Option<WebhookEvent>>) -> Vec<WebhookEvent> {
     events.into_iter().flatten().collect()
 }
 
@@ -91,8 +85,6 @@ impl Webhook {
             events: flatten_events(webhook.events),
             headers: webhook.headers,
             status: webhook.status,
-            failure_count: webhook.failure_count,
-            max_failures: webhook.max_failures,
             last_triggered_at: webhook.last_triggered_at.map(Into::into),
             last_success_at: webhook.last_success_at.map(Into::into),
             last_failure_at: webhook.last_failure_at.map(Into::into),
@@ -122,8 +114,6 @@ impl WebhookWithSecret {
                 events: flatten_events(webhook.events),
                 headers: webhook.headers,
                 status: webhook.status,
-                failure_count: webhook.failure_count,
-                max_failures: webhook.max_failures,
                 last_triggered_at: webhook.last_triggered_at.map(Into::into),
                 last_success_at: webhook.last_success_at.map(Into::into),
                 last_failure_at: webhook.last_failure_at.map(Into::into),
@@ -137,3 +127,33 @@ impl WebhookWithSecret {
 
 /// Response for listing workspace webhooks.
 pub type Webhooks = Vec<Webhook>;
+
+/// Result of a webhook test delivery attempt.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookTestResult {
+    /// Whether the webhook delivery was successful (2xx status code).
+    pub success: bool,
+
+    /// HTTP status code returned by the webhook endpoint.
+    pub status_code: Option<u16>,
+
+    /// Time taken to receive a response in milliseconds.
+    pub response_time_ms: Option<i64>,
+
+    /// Error message if the delivery failed.
+    pub error_message: Option<String>,
+}
+
+impl WebhookTestResult {
+    /// Creates a WebhookTestResult from the core webhook response.
+    pub fn from_core_response(response: nvisy_service::webhook::WebhookResponse) -> Self {
+        Self {
+            success: response.success,
+            status_code: response.status_code,
+            response_time_ms: response.response_time_ms.map(|ms| ms as i64),
+            error_message: response.error,
+        }
+    }
+}

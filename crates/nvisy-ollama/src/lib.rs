@@ -4,10 +4,11 @@
 
 //! # nvisy-ollama
 //!
-//! Ollama client library for nvisy, providing embeddings and VLM capabilities.
+//! Ollama client library for nvisy, providing embeddings, OCR, and VLM capabilities.
 //!
-//! The [`OllamaClient`] implements `EmbeddingProvider`, `VlmProvider`, and
-//! `OcrProvider` traits from nvisy-core.
+//! The [`OllamaClient`] implements the [`InferenceProvider`] trait from nvisy-service.
+//!
+//! [`InferenceProvider`]: nvisy_service::InferenceProvider
 
 /// Tracing target for the main library.
 pub const TRACING_TARGET: &str = "nvisy_ollama";
@@ -17,7 +18,7 @@ pub const TRACING_TARGET_CLIENT: &str = "nvisy_ollama::client";
 
 mod client;
 mod error;
-pub mod provider;
+mod provider;
 
 pub use crate::client::{OllamaClient, OllamaConfig};
 pub use crate::error::{Error, Result};

@@ -70,7 +70,7 @@ pub struct UpdateAccountNotification {
     /// Mark as read/unread.
     pub is_read: Option<bool>,
     /// Read timestamp.
-    pub read_at: Option<Timestamp>,
+    pub read_at: Option<Option<Timestamp>>,
 }
 
 impl AccountNotification {

@@ -1,14 +1,16 @@
 //! AI service provider configuration based on compile-time features.
 //!
-//! This module creates [`AiServices`] based on the enabled feature flags:
+//! This module creates [`InferenceService`] based on the enabled feature flags:
 //!
 //! - `ollama`: Use Ollama for embeddings, VLM, and OCR
 //! - `mock`: Use mock providers (fallback when no real provider is selected)
 //!
 //! When multiple features are enabled, real providers take precedence over mocks.
 
-use nvisy_core::AiServices;
+#[cfg(any(feature = "mock", feature = "ollama"))]
+use nvisy_service::InferenceService;
 
+#[cfg(any(feature = "mock", feature = "ollama"))]
 use super::Cli;
 
 // Compile-time check: at least one AI backend must be enabled
@@ -19,7 +21,7 @@ compile_error!(
      Example: cargo build --features ollama"
 );
 
-/// Creates AI services based on enabled feature flags and CLI configuration.
+/// Creates inference service based on enabled feature flags and CLI configuration.
 ///
 /// # Feature Priority
 ///
@@ -29,17 +31,15 @@ compile_error!(
 ///
 /// Returns an error if a provider cannot be initialized.
 #[cfg(feature = "ollama")]
-pub fn create_services(cli: &Cli) -> anyhow::Result<AiServices> {
+pub fn create_services(cli: &Cli) -> anyhow::Result<InferenceService> {
     use anyhow::Context;
     use nvisy_ollama::OllamaClient;
     let client = OllamaClient::new(cli.ollama.clone()).context("failed to create Ollama client")?;
-    Ok(client.into_services())
+    Ok(InferenceService::from_provider(client))
 }
 
-/// Creates AI services using mock providers for testing.
+/// Creates inference service using mock providers for testing.
 #[cfg(all(feature = "mock", not(feature = "ollama")))]
-pub fn create_services(cli: &Cli) -> anyhow::Result<AiServices> {
-    use nvisy_core::MockProvider;
-    let client = MockProvider::new(cli.mock.clone());
-    Ok(client.into_services())
+pub fn create_services(_cli: &Cli) -> anyhow::Result<InferenceService> {
+    Ok(InferenceService::mock())
 }

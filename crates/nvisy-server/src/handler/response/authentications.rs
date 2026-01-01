@@ -12,19 +12,8 @@ use uuid::Uuid;
 pub struct AuthToken {
     /// The JWT API token for authentication.
     pub api_token: String,
-
     /// ID of the token.
     pub token_id: Uuid,
-
-    /// ID of the account.
-    pub account_id: Uuid,
-
-    /// Display name.
-    pub display_name: String,
-
-    /// Email address.
-    pub email_address: String,
-
     /// Timestamp when the token was issued.
     pub issued_at: Timestamp,
     /// Timestamp when the token expires.

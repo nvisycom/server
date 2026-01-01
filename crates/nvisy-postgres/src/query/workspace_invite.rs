@@ -207,7 +207,7 @@ impl WorkspaceInviteRepository for PgConnection {
     ) -> PgResult<WorkspaceInvite> {
         let changes = UpdateWorkspaceInvite {
             invite_status: Some(InviteStatus::Accepted),
-            responded_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
+            responded_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
             ..Default::default()
         };
 

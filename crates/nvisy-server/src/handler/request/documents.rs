@@ -17,27 +17,21 @@ pub struct CreateDocument {
     /// Display name of the document.
     #[validate(length(min = 1, max = 255))]
     pub display_name: String,
-
     /// Description of the document.
     #[serde(default)]
     #[validate(length(max = 200))]
     pub description: Option<String>,
-
     /// Tags for document classification.
     #[serde(default)]
     #[validate(length(max = 20))]
     pub tags: Vec<String>,
-
     /// Document category.
     #[validate(length(max = 50))]
     pub category: Option<String>,
-
     /// Optional expiration date.
     pub expires_at: Option<Timestamp>,
-
     /// Whether the document is private.
     pub is_private: Option<bool>,
-
     /// Whether approval is required.
     pub requires_approval: Option<bool>,
 }
@@ -64,26 +58,20 @@ pub struct UpdateDocument {
     /// Updated display name.
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
-
     /// Updated description.
     #[validate(length(max = 2000))]
     pub description: Option<String>,
-
     /// Updated tags (must be alphanumeric).
     #[validate(length(min = 1, max = 20))]
     #[validate(custom(function = "is_alphanumeric"))]
     pub tags: Option<Vec<String>>,
-
     /// Updated category.
     #[validate(length(max = 50))]
     pub category: Option<String>,
-
     /// Updated expiration date.
     pub expires_at: Option<Timestamp>,
-
     /// Updated private status.
     pub is_private: Option<bool>,
-
     /// Updated approval requirement.
     pub requires_approval: Option<bool>,
 }
@@ -93,7 +81,7 @@ impl UpdateDocument {
     pub fn into_model(self) -> UpdateDocumentModel {
         UpdateDocumentModel {
             display_name: self.display_name,
-            description: self.description,
+            description: self.description.map(Some),
             tags: self.tags.map(|t| t.into_iter().map(Some).collect()),
             ..Default::default()
         }

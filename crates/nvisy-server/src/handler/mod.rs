@@ -131,7 +131,7 @@ mod test {
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
-        let mock_services = nvisy_core::MockConfig::default().into_services();
+        let mock_services = nvisy_service::MockConfig::default().into_services();
         let state = ServiceState::new(config, mock_services).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
