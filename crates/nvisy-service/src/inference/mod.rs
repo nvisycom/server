@@ -22,6 +22,10 @@
 //! let vlm_result = service.process_vlm(&request).await?;
 //! ```
 
+mod annotation;
+mod content;
+mod document;
+mod message;
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 mod mock;
@@ -30,12 +34,19 @@ mod service;
 pub mod request;
 pub mod response;
 
+pub use annotation::{
+    Annotation, AnnotationRelation, AnnotationSet, AnnotationType, BoundingBox, RelationType,
+    TextSpan,
+};
+pub use content::Content;
+pub use document::{Document, DocumentId, DocumentMetadata};
+pub use message::{Chat, Message, MessageRole};
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use mock::{MockConfig, MockProvider};
 pub use request::{
-    EmbeddingBatchRequest, EmbeddingRequest, OcrBatchRequest, OcrRequest, VlmBatchRequest,
-    VlmRequest,
+    Context, EmbeddingBatchRequest, EmbeddingRequest, OcrBatchRequest, OcrRequest, SharedContext,
+    UsageStats, VlmBatchRequest, VlmRequest,
 };
 pub use response::{
     EmbeddingBatchResponse, EmbeddingFormat, EmbeddingResponse, OcrBatchResponse, OcrResponse,
@@ -43,7 +54,7 @@ pub use response::{
 };
 pub use service::InferenceService;
 
-use crate::types::{ServiceHealth, SharedContext};
+pub use crate::types::{ServiceHealth, ServiceStatus, Timing};
 pub use crate::{Error, Result};
 
 /// Tracing target for inference operations.

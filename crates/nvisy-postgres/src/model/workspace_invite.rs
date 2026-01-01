@@ -17,8 +17,8 @@ pub struct WorkspaceInvite {
     pub id: Uuid,
     /// Reference to the workspace.
     pub workspace_id: Uuid,
-    /// Account ID if invitee is already registered.
-    pub invitee_id: Option<Uuid>,
+    /// Email address of the invitee (null for open invite codes).
+    pub invitee_email: Option<String>,
     /// Role to be assigned upon acceptance.
     pub invited_role: WorkspaceRole,
     /// Unique token for accepting the invitation.
@@ -46,8 +46,8 @@ pub struct WorkspaceInvite {
 pub struct NewWorkspaceInvite {
     /// Workspace ID.
     pub workspace_id: Uuid,
-    /// Invitee ID.
-    pub invitee_id: Option<Uuid>,
+    /// Email address of the invitee (null for open invite codes).
+    pub invitee_email: Option<String>,
     /// Invited role.
     pub invited_role: Option<WorkspaceRole>,
     /// Invite token.
@@ -158,14 +158,14 @@ impl WorkspaceInvite {
         })
     }
 
-    /// Returns whether the invitation is for a specific user.
-    pub fn is_for_specific_user(&self) -> bool {
-        self.invitee_id.is_some()
+    /// Returns whether the invitation is for a specific email.
+    pub fn is_for_specific_email(&self) -> bool {
+        self.invitee_email.is_some()
     }
 
-    /// Returns whether this is an open invitation (no specific user).
+    /// Returns whether this is an open invitation (no specific email).
     pub fn is_open_invitation(&self) -> bool {
-        self.invitee_id.is_none()
+        self.invitee_email.is_none()
     }
 
     /// Returns whether the invitation grants owner privileges.

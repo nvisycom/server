@@ -32,25 +32,13 @@ pub struct CreateWorkspace {
     /// Display name of the workspace (3-100 characters).
     #[validate(length(min = 3, max = 100))]
     pub display_name: String,
-
     /// Optional description of the workspace (max 200 characters).
     #[validate(length(max = 200))]
     pub description: Option<String>,
-
-    /// Duration in seconds to keep the original files (60-604800 seconds).
-    #[validate(range(min = 60, max = 604800))]
-    pub keep_for_sec: Option<i32>,
-
     /// Whether to automatically delete processed files after expiration.
     pub auto_cleanup: Option<bool>,
-
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
-
-    /// Maximum storage size in megabytes allowed for the workspace (1024-1048576 MB).
-    #[validate(range(min = 1024, max = 1048576))]
-    pub max_storage: Option<i32>,
-
     /// Whether comments are enabled for this workspace.
     pub enable_comments: Option<bool>,
 }
@@ -66,10 +54,8 @@ impl CreateWorkspace {
         NewWorkspace {
             display_name: self.display_name,
             description: self.description,
-            keep_for_sec: self.keep_for_sec,
             auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
-            max_storage: self.max_storage,
             enable_comments: self.enable_comments,
             created_by: account_id,
             ..Default::default()
@@ -108,25 +94,13 @@ pub struct UpdateWorkspace {
     /// New display name for the workspace (3-100 characters).
     #[validate(length(min = 3, max = 100))]
     pub display_name: Option<String>,
-
     /// New description for the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
-
-    /// New duration in seconds to keep original files (60-604800 seconds).
-    #[validate(range(min = 60, max = 604800))]
-    pub keep_for_sec: Option<i32>,
-
     /// Whether to automatically delete processed files after expiration.
     pub auto_cleanup: Option<bool>,
-
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
-
-    /// Maximum storage size in megabytes allowed for the workspace (1-1048576 MB).
-    #[validate(range(min = 1, max = 1048576))]
-    pub max_storage: Option<i32>,
-
     /// Whether comments are enabled for this workspace.
     pub enable_comments: Option<bool>,
 }
@@ -138,10 +112,8 @@ impl UpdateWorkspace {
         UpdateWorkspaceModel {
             display_name: self.display_name,
             description: self.description.map(Some),
-            keep_for_sec: self.keep_for_sec,
             auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
-            max_storage: self.max_storage,
             enable_comments: self.enable_comments,
             ..Default::default()
         }

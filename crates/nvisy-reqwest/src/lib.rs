@@ -24,8 +24,10 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod client;
+mod config;
 mod error;
-mod webhook;
 
+pub use client::{TRACING_TARGET, WebhookClient};
+pub use config::WebhookClientConfig;
 pub use error::{Error, Result};
-pub use webhook::{WebhookClient, WebhookClientConfig};

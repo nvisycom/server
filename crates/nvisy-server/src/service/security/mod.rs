@@ -10,5 +10,5 @@ mod user_agent;
 
 pub use password_hasher::PasswordHasher;
 pub use password_strength::PasswordStrength;
-pub use session_keys::{AuthConfig, AuthKeys};
+pub use session_keys::{SessionKeysConfig, SessionKeys};
 pub use user_agent::UserAgentParser;

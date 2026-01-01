@@ -1,7 +1,7 @@
 //! Workspace invite response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::{self, Account, WorkspaceInvite};
+use nvisy_postgres::model::{self, WorkspaceInvite};
 use nvisy_postgres::types::{InviteStatus, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,13 +20,11 @@ pub struct Invite {
     pub invite_id: Uuid,
     /// ID of the workspace the invitation is for.
     pub workspace_id: Uuid,
-    /// Account ID if the invitee has an account.
-    pub invitee_id: Option<Uuid>,
-    /// Invite token (only included for open invitations without invitee_id).
+    /// Email address of the invitee (null for open invite codes).
+    pub invitee_email: Option<String>,
+    /// Invite token (only included for open invitations without invitee_email).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invite_token: Option<String>,
-    /// Email address of the invitee (if they have an account).
-    pub email_address: Option<String>,
     /// Role the invitee will have if they accept.
     pub invited_role: WorkspaceRole,
     /// Current status of the invitation.
@@ -40,10 +38,10 @@ pub struct Invite {
 }
 
 impl Invite {
-    /// Creates an Invite response from database models.
-    pub fn from_model(invite: WorkspaceInvite, account: Option<Account>) -> Self {
-        // Only include invite_token for open invitations (no invitee_id)
-        let invite_token = if invite.invitee_id.is_none() {
+    /// Creates an Invite response from a database model.
+    pub fn from_model(invite: WorkspaceInvite) -> Self {
+        // Only include invite_token for open invitations (no invitee_email)
+        let invite_token = if invite.invitee_email.is_none() {
             Some(invite.invite_token.clone())
         } else {
             None
@@ -52,9 +50,8 @@ impl Invite {
         Self {
             invite_id: invite.id,
             workspace_id: invite.workspace_id,
-            invitee_id: invite.invitee_id,
+            invitee_email: invite.invitee_email,
             invite_token,
-            email_address: account.map(|a| a.email_address),
             invited_role: invite.invited_role,
             invite_status: invite.invite_status,
             expires_at: invite.expires_at.into(),
@@ -64,11 +61,8 @@ impl Invite {
     }
 
     /// Creates a list of Invite responses from database models.
-    pub fn from_models(models: Vec<(WorkspaceInvite, Option<Account>)>) -> Vec<Self> {
-        models
-            .into_iter()
-            .map(|(invite, account)| Self::from_model(invite, account))
-            .collect()
+    pub fn from_models(models: Vec<WorkspaceInvite>) -> Vec<Self> {
+        models.into_iter().map(Self::from_model).collect()
     }
 }
 

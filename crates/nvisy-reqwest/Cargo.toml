@@ -1,48 +1,57 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [package]
 name = "nvisy-reqwest"
 version = { workspace = true }
-edition = { workspace = true }
 rust-version = { workspace = true }
+edition = { workspace = true }
 license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = { workspace = true }
-publish = { workspace = true }
 
 description = "HTTP client implementations for nvisy services"
 keywords = ["http", "client", "webhook", "reqwest"]
 categories = ["api-bindings", "web-programming::http-client"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
 
 [dependencies]
 # Internal crates
-nvisy-service = { workspace = true }
+nvisy-service = { workspace = true, features = [] }
 
 # HTTP client
 reqwest = { workspace = true, features = ["json"] }
 
 # Async runtime
-tokio = { workspace = true }
-async-trait = { workspace = true }
+tokio = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
 
-# Serialization
-serde = { workspace = true }
-serde_json = { workspace = true }
+# (De)serialization
+serde = { workspace = true, features = [] }
+serde_json = { workspace = true, features = [] }
 
 # Security
-sha2 = { workspace = true }
-hmac = { workspace = true }
-hex = { workspace = true }
+sha2 = { workspace = true, features = [] }
+hmac = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
 
 # Observability
-tracing = { workspace = true }
+tracing = { workspace = true, features = [] }
 
 # Data types
-uuid = { workspace = true }
-jiff = { workspace = true }
+uuid = { workspace = true, features = [] }
+jiff = { workspace = true, features = [] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

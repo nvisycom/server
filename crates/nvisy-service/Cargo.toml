@@ -60,6 +60,7 @@ schemars = { workspace = true, features = [], optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 bytes = { workspace = true, features = ["serde"] }
+url = { workspace = true, features = ["serde"] }
 
 # CLI (optional)
 clap = { workspace = true, features = ["derive", "env"], optional = true }

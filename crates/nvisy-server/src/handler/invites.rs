@@ -9,10 +9,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::http::StatusCode;
 use nvisy_postgres::model::NewWorkspaceMember;
-use nvisy_postgres::query::{
-    Pagination as PgPagination, WorkspaceInviteRepository, WorkspaceMemberRepository,
-};
-use nvisy_postgres::types::InviteStatus;
+use nvisy_postgres::query::{WorkspaceInviteRepository, WorkspaceMemberRepository};
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
@@ -57,9 +54,9 @@ async fn send_invite(
         )
         .await?;
 
-    // Check if user is already a member
+    // Check if invitee is already a member (by email)
     if conn
-        .find_workspace_member(path_params.workspace_id, auth_state.account_id)
+        .find_workspace_member_by_email(path_params.workspace_id, &request.invitee_email)
         .await?
         .is_some()
     {
@@ -68,41 +65,28 @@ async fn send_invite(
             .with_resource("workspace_member"));
     }
 
-    // Check for existing pending invites
-    let all_invites = conn
-        .list_user_invites(
-            None,
-            PgPagination {
-                limit: 100,
-                offset: 0,
-            },
-        )
-        .await?;
-
-    let has_pending = all_invites.iter().any(|invite| {
-        invite.workspace_id == path_params.workspace_id
-            && invite.invite_status == InviteStatus::Pending
-    });
-
-    if has_pending {
+    // Check for existing pending invite for this email
+    if conn
+        .find_pending_invite_by_email(path_params.workspace_id, &request.invitee_email)
+        .await?
+        .is_some()
+    {
         return Err(ErrorKind::Conflict
-            .with_message("A pending invitation already exists for this workspace")
+            .with_message("A pending invitation already exists for this email")
             .with_resource("workspace_invite"));
     }
 
     let workspace_invite = conn
-        .create_workspace_invite(request.into_model(
-            path_params.workspace_id,
-            None,
-            auth_state.account_id,
-        ))
+        .create_workspace_invite(
+            request.into_model(path_params.workspace_id, auth_state.account_id),
+        )
         .await?;
-    let response = Invite::from_model(workspace_invite, None);
+    let response = Invite::from_model(workspace_invite);
 
     tracing::info!(
         target: TRACING_TARGET,
         invite_id = %response.invite_id,
-        "Workspace invitation created ",
+        "Workspace invitation created",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -143,7 +127,7 @@ async fn list_invites(
         .await?;
 
     let workspace_invites = conn
-        .list_workspace_invites_with_accounts(
+        .list_workspace_invites_with_filter(
             path_params.workspace_id,
             pagination.into(),
             query.to_sort(),
@@ -156,7 +140,7 @@ async fn list_invites(
     tracing::debug!(
         target: TRACING_TARGET,
         invite_count = invites.len(),
-        "Workspace invitations listed ",
+        "Workspace invitations listed",
     );
 
     Ok((StatusCode::OK, Json(invites)))
@@ -258,10 +242,7 @@ async fn reply_to_invite(
         declined
     };
 
-    Ok((
-        StatusCode::OK,
-        Json(Invite::from_model(workspace_invite, None)),
-    ))
+    Ok((StatusCode::OK, Json(Invite::from_model(workspace_invite))))
 }
 
 fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
@@ -283,7 +264,7 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %path_params.workspace_id,
-        role = ?request.role,
+        invited_role = ?request.invited_role,
     )
 )]
 async fn generate_invite_code(

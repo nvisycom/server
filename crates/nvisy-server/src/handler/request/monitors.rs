@@ -17,7 +17,6 @@ pub struct CheckHealth {
     /// Timeout in milliseconds for health checks.
     #[validate(range(min = 100, max = 30000))]
     pub timeout: Option<u32>,
-
     /// Whether to return cached results if available.
     pub use_cache: Option<bool>,
 }

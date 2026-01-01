@@ -26,18 +26,12 @@ pub struct WorkspaceIntegrationRun {
     pub run_type: String,
     /// Current run status.
     pub run_status: IntegrationStatus,
+    /// Run metadata, results, and error details.
+    pub metadata: serde_json::Value,
     /// Timestamp when run execution started.
     pub started_at: Option<Timestamp>,
     /// Timestamp when run execution completed.
     pub completed_at: Option<Timestamp>,
-    /// Run duration in milliseconds.
-    pub duration_ms: Option<i32>,
-    /// Summary of run results.
-    pub result_summary: Option<String>,
-    /// Run metadata and configuration.
-    pub metadata: serde_json::Value,
-    /// Error details for failed runs.
-    pub error_details: Option<serde_json::Value>,
     /// Timestamp when the run was created.
     pub created_at: Timestamp,
     /// Timestamp when the run was last updated.
@@ -74,18 +68,12 @@ pub struct UpdateWorkspaceIntegrationRun {
     pub run_name: Option<String>,
     /// Run status.
     pub run_status: Option<IntegrationStatus>,
+    /// Metadata.
+    pub metadata: Option<serde_json::Value>,
     /// Started at.
     pub started_at: Option<Option<Timestamp>>,
     /// Completed at.
     pub completed_at: Option<Option<Timestamp>>,
-    /// Duration in milliseconds.
-    pub duration_ms: Option<Option<i32>>,
-    /// Result summary.
-    pub result_summary: Option<Option<String>>,
-    /// Metadata.
-    pub metadata: Option<serde_json::Value>,
-    /// Error details.
-    pub error_details: Option<Option<serde_json::Value>>,
 }
 
 impl WorkspaceIntegrationRun {
@@ -129,39 +117,9 @@ impl WorkspaceIntegrationRun {
         self.account_id.is_none()
     }
 
-    /// Returns whether the run has error details.
-    pub fn has_errors(&self) -> bool {
-        self.error_details
-            .as_ref()
-            .is_some_and(|e| !e.as_object().is_none_or(|obj| obj.is_empty()))
-    }
-
     /// Returns whether the run has custom metadata.
     pub fn has_metadata(&self) -> bool {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
-    }
-
-    /// Returns the duration as a jiff_diesel::Span if available.
-    pub fn duration(&self) -> Option<jiff::Span> {
-        self.duration_ms
-            .map(|ms| jiff::Span::new().milliseconds(ms as i64))
-    }
-
-    /// Returns the duration in a human-readable format.
-    pub fn duration_human(&self) -> Option<String> {
-        self.duration_ms.map(|ms| {
-            let seconds = ms / 1000;
-            let minutes = seconds / 60;
-            let hours = minutes / 60;
-
-            if hours > 0 {
-                format!("{}h {}m", hours, minutes % 60)
-            } else if minutes > 0 {
-                format!("{}m {}s", minutes, seconds % 60)
-            } else {
-                format!("{}s", seconds)
-            }
-        })
     }
 
     /// Returns the elapsed time if run is in progress.
@@ -175,11 +133,6 @@ impl WorkspaceIntegrationRun {
         } else {
             None
         }
-    }
-
-    /// Returns whether the run exceeded a specific duration.
-    pub fn exceeded_duration(&self, max_duration_ms: i32) -> bool {
-        self.duration_ms.is_some_and(|d| d > max_duration_ms)
     }
 
     /// Returns whether this is a specific run type.

@@ -16,19 +16,13 @@ pub enum WorkspaceIntegrationRunConstraints {
     #[strum(serialize = "workspace_integration_runs_run_type_format")]
     RunTypeFormat,
 
-    // Run timing constraints
-    #[strum(serialize = "workspace_integration_runs_duration_positive")]
-    DurationPositive,
-    #[strum(serialize = "workspace_integration_runs_completed_after_started")]
-    CompletedAfterStarted,
-
     // Run data constraints
-    #[strum(serialize = "workspace_integration_runs_result_summary_length")]
-    ResultSummaryLength,
     #[strum(serialize = "workspace_integration_runs_metadata_size")]
     MetadataSize,
-    #[strum(serialize = "workspace_integration_runs_error_details_size")]
-    ErrorDetailsSize,
+
+    // Run timing constraints
+    #[strum(serialize = "workspace_integration_runs_completed_after_started")]
+    CompletedAfterStarted,
 
     // Run chronological constraints
     #[strum(serialize = "workspace_integration_runs_updated_after_created")]
@@ -48,14 +42,13 @@ impl WorkspaceIntegrationRunConstraints {
         match self {
             WorkspaceIntegrationRunConstraints::RunNameLength
             | WorkspaceIntegrationRunConstraints::RunTypeFormat
-            | WorkspaceIntegrationRunConstraints::DurationPositive
-            | WorkspaceIntegrationRunConstraints::ResultSummaryLength
-            | WorkspaceIntegrationRunConstraints::MetadataSize
-            | WorkspaceIntegrationRunConstraints::ErrorDetailsSize => ConstraintCategory::Validation,
+            | WorkspaceIntegrationRunConstraints::MetadataSize => ConstraintCategory::Validation,
 
             WorkspaceIntegrationRunConstraints::CompletedAfterStarted
             | WorkspaceIntegrationRunConstraints::UpdatedAfterCreated
-            | WorkspaceIntegrationRunConstraints::StartedAfterCreated => ConstraintCategory::Chronological,
+            | WorkspaceIntegrationRunConstraints::StartedAfterCreated => {
+                ConstraintCategory::Chronological
+            }
         }
     }
 }

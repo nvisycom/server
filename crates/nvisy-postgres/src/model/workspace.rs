@@ -20,16 +20,12 @@ pub struct Workspace {
     pub description: Option<String>,
     /// URL to workspace avatar/logo image.
     pub avatar_url: Option<String>,
-    /// Data retention period in seconds (NULL for indefinite retention).
-    pub keep_for_sec: Option<i32>,
-    /// Whether automatic cleanup is enabled.
-    pub auto_cleanup: bool,
-    /// Maximum storage in MB.
-    pub max_storage: Option<i32>,
     /// Whether approval is required.
     pub require_approval: bool,
     /// Whether comments are enabled.
     pub enable_comments: bool,
+    /// Whether automatic cleanup is enabled.
+    pub auto_cleanup: bool,
     /// Workspace tags.
     pub tags: Vec<Option<String>>,
     /// Additional workspace metadata.
@@ -42,8 +38,6 @@ pub struct Workspace {
     pub created_at: Timestamp,
     /// Timestamp when the workspace was last updated.
     pub updated_at: Timestamp,
-    /// Timestamp when the workspace was archived.
-    pub archived_at: Option<Timestamp>,
     /// Timestamp when the workspace was soft-deleted.
     pub deleted_at: Option<Timestamp>,
 }
@@ -59,16 +53,12 @@ pub struct NewWorkspace {
     pub description: Option<String>,
     /// Optional avatar URL.
     pub avatar_url: Option<String>,
-    /// Data retention period.
-    pub keep_for_sec: Option<i32>,
-    /// Auto cleanup enabled.
-    pub auto_cleanup: Option<bool>,
-    /// Maximum storage.
-    pub max_storage: Option<i32>,
     /// Require approval.
     pub require_approval: Option<bool>,
     /// Enable comments.
     pub enable_comments: Option<bool>,
+    /// Auto cleanup enabled.
+    pub auto_cleanup: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -90,16 +80,12 @@ pub struct UpdateWorkspace {
     pub description: Option<Option<String>>,
     /// Avatar URL.
     pub avatar_url: Option<Option<String>>,
-    /// Data retention period.
-    pub keep_for_sec: Option<i32>,
-    /// Auto cleanup enabled.
-    pub auto_cleanup: Option<bool>,
-    /// Maximum storage.
-    pub max_storage: Option<i32>,
     /// Require approval.
     pub require_approval: Option<bool>,
     /// Enable comments.
     pub enable_comments: Option<bool>,
+    /// Auto cleanup enabled.
+    pub auto_cleanup: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -163,26 +149,6 @@ impl Workspace {
     /// Returns whether the workspace has custom settings.
     pub fn has_settings(&self) -> bool {
         !self.settings.as_object().is_none_or(|obj| obj.is_empty())
-    }
-
-    /// Returns whether the workspace has storage limits.
-    pub fn has_storage_limit(&self) -> bool {
-        self.max_storage.is_some()
-    }
-
-    /// Returns whether the workspace is at or near storage capacity.
-    pub fn is_near_storage_capacity(&self, current_storage_mb: i32) -> bool {
-        if let Some(max_storage) = self.max_storage {
-            let usage_percentage = (current_storage_mb as f64 / max_storage as f64) * 100.0;
-            usage_percentage >= 80.0 // 80% threshold
-        } else {
-            false
-        }
-    }
-
-    /// Returns the data retention period in days.
-    pub fn retention_days(&self) -> Option<i32> {
-        self.keep_for_sec.map(|sec| sec / (24 * 60 * 60)) // Convert seconds to days
     }
 
     /// Returns whether the workspace allows file uploads.

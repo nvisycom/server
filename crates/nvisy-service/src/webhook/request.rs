@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
 
 /// A webhook delivery request.
@@ -12,44 +13,30 @@ pub struct WebhookRequest {
     /// Unique identifier for this request.
     pub request_id: Uuid,
     /// The webhook endpoint URL.
-    pub url: String,
-    /// Optional shared secret for request signing.
-    pub secret: Option<String>,
-    /// The JSON payload to deliver.
-    pub payload: serde_json::Value,
+    pub url: Url,
+    /// The webhook payload to deliver.
+    pub payload: WebhookPayload,
     /// Custom headers to include in the request.
     pub headers: HashMap<String, String>,
-    /// Request timeout.
-    pub timeout: Duration,
+    /// Optional request timeout (uses client default if not set).
+    pub timeout: Option<Duration>,
 }
 
 impl WebhookRequest {
-    /// Creates a new webhook request with a raw JSON payload.
-    pub fn new(url: impl Into<String>, payload: serde_json::Value) -> Self {
+    /// Creates a new webhook request.
+    pub fn new(url: Url, payload: WebhookPayload) -> Self {
         Self {
             request_id: Uuid::now_v7(),
-            url: url.into(),
-            secret: None,
+            url,
             payload,
             headers: HashMap::new(),
-            timeout: Duration::from_secs(30),
+            timeout: None,
         }
-    }
-
-    /// Creates a new webhook request from a typed payload.
-    pub fn from_payload(url: impl Into<String>, payload: &WebhookPayload) -> Self {
-        Self::new(url, serde_json::to_value(payload).unwrap_or_default())
-    }
-
-    /// Sets the shared secret for request signing.
-    pub fn with_secret(mut self, secret: impl Into<String>) -> Self {
-        self.secret = Some(secret.into());
-        self
     }
 
     /// Sets the request timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
+        self.timeout = Some(timeout);
         self
     }
 
@@ -72,9 +59,6 @@ impl WebhookRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WebhookPayload {
-    /// Unique identifier for the webhook configuration that triggered this delivery.
-    pub webhook_id: Uuid,
-
     /// The event type that triggered this webhook delivery.
     ///
     /// Examples: `document:created`, `workspace:updated`, `member:added`
@@ -86,46 +70,38 @@ pub struct WebhookPayload {
     /// Additional context about the event.
     pub context: WebhookContext,
 
-    /// Timestamp when the event occurred (Unix timestamp in seconds).
-    pub timestamp: i64,
-
-    /// Unique identifier for this delivery attempt.
-    ///
-    /// Can be used for deduplication on the receiving end.
-    pub delivery_id: Uuid,
+    /// Timestamp when the event occurred.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub timestamp: jiff::Timestamp,
 }
 
 impl WebhookPayload {
     /// Creates a new webhook payload.
     pub fn new(
-        webhook_id: Uuid,
         event: impl Into<String>,
         message: impl Into<String>,
         context: WebhookContext,
     ) -> Self {
         Self {
-            webhook_id,
             event: event.into(),
             message: message.into(),
             context,
-            timestamp: jiff::Timestamp::now().as_second(),
-            delivery_id: Uuid::now_v7(),
+            timestamp: jiff::Timestamp::now(),
         }
     }
 
     /// Creates a test payload for webhook testing.
     pub fn test(webhook_id: Uuid) -> Self {
         Self::new(
-            webhook_id,
             "webhook:test",
             "This is a test webhook delivery",
-            WebhookContext::test(),
+            WebhookContext::test(webhook_id),
         )
     }
 
     /// Converts the payload into a webhook request.
-    pub fn into_request(self, url: impl Into<String>) -> WebhookRequest {
-        WebhookRequest::new(url, serde_json::to_value(&self).unwrap_or_default())
+    pub fn into_request(self, url: Url) -> WebhookRequest {
+        WebhookRequest::new(url, self)
     }
 }
 
@@ -133,6 +109,9 @@ impl WebhookPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WebhookContext {
+    /// Unique identifier for the webhook configuration that triggered this delivery.
+    pub webhook_id: Uuid,
+
     /// The workspace where the event occurred.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<Uuid>,
@@ -147,7 +126,7 @@ pub struct WebhookContext {
 
     /// The account that triggered the event (if applicable).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub actor_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
 
     /// Additional event-specific metadata.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
@@ -155,24 +134,26 @@ pub struct WebhookContext {
 }
 
 impl WebhookContext {
-    /// Creates an empty context.
-    pub fn empty() -> Self {
+    /// Creates a new context with only the webhook ID.
+    pub fn new(webhook_id: Uuid) -> Self {
         Self {
+            webhook_id,
             workspace_id: None,
             resource_id: None,
             resource_type: None,
-            actor_id: None,
+            account_id: None,
             metadata: serde_json::Value::Null,
         }
     }
 
     /// Creates a test context for webhook testing.
-    pub fn test() -> Self {
+    pub fn test(webhook_id: Uuid) -> Self {
         Self {
+            webhook_id,
             workspace_id: None,
             resource_id: None,
             resource_type: Some("test".to_string()),
-            actor_id: None,
+            account_id: None,
             metadata: serde_json::json!({
                 "test": true,
                 "message": "This is a test webhook payload"
@@ -193,9 +174,9 @@ impl WebhookContext {
         self
     }
 
-    /// Sets the actor ID.
-    pub fn with_actor(mut self, actor_id: Uuid) -> Self {
-        self.actor_id = Some(actor_id);
+    /// Sets the account ID.
+    pub fn with_account(mut self, account_id: Uuid) -> Self {
+        self.account_id = Some(account_id);
         self
     }
 
@@ -203,12 +184,6 @@ impl WebhookContext {
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = metadata;
         self
-    }
-}
-
-impl Default for WebhookContext {
-    fn default() -> Self {
-        Self::empty()
     }
 }
 
@@ -220,52 +195,58 @@ mod tests {
     fn test_payload_creation() {
         let webhook_id = Uuid::now_v7();
         let payload = WebhookPayload::new(
-            webhook_id,
             "document:created",
             "A new document was created",
-            WebhookContext::empty().with_resource(Uuid::now_v7(), "document"),
+            WebhookContext::new(webhook_id).with_resource(Uuid::now_v7(), "document"),
         );
 
-        assert_eq!(payload.webhook_id, webhook_id);
         assert_eq!(payload.event, "document:created");
         assert_eq!(payload.message, "A new document was created");
+        assert_eq!(payload.context.webhook_id, webhook_id);
         assert!(payload.context.resource_type.is_some());
     }
 
     #[test]
     fn test_payload_into_request() {
-        let payload = WebhookPayload::test(Uuid::now_v7());
-        let request = payload.into_request("https://example.com/webhook");
+        let webhook_id = Uuid::now_v7();
+        let payload = WebhookPayload::test(webhook_id);
+        let url = Url::parse("https://example.com/webhook").unwrap();
+        let request = payload.into_request(url.clone());
 
-        assert_eq!(request.url, "https://example.com/webhook");
-        assert!(request.payload.get("event").is_some());
+        assert_eq!(request.url, url);
+        assert_eq!(request.payload.event, "webhook:test");
+        assert_eq!(request.payload.context.webhook_id, webhook_id);
     }
 
     #[test]
-    fn test_request_from_payload() {
-        let payload = WebhookPayload::test(Uuid::now_v7());
-        let request = WebhookRequest::from_payload("https://example.com/webhook", &payload);
+    fn test_request_creation() {
+        let webhook_id = Uuid::now_v7();
+        let payload = WebhookPayload::test(webhook_id);
+        let url = Url::parse("https://example.com/webhook").unwrap();
+        let request = WebhookRequest::new(url.clone(), payload);
 
-        assert_eq!(request.url, "https://example.com/webhook");
-        assert!(request.payload.get("webhook_id").is_some());
+        assert_eq!(request.url, url);
+        assert!(request.timeout.is_none());
     }
 
     #[test]
     fn test_context_builder() {
+        let webhook_id = Uuid::now_v7();
         let workspace_id = Uuid::now_v7();
         let resource_id = Uuid::now_v7();
-        let actor_id = Uuid::now_v7();
+        let account_id = Uuid::now_v7();
 
-        let context = WebhookContext::empty()
+        let context = WebhookContext::new(webhook_id)
             .with_workspace(workspace_id)
             .with_resource(resource_id, "document")
-            .with_actor(actor_id)
+            .with_account(account_id)
             .with_metadata(serde_json::json!({"key": "value"}));
 
+        assert_eq!(context.webhook_id, webhook_id);
         assert_eq!(context.workspace_id, Some(workspace_id));
         assert_eq!(context.resource_id, Some(resource_id));
         assert_eq!(context.resource_type, Some("document".to_string()));
-        assert_eq!(context.actor_id, Some(actor_id));
+        assert_eq!(context.account_id, Some(account_id));
         assert!(context.metadata.get("key").is_some());
     }
 }

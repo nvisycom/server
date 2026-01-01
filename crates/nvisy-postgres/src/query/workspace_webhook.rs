@@ -228,10 +228,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         let now = jiff_diesel::Timestamp::from(Timestamp::now());
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set((
-                last_triggered_at.eq(Some(now)),
-                last_success_at.eq(Some(now)),
-            ))
+            .set(last_triggered_at.eq(Some(now)))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
@@ -247,10 +244,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set((
-                last_triggered_at.eq(Some(now)),
-                last_failure_at.eq(Some(now)),
-            ))
+            .set(last_triggered_at.eq(Some(now)))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await

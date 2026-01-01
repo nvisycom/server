@@ -1,62 +1,23 @@
 //! Webhook client implementation using reqwest.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use hmac::{Hmac, Mac};
+use nvisy_service::types::ServiceHealth;
+#[cfg(test)]
+use nvisy_service::types::ServiceStatus;
 use nvisy_service::webhook::{WebhookProvider, WebhookRequest, WebhookResponse, WebhookService};
 use reqwest::Client;
 use sha2::Sha256;
 
+use crate::config::WebhookClientConfig;
 use crate::error::{Error, Result};
 
 type HmacSha256 = Hmac<Sha256>;
 
 /// Tracing target for webhook client operations.
 pub const TRACING_TARGET: &str = "nvisy_reqwest::webhook";
-
-/// Configuration for the webhook client.
-#[derive(Debug, Clone)]
-pub struct WebhookClientConfig {
-    /// Default timeout for webhook requests.
-    pub timeout: Duration,
-    /// User-Agent header to send with requests.
-    pub user_agent: String,
-}
-
-impl Default for WebhookClientConfig {
-    fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(30),
-            user_agent: format!("nvisy-webhook/{}", env!("CARGO_PKG_VERSION")),
-        }
-    }
-}
-
-impl WebhookClientConfig {
-    /// Creates a new configuration with the specified timeout.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// Creates a new configuration with the specified user agent.
-    pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
-        self.user_agent = user_agent.into();
-        self
-    }
-
-    /// Validates the configuration.
-    pub fn validate(&self) -> Result<()> {
-        if self.timeout.is_zero() {
-            return Err(Error::Config("timeout cannot be zero".into()));
-        }
-        if self.user_agent.is_empty() {
-            return Err(Error::Config("user_agent cannot be empty".into()));
-        }
-        Ok(())
-    }
-}
 
 /// Inner client that holds the HTTP client and configuration.
 struct WebhookClientInner {
@@ -81,12 +42,15 @@ impl std::fmt::Debug for WebhookClientInner {
 ///
 /// ```rust,ignore
 /// use nvisy_reqwest::{WebhookClient, WebhookClientConfig};
-/// use nvisy_service::webhook::WebhookRequest;
+/// use nvisy_service::webhook::{WebhookPayload, WebhookContext};
+/// use url::Url;
 ///
 /// let config = WebhookClientConfig::default();
 /// let client = WebhookClient::new(config)?;
 ///
-/// let request = WebhookRequest::new("https://example.com/webhook", json!({"event": "test"}));
+/// let payload = WebhookPayload::test(webhook_id);
+/// let url = Url::parse("https://example.com/webhook")?;
+/// let request = payload.into_request(url);
 /// let response = client.deliver(&request).await?;
 /// ```
 #[derive(Clone, Debug)]
@@ -146,7 +110,7 @@ impl WebhookClient {
     /// Signs a payload using HMAC-SHA256.
     ///
     /// The signature is computed over: `{timestamp}.{payload}`
-    fn sign_payload(secret: &str, timestamp: i64, payload: &[u8]) -> String {
+    pub fn sign_payload(secret: &str, timestamp: i64, payload: &[u8]) -> String {
         let signing_input = format!("{}.{}", timestamp, String::from_utf8_lossy(payload));
 
         let mut mac =
@@ -168,34 +132,29 @@ impl WebhookProvider for WebhookClient {
             target: TRACING_TARGET,
             request_id = %request.request_id,
             url = %request.url,
-            has_secret = request.secret.is_some(),
             "Delivering webhook"
         );
 
         // Serialize the payload
-        let payload_bytes = serde_json::to_vec(&request.payload).map_err(|e| Error::Serde(e))?;
+        let payload_bytes = serde_json::to_vec(&request.payload).map_err(Error::Serde)?;
+
+        // Determine the timeout to use
+        let timeout = request.timeout.unwrap_or(self.inner.config.timeout);
 
         // Build the HTTP request
         let mut http_request = self
             .inner
             .http
-            .post(&request.url)
+            .post(request.url.as_str())
             .header("Content-Type", "application/json")
-            .header("X-Webhook-Event", "delivery")
+            .header("X-Webhook-Event", &request.payload.event)
             .header("X-Webhook-Timestamp", timestamp.to_string())
             .header("X-Webhook-Request-Id", request.request_id.to_string())
-            .timeout(request.timeout);
+            .timeout(timeout);
 
         // Add custom headers
         for (name, value) in &request.headers {
             http_request = http_request.header(name, value);
-        }
-
-        // Sign the request if a secret is provided
-        if let Some(ref secret) = request.secret {
-            let signature = Self::sign_payload(secret, timestamp, &payload_bytes);
-            http_request =
-                http_request.header("X-Webhook-Signature", format!("sha256={signature}"));
         }
 
         // Send the request
@@ -270,32 +229,16 @@ impl WebhookProvider for WebhookClient {
             }
         }
     }
+
+    async fn health_check(&self) -> nvisy_service::Result<ServiceHealth> {
+        // The webhook client is stateless and always healthy if it was created successfully
+        Ok(ServiceHealth::healthy())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
-
-    #[test]
-    fn test_config_defaults() {
-        let config = WebhookClientConfig::default();
-        assert_eq!(config.timeout, Duration::from_secs(30));
-        assert!(config.user_agent.contains("nvisy-webhook"));
-    }
-
-    #[test]
-    fn test_config_validation() {
-        let config = WebhookClientConfig::default();
-        assert!(config.validate().is_ok());
-
-        let bad_config = WebhookClientConfig {
-            timeout: Duration::ZERO,
-            ..Default::default()
-        };
-        assert!(bad_config.validate().is_err());
-    }
 
     #[test]
     fn test_sign_payload() {
@@ -315,5 +258,12 @@ mod tests {
         let config = WebhookClientConfig::default();
         let client = WebhookClient::new(config);
         assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let client = WebhookClient::with_defaults().unwrap();
+        let health = client.health_check().await.unwrap();
+        assert_eq!(health.status, ServiceStatus::Healthy);
     }
 }

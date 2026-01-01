@@ -73,8 +73,7 @@ pub struct DownloadMultipleFilesRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadArchivedFilesRequest {
-    /// Archive format (defaults to tar).
-    #[serde(default)]
+    /// Archive format.
     pub format: ArchiveFormat,
 
     /// Optional specific file IDs (if None, downloads all workspace files).

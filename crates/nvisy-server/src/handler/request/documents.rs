@@ -18,13 +18,11 @@ pub struct CreateDocument {
     #[validate(length(min = 1, max = 255))]
     pub display_name: String,
     /// Description of the document.
-    #[serde(default)]
     #[validate(length(max = 200))]
     pub description: Option<String>,
     /// Tags for document classification.
-    #[serde(default)]
     #[validate(length(max = 20))]
-    pub tags: Vec<String>,
+    pub tags: Option<Vec<String>>,
     /// Document category.
     #[validate(length(max = 50))]
     pub category: Option<String>,
@@ -44,7 +42,7 @@ impl CreateDocument {
             account_id,
             display_name: Some(self.display_name),
             description: self.description,
-            tags: Some(self.tags.into_iter().map(Some).collect()),
+            tags: self.tags.map(|t| t.into_iter().map(Some).collect()),
             ..Default::default()
         }
     }

@@ -39,9 +39,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     EmbeddingRequest, EmbeddingResponse, InferenceProvider, InferenceService, OcrRequest,
-    OcrResponse, Result, VlmRequest, VlmResponse,
+    OcrResponse, Result, ServiceHealth, SharedContext, UsageStats, VlmRequest, VlmResponse,
 };
-use crate::types::{ServiceHealth, SharedContext, UsageStats};
 
 /// Configuration for the mock provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]

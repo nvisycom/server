@@ -61,6 +61,18 @@ pub enum Permission {
     /// Can create, modify, and manage workspace integrations.
     ManageIntegrations,
 
+    // Webhook permissions
+    /// Can view workspace webhooks.
+    ViewWebhooks,
+    /// Can create new webhooks in the workspace.
+    CreateWebhooks,
+    /// Can update existing webhooks.
+    UpdateWebhooks,
+    /// Can delete webhooks from the workspace.
+    DeleteWebhooks,
+    /// Can test webhooks by sending test payloads.
+    TestWebhooks,
+
     // Workspace settings and configuration
     /// Can view workspace settings.
     ViewSettings,
@@ -88,6 +100,7 @@ impl Permission {
             | Self::ViewFiles
             | Self::ViewMembers
             | Self::ViewIntegrations
+            | Self::ViewWebhooks
             | Self::ViewSettings => WorkspaceRole::Guest,
 
             // Member-level permissions
@@ -99,12 +112,16 @@ impl Permission {
             | Self::DownloadFiles
             | Self::DeleteFiles => WorkspaceRole::Member,
 
-            // Owner-level permissions
+            // Admin-level permissions
             Self::UpdateWorkspace
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageIntegrations
-            | Self::ManageSettings => WorkspaceRole::Owner,
+            | Self::CreateWebhooks
+            | Self::UpdateWebhooks
+            | Self::DeleteWebhooks
+            | Self::TestWebhooks
+            | Self::ManageSettings => WorkspaceRole::Admin,
 
             // Owner-only permissions (highest level)
             Self::DeleteWorkspace | Self::ManageRoles => WorkspaceRole::Owner,

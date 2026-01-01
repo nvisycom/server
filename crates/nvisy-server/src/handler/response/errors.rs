@@ -248,8 +248,15 @@ impl From<ValidationErrors> for ErrorResponse<'_> {
 }
 
 impl IntoResponse for ErrorResponse<'_> {
-    #[inline]
     fn into_response(self) -> Response {
+        tracing::warn!(
+            status = %self.status,
+            name = %self.name,
+            message = %self.message,
+            resource = ?self.resource,
+            context = ?self.context,
+            "HTTP error response"
+        );
         (self.status, Json(self)).into_response()
     }
 }

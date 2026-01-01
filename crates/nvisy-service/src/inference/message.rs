@@ -11,7 +11,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Content, Result, TypeError};
+use super::Content;
+use crate::{Error, Result};
 
 /// A message in a conversational AI interaction.
 ///
@@ -240,9 +241,9 @@ impl Message {
     /// Validates the message content and metadata.
     pub fn validate(&self) -> Result<()> {
         if self.content.is_empty() && self.content_parts.is_empty() {
-            return Err(TypeError::ValidationFailed(
-                "Message must have content or content parts".to_string(),
-            ));
+            return Err(
+                Error::invalid_input().with_message("Message must have content or content parts")
+            );
         }
 
         Ok(())

@@ -36,7 +36,7 @@ mod defaults {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Parser))]
 #[cfg_attr(all(not(test), feature = "config"), derive(Args))]
-pub struct AuthConfig {
+pub struct SessionKeysConfig {
     /// File path to the JWT decoding (public) key used for sessions.
     #[cfg_attr(
         any(test, feature = "config"),
@@ -63,7 +63,7 @@ pub struct AuthConfig {
 /// This struct provides thread-safe access to cryptographic keys used for
 /// encoding and decoding JWT tokens in session management.
 #[derive(Clone)]
-pub struct AuthKeys {
+pub struct SessionKeys {
     inner: Arc<AuthKeysInner>,
 }
 
@@ -71,10 +71,10 @@ pub struct AuthKeys {
 struct AuthKeysInner {
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
-    config: AuthConfig,
+    config: SessionKeysConfig,
 }
 
-impl AuthKeys {
+impl SessionKeys {
     /// Creates a new `AuthKeys` instance from the provided configuration.
     ///
     /// # Arguments
@@ -84,7 +84,7 @@ impl AuthKeys {
     /// # Returns
     ///
     /// Returns a result containing the initialized keys or an error.
-    pub async fn from_config(config: &AuthConfig) -> Result<Self> {
+    pub async fn from_config(config: &SessionKeysConfig) -> Result<Self> {
         // Validate configuration before attempting to load keys
         Self::validate_config(config)?;
 
@@ -131,7 +131,7 @@ impl AuthKeys {
         decoding_pem_key: impl AsRef<Path>,
         encoding_pem_key: impl AsRef<Path>,
     ) -> Result<Self> {
-        let config = AuthConfig {
+        let config = SessionKeysConfig {
             decoding_key: decoding_pem_key.as_ref().to_path_buf(),
             encoding_key: encoding_pem_key.as_ref().to_path_buf(),
         };
@@ -156,7 +156,7 @@ impl AuthKeys {
 
     /// Returns a reference to the configuration used to create this instance.
     #[inline]
-    pub fn config(&self) -> &AuthConfig {
+    pub fn config(&self) -> &SessionKeysConfig {
         &self.inner.config
     }
 
@@ -220,7 +220,7 @@ impl AuthKeys {
     }
 
     /// Validates that both key files exist and are readable.
-    fn validate_config(config: &AuthConfig) -> Result<()> {
+    fn validate_config(config: &SessionKeysConfig) -> Result<()> {
         if !config.decoding_key.exists() {
             return Err(Error::config("Decoding key file does not exist"));
         }
@@ -319,7 +319,7 @@ impl AuthKeys {
     }
 }
 
-impl fmt::Debug for AuthKeys {
+impl fmt::Debug for SessionKeys {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AuthKeys")
             .field("config", &self.inner.config)
@@ -352,7 +352,7 @@ MCowBQYDK2VwAyEAMveirBCUUpVI8TCv4W5jAZqtkEzfA7eIvozsugFbvDU=
         fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
         fs::write(&priv_path, TEST_PRIVATE_KEY).unwrap();
 
-        let keys = AuthKeys::new(&pub_path, &priv_path).await.unwrap();
+        let keys = SessionKeys::new(&pub_path, &priv_path).await.unwrap();
         let result = keys.validate_keys();
         assert!(result.is_ok(), "validate_keys failed: {:?}", result.err());
     }
@@ -366,7 +366,7 @@ MCowBQYDK2VwAyEAMveirBCUUpVI8TCv4W5jAZqtkEzfA7eIvozsugFbvDU=
         fs::write(&invalid_path, "invalid pem").unwrap();
         fs::write(&priv_path, TEST_PRIVATE_KEY).unwrap();
 
-        assert!(AuthKeys::new(&invalid_path, &priv_path).await.is_err());
+        assert!(SessionKeys::new(&invalid_path, &priv_path).await.is_err());
     }
 
     #[tokio::test]
@@ -383,7 +383,7 @@ MC4CAQAwBQYDK2VwBCIEIPBLfUxGwCNcZ+6kBdNp8e7AiJMpFJ6kXBDDZsREj6Dk
         fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
         fs::write(&wrong_priv_path, wrong_private_key).unwrap();
 
-        let keys = AuthKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
+        let keys = SessionKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
         assert!(keys.validate_keys().is_err());
     }
 
@@ -393,6 +393,6 @@ MC4CAQAwBQYDK2VwBCIEIPBLfUxGwCNcZ+6kBdNp8e7AiJMpFJ6kXBDDZsREj6Dk
         let pub_path = temp_dir.path().join("nonexistent_public.pem");
         let priv_path = temp_dir.path().join("nonexistent_private.pem");
 
-        assert!(AuthKeys::new(&pub_path, &priv_path).await.is_err());
+        assert!(SessionKeys::new(&pub_path, &priv_path).await.is_err());
     }
 }

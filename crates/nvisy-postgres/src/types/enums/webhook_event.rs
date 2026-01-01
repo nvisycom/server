@@ -31,26 +31,21 @@ pub enum WebhookEvent {
     #[serde(rename = "document:deleted")]
     DocumentDeleted,
 
-    /// A document was processed
-    #[db_rename = "document:processed"]
-    #[serde(rename = "document:processed")]
-    DocumentProcessed,
+    // File events
+    /// A new file was created
+    #[db_rename = "file:created"]
+    #[serde(rename = "file:created")]
+    FileCreated,
 
-    /// A document was uploaded
-    #[db_rename = "document:uploaded"]
-    #[serde(rename = "document:uploaded")]
-    DocumentUploaded,
+    /// A file was updated
+    #[db_rename = "file:updated"]
+    #[serde(rename = "file:updated")]
+    FileUpdated,
 
-    // Workspace events
-    /// A workspace was updated
-    #[db_rename = "workspace:updated"]
-    #[serde(rename = "workspace:updated")]
-    WorkspaceUpdated,
-
-    /// A workspace was archived
-    #[db_rename = "workspace:archived"]
-    #[serde(rename = "workspace:archived")]
-    WorkspaceArchived,
+    /// A file was deleted
+    #[db_rename = "file:deleted"]
+    #[serde(rename = "file:deleted")]
+    FileDeleted,
 
     // Member events
     /// A member was added to the workspace
@@ -58,10 +53,10 @@ pub enum WebhookEvent {
     #[serde(rename = "member:added")]
     MemberAdded,
 
-    /// A member was removed from the workspace
-    #[db_rename = "member:removed"]
-    #[serde(rename = "member:removed")]
-    MemberRemoved,
+    /// A member was deleted from the workspace
+    #[db_rename = "member:deleted"]
+    #[serde(rename = "member:deleted")]
+    MemberDeleted,
 
     /// A member's details were updated
     #[db_rename = "member:updated"]
@@ -69,31 +64,25 @@ pub enum WebhookEvent {
     MemberUpdated,
 
     // Integration events
+    /// An integration was created
+    #[db_rename = "integration:created"]
+    #[serde(rename = "integration:created")]
+    IntegrationCreated,
+
+    /// An integration was updated
+    #[db_rename = "integration:updated"]
+    #[serde(rename = "integration:updated")]
+    IntegrationUpdated,
+
+    /// An integration was deleted
+    #[db_rename = "integration:deleted"]
+    #[serde(rename = "integration:deleted")]
+    IntegrationDeleted,
+
     /// An integration was synchronized
     #[db_rename = "integration:synced"]
     #[serde(rename = "integration:synced")]
     IntegrationSynced,
-
-    /// An integration failed
-    #[db_rename = "integration:failed"]
-    #[serde(rename = "integration:failed")]
-    IntegrationFailed,
-
-    // Run events
-    /// A run was started
-    #[db_rename = "run:started"]
-    #[serde(rename = "run:started")]
-    RunStarted,
-
-    /// A run was completed successfully
-    #[db_rename = "run:completed"]
-    #[serde(rename = "run:completed")]
-    RunCompleted,
-
-    /// A run failed
-    #[db_rename = "run:failed"]
-    #[serde(rename = "run:failed")]
-    RunFailed,
 }
 
 impl WebhookEvent {
@@ -105,17 +94,15 @@ impl WebhookEvent {
             WebhookEvent::DocumentCreated
                 | WebhookEvent::DocumentUpdated
                 | WebhookEvent::DocumentDeleted
-                | WebhookEvent::DocumentProcessed
-                | WebhookEvent::DocumentUploaded
         )
     }
 
-    /// Returns whether this is a workspace-related event.
+    /// Returns whether this is a file-related event.
     #[inline]
-    pub fn is_workspace_event(self) -> bool {
+    pub fn is_file_event(self) -> bool {
         matches!(
             self,
-            WebhookEvent::WorkspaceUpdated | WebhookEvent::WorkspaceArchived
+            WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted
         )
     }
 
@@ -124,7 +111,7 @@ impl WebhookEvent {
     pub fn is_member_event(self) -> bool {
         matches!(
             self,
-            WebhookEvent::MemberAdded | WebhookEvent::MemberRemoved | WebhookEvent::MemberUpdated
+            WebhookEvent::MemberAdded | WebhookEvent::MemberDeleted | WebhookEvent::MemberUpdated
         )
     }
 
@@ -133,16 +120,10 @@ impl WebhookEvent {
     pub fn is_integration_event(self) -> bool {
         matches!(
             self,
-            WebhookEvent::IntegrationSynced | WebhookEvent::IntegrationFailed
-        )
-    }
-
-    /// Returns whether this is a run-related event.
-    #[inline]
-    pub fn is_run_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::RunStarted | WebhookEvent::RunCompleted | WebhookEvent::RunFailed
+            WebhookEvent::IntegrationCreated
+                | WebhookEvent::IntegrationUpdated
+                | WebhookEvent::IntegrationDeleted
+                | WebhookEvent::IntegrationSynced
         )
     }
 
@@ -151,17 +132,17 @@ impl WebhookEvent {
         match self {
             WebhookEvent::DocumentCreated
             | WebhookEvent::DocumentUpdated
-            | WebhookEvent::DocumentDeleted
-            | WebhookEvent::DocumentProcessed
-            | WebhookEvent::DocumentUploaded => "document",
-            WebhookEvent::WorkspaceUpdated | WebhookEvent::WorkspaceArchived => "workspace",
-            WebhookEvent::MemberAdded
-            | WebhookEvent::MemberRemoved
-            | WebhookEvent::MemberUpdated => "member",
-            WebhookEvent::IntegrationSynced | WebhookEvent::IntegrationFailed => "integration",
-            WebhookEvent::RunStarted | WebhookEvent::RunCompleted | WebhookEvent::RunFailed => {
-                "run"
+            | WebhookEvent::DocumentDeleted => "document",
+            WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted => {
+                "file"
             }
+            WebhookEvent::MemberAdded
+            | WebhookEvent::MemberDeleted
+            | WebhookEvent::MemberUpdated => "member",
+            WebhookEvent::IntegrationCreated
+            | WebhookEvent::IntegrationUpdated
+            | WebhookEvent::IntegrationDeleted
+            | WebhookEvent::IntegrationSynced => "integration",
         }
     }
 }

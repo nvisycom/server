@@ -8,7 +8,7 @@
 //! When multiple features are enabled, real providers take precedence over mocks.
 
 #[cfg(any(feature = "mock", feature = "ollama"))]
-use nvisy_service::InferenceService;
+use nvisy_service::inference::InferenceService;
 
 #[cfg(any(feature = "mock", feature = "ollama"))]
 use super::Cli;

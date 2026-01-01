@@ -1,15 +1,32 @@
-# nvisy-core
+# nvisy-service
 
-Core abstractions and shared types for AI services in the Nvisy platform.
-
-[![Rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+Core service abstractions and shared types for the Nvisy platform.
 
 ## Features
 
-- **Service Abstractions** - Provider-agnostic traits for OCR, VLM, and embeddings
+- **Inference Services** - Provider-agnostic traits for OCR, VLM, and embeddings
+- **Webhook Services** - Webhook delivery abstractions with health checks
 - **Shared Types** - Documents, messages, annotations, and health monitoring
-- **Error Handling** - Comprehensive error types with retry policies
-- **Mock Providers** - Test utilities for AI service testing
+- **Error Handling** - Comprehensive error types with context support
+- **Mock Providers** - Test utilities for service testing (requires `test-utils` feature)
+
+## Modules
+
+- **inference** - AI inference abstractions (embeddings, OCR, VLM)
+- **webhook** - Webhook delivery traits and service wrappers
+- **types** - Shared data structures (health, timing)
+- **prelude** - Common imports for convenience
+
+## Usage
+
+```rust
+use nvisy_service::prelude::*;
+
+// Or import specific modules
+use nvisy_service::inference::{InferenceProvider, InferenceService};
+use nvisy_service::webhook::{WebhookProvider, WebhookService};
+use nvisy_service::types::{ServiceHealth, ServiceStatus};
+```
 
 ## Key Dependencies
 
@@ -17,11 +34,4 @@ Core abstractions and shared types for AI services in the Nvisy platform.
 - `uuid` - Type-safe identifiers for requests and entities
 - `jiff` - Precision timestamps for processing metadata
 - `serde` - Serialization for all data structures
-
-## Architecture
-
-- **ocr** - Optical character recognition service abstractions
-- **vlm** - Vision language model traits for multimodal AI
-- **emb** - Embedding service interfaces for vectorization
-- **types** - Shared data structures (documents, messages, annotations)
-- **mock** - Mock implementations for testing (requires `test-utils` feature)
+- `async-trait` - Async trait support for providers

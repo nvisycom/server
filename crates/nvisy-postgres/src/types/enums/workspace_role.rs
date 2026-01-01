@@ -22,6 +22,11 @@ pub enum WorkspaceRole {
     #[serde(rename = "owner")]
     Owner,
 
+    /// Can manage members, integrations, and settings, but cannot delete workspace or transfer ownership
+    #[db_rename = "admin"]
+    #[serde(rename = "admin")]
+    Admin,
+
     /// Can edit content and manage files, but cannot manage members or workspace settings
     #[db_rename = "member"]
     #[serde(rename = "member")]
@@ -41,13 +46,29 @@ impl WorkspaceRole {
         matches!(self, WorkspaceRole::Owner)
     }
 
+    /// Returns whether this role has admin privileges (admin or owner).
+    #[inline]
+    pub fn is_admin(self) -> bool {
+        matches!(self, WorkspaceRole::Owner | WorkspaceRole::Admin)
+    }
+
+    /// Returns whether this role has admin privileges (admin or owner).
+    #[inline]
+    pub fn is_member(self) -> bool {
+        matches!(
+            self,
+            WorkspaceRole::Owner | WorkspaceRole::Admin | WorkspaceRole::Member
+        )
+    }
+
     /// Returns the hierarchical level of this role (higher number = more permissions).
     #[inline]
     pub const fn hierarchy_level(self) -> u8 {
         match self {
             WorkspaceRole::Guest => 1,
             WorkspaceRole::Member => 2,
-            WorkspaceRole::Owner => 3,
+            WorkspaceRole::Admin => 3,
+            WorkspaceRole::Owner => 4,
         }
     }
 

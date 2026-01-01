@@ -75,8 +75,7 @@ pub struct CreateApiToken {
     pub name: String,
 
     /// When the token expires.
-    #[serde(default)]
-    pub expires: TokenExpiration,
+    pub expires_in: TokenExpiration,
 }
 
 impl CreateApiToken {
@@ -101,7 +100,7 @@ impl CreateApiToken {
             user_agent,
             session_type: Some(ApiTokenType::Api),
             is_remembered: Some(true),
-            expired_at: self.expires.to_expiry_timestamp().map(Into::into),
+            expired_at: self.expires_in.to_expiry_timestamp().map(Into::into),
         })
     }
 }

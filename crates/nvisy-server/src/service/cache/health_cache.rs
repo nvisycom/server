@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use nvisy_service::InferenceService;
+use nvisy_service::inference::InferenceService;
 use tokio::sync::RwLock;
 
 use crate::service::ServiceState;
@@ -205,8 +205,8 @@ impl HealthCache {
         self.cache
             .get_or_update(|| {
                 self.check_all_components(
-                    &service_state.pg_client,
-                    &service_state.nats_client,
+                    &service_state.postgres,
+                    &service_state.nats,
                     &service_state.inference,
                 )
             })
@@ -358,7 +358,7 @@ impl HealthCache {
 
     /// Checks inference service health.
     async fn check_inference(&self, inference: &InferenceService) -> bool {
-        use nvisy_service::ServiceStatus;
+        use nvisy_service::types::ServiceStatus;
 
         match inference.health_check().await {
             Ok(health) => {

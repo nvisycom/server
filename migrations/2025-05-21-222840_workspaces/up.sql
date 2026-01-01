@@ -13,20 +13,10 @@ CREATE TABLE workspaces (
     CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 32),
     CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 2000),
 
-    -- Data retention and cleanup
-    keep_for_sec     INTEGER            DEFAULT NULL,
-    auto_cleanup     BOOLEAN            NOT NULL DEFAULT TRUE,
-
-    CONSTRAINT workspaces_keep_for_sec_range CHECK (keep_for_sec IS NULL OR keep_for_sec BETWEEN 3600 AND 31536000),
-
-    -- Resource limits and quotas
-    max_storage      INTEGER            DEFAULT NULL,
-
-    CONSTRAINT workspaces_max_storage_min CHECK (max_storage IS NULL OR max_storage >= 1),
-
     -- Workspace settings
     require_approval BOOLEAN            NOT NULL DEFAULT TRUE,
     enable_comments  BOOLEAN            NOT NULL DEFAULT TRUE,
+    auto_cleanup     BOOLEAN            NOT NULL DEFAULT TRUE,
 
     -- Tags and extended metadata
     tags             TEXT[]             NOT NULL DEFAULT '{}',
@@ -43,14 +33,11 @@ CREATE TABLE workspaces (
     -- Lifecycle timestamps
     created_at       TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ        NOT NULL DEFAULT current_timestamp,
-    archived_at      TIMESTAMPTZ        DEFAULT NULL,
     deleted_at       TIMESTAMPTZ        DEFAULT NULL,
 
     CONSTRAINT workspaces_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT workspaces_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
-    CONSTRAINT workspaces_archived_after_created CHECK (archived_at IS NULL OR archived_at >= created_at),
-    CONSTRAINT workspaces_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT workspaces_deleted_after_archived CHECK (deleted_at IS NULL OR archived_at IS NULL OR deleted_at >= archived_at)
+    CONSTRAINT workspaces_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 
 -- Triggers for workspaces table
@@ -74,7 +61,7 @@ CREATE INDEX workspaces_tags_lookup_idx
     WHERE array_length(tags, 1) > 0 AND deleted_at IS NULL;
 
 CREATE INDEX workspaces_cleanup_idx
-    ON workspaces (created_at, keep_for_sec, auto_cleanup)
+    ON workspaces (created_at, auto_cleanup)
     WHERE auto_cleanup = TRUE AND deleted_at IS NULL;
 
 CREATE INDEX workspaces_metadata_lookup_idx
@@ -89,10 +76,6 @@ COMMENT ON COLUMN workspaces.id IS 'Unique workspace identifier (UUID)';
 COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (3-32 characters)';
 COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 2000 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
-
-COMMENT ON COLUMN workspaces.keep_for_sec IS 'Data retention period in seconds (1 hour to 1 year)';
-COMMENT ON COLUMN workspaces.auto_cleanup IS 'Enable automatic cleanup of old workspace data';
-COMMENT ON COLUMN workspaces.max_storage IS 'Maximum storage in megabytes (NULL = unlimited)';
 COMMENT ON COLUMN workspaces.require_approval IS 'Require approval for new member requests';
 COMMENT ON COLUMN workspaces.enable_comments IS 'Enable commenting features within the workspace';
 COMMENT ON COLUMN workspaces.tags IS 'Array of tags for workspace classification and search';
@@ -101,12 +84,12 @@ COMMENT ON COLUMN workspaces.settings IS 'Workspace-specific settings and prefer
 COMMENT ON COLUMN workspaces.created_by IS 'Account that created this workspace (becomes first owner)';
 COMMENT ON COLUMN workspaces.created_at IS 'Timestamp when the workspace was created';
 COMMENT ON COLUMN workspaces.updated_at IS 'Timestamp when the workspace was last modified (auto-updated)';
-COMMENT ON COLUMN workspaces.archived_at IS 'Timestamp when the workspace was archived';
 COMMENT ON COLUMN workspaces.deleted_at IS 'Timestamp when the workspace was soft-deleted (NULL if active)';
 
 -- Enum types for workspace_members table
 CREATE TYPE WORKSPACE_ROLE AS ENUM (
     'owner',        -- Full workspace ownership and management
+    'admin',        -- Can manage members, integrations, and settings
     'member',       -- Can edit content and manage files
     'guest'         -- Read-only access to workspace content
 );
@@ -117,43 +100,27 @@ COMMENT ON TYPE WORKSPACE_ROLE IS
 -- Workspace members table definition
 CREATE TABLE workspace_members (
     -- Primary keys (composite)
-    workspace_id         UUID         NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id         UUID         NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    workspace_id       UUID           NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    account_id         UUID           NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     PRIMARY KEY (workspace_id, account_id),
 
-    -- Role and permissions
+    -- Role
     member_role        WORKSPACE_ROLE NOT NULL DEFAULT 'guest',
-    custom_permissions JSONB        NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_members_custom_permissions_size CHECK (length(custom_permissions::TEXT) BETWEEN 2 AND 2048),
-
-    -- Member preferences and settings
-    show_order         INTEGER      NOT NULL DEFAULT 0,
-    is_favorite        BOOLEAN      NOT NULL DEFAULT FALSE,
-    is_hidden          BOOLEAN      NOT NULL DEFAULT FALSE,
-
-    CONSTRAINT workspace_members_show_order_range CHECK (show_order BETWEEN -1000 AND 1000),
 
     -- Notification preferences
-    notify_updates     BOOLEAN      NOT NULL DEFAULT TRUE,
-    notify_comments    BOOLEAN      NOT NULL DEFAULT TRUE,
-    notify_mentions    BOOLEAN      NOT NULL DEFAULT TRUE,
-
-    -- Member status
-    is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
-    last_accessed_at   TIMESTAMPTZ  DEFAULT NULL,
+    notify_updates     BOOLEAN        NOT NULL DEFAULT TRUE,
+    notify_mentions    BOOLEAN        NOT NULL DEFAULT TRUE,
 
     -- Audit tracking
-    created_by         UUID         NOT NULL REFERENCES accounts (id),
-    updated_by         UUID         NOT NULL REFERENCES accounts (id),
+    created_by         UUID           NOT NULL REFERENCES accounts (id),
+    updated_by         UUID           NOT NULL REFERENCES accounts (id),
 
     -- Lifecycle timestamps
-    created_at         TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
-    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
+    created_at         TIMESTAMPTZ    NOT NULL DEFAULT current_timestamp,
+    updated_at         TIMESTAMPTZ    NOT NULL DEFAULT current_timestamp,
 
-    CONSTRAINT workspace_members_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_members_last_accessed_after_created CHECK (last_accessed_at IS NULL OR last_accessed_at >= created_at)
+    CONSTRAINT workspace_members_updated_after_created CHECK (updated_at >= created_at)
 );
 
 -- Triggers for workspace_members table
@@ -161,41 +128,23 @@ SELECT setup_updated_at('workspace_members');
 
 -- Indexes for workspace_members table
 CREATE INDEX workspace_members_account_workspaces_idx
-    ON workspace_members (account_id, is_active, show_order)
-    WHERE is_active = TRUE;
+    ON workspace_members (account_id, created_at DESC);
 
-CREATE INDEX workspace_members_workspace_active_idx
-    ON workspace_members (workspace_id, member_role, is_active)
-    WHERE is_active = TRUE;
+CREATE INDEX workspace_members_workspace_role_idx
+    ON workspace_members (workspace_id, member_role);
 
 CREATE INDEX workspace_members_role_lookup_idx
-    ON workspace_members (member_role, workspace_id)
-    WHERE is_active = TRUE;
-
-CREATE INDEX workspace_members_activity_tracking_idx
-    ON workspace_members (last_accessed_at DESC)
-    WHERE last_accessed_at IS NOT NULL;
-
-CREATE INDEX workspace_members_favorites_idx
-    ON workspace_members (account_id, is_favorite, updated_at DESC)
-    WHERE is_favorite = TRUE;
+    ON workspace_members (member_role, workspace_id);
 
 -- Comments for workspace_members table
 COMMENT ON TABLE workspace_members IS
-    'Workspace membership with enhanced roles, permissions, and preferences.';
+    'Workspace membership with roles and notification preferences.';
 
 COMMENT ON COLUMN workspace_members.workspace_id IS 'Reference to the workspace';
 COMMENT ON COLUMN workspace_members.account_id IS 'Reference to the member account';
 COMMENT ON COLUMN workspace_members.member_role IS 'Member role defining base permissions level';
-COMMENT ON COLUMN workspace_members.custom_permissions IS 'Custom permission overrides (JSON, 2B-2KB)';
-COMMENT ON COLUMN workspace_members.show_order IS 'Custom sort order for member workspace list (-1000 to 1000)';
-COMMENT ON COLUMN workspace_members.is_favorite IS 'Mark workspace as favorite for quick access';
-COMMENT ON COLUMN workspace_members.is_hidden IS 'Hide workspace from member workspace list';
 COMMENT ON COLUMN workspace_members.notify_updates IS 'Receive notifications for workspace updates';
-COMMENT ON COLUMN workspace_members.notify_comments IS 'Receive notifications for new comments';
 COMMENT ON COLUMN workspace_members.notify_mentions IS 'Receive notifications when mentioned';
-COMMENT ON COLUMN workspace_members.is_active IS 'Member status (inactive members retain access but are hidden)';
-COMMENT ON COLUMN workspace_members.last_accessed_at IS 'Timestamp of member last workspace access';
 COMMENT ON COLUMN workspace_members.created_by IS 'Account that added this member';
 COMMENT ON COLUMN workspace_members.updated_by IS 'Account that last modified this membership';
 COMMENT ON COLUMN workspace_members.created_at IS 'Timestamp when the membership was created';
@@ -220,14 +169,15 @@ CREATE TABLE workspace_invites (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    workspace_id     UUID          NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    invitee_id     UUID          DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
+    workspace_id   UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
 
     -- Invitation details
+    invitee_email  TEXT            DEFAULT NULL,
     invited_role   WORKSPACE_ROLE  NOT NULL DEFAULT 'guest',
-    invite_token   TEXT          NOT NULL DEFAULT generate_secure_token(32),
+    invite_token   TEXT            NOT NULL DEFAULT generate_secure_token(32),
 
     CONSTRAINT workspace_invites_invite_token_not_empty CHECK (trim(invite_token) <> ''),
+    CONSTRAINT workspace_invites_invitee_email_format CHECK (invitee_email IS NULL OR is_valid_email(invitee_email)),
 
     -- Invite status and expiration
     invite_status  INVITE_STATUS NOT NULL DEFAULT 'pending',
@@ -260,8 +210,8 @@ CREATE INDEX workspace_invites_expiry_cleanup_idx
     WHERE invite_status = 'pending';
 
 CREATE INDEX workspace_invites_invitee_lookup_idx
-    ON workspace_invites (invitee_id, invite_status, created_at DESC)
-    WHERE invitee_id IS NOT NULL;
+    ON workspace_invites (invitee_email, invite_status, created_at DESC)
+    WHERE invitee_email IS NOT NULL;
 
 -- Comments for workspace_invites table
 COMMENT ON TABLE workspace_invites IS
@@ -269,7 +219,7 @@ COMMENT ON TABLE workspace_invites IS
 
 COMMENT ON COLUMN workspace_invites.id IS 'Unique invite identifier (UUID)';
 COMMENT ON COLUMN workspace_invites.workspace_id IS 'Reference to the workspace being invited to';
-COMMENT ON COLUMN workspace_invites.invitee_id IS 'Reference to invitee account (if exists)';
+COMMENT ON COLUMN workspace_invites.invitee_email IS 'Email address of invitee (null for open invite codes)';
 COMMENT ON COLUMN workspace_invites.invited_role IS 'Role that will be assigned upon acceptance';
 COMMENT ON COLUMN workspace_invites.invite_token IS 'Secure token for invite validation';
 COMMENT ON COLUMN workspace_invites.invite_status IS 'Current status of the invitation';
@@ -286,48 +236,35 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'workspace:created',
     'workspace:updated',
     'workspace:deleted',
-    'workspace:archived',
-    'workspace:restored',
-    'workspace:settings_changed',
     'workspace:exported',
     'workspace:imported',
 
     -- Member activities
-    'member:added',
-    'member:kicked',
+    'member:deleted',
     'member:updated',
-    'member:invited',
-    'member:invite_accepted',
-    'member:invite_declined',
-    'member:invite_canceled',
+
+    -- Invite activities
+    'invite:created',
+    'invite:accepted',
+    'invite:declined',
+    'invite:canceled',
 
     -- Integration activities
     'integration:created',
     'integration:updated',
     'integration:deleted',
-    'integration:enabled',
-    'integration:disabled',
     'integration:synced',
-    'integration:succeeded',
-    'integration:failed',
 
     -- Webhook activities
     'webhook:created',
     'webhook:updated',
     'webhook:deleted',
-    'webhook:enabled',
-    'webhook:disabled',
     'webhook:triggered',
-    'webhook:succeeded',
-    'webhook:failed',
 
     -- Document activities
     'document:created',
     'document:updated',
     'document:deleted',
-    'document:processed',
-    'document:uploaded',
-    'document:downloaded',
     'document:verified',
 
     -- Comment activities
@@ -495,26 +432,22 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'document:created',
     'document:updated',
     'document:deleted',
-    'document:processed',
-    'document:uploaded',
 
-    -- Workspace events
-    'workspace:updated',
-    'workspace:archived',
+    -- File events
+    'file:created',
+    'file:updated',
+    'file:deleted',
 
     -- Member events
     'member:added',
-    'member:removed',
+    'member:deleted',
     'member:updated',
 
     -- Integration events
-    'integration:synced',
-    'integration:failed',
-
-    -- Run events
-    'run:started',
-    'run:completed',
-    'run:failed'
+    'integration:created',
+    'integration:updated',
+    'integration:deleted',
+    'integration:synced'
 );
 
 COMMENT ON TYPE WEBHOOK_EVENT IS
@@ -526,19 +459,17 @@ CREATE TABLE workspace_webhooks (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Reference
-    workspace_id       UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    workspace_id     UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
 
     -- Webhook details
     display_name     TEXT             NOT NULL,
     description      TEXT             NOT NULL DEFAULT '',
     url              TEXT             NOT NULL,
-    secret           TEXT             DEFAULT NULL,
 
     CONSTRAINT workspace_webhooks_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 128),
     CONSTRAINT workspace_webhooks_description_length CHECK (length(description) <= 500),
     CONSTRAINT workspace_webhooks_url_length CHECK (length(url) BETWEEN 10 AND 2048),
     CONSTRAINT workspace_webhooks_url_format CHECK (url ~ '^https?://'),
-    CONSTRAINT workspace_webhooks_secret_length CHECK (secret IS NULL OR length(secret) BETWEEN 16 AND 256),
 
     -- Event configuration
     events           WEBHOOK_EVENT[]  NOT NULL DEFAULT '{}',
@@ -550,8 +481,6 @@ CREATE TABLE workspace_webhooks (
     -- Webhook status
     status           WEBHOOK_STATUS   NOT NULL DEFAULT 'active',
     last_triggered_at TIMESTAMPTZ     DEFAULT NULL,
-    last_success_at  TIMESTAMPTZ      DEFAULT NULL,
-    last_failure_at  TIMESTAMPTZ      DEFAULT NULL,
 
     -- Audit tracking
     created_by       UUID             NOT NULL REFERENCES accounts (id),
@@ -586,13 +515,10 @@ COMMENT ON COLUMN workspace_webhooks.workspace_id IS 'Reference to the workspace
 COMMENT ON COLUMN workspace_webhooks.display_name IS 'Human-readable webhook name (1-128 chars)';
 COMMENT ON COLUMN workspace_webhooks.description IS 'Webhook description (up to 500 chars)';
 COMMENT ON COLUMN workspace_webhooks.url IS 'Webhook endpoint URL (must be HTTP/HTTPS)';
-COMMENT ON COLUMN workspace_webhooks.secret IS 'Shared secret for webhook signature verification';
 COMMENT ON COLUMN workspace_webhooks.events IS 'Array of event types this webhook subscribes to';
 COMMENT ON COLUMN workspace_webhooks.headers IS 'Custom headers to include in webhook requests';
 COMMENT ON COLUMN workspace_webhooks.status IS 'Current webhook status (active, paused, disabled)';
 COMMENT ON COLUMN workspace_webhooks.last_triggered_at IS 'Timestamp of last webhook trigger';
-COMMENT ON COLUMN workspace_webhooks.last_success_at IS 'Timestamp of last successful delivery';
-COMMENT ON COLUMN workspace_webhooks.last_failure_at IS 'Timestamp of last failed delivery';
 COMMENT ON COLUMN workspace_webhooks.created_by IS 'Account that created the webhook';
 COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was created';
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
@@ -615,25 +541,17 @@ CREATE TABLE workspace_integration_runs (
     CONSTRAINT workspace_integration_runs_run_name_length CHECK (length(trim(run_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_integration_runs_run_type_format CHECK (run_type ~ '^[a-z_]+$'),
 
-    -- Run status
+    -- Run status and metadata
     run_status          INTEGRATION_STATUS NOT NULL DEFAULT 'pending',
+    metadata            JSONB            NOT NULL DEFAULT '{}',
+
+    CONSTRAINT workspace_integration_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
 
     -- Run timing
     started_at          TIMESTAMPTZ      DEFAULT NULL,
     completed_at        TIMESTAMPTZ      DEFAULT NULL,
-    duration_ms         INTEGER          DEFAULT NULL,
 
-    CONSTRAINT workspace_integration_runs_duration_positive CHECK (duration_ms IS NULL OR duration_ms >= 0),
     CONSTRAINT workspace_integration_runs_completed_after_started CHECK (completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at),
-
-    -- Run results and metadata
-    result_summary      TEXT             DEFAULT NULL,
-    metadata            JSONB            NOT NULL DEFAULT '{}',
-    error_details       JSONB            DEFAULT NULL,
-
-    CONSTRAINT workspace_integration_runs_result_summary_length CHECK (length(result_summary) <= 2000),
-    CONSTRAINT workspace_integration_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
-    CONSTRAINT workspace_integration_runs_error_details_size CHECK (length(error_details::TEXT) BETWEEN 2 AND 8192),
 
     -- Lifecycle timestamps
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
@@ -672,12 +590,9 @@ COMMENT ON COLUMN workspace_integration_runs.account_id IS 'Account that trigger
 COMMENT ON COLUMN workspace_integration_runs.run_name IS 'Human-readable run name (1-255 chars)';
 COMMENT ON COLUMN workspace_integration_runs.run_type IS 'Type of run (manual, scheduled, triggered, etc.)';
 COMMENT ON COLUMN workspace_integration_runs.run_status IS 'Current run status (pending, executing, failure)';
+COMMENT ON COLUMN workspace_integration_runs.metadata IS 'Run metadata, results, and error details (JSON, 2B-16KB)';
 COMMENT ON COLUMN workspace_integration_runs.started_at IS 'Timestamp when run execution started';
 COMMENT ON COLUMN workspace_integration_runs.completed_at IS 'Timestamp when run execution completed';
-COMMENT ON COLUMN workspace_integration_runs.duration_ms IS 'Run duration in milliseconds';
-COMMENT ON COLUMN workspace_integration_runs.result_summary IS 'Summary of run results (up to 2000 chars)';
-COMMENT ON COLUMN workspace_integration_runs.metadata IS 'Run metadata and configuration (JSON, 2B-16KB)';
-COMMENT ON COLUMN workspace_integration_runs.error_details IS 'Error details for failed runs (JSON, 2B-8KB)';
 COMMENT ON COLUMN workspace_integration_runs.created_at IS 'Timestamp when run was created';
 COMMENT ON COLUMN workspace_integration_runs.updated_at IS 'Timestamp when run was last modified';
 
@@ -688,17 +603,16 @@ SELECT
     p.display_name,
     COUNT(pm.account_id)                                  AS total_members,
     COUNT(CASE WHEN pm.member_role = 'owner' THEN 1 END)  AS owners,
+    COUNT(CASE WHEN pm.member_role = 'admin' THEN 1 END)  AS admins,
     COUNT(CASE WHEN pm.member_role = 'member' THEN 1 END) AS members,
-    COUNT(CASE WHEN pm.member_role = 'guest' THEN 1 END)  AS guests,
-    COUNT(CASE WHEN pm.is_active = FALSE THEN 1 END)      AS inactive_members,
-    MAX(pm.last_accessed_at)                              AS last_member_access
+    COUNT(CASE WHEN pm.member_role = 'guest' THEN 1 END)  AS guests
 FROM workspaces p
     LEFT JOIN workspace_members pm ON p.id = pm.workspace_id
 WHERE p.deleted_at IS NULL
 GROUP BY p.id, p.display_name;
 
 COMMENT ON VIEW workspace_member_summary IS
-    'Summary of workspace membership statistics and activity.';
+    'Summary of workspace membership statistics.';
 
 -- Create pending workspace invites view
 CREATE VIEW pending_workspace_invites AS

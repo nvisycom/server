@@ -2,10 +2,10 @@
 
 use jiff::Timestamp;
 use nvisy_service::inference::{
-    EmbeddingRequest, EmbeddingResponse, InferenceProvider, OcrRequest, OcrResponse, VlmRequest,
-    VlmResponse,
+    EmbeddingRequest, EmbeddingResponse, InferenceProvider, OcrRequest, OcrResponse, SharedContext,
+    UsageStats, VlmRequest, VlmResponse,
 };
-use nvisy_service::{ServiceHealth, SharedContext, UsageStats};
+use nvisy_service::types::ServiceHealth;
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
 use ollama_rs::generation::embeddings::request::GenerateEmbeddingsRequest;

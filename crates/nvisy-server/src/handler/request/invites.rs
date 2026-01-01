@@ -15,14 +15,10 @@ pub struct CreateInvite {
     #[validate(email)]
     #[validate(length(min = 5, max = 254))]
     pub invitee_email: String,
-
     /// Role the invitee will have if they accept the invitation.
-    #[serde(default)]
     pub invited_role: WorkspaceRole,
-
     /// When the invitation expires.
-    #[serde(default)]
-    pub expires: InviteExpiration,
+    pub expires_in: InviteExpiration,
 }
 
 impl CreateInvite {
@@ -30,14 +26,13 @@ impl CreateInvite {
     pub fn into_model(
         self,
         workspace_id: Uuid,
-        invitee_id: Option<Uuid>,
         created_by: Uuid,
     ) -> nvisy_postgres::model::NewWorkspaceInvite {
         nvisy_postgres::model::NewWorkspaceInvite {
             workspace_id,
-            invitee_id,
+            invitee_email: Some(self.invitee_email),
             invited_role: Some(self.invited_role),
-            expires_at: self.expires.to_expiry_timestamp().map(Into::into),
+            expires_at: self.expires_in.to_expiry_timestamp().map(Into::into),
             created_by,
             updated_by: created_by,
             ..Default::default()
@@ -98,12 +93,9 @@ impl InviteExpiration {
 #[serde(rename_all = "camelCase")]
 pub struct GenerateInviteCode {
     /// Role to assign when someone joins via this invite code.
-    #[serde(default)]
-    pub role: WorkspaceRole,
-
+    pub invited_role: WorkspaceRole,
     /// When the invite code expires.
-    #[serde(default)]
-    pub expires: InviteExpiration,
+    pub expires_in: InviteExpiration,
 }
 
 impl GenerateInviteCode {
@@ -115,9 +107,9 @@ impl GenerateInviteCode {
     ) -> nvisy_postgres::model::NewWorkspaceInvite {
         nvisy_postgres::model::NewWorkspaceInvite {
             workspace_id,
-            invitee_id: None,
-            invited_role: Some(self.role),
-            expires_at: self.expires.to_expiry_timestamp().map(Into::into),
+            invitee_email: None,
+            invited_role: Some(self.invited_role),
+            expires_at: self.expires_in.to_expiry_timestamp().map(Into::into),
             created_by,
             updated_by: created_by,
             ..Default::default()

@@ -21,7 +21,7 @@ use crate::extract::{
     AuthClaims, AuthHeader, AuthState, Json, Path, PgPool, Query, TypedHeader, ValidateJson,
 };
 use crate::handler::{ErrorKind, Result};
-use crate::service::{AuthKeys, ServiceState};
+use crate::service::{SessionKeys, ServiceState};
 
 /// Tracing target for API token operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
@@ -33,7 +33,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_api_token(
     PgPool(mut conn): PgPool,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_keys): State<SessionKeys>,
     AuthState(auth_state): AuthState,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<CreateApiToken>,

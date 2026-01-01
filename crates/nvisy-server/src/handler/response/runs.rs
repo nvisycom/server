@@ -27,21 +27,14 @@ pub struct IntegrationRun {
     pub run_type: String,
     /// Current status.
     pub status: IntegrationStatus,
+    /// Run metadata, results, and error details.
+    pub metadata: serde_json::Value,
     /// When the run started.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<Timestamp>,
     /// When the run completed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<Timestamp>,
-    /// Duration in milliseconds.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<i32>,
-    /// Result summary.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_summary: Option<String>,
-    /// Error details for failed runs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_details: Option<serde_json::Value>,
     /// When the run was created.
     pub created_at: Timestamp,
 }
@@ -60,11 +53,9 @@ impl IntegrationRun {
             run_name: run.run_name,
             run_type: run.run_type,
             status: run.run_status,
+            metadata: run.metadata,
             started_at: run.started_at.map(Into::into),
             completed_at: run.completed_at.map(Into::into),
-            duration_ms: run.duration_ms,
-            result_summary: run.result_summary,
-            error_details: run.error_details,
             created_at: run.created_at.into(),
         }
     }

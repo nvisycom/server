@@ -19,7 +19,9 @@ use super::request::{Login, Signup};
 use super::response::{AuthToken, ErrorResponse};
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, PgPool, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{AuthKeys, PasswordHasher, PasswordStrength, ServiceState, UserAgentParser};
+use crate::service::{
+    PasswordHasher, PasswordStrength, ServiceState, SessionKeys, UserAgentParser,
+};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -36,7 +38,7 @@ fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str)
 
 /// Creates a new authentication header.
 fn create_auth_header(
-    auth_secret_keys: AuthKeys,
+    auth_secret_keys: SessionKeys,
     account_model: &Account,
     account_api_token: &AccountApiToken,
 ) -> Result<AuthHeader> {
@@ -50,7 +52,7 @@ fn create_auth_header(
 async fn login(
     PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
@@ -120,6 +122,7 @@ async fn login(
     let api_token = auth_header.into_string()?;
     let response = AuthToken {
         api_token,
+        account_id: auth_claims.account_id,
         token_id: auth_claims.token_id,
         issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
         expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
@@ -150,7 +153,7 @@ async fn signup(
     PgPool(mut conn): PgPool,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
-    State(auth_keys): State<AuthKeys>,
+    State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
@@ -207,6 +210,7 @@ async fn signup(
     let api_token = auth_header.into_string()?;
     let response = AuthToken {
         api_token,
+        account_id: auth_claims.account_id,
         token_id: auth_claims.token_id,
         issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
         expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),

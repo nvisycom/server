@@ -4,7 +4,6 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
@@ -70,7 +69,7 @@ pub trait WorkspaceMemberRepository {
 
     /// Lists workspaces where a user is a member.
     ///
-    /// Returns memberships ordered by favorites and recent activity.
+    /// Returns memberships ordered by creation date.
     fn list_user_workspaces(
         &mut self,
         user_id: Uuid,
@@ -93,13 +92,6 @@ pub trait WorkspaceMemberRepository {
         user_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceRole>>> + Send;
 
-    /// Updates the last access timestamp for a member.
-    fn touch_member_access(
-        &mut self,
-        proj_id: Uuid,
-        user_id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
-
     /// Finds all members with a specific role.
     fn find_members_by_role(
         &mut self,
@@ -113,26 +105,6 @@ pub trait WorkspaceMemberRepository {
         proj_id: Uuid,
         user_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
-
-    /// Finds members who have favorited the workspace.
-    fn get_favorite_members(
-        &mut self,
-        proj_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
-
-    /// Finds members who have enabled a specific notification type.
-    fn get_notifiable_members(
-        &mut self,
-        proj_id: Uuid,
-        notification_type: &str,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
-
-    /// Finds members who accessed the workspace within the specified hours.
-    fn get_recently_active_members(
-        &mut self,
-        proj_id: Uuid,
-        hours: i64,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
 
     /// Lists members of a workspace with account details.
     ///
@@ -150,6 +122,15 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         proj_id: Uuid,
         member_account_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceMember, Account)>>> + Send;
+
+    /// Finds a workspace member by their email address.
+    ///
+    /// Performs a JOIN with accounts to match by email.
+    fn find_workspace_member_by_email(
+        &mut self,
+        proj_id: Uuid,
+        email: &str,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceMember, Account)>>> + Send;
 }
 
@@ -300,11 +281,7 @@ impl WorkspaceMemberRepository for PgConnection {
         let memberships = workspace_members
             .filter(account_id.eq(user_id))
             .select(WorkspaceMember::as_select())
-            .order((
-                is_favorite.desc(),
-                last_accessed_at.desc().nulls_last(),
-                created_at.desc(),
-            ))
+            .order(created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .load(self)
@@ -326,11 +303,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .filter(workspace_members::account_id.eq(user_id))
             .filter(workspaces::deleted_at.is_null())
             .select((Workspace::as_select(), WorkspaceMember::as_select()))
-            .order((
-                workspace_members::is_favorite.desc(),
-                workspace_members::last_accessed_at.desc().nulls_last(),
-                workspace_members::created_at.desc(),
-            ))
+            .order(workspace_members::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .load::<(Workspace, WorkspaceMember)>(self)
@@ -357,20 +330,6 @@ impl WorkspaceMemberRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(role)
-    }
-
-    async fn touch_member_access(&mut self, proj_id: Uuid, user_id: Uuid) -> PgResult<()> {
-        use schema::workspace_members::dsl::*;
-
-        diesel::update(workspace_members)
-            .filter(workspace_id.eq(proj_id))
-            .filter(account_id.eq(user_id))
-            .set(last_accessed_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-            .execute(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(())
     }
 
     async fn find_members_by_role(
@@ -406,70 +365,6 @@ impl WorkspaceMemberRepository for PgConnection {
             .is_some();
 
         Ok(is_member)
-    }
-
-    async fn get_favorite_members(&mut self, proj_id: Uuid) -> PgResult<Vec<WorkspaceMember>> {
-        use schema::workspace_members::dsl::*;
-
-        let members = workspace_members
-            .filter(workspace_id.eq(proj_id))
-            .filter(is_favorite.eq(true))
-            .select(WorkspaceMember::as_select())
-            .order(created_at.asc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(members)
-    }
-
-    async fn get_notifiable_members(
-        &mut self,
-        proj_id: Uuid,
-        notification_type: &str,
-    ) -> PgResult<Vec<WorkspaceMember>> {
-        use schema::workspace_members::dsl::*;
-
-        let mut query = workspace_members
-            .filter(workspace_id.eq(proj_id))
-            .into_boxed();
-
-        match notification_type {
-            "updates" => query = query.filter(notify_updates.eq(true)),
-            "comments" => query = query.filter(notify_comments.eq(true)),
-            "mentions" => query = query.filter(notify_mentions.eq(true)),
-            _ => {}
-        }
-
-        let members = query
-            .select(WorkspaceMember::as_select())
-            .order(created_at.asc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(members)
-    }
-
-    async fn get_recently_active_members(
-        &mut self,
-        proj_id: Uuid,
-        hours: i64,
-    ) -> PgResult<Vec<WorkspaceMember>> {
-        use schema::workspace_members::dsl::*;
-
-        let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
-
-        let members = workspace_members
-            .filter(workspace_id.eq(proj_id))
-            .filter(last_accessed_at.gt(cutoff_time))
-            .select(WorkspaceMember::as_select())
-            .order(last_accessed_at.desc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(members)
     }
 
     async fn list_workspace_members_with_accounts(
@@ -522,6 +417,27 @@ impl WorkspaceMemberRepository for PgConnection {
             .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
             .filter(workspace_members::workspace_id.eq(proj_id))
             .filter(workspace_members::account_id.eq(member_account_id))
+            .filter(accounts::deleted_at.is_null())
+            .select((WorkspaceMember::as_select(), Account::as_select()))
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(result)
+    }
+
+    async fn find_workspace_member_by_email(
+        &mut self,
+        proj_id: Uuid,
+        email: &str,
+    ) -> PgResult<Option<(WorkspaceMember, Account)>> {
+        use schema::{accounts, workspace_members};
+
+        let result = workspace_members::table
+            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
+            .filter(workspace_members::workspace_id.eq(proj_id))
+            .filter(accounts::email_address.eq(email))
             .filter(accounts::deleted_at.is_null())
             .select((WorkspaceMember::as_select(), Account::as_select()))
             .first(self)

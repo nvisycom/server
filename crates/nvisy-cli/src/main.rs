@@ -62,7 +62,7 @@ async fn run() -> anyhow::Result<()> {
 /// Creates the service state from configuration.
 async fn create_service_state(
     config: &ServiceConfig,
-    inference: nvisy_service::InferenceService,
+    inference: nvisy_service::inference::InferenceService,
 ) -> anyhow::Result<ServiceState> {
     let webhook_service = create_webhook_service()?;
     let state = ServiceState::new(config.clone(), inference, webhook_service).await?;

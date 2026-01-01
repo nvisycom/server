@@ -3,14 +3,18 @@
 //! This module provides request DTOs for workspace webhook management including
 //! creation and updates.
 
+use std::collections::HashMap;
+
 use nvisy_postgres::model::{
     NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel,
 };
-use nvisy_postgres::types::WebhookEvent;
+use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
+
+use crate::handler::utility::{serialize_headers, serialize_headers_opt};
 
 /// Request payload for creating a new workspace webhook.
 #[must_use]
@@ -20,25 +24,18 @@ pub struct CreateWebhook {
     /// Human-readable name for the webhook (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub display_name: String,
-
     /// Detailed description of the webhook's purpose (max 500 characters).
     #[validate(length(max = 500))]
-    #[serde(default)]
     pub description: String,
-
     /// The URL to send webhook payloads to.
     #[validate(url, length(min = 1, max = 2048))]
     pub url: String,
-
-    /// Optional secret for signing webhook payloads (max 256 characters).
-    #[validate(length(max = 256))]
-    pub secret: Option<String>,
-
     /// List of event types this webhook should receive.
     pub events: Vec<WebhookEvent>,
-
     /// Optional custom headers to include in webhook requests.
-    pub headers: Option<serde_json::Value>,
+    pub headers: HashMap<String, String>,
+    /// Initial status of the webhook (active or paused).
+    pub status: Option<WebhookStatus>,
 }
 
 impl CreateWebhook {
@@ -51,16 +48,21 @@ impl CreateWebhook {
     #[inline]
     pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewWorkspaceWebhook {
         let events = self.events.into_iter().map(Some).collect();
+        let headers = serialize_headers(self.headers);
+        // Treat Disabled as Paused since users cannot set Disabled status
+        let status = self.status.map(|s| match s {
+            WebhookStatus::Disabled => WebhookStatus::Paused,
+            other => other,
+        });
 
         NewWorkspaceWebhook {
             workspace_id,
             display_name: self.display_name,
             description: self.description,
             url: self.url,
-            secret: self.secret,
             events,
-            headers: self.headers,
-            status: None,
+            headers,
+            status,
             created_by: account_id,
         }
     }
@@ -74,40 +76,46 @@ pub struct UpdateWebhook {
     /// Updated human-readable name for the webhook (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub display_name: Option<String>,
-
     /// Updated description of the webhook's purpose (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
-
     /// Updated URL to send webhook payloads to.
     #[validate(url, length(min = 1, max = 2048))]
     pub url: Option<String>,
-
-    /// Updated secret for signing webhook payloads (max 256 characters).
-    #[validate(length(max = 256))]
-    pub secret: Option<String>,
-
     /// Updated list of event types this webhook should receive.
     pub events: Option<Vec<WebhookEvent>>,
-
     /// Updated custom headers to include in webhook requests.
-    pub headers: Option<serde_json::Value>,
+    pub headers: Option<HashMap<String, String>>,
+    /// Updated status (active or paused). Ignored if webhook is currently disabled.
+    pub status: Option<WebhookStatus>,
 }
 
 impl UpdateWebhook {
     /// Converts this request into an [`UpdateWorkspaceWebhookModel`].
+    ///
+    /// If `current_status` is `Disabled`, the status field is ignored.
+    /// If user tries to set `Disabled`, it's treated as `Paused`.
     #[inline]
-    pub fn into_model(self) -> UpdateWorkspaceWebhookModel {
+    pub fn into_model(self, current_status: WebhookStatus) -> UpdateWorkspaceWebhookModel {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
+        let headers = serialize_headers_opt(self.headers);
+        // Ignore status changes if webhook is disabled; treat Disabled as Paused
+        let status = if current_status.is_disabled() {
+            None
+        } else {
+            self.status.map(|s| match s {
+                WebhookStatus::Disabled => WebhookStatus::Paused,
+                other => other,
+            })
+        };
 
         UpdateWorkspaceWebhookModel {
             display_name: self.display_name,
             description: self.description,
             url: self.url,
-            secret: self.secret.map(Some),
             events,
-            headers: self.headers,
-            status: None,
+            headers,
+            status,
             ..Default::default()
         }
     }

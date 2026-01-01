@@ -16,7 +16,7 @@ use serde::Deserialize;
 
 use super::{AuthClaims, AuthHeader, TRACING_TARGET_AUTHENTICATION};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::AuthKeys;
+use crate::service::SessionKeys;
 
 /// Authenticated user state with comprehensive database verification.
 ///
@@ -294,7 +294,7 @@ where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    AuthKeys: FromRef<S>,
+    SessionKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -320,7 +320,7 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    AuthKeys: FromRef<S>,
+    SessionKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 

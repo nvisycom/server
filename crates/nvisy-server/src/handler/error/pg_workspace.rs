@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::{
     WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
-    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceIntegrationRunConstraints,
+    WorkspaceIntegrationRunConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
     WorkspaceWebhookConstraints,
 };
 
@@ -138,17 +138,8 @@ impl From<WorkspaceIntegrationRunConstraints> for Error<'static> {
             WorkspaceIntegrationRunConstraints::RunTypeFormat => {
                 ErrorKind::BadRequest.with_message("Run type format is invalid")
             }
-            WorkspaceIntegrationRunConstraints::DurationPositive => {
-                ErrorKind::BadRequest.with_message("Run duration must be positive")
-            }
-            WorkspaceIntegrationRunConstraints::ResultSummaryLength => {
-                ErrorKind::BadRequest.with_message("Run result summary is too long")
-            }
             WorkspaceIntegrationRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Run metadata size is invalid")
-            }
-            WorkspaceIntegrationRunConstraints::ErrorDetailsSize => {
-                ErrorKind::BadRequest.with_message("Run error details size is invalid")
             }
             WorkspaceIntegrationRunConstraints::CompletedAfterStarted
             | WorkspaceIntegrationRunConstraints::UpdatedAfterCreated

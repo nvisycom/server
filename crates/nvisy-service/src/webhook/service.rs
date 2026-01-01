@@ -4,7 +4,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::{Result, TRACING_TARGET, WebhookProvider, WebhookRequest, WebhookResponse};
+use super::{
+    Result, ServiceHealth, TRACING_TARGET, WebhookProvider, WebhookRequest, WebhookResponse,
+};
 
 /// Webhook service wrapper with observability.
 ///
@@ -40,8 +42,7 @@ impl WebhookService {
             target: TRACING_TARGET,
             request_id = %request.request_id,
             url = %request.url,
-            has_secret = request.secret.is_some(),
-            timeout_ms = request.timeout.as_millis(),
+            timeout_ms = ?request.timeout.map(|t| t.as_millis()),
             "Delivering webhook"
         );
 
@@ -78,6 +79,40 @@ impl WebhookService {
                     error = %error,
                     elapsed_ms = elapsed.as_millis(),
                     "Webhook delivery error"
+                );
+            }
+        }
+
+        result
+    }
+
+    /// Performs a health check on the underlying webhook provider.
+    pub async fn health_check(&self) -> Result<ServiceHealth> {
+        let started_at = Instant::now();
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            "Performing webhook provider health check"
+        );
+
+        let result = self.inner.health_check().await;
+        let elapsed = started_at.elapsed();
+
+        match &result {
+            Ok(health) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    status = ?health.status,
+                    elapsed_ms = elapsed.as_millis(),
+                    "Webhook health check completed"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %error,
+                    elapsed_ms = elapsed.as_millis(),
+                    "Webhook health check failed"
                 );
             }
         }

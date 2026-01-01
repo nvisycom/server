@@ -10,16 +10,15 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{Pagination, WorkspaceWebhookRepository};
-use nvisy_service::webhook::{WebhookRequest, WebhookService};
+use nvisy_service::webhook::{WebhookPayload, WebhookService};
+use url::Url;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
 use crate::handler::request::{
     CreateWebhook, TestWebhook, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
     WorkspacePathParams,
 };
-use crate::handler::response::{
-    ErrorResponse, Webhook, WebhookTestResult, WebhookWithSecret, Webhooks,
-};
+use crate::handler::response::{ErrorResponse, Webhook, WebhookResult, Webhooks};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -28,8 +27,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
 
 /// Creates a new workspace webhook.
 ///
-/// Returns the webhook with secret. The secret is only shown once at creation.
-/// Requires `ManageIntegrations` permission.
+/// Returns the webhook configuration. Requires `CreateWebhooks` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -42,14 +40,14 @@ async fn create_webhook(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateWebhook>,
-) -> Result<(StatusCode, Json<WebhookWithSecret>)> {
+) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
 
     auth_state
         .authorize_workspace(
             &mut conn,
             path_params.workspace_id,
-            Permission::ManageIntegrations,
+            Permission::CreateWebhooks,
         )
         .await?;
 
@@ -59,19 +57,16 @@ async fn create_webhook(
     tracing::info!(
         target: TRACING_TARGET,
         webhook_id = %webhook.id,
-        "Webhook created ",
+        "Webhook created",
     );
 
-    Ok((
-        StatusCode::CREATED,
-        Json(WebhookWithSecret::from_model(webhook)),
-    ))
+    Ok((StatusCode::CREATED, Json(Webhook::from_model(webhook))))
 }
 
 fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create webhook")
-        .description("Creates a new webhook. The secret is only shown once at creation.")
-        .response::<201, Json<WebhookWithSecret>>()
+        .description("Creates a new webhook for the workspace.")
+        .response::<201, Json<Webhook>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -79,7 +74,7 @@ fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
 
 /// Lists all webhooks for a workspace.
 ///
-/// Returns all configured webhooks without secrets. Requires `ViewIntegrations` permission.
+/// Returns all configured webhooks. Requires `ViewWebhooks` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -98,7 +93,7 @@ async fn list_webhooks(
         .authorize_workspace(
             &mut conn,
             path_params.workspace_id,
-            Permission::ViewIntegrations,
+            Permission::ViewWebhooks,
         )
         .await?;
 
@@ -127,7 +122,7 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
 
 /// Retrieves a specific workspace webhook.
 ///
-/// Returns webhook details without secret. Requires `ViewIntegrations` permission.
+/// Returns webhook details. Requires `ViewWebhooks` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -146,11 +141,7 @@ async fn read_webhook(
     let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            webhook.workspace_id,
-            Permission::ViewIntegrations,
-        )
+        .authorize_workspace(&mut conn, webhook.workspace_id, Permission::ViewWebhooks)
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace webhook read");
@@ -169,7 +160,7 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
 
 /// Updates a workspace webhook.
 ///
-/// Updates webhook configuration. Requires `ManageIntegrations` permission.
+/// Updates webhook configuration. Requires `UpdateWebhooks` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -189,14 +180,10 @@ async fn update_webhook(
     let existing = find_webhook(&mut conn, path_params.webhook_id).await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            existing.workspace_id,
-            Permission::ManageIntegrations,
-        )
+        .authorize_workspace(&mut conn, existing.workspace_id, Permission::UpdateWebhooks)
         .await?;
 
-    let update_data = request.into_model();
+    let update_data = request.into_model(existing.status);
     let webhook = conn
         .update_workspace_webhook(path_params.webhook_id, update_data)
         .await?;
@@ -218,7 +205,7 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
 
 /// Deletes a workspace webhook.
 ///
-/// Permanently removes the webhook. Requires `ManageIntegrations` permission.
+/// Permanently removes the webhook. Requires `DeleteWebhooks` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -237,11 +224,7 @@ async fn delete_webhook(
     let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            webhook.workspace_id,
-            Permission::ManageIntegrations,
-        )
+        .authorize_workspace(&mut conn, webhook.workspace_id, Permission::DeleteWebhooks)
         .await?;
 
     conn.delete_workspace_webhook(path_params.webhook_id)
@@ -264,7 +247,7 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
 /// Tests a webhook by sending a test payload.
 ///
 /// Sends a test request to the webhook endpoint and returns the result.
-/// Requires `ManageIntegrations` permission.
+/// Requires `TestWebhooks` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -277,38 +260,28 @@ async fn test_webhook(
     AuthState(auth_state): AuthState,
     State(webhook_service): State<WebhookService>,
     Path(path_params): Path<WebhookPathParams>,
-    ValidateJson(request): ValidateJson<TestWebhook>,
-) -> Result<(StatusCode, Json<WebhookTestResult>)> {
+    ValidateJson(_request): ValidateJson<TestWebhook>,
+) -> Result<(StatusCode, Json<WebhookResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
 
-    // Fetch the webhook to get URL and secret
+    // Fetch the webhook to get URL
     let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            webhook.workspace_id,
-            Permission::ManageIntegrations,
-        )
+        .authorize_workspace(&mut conn, webhook.workspace_id, Permission::TestWebhooks)
         .await?;
 
-    // Build the webhook request
-    let payload = request.payload.unwrap_or_else(|| {
-        serde_json::json!({
-            "event": "test",
-            "message": "This is a test webhook delivery"
-        })
-    });
+    // Parse the webhook URL
+    let url: Url = webhook.url.parse().map_err(|_| {
+        ErrorKind::BadRequest
+            .with_message("Invalid webhook URL")
+            .with_resource("webhook")
+    })?;
 
-    let mut webhook_request = WebhookRequest::new(&webhook.url, payload);
-    if let Some(secret) = webhook.secret {
-        webhook_request = webhook_request.with_secret(secret);
-    }
-
-    let response = webhook_service
-        .deliver(&webhook_request)
-        .await
-        .map_err(|e| ErrorKind::InternalServerError.with_message(e.to_string()))?;
+    // Build the test webhook payload
+    let payload = WebhookPayload::test(webhook.id);
+    let webhook_request = payload.into_request(url);
+    let response = webhook_service.deliver(&webhook_request).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -317,16 +290,13 @@ async fn test_webhook(
         "Webhook test completed"
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(WebhookTestResult::from_core_response(response)),
-    ))
+    Ok((StatusCode::OK, Json(WebhookResult::from_response(response))))
 }
 
 fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Test webhook")
         .description("Sends a test payload to the webhook endpoint and returns the result.")
-        .response::<200, Json<WebhookTestResult>>()
+        .response::<200, Json<WebhookResult>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()

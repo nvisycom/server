@@ -29,6 +29,7 @@ pub use request::{WebhookContext, WebhookPayload, WebhookRequest};
 pub use response::WebhookResponse;
 pub use service::WebhookService;
 
+pub use crate::types::{ServiceHealth, ServiceStatus};
 pub use crate::{Error, Result};
 
 /// Tracing target for webhook operations.
@@ -41,4 +42,7 @@ pub const TRACING_TARGET: &str = "nvisy_service::webhook";
 pub trait WebhookProvider: Send + Sync {
     /// Delivers a webhook payload to the specified endpoint.
     async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse>;
+
+    /// Performs a health check on the webhook provider.
+    async fn health_check(&self) -> Result<ServiceHealth>;
 }

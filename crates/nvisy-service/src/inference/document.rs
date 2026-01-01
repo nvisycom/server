@@ -13,7 +13,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Annotation, Result, TypeError};
+use super::Annotation;
+use crate::{Error, Result};
 
 /// Unique identifier for documents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -350,21 +351,20 @@ impl Document {
         if let Some(ref content_type) = self.metadata.content_type
             && !content_type.contains('/')
         {
-            return Err(TypeError::InvalidContentType(content_type.clone()));
+            return Err(Error::invalid_input()
+                .with_message(format!("Invalid content type format: {}", content_type)));
         }
 
         // Validate size consistency
         if self.metadata.size != self.content.len() {
-            return Err(TypeError::ValidationFailed(
-                "Metadata size does not match actual content size".to_string(),
-            ));
+            return Err(Error::invalid_input()
+                .with_message("Metadata size does not match actual content size"));
         }
 
         // Validate timestamps
         if self.updated_at < self.created_at {
-            return Err(TypeError::ValidationFailed(
-                "Updated timestamp cannot be before created timestamp".to_string(),
-            ));
+            return Err(Error::invalid_input()
+                .with_message("Updated timestamp cannot be before created timestamp"));
         }
 
         Ok(())

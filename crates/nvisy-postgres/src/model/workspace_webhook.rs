@@ -36,9 +36,6 @@ pub struct WorkspaceWebhook {
     /// Webhook endpoint URL.
     pub url: String,
 
-    /// Shared secret for signature verification.
-    pub secret: Option<String>,
-
     /// Array of event types this webhook subscribes to.
     pub events: Vec<Option<WebhookEvent>>,
 
@@ -50,12 +47,6 @@ pub struct WorkspaceWebhook {
 
     /// Timestamp of last webhook trigger.
     pub last_triggered_at: Option<Timestamp>,
-
-    /// Timestamp of last successful delivery.
-    pub last_success_at: Option<Timestamp>,
-
-    /// Timestamp of last failed delivery.
-    pub last_failure_at: Option<Timestamp>,
 
     /// Account that created this webhook.
     pub created_by: Uuid,
@@ -87,9 +78,6 @@ pub struct NewWorkspaceWebhook {
     /// Webhook endpoint URL.
     pub url: String,
 
-    /// Shared secret for signature verification.
-    pub secret: Option<String>,
-
     /// Array of event types this webhook subscribes to.
     pub events: Vec<Option<WebhookEvent>>,
 
@@ -117,9 +105,6 @@ pub struct UpdateWorkspaceWebhook {
     /// Updated endpoint URL.
     pub url: Option<String>,
 
-    /// Updated shared secret.
-    pub secret: Option<Option<String>>,
-
     /// Updated event subscriptions.
     pub events: Option<Vec<Option<WebhookEvent>>>,
 
@@ -131,12 +116,6 @@ pub struct UpdateWorkspaceWebhook {
 
     /// Updated last triggered timestamp.
     pub last_triggered_at: Option<Option<Timestamp>>,
-
-    /// Updated last success timestamp.
-    pub last_success_at: Option<Option<Timestamp>>,
-
-    /// Updated last failure timestamp.
-    pub last_failure_at: Option<Option<Timestamp>>,
 
     /// Soft deletion timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
@@ -158,11 +137,6 @@ impl WorkspaceWebhook {
         self.status.is_disabled()
     }
 
-    /// Returns whether the webhook has a secret configured.
-    pub fn has_secret(&self) -> bool {
-        self.secret.is_some()
-    }
-
     /// Returns whether the webhook has custom headers.
     pub fn has_custom_headers(&self) -> bool {
         !self.headers.as_object().is_none_or(|obj| obj.is_empty())
@@ -178,9 +152,9 @@ impl WorkspaceWebhook {
         self.events.contains(&Some(event))
     }
 
-    /// Returns whether the webhook has been successfully triggered at least once.
+    /// Returns whether the webhook has been triggered at least once.
     pub fn has_been_triggered(&self) -> bool {
-        self.last_success_at.is_some()
+        self.last_triggered_at.is_some()
     }
 
     /// Returns whether the webhook is in a healthy state.

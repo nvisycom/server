@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_members;
-use crate::types::{HasCreatedAt, HasLastActivityAt, HasOwnership, HasUpdatedAt, WorkspaceRole};
+use crate::types::{HasCreatedAt, HasOwnership, HasUpdatedAt, WorkspaceRole};
 
 /// Workspace member model representing a user's membership in a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,22 +18,10 @@ pub struct WorkspaceMember {
     pub account_id: Uuid,
     /// Member's role in the workspace.
     pub member_role: WorkspaceRole,
-    /// Custom permissions (JSON).
-    pub custom_permissions: serde_json::Value,
-    /// Display order for UI sorting.
-    pub show_order: i32,
-    /// Whether member has marked workspace as favorite.
-    pub is_favorite: bool,
-    /// Whether member has hidden the workspace.
-    pub is_hidden: bool,
     /// Whether member receives update notifications.
     pub notify_updates: bool,
-    /// Whether member receives comment notifications.
-    pub notify_comments: bool,
     /// Whether member receives mention notifications.
     pub notify_mentions: bool,
-    /// Last time member accessed the workspace.
-    pub last_accessed_at: Option<Timestamp>,
     /// Account that created this membership.
     pub created_by: Uuid,
     /// Account that last updated this membership.
@@ -55,18 +43,8 @@ pub struct NewWorkspaceMember {
     pub account_id: Uuid,
     /// Member role.
     pub member_role: WorkspaceRole,
-    /// Custom permissions.
-    pub custom_permissions: serde_json::Value,
-    /// Show order.
-    pub show_order: i32,
-    /// Is favorite.
-    pub is_favorite: bool,
-    /// Is hidden.
-    pub is_hidden: bool,
     /// Notify updates.
     pub notify_updates: bool,
-    /// Notify comments.
-    pub notify_comments: bool,
     /// Notify mentions.
     pub notify_mentions: bool,
     /// Created by.
@@ -94,7 +72,6 @@ impl NewWorkspaceMember {
     pub fn new_owner(workspace_id: Uuid, account_id: Uuid) -> Self {
         Self {
             notify_updates: true,
-            notify_comments: true,
             notify_mentions: true,
             ..Self::new(workspace_id, account_id, WorkspaceRole::Owner)
         }
@@ -108,22 +85,10 @@ impl NewWorkspaceMember {
 pub struct UpdateWorkspaceMember {
     /// Member role.
     pub member_role: Option<WorkspaceRole>,
-    /// Custom permissions.
-    pub custom_permissions: Option<serde_json::Value>,
-    /// Show order.
-    pub show_order: Option<i32>,
-    /// Is favorite.
-    pub is_favorite: Option<bool>,
-    /// Is hidden.
-    pub is_hidden: Option<bool>,
     /// Notify updates.
     pub notify_updates: Option<bool>,
-    /// Notify comments.
-    pub notify_comments: Option<bool>,
     /// Notify mentions.
     pub notify_mentions: Option<bool>,
-    /// Last accessed at.
-    pub last_accessed_at: Option<Option<Timestamp>>,
     /// Updated by.
     pub updated_by: Option<Uuid>,
 }
@@ -167,62 +132,19 @@ impl WorkspaceMember {
         self.notify_updates
     }
 
-    /// Returns whether the member has notifications enabled for comments.
-    pub fn has_comment_notifications(&self) -> bool {
-        self.notify_comments
-    }
-
     /// Returns whether the member has notifications enabled for mentions.
     pub fn has_mention_notifications(&self) -> bool {
         self.notify_mentions
     }
 
-    /// Returns whether the member has marked this workspace as favorite.
-    pub fn is_favorite(&self) -> bool {
-        self.is_favorite
-    }
-
-    /// Returns whether the member has hidden this workspace.
-    pub fn is_hidden(&self) -> bool {
-        self.is_hidden
-    }
-
     /// Returns whether the member has any notification preferences enabled.
     pub fn has_notifications_enabled(&self) -> bool {
-        self.notify_updates || self.notify_comments || self.notify_mentions
+        self.notify_updates || self.notify_mentions
     }
 
     /// Returns whether the member has all notifications enabled.
     pub fn has_all_notifications_enabled(&self) -> bool {
-        self.notify_updates && self.notify_comments && self.notify_mentions
-    }
-
-    /// Returns whether the member has custom permissions.
-    pub fn has_custom_permissions(&self) -> bool {
-        !self
-            .custom_permissions
-            .as_object()
-            .is_none_or(|obj| obj.is_empty())
-    }
-
-    /// Returns whether the member has never accessed the workspace.
-    pub fn has_never_accessed(&self) -> bool {
-        self.last_accessed_at.is_none()
-    }
-
-    /// Returns the time since last access.
-    pub fn time_since_last_access(&self) -> Option<jiff::Span> {
-        self.last_accessed_at
-            .map(|last_access| jiff::Timestamp::now() - jiff::Timestamp::from(last_access))
-    }
-
-    /// Returns whether the member is inactive (no recent access).
-    pub fn is_inactive(&self) -> bool {
-        if let Some(duration) = self.time_since_last_access() {
-            duration.get_days() > 30 // No access for 30+ days
-        } else {
-            true // Never accessed
-        }
+        self.notify_updates && self.notify_mentions
     }
 
     /// Returns whether the member can perform administrative actions.
@@ -270,11 +192,5 @@ impl HasOwnership for WorkspaceMember {
 
     fn updated_by(&self) -> Option<Uuid> {
         Some(self.updated_by)
-    }
-}
-
-impl HasLastActivityAt for WorkspaceMember {
-    fn last_activity_at(&self) -> Option<jiff::Timestamp> {
-        self.last_accessed_at.map(Into::into)
     }
 }

@@ -131,11 +131,8 @@ async fn upload_file(
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
         .await?;
 
-    // Load workspace keep_for_sec setting
-    let workspace_keep_for_sec = conn
-        .find_workspace_by_id(path_params.workspace_id)
-        .await?
-        .and_then(|p| p.keep_for_sec);
+    // Load workspace for settings (keep_for_sec is no longer used, files have their own expiration)
+    let _workspace = conn.find_workspace_by_id(path_params.workspace_id).await?;
 
     let mut uploaded_files = Vec::new();
 
@@ -220,7 +217,6 @@ async fn upload_file(
             storage_path: object_key.as_str().to_string(),
             storage_bucket: Some(InputFiles::bucket_name().to_string()),
             file_hash_sha256: sha256_bytes,
-            keep_for_sec: workspace_keep_for_sec,
             auto_delete_at: None,
             ..Default::default()
         };

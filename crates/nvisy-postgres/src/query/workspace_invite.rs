@@ -8,7 +8,7 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use super::Pagination;
-use crate::model::{Account, NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
+use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 use crate::types::{InviteFilter, InviteSortBy, InviteStatus, SortOrder};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -82,10 +82,10 @@ pub trait WorkspaceInviteRepository {
         filter: InviteFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
-    /// Lists invitations for a specific user with pagination support.
-    fn list_user_invites(
+    /// Lists invitations for a specific email with pagination support.
+    fn list_invites_by_email(
         &mut self,
-        user_id: Option<Uuid>,
+        email: Option<&str>,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
@@ -125,16 +125,21 @@ pub trait WorkspaceInviteRepository {
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
 
-    /// Lists invitations for a workspace with account details.
-    ///
-    /// Returns invites with their associated invitee account information (if invitee exists).
-    fn list_workspace_invites_with_accounts(
+    /// Lists invitations for a workspace.
+    fn list_workspace_invites_with_filter(
         &mut self,
         proj_id: Uuid,
         pagination: Pagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
-    ) -> impl Future<Output = PgResult<Vec<(WorkspaceInvite, Option<Account>)>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
+
+    /// Finds a pending invite by workspace and email.
+    fn find_pending_invite_by_email(
+        &mut self,
+        workspace_id: Uuid,
+        email: &str,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
 }
 
 impl WorkspaceInviteRepository for PgConnection {
@@ -269,13 +274,9 @@ impl WorkspaceInviteRepository for PgConnection {
         sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> PgResult<Vec<WorkspaceInvite>> {
-        use schema::{accounts, workspace_invites};
+        use schema::workspace_invites;
 
-        // Build base query with LEFT JOIN for email sorting (invitee_id may be NULL)
         let mut query = workspace_invites::table
-            .left_join(
-                accounts::table.on(accounts::id.nullable().eq(workspace_invites::invitee_id)),
-            )
             .filter(workspace_invites::workspace_id.eq(proj_id))
             .into_boxed();
 
@@ -287,10 +288,10 @@ impl WorkspaceInviteRepository for PgConnection {
         // Apply sorting
         let query = match sort_by {
             InviteSortBy::Email(SortOrder::Asc) => {
-                query.order(accounts::email_address.asc().nulls_last())
+                query.order(workspace_invites::invitee_email.asc().nulls_last())
             }
             InviteSortBy::Email(SortOrder::Desc) => {
-                query.order(accounts::email_address.desc().nulls_last())
+                query.order(workspace_invites::invitee_email.desc().nulls_last())
             }
             InviteSortBy::Date(SortOrder::Asc) => query.order(workspace_invites::created_at.asc()),
             InviteSortBy::Date(SortOrder::Desc) => {
@@ -309,17 +310,17 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invites)
     }
 
-    async fn list_user_invites(
+    async fn list_invites_by_email(
         &mut self,
-        user_id: Option<Uuid>,
+        email: Option<&str>,
         pagination: Pagination,
     ) -> PgResult<Vec<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
         let mut query = workspace_invites.into_boxed();
 
-        if let Some(uid) = user_id {
-            query = query.filter(invitee_id.eq(uid));
+        if let Some(e) = email {
+            query = query.filter(invitee_email.eq(e));
         }
 
         let invites = query
@@ -436,51 +437,35 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invite)
     }
 
-    async fn list_workspace_invites_with_accounts(
+    async fn list_workspace_invites_with_filter(
         &mut self,
         proj_id: Uuid,
         pagination: Pagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
-    ) -> PgResult<Vec<(WorkspaceInvite, Option<Account>)>> {
-        use schema::accounts;
-
-        // First get the invites
-        let invites = self
-            .list_workspace_invites_filtered(proj_id, pagination, sort_by, filter)
-            .await?;
-
-        // Collect invitee IDs that exist
-        let invitee_ids: Vec<Uuid> = invites.iter().filter_map(|i| i.invitee_id).collect();
-
-        if invitee_ids.is_empty() {
-            return Ok(invites.into_iter().map(|i| (i, None)).collect());
-        }
-
-        // Fetch accounts for those IDs
-        let accounts_list: Vec<Account> = accounts::table
-            .filter(accounts::id.eq_any(&invitee_ids))
-            .filter(accounts::deleted_at.is_null())
-            .select(Account::as_select())
-            .load(self)
+    ) -> PgResult<Vec<WorkspaceInvite>> {
+        self.list_workspace_invites_filtered(proj_id, pagination, sort_by, filter)
             .await
+    }
+
+    async fn find_pending_invite_by_email(
+        &mut self,
+        ws_id: Uuid,
+        email: &str,
+    ) -> PgResult<Option<WorkspaceInvite>> {
+        use schema::workspace_invites::dsl::*;
+
+        let invite = workspace_invites
+            .filter(workspace_id.eq(ws_id))
+            .filter(invitee_email.eq(email))
+            .filter(invite_status.eq(InviteStatus::Pending))
+            .filter(expires_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
+            .select(WorkspaceInvite::as_select())
+            .first(self)
+            .await
+            .optional()
             .map_err(PgError::from)?;
 
-        // Build a map for quick lookup
-        let accounts_map: std::collections::HashMap<Uuid, Account> =
-            accounts_list.into_iter().map(|a| (a.id, a)).collect();
-
-        // Combine results
-        let results = invites
-            .into_iter()
-            .map(|invite| {
-                let account = invite
-                    .invitee_id
-                    .and_then(|id| accounts_map.get(&id).cloned());
-                (invite, account)
-            })
-            .collect();
-
-        Ok(results)
+        Ok(invite)
     }
 }

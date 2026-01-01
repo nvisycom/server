@@ -9,11 +9,11 @@ use std::sync::Arc;
 use jiff::Timestamp;
 
 use super::{
-    EmbeddingBatchRequest, EmbeddingBatchResponse, EmbeddingRequest, EmbeddingResponse,
+    Context, EmbeddingBatchRequest, EmbeddingBatchResponse, EmbeddingRequest, EmbeddingResponse,
     InferenceProvider, OcrBatchRequest, OcrBatchResponse, OcrRequest, OcrResponse, Result,
-    TRACING_TARGET, VlmBatchRequest, VlmBatchResponse, VlmRequest, VlmResponse,
+    ServiceHealth, SharedContext, TRACING_TARGET, VlmBatchRequest, VlmBatchResponse, VlmRequest,
+    VlmResponse,
 };
-use crate::types::{Context, ServiceHealth, SharedContext};
 
 /// Unified inference service with observability.
 ///

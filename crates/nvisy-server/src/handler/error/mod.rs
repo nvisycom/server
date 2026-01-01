@@ -6,6 +6,6 @@ mod pg_account;
 mod pg_document;
 mod pg_error;
 mod pg_workspace;
-mod webhook_error;
+mod service_error;
 
 pub use http_error::{Error, ErrorKind, Result};

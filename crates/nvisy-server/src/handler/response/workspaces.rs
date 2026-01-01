@@ -18,14 +18,10 @@ pub struct Workspace {
     pub display_name: String,
     /// Description of the workspace.
     pub description: Option<String>,
-    /// Duration in seconds to keep the original files (optional).
-    pub keep_for_sec: Option<i32>,
     /// Whether to automatically delete processed files after expiration.
     pub auto_cleanup: bool,
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
-    /// Maximum storage size in megabytes allowed for the workspace.
-    pub max_storage: Option<i32>,
     /// Whether comments are enabled for this workspace.
     pub enable_comments: bool,
     /// ID of the account that created the workspace.
@@ -45,10 +41,8 @@ impl Workspace {
             workspace_id: workspace.id,
             display_name: workspace.display_name,
             description: workspace.description,
-            keep_for_sec: workspace.keep_for_sec,
             auto_cleanup: workspace.auto_cleanup,
             require_approval: workspace.require_approval,
-            max_storage: workspace.max_storage,
             enable_comments: workspace.enable_comments,
             created_by: workspace.created_by,
             member_role: WorkspaceRole::Owner,
@@ -66,10 +60,8 @@ impl Workspace {
             workspace_id: workspace.id,
             display_name: workspace.display_name,
             description: workspace.description,
-            keep_for_sec: workspace.keep_for_sec,
             auto_cleanup: workspace.auto_cleanup,
             require_approval: workspace.require_approval,
-            max_storage: workspace.max_storage,
             enable_comments: workspace.enable_comments,
             created_by: workspace.created_by,
             member_role: member.member_role,

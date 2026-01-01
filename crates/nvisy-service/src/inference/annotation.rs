@@ -13,7 +13,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Result, TypeError};
+use crate::{Error, Result};
 
 /// A comprehensive annotation that can mark up various types of content.
 ///
@@ -452,33 +452,29 @@ impl Annotation {
     /// Validates the annotation data.
     pub fn validate(&self) -> Result<()> {
         if self.label.is_empty() {
-            return Err(TypeError::ValidationFailed(
-                "Annotation label cannot be empty".to_string(),
-            ));
+            return Err(Error::invalid_input().with_message("Annotation label cannot be empty"));
         }
 
         if let Some(confidence) = self.confidence
             && !(0.0..=1.0).contains(&confidence)
         {
-            return Err(TypeError::ValidationFailed(
-                "Confidence must be between 0.0 and 1.0".to_string(),
-            ));
+            return Err(
+                Error::invalid_input().with_message("Confidence must be between 0.0 and 1.0")
+            );
         }
 
         if let Some(span) = &self.text_span
             && span.is_empty()
         {
-            return Err(TypeError::ValidationFailed(
-                "Text span cannot be empty".to_string(),
-            ));
+            return Err(Error::invalid_input().with_message("Text span cannot be empty"));
         }
 
         if let Some(bbox) = &self.bounding_box
             && (bbox.width <= 0.0 || bbox.height <= 0.0)
         {
-            return Err(TypeError::ValidationFailed(
-                "Bounding box dimensions must be positive".to_string(),
-            ));
+            return Err(
+                Error::invalid_input().with_message("Bounding box dimensions must be positive")
+            );
         }
 
         Ok(())
