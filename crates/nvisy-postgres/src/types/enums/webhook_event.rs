@@ -83,6 +83,11 @@ pub enum WebhookEvent {
     #[db_rename = "integration:synced"]
     #[serde(rename = "integration:synced")]
     IntegrationSynced,
+
+    /// An integration was desynchronized
+    #[db_rename = "integration:desynced"]
+    #[serde(rename = "integration:desynced")]
+    IntegrationDesynced,
 }
 
 impl WebhookEvent {
@@ -124,6 +129,7 @@ impl WebhookEvent {
                 | WebhookEvent::IntegrationUpdated
                 | WebhookEvent::IntegrationDeleted
                 | WebhookEvent::IntegrationSynced
+                | WebhookEvent::IntegrationDesynced
         )
     }
 
@@ -142,7 +148,8 @@ impl WebhookEvent {
             WebhookEvent::IntegrationCreated
             | WebhookEvent::IntegrationUpdated
             | WebhookEvent::IntegrationDeleted
-            | WebhookEvent::IntegrationSynced => "integration",
+            | WebhookEvent::IntegrationSynced
+            | WebhookEvent::IntegrationDesynced => "integration",
         }
     }
 }

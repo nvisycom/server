@@ -1,4 +1,6 @@
-//! Password strength evaluation using zxcvbn.
+//! Password strength evaluation service.
+//!
+//! This module provides password strength analysis using the zxcvbn algorithm.
 
 use std::time::Duration;
 

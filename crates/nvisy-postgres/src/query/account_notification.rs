@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
-use crate::types::NotificationType;
+use crate::types::NotificationEvent;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account notification database operations.
@@ -42,7 +42,7 @@ pub trait AccountNotificationRepository {
     fn find_notifications_by_type(
         &mut self,
         account_id: Uuid,
-        notification_type: NotificationType,
+        notification_type: NotificationEvent,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<AccountNotification>>> + Send;
 
@@ -146,7 +146,7 @@ impl AccountNotificationRepository for PgConnection {
     async fn find_notifications_by_type(
         &mut self,
         account_id: Uuid,
-        notification_type: NotificationType,
+        notification_type: NotificationEvent,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
         use schema::account_notifications::{self, dsl};

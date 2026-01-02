@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::AccountNotification;
-use nvisy_postgres::types::NotificationType;
+use nvisy_postgres::types::NotificationEvent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,7 +14,7 @@ pub struct Notification {
     /// Unique notification identifier.
     pub id: Uuid,
     /// Notification type.
-    pub notify_type: NotificationType,
+    pub notify_type: NotificationEvent,
     /// Notification title.
     pub title: String,
     /// Notification message.

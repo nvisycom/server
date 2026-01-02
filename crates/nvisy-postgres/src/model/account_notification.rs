@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::schema::account_notifications;
 use crate::types::constants::notification;
-use crate::types::{HasCreatedAt, HasExpiresAt, NotificationType};
+use crate::types::{HasCreatedAt, HasExpiresAt, NotificationEvent};
 
 /// Account notification model representing a notification sent to a user.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,7 +18,7 @@ pub struct AccountNotification {
     /// Account receiving the notification.
     pub account_id: Uuid,
     /// Type of notification.
-    pub notify_type: NotificationType,
+    pub notify_type: NotificationEvent,
     /// Notification title.
     pub title: String,
     /// Notification message.
@@ -47,7 +47,7 @@ pub struct NewAccountNotification {
     /// Account ID.
     pub account_id: Uuid,
     /// Notification type.
-    pub notify_type: NotificationType,
+    pub notify_type: NotificationEvent,
     /// Notification title.
     pub title: String,
     /// Notification message.
@@ -130,17 +130,12 @@ impl AccountNotification {
 
     /// Returns whether this is a system notification.
     pub fn is_system_notification(&self) -> bool {
-        matches!(self.notify_type, NotificationType::SystemAnnouncement)
+        self.notify_type.is_system_event()
     }
 
     /// Returns whether this is a user activity notification.
     pub fn is_user_activity(&self) -> bool {
-        matches!(
-            self.notify_type,
-            NotificationType::CommentMention
-                | NotificationType::CommentReply
-                | NotificationType::WorkspaceInvite
-        )
+        self.notify_type.is_comment_event() || self.notify_type.is_member_event()
     }
 
     /// Returns whether the notification can be dismissed.
@@ -162,7 +157,9 @@ impl AccountNotification {
     pub fn requires_action(&self) -> bool {
         matches!(
             self.notify_type,
-            NotificationType::WorkspaceInvite | NotificationType::SystemAnnouncement
+            NotificationEvent::MemberInvited
+                | NotificationEvent::SystemAnnouncement
+                | NotificationEvent::SystemReport
         )
     }
 

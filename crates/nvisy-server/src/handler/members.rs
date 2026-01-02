@@ -15,7 +15,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    ListMembersQuery, MemberPathParams, Pagination, UpdateMemberRole, WorkspacePathParams,
+    ListMembersQuery, MemberPathParams, Pagination, UpdateMember, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Member, Members};
 use crate::handler::{ErrorKind, Result};
@@ -216,7 +216,7 @@ async fn update_member(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
-    ValidateJson(request): ValidateJson<UpdateMemberRole>,
+    ValidateJson(request): ValidateJson<UpdateMember>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
 
@@ -262,7 +262,7 @@ async fn update_member(
     tracing::info!(
         target: TRACING_TARGET,
         new_role = ?updated_member.member_role,
-        "Member role updated ",
+        "Member role updated",
     );
 
     Ok((

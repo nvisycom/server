@@ -278,6 +278,7 @@ impl WorkspaceInviteRepository for PgConnection {
 
         let mut query = workspace_invites::table
             .filter(workspace_invites::workspace_id.eq(proj_id))
+            .filter(workspace_invites::invite_status.ne(InviteStatus::Canceled))
             .into_boxed();
 
         // Apply role filter

@@ -14,8 +14,10 @@ use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
-use crate::handler::request::{CreateWorkspace, Pagination, UpdateWorkspace, WorkspacePathParams};
-use crate::handler::response::{ErrorResponse, Workspace, Workspaces};
+use crate::handler::request::{
+    CreateWorkspace, Pagination, UpdateNotificationSettings, UpdateWorkspace, WorkspacePathParams,
+};
+use crate::handler::response::{ErrorResponse, NotificationSettings, Workspace, Workspaces};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -242,6 +244,91 @@ fn delete_workspace_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Retrieves the notification settings for the authenticated user in a workspace.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
+    )
+)]
+async fn get_notification_settings(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<WorkspacePathParams>,
+) -> Result<(StatusCode, Json<NotificationSettings>)> {
+    let Some(member) = conn
+        .find_workspace_member(path_params.workspace_id, auth_state.account_id)
+        .await?
+    else {
+        return Err(ErrorKind::NotFound
+            .with_message("Workspace membership not found")
+            .with_resource("workspace_member"));
+    };
+
+    tracing::debug!(target: TRACING_TARGET, "Notification settings retrieved");
+
+    Ok((
+        StatusCode::OK,
+        Json(NotificationSettings::from_member(&member)),
+    ))
+}
+
+fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get notification settings")
+        .description("Returns the notification settings for the authenticated user in a workspace.")
+        .response::<200, Json<NotificationSettings>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Updates the notification settings for the authenticated user in a workspace.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
+    )
+)]
+async fn update_notification_settings(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<WorkspacePathParams>,
+    ValidateJson(request): ValidateJson<UpdateNotificationSettings>,
+) -> Result<(StatusCode, Json<NotificationSettings>)> {
+    // Verify membership exists
+    if conn
+        .find_workspace_member(path_params.workspace_id, auth_state.account_id)
+        .await?
+        .is_none()
+    {
+        return Err(ErrorKind::NotFound
+            .with_message("Workspace membership not found")
+            .with_resource("workspace_member"));
+    }
+
+    let update_data = request.into_model();
+    let member = conn
+        .update_workspace_member(path_params.workspace_id, auth_state.account_id, update_data)
+        .await?;
+
+    tracing::info!(target: TRACING_TARGET, "Notification settings updated");
+
+    Ok((
+        StatusCode::OK,
+        Json(NotificationSettings::from_member(&member)),
+    ))
+}
+
+fn update_notification_settings_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Update notification settings")
+        .description("Updates the notification settings for the authenticated user in a workspace.")
+        .response::<200, Json<NotificationSettings>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all workspace-related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -259,6 +346,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(read_workspace, read_workspace_docs)
                 .patch_with(update_workspace, update_workspace_docs)
                 .delete_with(delete_workspace, delete_workspace_docs),
+        )
+        .api_route(
+            "/workspaces/{workspace_id}/notifications",
+            get_with(get_notification_settings, get_notification_settings_docs).patch_with(
+                update_notification_settings,
+                update_notification_settings_docs,
+            ),
         )
         .with_path_items(|item| item.tag("Workspaces"))
 }

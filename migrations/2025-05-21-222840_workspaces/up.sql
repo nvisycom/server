@@ -109,8 +109,9 @@ CREATE TABLE workspace_members (
     member_role        WORKSPACE_ROLE NOT NULL DEFAULT 'guest',
 
     -- Notification preferences
-    notify_updates     BOOLEAN        NOT NULL DEFAULT TRUE,
-    notify_mentions    BOOLEAN        NOT NULL DEFAULT TRUE,
+    notify_via_email          BOOLEAN              NOT NULL DEFAULT FALSE,
+    notification_events_app   NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
+    notification_events_email NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
 
     -- Audit tracking
     created_by         UUID           NOT NULL REFERENCES accounts (id),
@@ -143,8 +144,9 @@ COMMENT ON TABLE workspace_members IS
 COMMENT ON COLUMN workspace_members.workspace_id IS 'Reference to the workspace';
 COMMENT ON COLUMN workspace_members.account_id IS 'Reference to the member account';
 COMMENT ON COLUMN workspace_members.member_role IS 'Member role defining base permissions level';
-COMMENT ON COLUMN workspace_members.notify_updates IS 'Receive notifications for workspace updates';
-COMMENT ON COLUMN workspace_members.notify_mentions IS 'Receive notifications when mentioned';
+COMMENT ON COLUMN workspace_members.notify_via_email IS 'Whether to send email notifications';
+COMMENT ON COLUMN workspace_members.notification_events_app IS 'Notification events to receive in-app';
+COMMENT ON COLUMN workspace_members.notification_events_email IS 'Notification events to receive via email';
 COMMENT ON COLUMN workspace_members.created_by IS 'Account that added this member';
 COMMENT ON COLUMN workspace_members.updated_by IS 'Account that last modified this membership';
 COMMENT ON COLUMN workspace_members.created_at IS 'Timestamp when the membership was created';
@@ -447,7 +449,8 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'integration:created',
     'integration:updated',
     'integration:deleted',
-    'integration:synced'
+    'integration:synced',
+    'integration:desynced'
 );
 
 COMMENT ON TYPE WEBHOOK_EVENT IS

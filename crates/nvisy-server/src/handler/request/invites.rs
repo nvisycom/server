@@ -55,8 +55,6 @@ pub struct ReplyInvite {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum InviteExpiration {
-    /// Invite code never expires.
-    Never,
     /// Expires in 24 hours.
     In24Hours,
     /// Expires in 7 days.
@@ -67,23 +65,21 @@ pub enum InviteExpiration {
 }
 
 impl InviteExpiration {
-    /// Returns the duration until expiration in hours, or None if never expires.
+    /// Returns the duration until expiration in hours.
     ///
     /// Uses hours instead of days because `jiff::Timestamp` only supports
     /// units of hours or smaller for arithmetic operations.
-    pub fn to_span(self) -> Option<jiff::Span> {
+    pub fn to_span(self) -> jiff::Span {
         match self {
-            Self::Never => None,
-            Self::In24Hours => Some(jiff::Span::new().hours(24)),
-            Self::In7Days => Some(jiff::Span::new().hours(7 * 24)),
-            Self::In30Days => Some(jiff::Span::new().hours(30 * 24)),
+            Self::In24Hours => jiff::Span::new().hours(24),
+            Self::In7Days => jiff::Span::new().hours(7 * 24),
+            Self::In30Days => jiff::Span::new().hours(30 * 24),
         }
     }
 
-    /// Returns the expiry timestamp from now, or None if never expires.
+    /// Returns the expiry timestamp from now.
     pub fn to_expiry_timestamp(self) -> Option<jiff::Timestamp> {
-        self.to_span()
-            .and_then(|span| jiff::Timestamp::now().checked_add(span).ok())
+        jiff::Timestamp::now().checked_add(self.to_span()).ok()
     }
 }
 

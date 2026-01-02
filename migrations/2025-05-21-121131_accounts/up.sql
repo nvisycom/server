@@ -245,19 +245,32 @@ COMMENT ON COLUMN account_action_tokens.issued_at IS 'Timestamp when the token w
 COMMENT ON COLUMN account_action_tokens.expired_at IS 'Timestamp after which the token becomes invalid';
 COMMENT ON COLUMN account_action_tokens.used_at IS 'Timestamp when the token was successfully used (NULL if unused)';
 
--- Create notification type enum
-CREATE TYPE NOTIFICATION_TYPE AS ENUM (
-    'comment_mention',      -- User was mentioned in a comment
-    'comment_reply',        -- Someone replied to user's comment
-    'document_upload',      -- Document was uploaded
-    'document_download',    -- Document was downloaded
-    'document_verify',      -- Document verification completed
-    'workspace_invite',       -- User was invited to a workspace
-    'system_announcement'   -- System-wide announcement
+-- Create notification event enum
+CREATE TYPE NOTIFICATION_EVENT AS ENUM (
+    -- Comment events
+    'comment:mention',        -- User was mentioned in a comment
+    'comment:reply',          -- Someone replied to user's comment
+
+    -- Document events
+    'document:uploaded',      -- Document was uploaded
+    'document:downloaded',    -- Document was downloaded
+    'document:verified',      -- Document verification completed
+
+    -- Member events
+    'member:invited',         -- User was invited to a workspace
+    'member:joined',          -- A new member joined a workspace
+
+    -- Integration events
+    'integration:synced',     -- Integration sync completed
+    'integration:desynced',   -- Integration sync failed or disconnected
+
+    -- System events
+    'system:announcement',    -- System-wide announcement
+    'system:report'           -- System report generated
 );
 
-COMMENT ON TYPE NOTIFICATION_TYPE IS
-    'Types of notifications that can be sent to users.';
+COMMENT ON TYPE NOTIFICATION_EVENT IS
+    'Types of notification events that can be sent to users.';
 
 -- Create account notifications table
 CREATE TABLE account_notifications (
@@ -268,7 +281,7 @@ CREATE TABLE account_notifications (
     account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Notification details
-    notify_type     NOTIFICATION_TYPE NOT NULL,
+    notify_type     NOTIFICATION_EVENT NOT NULL,
     title           TEXT             NOT NULL,
     message         TEXT             NOT NULL,
 

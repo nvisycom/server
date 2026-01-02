@@ -4,7 +4,10 @@
 //! creation, updates, and archival. All request types support JSON serialization
 //! and validation.
 
-use nvisy_postgres::model::{NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel};
+use nvisy_postgres::model::{
+    NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel, UpdateWorkspaceMember,
+};
+use nvisy_postgres::types::NotificationEvent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -115,6 +118,36 @@ impl UpdateWorkspace {
             auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
             enable_comments: self.enable_comments,
+            ..Default::default()
+        }
+    }
+}
+
+/// Request payload for updating notification settings.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNotificationSettings {
+    /// Whether to send email notifications.
+    pub notify_via_email: Option<bool>,
+    /// Notification events to receive in-app.
+    pub notification_events_app: Option<Vec<NotificationEvent>>,
+    /// Notification events to receive via email.
+    pub notification_events_email: Option<Vec<NotificationEvent>>,
+}
+
+impl UpdateNotificationSettings {
+    /// Converts this request into an [`UpdateWorkspaceMember`] for database update.
+    #[inline]
+    pub fn into_model(self) -> UpdateWorkspaceMember {
+        UpdateWorkspaceMember {
+            notify_via_email: self.notify_via_email,
+            notification_events_app: self
+                .notification_events_app
+                .map(|events| events.into_iter().map(Some).collect()),
+            notification_events_email: self
+                .notification_events_email
+                .map(|events| events.into_iter().map(Some).collect()),
             ..Default::default()
         }
     }

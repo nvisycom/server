@@ -9,12 +9,12 @@ use validator::Validate;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateMemberRole {
+pub struct UpdateMember {
     /// New role for the member.
     pub role: WorkspaceRole,
 }
 
-impl UpdateMemberRole {
+impl UpdateMember {
     /// Converts to database model.
     pub fn into_model(self) -> nvisy_postgres::model::UpdateWorkspaceMember {
         nvisy_postgres::model::UpdateWorkspaceMember {

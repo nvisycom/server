@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_members;
-use crate::types::{HasCreatedAt, HasOwnership, HasUpdatedAt, WorkspaceRole};
+use crate::types::{HasCreatedAt, HasOwnership, HasUpdatedAt, NotificationEvent, WorkspaceRole};
 
 /// Workspace member model representing a user's membership in a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,10 +18,12 @@ pub struct WorkspaceMember {
     pub account_id: Uuid,
     /// Member's role in the workspace.
     pub member_role: WorkspaceRole,
-    /// Whether member receives update notifications.
-    pub notify_updates: bool,
-    /// Whether member receives mention notifications.
-    pub notify_mentions: bool,
+    /// Whether to send email notifications.
+    pub notify_via_email: bool,
+    /// Notification events to receive in-app.
+    pub notification_events_app: Vec<Option<NotificationEvent>>,
+    /// Notification events to receive via email.
+    pub notification_events_email: Vec<Option<NotificationEvent>>,
     /// Account that created this membership.
     pub created_by: Uuid,
     /// Account that last updated this membership.
@@ -43,10 +45,12 @@ pub struct NewWorkspaceMember {
     pub account_id: Uuid,
     /// Member role.
     pub member_role: WorkspaceRole,
-    /// Notify updates.
-    pub notify_updates: bool,
-    /// Notify mentions.
-    pub notify_mentions: bool,
+    /// Whether to send email notifications.
+    pub notify_via_email: bool,
+    /// Notification events to receive in-app.
+    pub notification_events_app: Vec<Option<NotificationEvent>>,
+    /// Notification events to receive via email.
+    pub notification_events_email: Vec<Option<NotificationEvent>>,
     /// Created by.
     pub created_by: Uuid,
     /// Updated by.
@@ -67,14 +71,8 @@ impl NewWorkspaceMember {
     }
 
     /// Creates a new owner membership for a workspace.
-    ///
-    /// The owner is automatically set with all notifications enabled.
     pub fn new_owner(workspace_id: Uuid, account_id: Uuid) -> Self {
-        Self {
-            notify_updates: true,
-            notify_mentions: true,
-            ..Self::new(workspace_id, account_id, WorkspaceRole::Owner)
-        }
+        Self::new(workspace_id, account_id, WorkspaceRole::Owner)
     }
 }
 
@@ -85,10 +83,12 @@ impl NewWorkspaceMember {
 pub struct UpdateWorkspaceMember {
     /// Member role.
     pub member_role: Option<WorkspaceRole>,
-    /// Notify updates.
-    pub notify_updates: Option<bool>,
-    /// Notify mentions.
-    pub notify_mentions: Option<bool>,
+    /// Whether to send email notifications.
+    pub notify_via_email: Option<bool>,
+    /// Notification events to receive in-app.
+    pub notification_events_app: Option<Vec<Option<NotificationEvent>>>,
+    /// Notification events to receive via email.
+    pub notification_events_email: Option<Vec<Option<NotificationEvent>>>,
     /// Updated by.
     pub updated_by: Option<Uuid>,
 }
@@ -127,24 +127,30 @@ impl WorkspaceMember {
         matches!(self.member_role, WorkspaceRole::Owner)
     }
 
-    /// Returns whether the member has notifications enabled for updates.
-    pub fn has_update_notifications(&self) -> bool {
-        self.notify_updates
+    /// Returns the in-app notification events (without None values).
+    pub fn app_notification_events(&self) -> Vec<NotificationEvent> {
+        self.notification_events_app
+            .iter()
+            .filter_map(|e| *e)
+            .collect()
     }
 
-    /// Returns whether the member has notifications enabled for mentions.
-    pub fn has_mention_notifications(&self) -> bool {
-        self.notify_mentions
+    /// Returns the email notification events (without None values).
+    pub fn email_notification_events(&self) -> Vec<NotificationEvent> {
+        self.notification_events_email
+            .iter()
+            .filter_map(|e| *e)
+            .collect()
     }
 
-    /// Returns whether the member has any notification preferences enabled.
-    pub fn has_notifications_enabled(&self) -> bool {
-        self.notify_updates || self.notify_mentions
+    /// Returns whether the member has any in-app notification events enabled.
+    pub fn has_app_notifications(&self) -> bool {
+        self.notification_events_app.iter().any(|e| e.is_some())
     }
 
-    /// Returns whether the member has all notifications enabled.
-    pub fn has_all_notifications_enabled(&self) -> bool {
-        self.notify_updates && self.notify_mentions
+    /// Returns whether the member has any email notification events enabled.
+    pub fn has_email_notifications(&self) -> bool {
+        self.notify_via_email && self.notification_events_email.iter().any(|e| e.is_some())
     }
 
     /// Returns whether the member can perform administrative actions.

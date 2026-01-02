@@ -17,7 +17,7 @@ pub use constraints::{
 };
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, ApiTokenType, ContentSegmentation,
-    DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus, NotificationType,
+    DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus, NotificationEvent,
     ProcessingStatus, RequireMode, VirusScanStatus, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use options::{

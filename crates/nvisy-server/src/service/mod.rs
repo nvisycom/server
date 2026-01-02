@@ -3,6 +3,7 @@
 mod cache;
 mod compression;
 mod config;
+mod integration;
 mod security;
 
 use nvisy_nats::NatsClient;
@@ -14,7 +15,7 @@ pub use crate::service::cache::HealthCache;
 pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
 pub use crate::service::security::{
-    SessionKeysConfig, SessionKeys, PasswordHasher, PasswordStrength, UserAgentParser,
+    PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
 // Re-export error types from crate root for convenience
 pub use crate::{Error, Result};

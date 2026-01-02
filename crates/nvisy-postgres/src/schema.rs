@@ -34,8 +34,8 @@ pub mod sql_types {
     pub struct InviteStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "notification_type"))]
-    pub struct NotificationType;
+    #[diesel(postgres_type(name = "notification_event"))]
+    pub struct NotificationEvent;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "processing_status"))]
@@ -106,12 +106,12 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::NotificationType;
+    use super::sql_types::NotificationEvent;
 
     account_notifications (id) {
         id -> Uuid,
         account_id -> Uuid,
-        notify_type -> NotificationType,
+        notify_type -> NotificationEvent,
         title -> Text,
         message -> Text,
         is_read -> Bool,
@@ -349,13 +349,15 @@ diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
     use super::sql_types::WorkspaceRole;
+    use super::sql_types::NotificationEvent;
 
     workspace_members (workspace_id, account_id) {
         workspace_id -> Uuid,
         account_id -> Uuid,
         member_role -> WorkspaceRole,
-        notify_updates -> Bool,
-        notify_mentions -> Bool,
+        notify_via_email -> Bool,
+        notification_events_app -> Array<Nullable<NotificationEvent>>,
+        notification_events_email -> Array<Nullable<NotificationEvent>>,
         created_by -> Uuid,
         updated_by -> Uuid,
         created_at -> Timestamptz,

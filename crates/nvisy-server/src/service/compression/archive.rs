@@ -1,4 +1,6 @@
-//! File archival service for creating tar and zip archives.
+//! File archival service.
+//!
+//! This module provides functionality for creating tar and zip archives.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
