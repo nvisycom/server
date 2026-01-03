@@ -121,11 +121,9 @@ pub struct ListInvitesQuery {
     /// Filter by invited role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
-
     /// Sort by field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<InviteSortField>,
-
     /// Sort order (asc or desc).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order: Option<SortOrder>,

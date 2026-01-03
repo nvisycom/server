@@ -129,10 +129,11 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn delete_token_by_id(&mut self, token_id: Uuid) -> PgResult<bool> {
+        use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
 
         let rows_affected = diesel::update(account_api_tokens::table.filter(dsl::id.eq(token_id)))
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;
@@ -141,6 +142,7 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn delete_all_tokens_for_account(&mut self, account_id: Uuid) -> PgResult<i64> {
+        use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(
@@ -148,7 +150,7 @@ impl AccountApiTokenRepository for PgConnection {
                 .filter(dsl::account_id.eq(account_id))
                 .filter(dsl::deleted_at.is_null()),
         )
-        .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+        .set(dsl::deleted_at.eq(now))
         .execute(self)
         .await
         .map_err(PgError::from)
@@ -160,16 +162,13 @@ impl AccountApiTokenRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountApiToken>> {
+        use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
 
         account_api_tokens::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
-            .filter(
-                dsl::expired_at
-                    .is_null()
-                    .or(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now()))),
-            )
+            .filter(dsl::expired_at.is_null().or(dsl::expired_at.gt(now)))
             .order(dsl::issued_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
@@ -199,15 +198,16 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn cleanup_expired_tokens(&mut self) -> PgResult<i64> {
+        use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
 
         diesel::update(
             account_api_tokens::table
                 .filter(dsl::expired_at.is_not_null())
-                .filter(dsl::expired_at.lt(jiff_diesel::Timestamp::from(Timestamp::now())))
+                .filter(dsl::expired_at.lt(now))
                 .filter(dsl::deleted_at.is_null()),
         )
-        .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+        .set(dsl::deleted_at.eq(now))
         .execute(self)
         .await
         .map_err(PgError::from)

@@ -4,8 +4,8 @@ use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 use uuid::Uuid;
 
-use super::workspace_event::WorkspaceEvent;
 use super::subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
+use super::workspace_event::WorkspaceEvent;
 use crate::Result;
 
 /// Workspace event subscriber for receiving WebSocket messages.

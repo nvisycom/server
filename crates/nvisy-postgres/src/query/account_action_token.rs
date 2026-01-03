@@ -4,7 +4,6 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -121,13 +120,14 @@ impl AccountActionTokenRepository for PgConnection {
         token_uuid: Uuid,
         action: ActionTokenType,
     ) -> PgResult<Option<AccountActionToken>> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         account_action_tokens::table
             .filter(dsl::action_token.eq(token_uuid))
             .filter(dsl::action_type.eq(action))
             .filter(dsl::used_at.is_null())
-            .filter(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
+            .filter(dsl::expired_at.gt(now))
             .select(AccountActionToken::as_select())
             .first(self)
             .await
@@ -140,13 +140,14 @@ impl AccountActionTokenRepository for PgConnection {
         account_id: Uuid,
         action: ActionTokenType,
     ) -> PgResult<Option<AccountActionToken>> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         account_action_tokens::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::action_type.eq(action))
             .filter(dsl::used_at.is_null())
-            .filter(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
+            .filter(dsl::expired_at.gt(now))
             .order(dsl::issued_at.desc())
             .select(AccountActionToken::as_select())
             .first(self)
@@ -194,6 +195,7 @@ impl AccountActionTokenRepository for PgConnection {
         token_uuid: Uuid,
         account_id: Uuid,
     ) -> PgResult<AccountActionToken> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         diesel::update(
@@ -201,7 +203,7 @@ impl AccountActionTokenRepository for PgConnection {
                 .filter(dsl::action_token.eq(token_uuid))
                 .filter(dsl::account_id.eq(account_id)),
         )
-        .set(dsl::used_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+        .set(dsl::used_at.eq(now))
         .returning(AccountActionToken::as_returning())
         .get_result(self)
         .await
@@ -209,11 +211,12 @@ impl AccountActionTokenRepository for PgConnection {
     }
 
     async fn invalidate_token(&mut self, token_uuid: Uuid) -> PgResult<bool> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         let rows_affected =
             diesel::update(account_action_tokens::table.filter(dsl::action_token.eq(token_uuid)))
-                .set(dsl::used_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+                .set(dsl::used_at.eq(now))
                 .execute(self)
                 .await
                 .map_err(PgError::from)?;
@@ -251,6 +254,7 @@ impl AccountActionTokenRepository for PgConnection {
         include_expired: bool,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountActionToken>> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = account_action_tokens::table
@@ -266,8 +270,7 @@ impl AccountActionTokenRepository for PgConnection {
         }
 
         if !include_expired {
-            query =
-                query.filter(dsl::expired_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())));
+            query = query.filter(dsl::expired_at.gt(now));
         }
 
         query.load(self).await.map_err(PgError::from)
@@ -278,6 +281,7 @@ impl AccountActionTokenRepository for PgConnection {
         account_id: Uuid,
         action: Option<ActionTokenType>,
     ) -> PgResult<i64> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = diesel::update(
@@ -292,7 +296,7 @@ impl AccountActionTokenRepository for PgConnection {
         }
 
         query
-            .set(dsl::used_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::used_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)
@@ -300,14 +304,12 @@ impl AccountActionTokenRepository for PgConnection {
     }
 
     async fn cleanup_expired_tokens(&mut self, account_id: Option<Uuid>) -> PgResult<i64> {
+        use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
         let mut query = diesel::delete(
-            account_action_tokens::table.filter(
-                dsl::expired_at
-                    .lt(jiff_diesel::Timestamp::from(Timestamp::now()))
-                    .or(dsl::used_at.is_not_null()),
-            ),
+            account_action_tokens::table
+                .filter(dsl::expired_at.lt(now).or(dsl::used_at.is_not_null())),
         )
         .into_boxed();
 

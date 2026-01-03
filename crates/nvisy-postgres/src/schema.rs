@@ -6,6 +6,10 @@ pub mod sql_types {
     pub struct ActionTokenType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "annotation_type"))]
+    pub struct AnnotationType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "activity_type"))]
     pub struct ActivityType;
 
@@ -44,10 +48,6 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "require_mode"))]
     pub struct RequireMode;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "virus_scan_status"))]
-    pub struct VirusScanStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
@@ -150,13 +150,14 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::AnnotationType;
 
     document_annotations (id) {
         id -> Uuid,
         document_file_id -> Uuid,
         account_id -> Uuid,
         content -> Text,
-        annotation_type -> Text,
+        annotation_type -> AnnotationType,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -207,7 +208,6 @@ diesel::table! {
     use pgvector::sql_types::*;
     use super::sql_types::RequireMode;
     use super::sql_types::ProcessingStatus;
-    use super::sql_types::VirusScanStatus;
     use super::sql_types::ContentSegmentation;
 
     document_files (id) {
@@ -223,7 +223,6 @@ diesel::table! {
         require_mode -> RequireMode,
         processing_priority -> Int4,
         processing_status -> ProcessingStatus,
-        virus_scan_status -> VirusScanStatus,
         is_indexed -> Bool,
         content_segmentation -> ContentSegmentation,
         visual_support -> Bool,
@@ -232,8 +231,6 @@ diesel::table! {
         storage_path -> Text,
         storage_bucket -> Text,
         metadata -> Jsonb,
-        keep_for_sec -> Nullable<Int4>,
-        auto_delete_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
@@ -399,7 +396,6 @@ diesel::table! {
         avatar_url -> Nullable<Text>,
         require_approval -> Bool,
         enable_comments -> Bool,
-        auto_cleanup -> Bool,
         tags -> Array<Nullable<Text>>,
         metadata -> Jsonb,
         settings -> Jsonb,

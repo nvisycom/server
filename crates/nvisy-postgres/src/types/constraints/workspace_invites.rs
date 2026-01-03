@@ -39,7 +39,9 @@ impl WorkspaceInviteConstraints {
 
             WorkspaceInviteConstraints::ExpiresAfterCreated
             | WorkspaceInviteConstraints::UpdatedAfterCreated
-            | WorkspaceInviteConstraints::RespondedAfterCreated => ConstraintCategory::Chronological,
+            | WorkspaceInviteConstraints::RespondedAfterCreated => {
+                ConstraintCategory::Chronological
+            }
         }
     }
 }

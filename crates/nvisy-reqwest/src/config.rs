@@ -1,28 +1,34 @@
-//! Configuration for webhook client.
+//! Configuration for reqwest client.
 
 use std::time::Duration;
 
-use crate::error::{Error, Result};
+/// Default timeout for HTTP requests: 30 seconds.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Configuration for the webhook client.
+/// Configuration for the reqwest HTTP client.
 #[derive(Debug, Clone)]
-pub struct WebhookClientConfig {
-    /// Default timeout for webhook requests.
+pub struct ReqwestClientConfig {
+    /// Default timeout for HTTP requests.
     pub timeout: Duration,
     /// User-Agent header to send with requests.
     pub user_agent: String,
 }
 
-impl Default for WebhookClientConfig {
+impl Default for ReqwestClientConfig {
     fn default() -> Self {
         Self {
-            timeout: Duration::from_secs(30),
-            user_agent: format!("nvisy-webhook/{}", env!("CARGO_PKG_VERSION")),
+            timeout: DEFAULT_TIMEOUT,
+            user_agent: Self::default_user_agent(),
         }
     }
 }
 
-impl WebhookClientConfig {
+impl ReqwestClientConfig {
+    /// Returns the default user agent string.
+    fn default_user_agent() -> String {
+        format!("nvisy/{}", env!("CARGO_PKG_VERSION"))
+    }
+
     /// Creates a new configuration with the specified timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -35,15 +41,22 @@ impl WebhookClientConfig {
         self
     }
 
-    /// Validates the configuration.
-    pub fn validate(&self) -> Result<()> {
+    /// Returns the effective timeout, using default if zero.
+    pub fn effective_timeout(&self) -> Duration {
         if self.timeout.is_zero() {
-            return Err(Error::Config("timeout cannot be zero".into()));
+            DEFAULT_TIMEOUT
+        } else {
+            self.timeout
         }
+    }
+
+    /// Returns the effective user agent, using default if empty.
+    pub fn effective_user_agent(&self) -> String {
         if self.user_agent.is_empty() {
-            return Err(Error::Config("user_agent cannot be empty".into()));
+            Self::default_user_agent()
+        } else {
+            self.user_agent.clone()
         }
-        Ok(())
     }
 }
 
@@ -55,20 +68,26 @@ mod tests {
 
     #[test]
     fn test_config_defaults() {
-        let config = WebhookClientConfig::default();
+        let config = ReqwestClientConfig::default();
         assert_eq!(config.timeout, Duration::from_secs(30));
-        assert!(config.user_agent.contains("nvisy-webhook"));
+        assert!(config.user_agent.contains("nvisy"));
     }
 
     #[test]
-    fn test_config_validation() {
-        let config = WebhookClientConfig::default();
-        assert!(config.validate().is_ok());
-
-        let bad_config = WebhookClientConfig {
+    fn test_effective_timeout_uses_default_when_zero() {
+        let config = ReqwestClientConfig {
             timeout: Duration::ZERO,
             ..Default::default()
         };
-        assert!(bad_config.validate().is_err());
+        assert_eq!(config.effective_timeout(), DEFAULT_TIMEOUT);
+    }
+
+    #[test]
+    fn test_effective_user_agent_uses_default_when_empty() {
+        let config = ReqwestClientConfig {
+            user_agent: String::new(),
+            ..Default::default()
+        };
+        assert!(config.effective_user_agent().contains("nvisy"));
     }
 }

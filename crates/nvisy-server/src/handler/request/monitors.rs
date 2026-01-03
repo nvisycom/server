@@ -25,7 +25,7 @@ impl CheckHealth {
     /// Returns the timeout duration for health checks.
     ///
     /// Uses the configured timeout or falls back to the default of 5 seconds.
-    pub fn timeout_duration(&self) -> Duration {
+    pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout.unwrap_or(DEFAULT_TIMEOUT_MS) as u64)
     }
 }

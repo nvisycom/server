@@ -46,6 +46,9 @@ sha2 = { workspace = true, features = [] }
 hmac = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
 
+# Error handling
+thiserror = { workspace = true, features = [] }
+
 # Observability
 tracing = { workspace = true, features = [] }
 

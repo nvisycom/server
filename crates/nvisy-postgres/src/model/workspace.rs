@@ -24,8 +24,6 @@ pub struct Workspace {
     pub require_approval: bool,
     /// Whether comments are enabled.
     pub enable_comments: bool,
-    /// Whether automatic cleanup is enabled.
-    pub auto_cleanup: bool,
     /// Workspace tags.
     pub tags: Vec<Option<String>>,
     /// Additional workspace metadata.
@@ -57,8 +55,6 @@ pub struct NewWorkspace {
     pub require_approval: Option<bool>,
     /// Enable comments.
     pub enable_comments: Option<bool>,
-    /// Auto cleanup enabled.
-    pub auto_cleanup: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -84,8 +80,6 @@ pub struct UpdateWorkspace {
     pub require_approval: Option<bool>,
     /// Enable comments.
     pub enable_comments: Option<bool>,
-    /// Auto cleanup enabled.
-    pub auto_cleanup: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -98,11 +92,6 @@ impl Workspace {
     /// Returns whether the workspace is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
-    }
-
-    /// Returns whether the workspace has auto cleanup enabled.
-    pub fn has_auto_cleanup(&self) -> bool {
-        self.auto_cleanup
     }
 
     /// Returns the tags as a Tags helper.

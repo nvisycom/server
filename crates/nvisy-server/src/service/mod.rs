@@ -14,6 +14,7 @@ use nvisy_service::webhook::WebhookService;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
+pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
@@ -35,11 +36,12 @@ pub struct ServiceState {
     pub webhook: WebhookService,
 
     // Internal services:
+    pub health_cache: HealthCache,
+    pub archive_service: ArchiveService,
+    pub integration_provider: IntegrationProvider,
     pub password_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
     pub session_keys: SessionKeys,
-    pub health_cache: HealthCache,
-    pub archive_service: ArchiveService,
     pub user_agent_parser: UserAgentParser,
 }
 
@@ -58,11 +60,12 @@ impl ServiceState {
             inference: inference_service,
             webhook: webhook_service,
 
+            health_cache: HealthCache::new(),
+            archive_service: ArchiveService::new(),
+            integration_provider: IntegrationProvider::new(),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
             session_keys: service_config.load_session_keys().await?,
-            health_cache: HealthCache::new(),
-            archive_service: ArchiveService::new(),
             user_agent_parser: UserAgentParser::new(),
         };
 
@@ -87,9 +90,10 @@ impl_di!(inference: InferenceService);
 impl_di!(webhook: WebhookService);
 
 // Internal services:
+impl_di!(health_cache: HealthCache);
+impl_di!(archive_service: ArchiveService);
+impl_di!(integration_provider: IntegrationProvider);
 impl_di!(password_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(session_keys: SessionKeys);
-impl_di!(health_cache: HealthCache);
-impl_di!(archive_service: ArchiveService);
 impl_di!(user_agent_parser: UserAgentParser);

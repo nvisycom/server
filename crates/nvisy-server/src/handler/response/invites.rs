@@ -95,3 +95,43 @@ impl InviteCode {
         }
     }
 }
+
+/// Preview of an invite with workspace details for display before joining.
+///
+/// This is a public-facing response that shows workspace information
+/// to help users decide whether to join via an invite code.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitePreview {
+    /// ID of the workspace.
+    pub workspace_id: Uuid,
+    /// Display name of the workspace.
+    pub display_name: String,
+    /// Description of the workspace.
+    pub description: Option<String>,
+    /// Tags associated with the workspace.
+    pub tags: Vec<String>,
+    /// Role the user will have if they join.
+    pub invited_role: WorkspaceRole,
+    /// Timestamp when the workspace was created.
+    pub created_at: Timestamp,
+    /// When the invite expires.
+    pub expires_at: Timestamp,
+}
+
+impl InvitePreview {
+    /// Creates an invite preview from workspace and invite models.
+    pub fn from_models(workspace: model::Workspace, invite: model::WorkspaceInvite) -> Self {
+        let tags = workspace.get_tags();
+        Self {
+            workspace_id: workspace.id,
+            display_name: workspace.display_name,
+            description: workspace.description,
+            tags,
+            invited_role: invite.invited_role,
+            created_at: workspace.created_at.into(),
+            expires_at: invite.expires_at.into(),
+        }
+    }
+}

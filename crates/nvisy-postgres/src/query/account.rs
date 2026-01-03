@@ -235,10 +235,11 @@ impl AccountRepository for PgConnection {
     }
 
     async fn delete_account(&mut self, account_id: Uuid) -> PgResult<Option<Account>> {
+        use diesel::dsl::now;
         use schema::accounts::{self, dsl};
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .returning(Account::as_returning())
             .get_result(self)
             .await

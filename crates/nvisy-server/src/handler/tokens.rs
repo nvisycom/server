@@ -21,7 +21,7 @@ use crate::extract::{
     AuthClaims, AuthHeader, AuthState, Json, Path, PgPool, Query, TypedHeader, ValidateJson,
 };
 use crate::handler::{ErrorKind, Result};
-use crate::service::{SessionKeys, ServiceState};
+use crate::service::{ServiceState, SessionKeys};
 
 /// Tracing target for API token operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::tokens";

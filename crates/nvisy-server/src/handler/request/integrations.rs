@@ -18,20 +18,15 @@ pub struct CreateIntegration {
     /// Human-readable name for the integration (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub integration_name: String,
-
     /// Detailed description of the integration's purpose (1-500 characters).
     #[validate(length(min = 1, max = 500))]
     pub description: String,
-
     /// Type of third-party service this integration connects to.
     pub integration_type: IntegrationType,
-
     /// Optional structured configuration and service-specific metadata.
     pub metadata: Option<serde_json::Value>,
-
     /// Optional authentication credentials for the external service.
     pub credentials: Option<serde_json::Value>,
-
     /// Whether the integration should be active immediately upon creation.
     pub is_active: Option<bool>,
 }
@@ -68,20 +63,15 @@ pub struct UpdateIntegration {
     /// Updated human-readable name for the integration (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub integration_name: Option<String>,
-
     /// Updated description of the integration's purpose (1-500 characters).
     #[validate(length(min = 1, max = 500))]
     pub description: Option<String>,
-
     /// Updated type of external service being integrated.
     pub integration_type: Option<IntegrationType>,
-
     /// Updated configuration and service-specific metadata.
     pub metadata: Option<serde_json::Value>,
-
     /// Updated authentication credentials for the external service.
     pub credentials: Option<serde_json::Value>,
-
     /// Updated active status for the integration.
     pub is_active: Option<bool>,
 }

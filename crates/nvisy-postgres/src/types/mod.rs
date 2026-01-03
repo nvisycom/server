@@ -16,9 +16,9 @@ pub use constraints::{
     WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActionTokenType, ActivityCategory, ActivityType, ApiTokenType, ContentSegmentation,
-    DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus, NotificationEvent,
-    ProcessingStatus, RequireMode, VirusScanStatus, WebhookEvent, WebhookStatus, WorkspaceRole,
+    ActionTokenType, ActivityCategory, ActivityType, AnnotationType, ApiTokenType,
+    ContentSegmentation, DocumentStatus, IntegrationStatus, IntegrationType, InviteStatus,
+    NotificationEvent, ProcessingStatus, RequireMode, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use options::{
     FileFilter, FileFormat, FileSortBy, IntegrationFilter, InviteFilter, InviteSortBy,

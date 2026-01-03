@@ -18,6 +18,6 @@ pub use crate::extract::auth::{
 };
 pub use crate::extract::connection_info::{AppConnectInfo, ClientIp};
 pub use crate::extract::pg_connection::PgPool;
-pub use crate::extract::reject::{Form, Json, Path, Query, ValidateJson};
+pub use crate::extract::reject::{Form, Json, Multipart, Path, Query, ValidateJson};
 pub use crate::extract::typed_header::TypedHeader;
 pub use crate::extract::version::Version;

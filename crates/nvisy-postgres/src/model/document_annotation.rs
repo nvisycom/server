@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::document_annotations;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::{AnnotationType, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Document annotation model representing user annotations on document content.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -20,8 +20,8 @@ pub struct DocumentAnnotation {
     pub account_id: Uuid,
     /// Annotation text content.
     pub content: String,
-    /// Type of annotation (note, highlight, etc.).
-    pub annotation_type: String,
+    /// Type of annotation (note, highlight, comment).
+    pub annotation_type: AnnotationType,
     /// Extended metadata including position/location.
     pub metadata: serde_json::Value,
     /// Timestamp when the annotation was created.
@@ -44,7 +44,7 @@ pub struct NewDocumentAnnotation {
     /// Annotation content.
     pub content: String,
     /// Annotation type.
-    pub annotation_type: Option<String>,
+    pub annotation_type: Option<AnnotationType>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
 }
@@ -57,7 +57,7 @@ pub struct UpdateDocumentAnnotation {
     /// Annotation content.
     pub content: Option<String>,
     /// Annotation type.
-    pub annotation_type: Option<String>,
+    pub annotation_type: Option<AnnotationType>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
 }
@@ -83,19 +83,19 @@ impl DocumentAnnotation {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
-    /// Returns whether this is a specific annotation type.
-    pub fn is_type(&self, type_name: &str) -> bool {
-        self.annotation_type.eq_ignore_ascii_case(type_name)
-    }
-
     /// Returns whether this is a note annotation.
     pub fn is_note(&self) -> bool {
-        self.is_type("note")
+        self.annotation_type.is_note()
     }
 
     /// Returns whether this is a highlight annotation.
     pub fn is_highlight(&self) -> bool {
-        self.is_type("highlight")
+        self.annotation_type.is_highlight()
+    }
+
+    /// Returns whether this is a comment annotation.
+    pub fn is_comment(&self) -> bool {
+        self.annotation_type.is_comment()
     }
 
     /// Returns the content length.

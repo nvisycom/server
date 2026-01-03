@@ -10,7 +10,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{Pagination, WorkspaceWebhookRepository};
-use nvisy_service::webhook::{WebhookPayload, WebhookService};
+use nvisy_service::webhook::{WebhookRequest, WebhookService};
 use url::Url;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
@@ -278,14 +278,20 @@ async fn test_webhook(
             .with_resource("webhook")
     })?;
 
-    // Build the test webhook payload
-    let payload = WebhookPayload::test(webhook.id);
-    let webhook_request = payload.into_request(url);
+    // Build the test webhook request
+    let webhook_request = WebhookRequest::test(url, webhook.id, webhook.workspace_id);
     let response = webhook_service.deliver(&webhook_request).await?;
+
+    // Update last_triggered_at timestamp
+    if response.is_success() {
+        conn.record_webhook_success(webhook.id).await?;
+    } else {
+        conn.record_webhook_failure(webhook.id).await?;
+    }
 
     tracing::info!(
         target: TRACING_TARGET,
-        success = response.success,
+        success = response.is_success(),
         status_code = ?response.status_code,
         "Webhook test completed"
     );

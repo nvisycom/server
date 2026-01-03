@@ -6,7 +6,7 @@ use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::security::{SessionKeysConfig, SessionKeys};
+use crate::service::security::{SessionKeys, SessionKeysConfig};
 use crate::service::{Error, Result};
 
 /// App [`state`] configuration.

@@ -17,17 +17,6 @@ use validator::Validate;
 ///
 /// Creates a new workspace with the specified configuration. The creator is
 /// automatically added as an owner of the workspace.
-///
-/// # Example
-///
-/// ```json
-/// {
-///   "displayName": "My Workspace",
-///   "description": "A sample workspace",
-///   "keepForSec": 86400,
-///   "autoCleanup": true
-/// }
-/// ```
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -38,8 +27,6 @@ pub struct CreateWorkspace {
     /// Optional description of the workspace (max 200 characters).
     #[validate(length(max = 200))]
     pub description: Option<String>,
-    /// Whether to automatically delete processed files after expiration.
-    pub auto_cleanup: Option<bool>,
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
     /// Whether comments are enabled for this workspace.
@@ -57,7 +44,6 @@ impl CreateWorkspace {
         NewWorkspace {
             display_name: self.display_name,
             description: self.description,
-            auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
             enable_comments: self.enable_comments,
             created_by: account_id,
@@ -81,15 +67,6 @@ pub struct ArchiveWorkspace {
 /// Request payload to update an existing workspace.
 ///
 /// All fields are optional; only provided fields will be updated.
-///
-/// # Example
-///
-/// ```json
-/// {
-///   "displayName": "Updated Workspace Name",
-///   "enableComments": true
-/// }
-/// ```
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -100,8 +77,6 @@ pub struct UpdateWorkspace {
     /// New description for the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
-    /// Whether to automatically delete processed files after expiration.
-    pub auto_cleanup: Option<bool>,
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
     /// Whether comments are enabled for this workspace.
@@ -115,7 +90,6 @@ impl UpdateWorkspace {
         UpdateWorkspaceModel {
             display_name: self.display_name,
             description: self.description.map(Some),
-            auto_cleanup: self.auto_cleanup,
             require_approval: self.require_approval,
             enable_comments: self.enable_comments,
             ..Default::default()

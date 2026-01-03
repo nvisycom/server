@@ -135,7 +135,10 @@ pub trait WorkspaceActivityRepository {
 }
 
 impl WorkspaceActivityRepository for PgConnection {
-    async fn log_activity(&mut self, activity: NewWorkspaceActivity) -> PgResult<WorkspaceActivity> {
+    async fn log_activity(
+        &mut self,
+        activity: NewWorkspaceActivity,
+    ) -> PgResult<WorkspaceActivity> {
         use schema::workspace_activities;
 
         let activity = diesel::insert_into(workspace_activities::table)

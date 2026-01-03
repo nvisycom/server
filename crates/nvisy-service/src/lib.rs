@@ -4,6 +4,7 @@
 
 mod error;
 pub mod inference;
+pub mod integration;
 #[doc(hidden)]
 pub mod prelude;
 pub mod types;

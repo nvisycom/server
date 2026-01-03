@@ -112,7 +112,6 @@ async fn login(
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
         expired_at: Some(expired_at.into()),
-        ..Default::default()
     };
 
     let account_api_token = conn.create_token(new_token).await?;
@@ -200,7 +199,6 @@ async fn signup(
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
         expired_at,
-        ..Default::default()
     };
     let account_api_token = conn.create_token(new_token).await?;
 

@@ -16,9 +16,9 @@ pub mod document_file;
 pub mod workspace;
 pub mod workspace_activity;
 pub mod workspace_integration;
+pub mod workspace_integration_run;
 pub mod workspace_invite;
 pub mod workspace_member;
-pub mod workspace_integration_run;
 pub mod workspace_webhook;
 
 // Account models
@@ -44,7 +44,9 @@ pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_integration::{
     NewWorkspaceIntegration, UpdateWorkspaceIntegration, WorkspaceIntegration,
 };
+pub use workspace_integration_run::{
+    NewWorkspaceIntegrationRun, UpdateWorkspaceIntegrationRun, WorkspaceIntegrationRun,
+};
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
-pub use workspace_integration_run::{NewWorkspaceIntegrationRun, UpdateWorkspaceIntegrationRun, WorkspaceIntegrationRun};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

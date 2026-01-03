@@ -8,7 +8,7 @@ mod server;
 use std::process;
 
 use axum::Router;
-use nvisy_reqwest::{WebhookClient, WebhookClientConfig};
+use nvisy_reqwest::{ReqwestClient, ReqwestClientConfig};
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::{
     RouterObservabilityExt, RouterOpenApiExt, RouterRecoveryExt, RouterSecurityExt,
@@ -55,7 +55,6 @@ async fn run() -> anyhow::Result<()> {
     let router = create_router(state, &cli.middleware);
 
     server::serve(router, cli.server).await?;
-
     Ok(())
 }
 
@@ -71,9 +70,9 @@ async fn create_service_state(
 
 /// Creates the webhook service.
 fn create_webhook_service() -> anyhow::Result<WebhookService> {
-    let webhook_config = WebhookClientConfig::default();
-    let webhook_client = WebhookClient::new(webhook_config)?;
-    Ok(webhook_client.into_service())
+    let config = ReqwestClientConfig::default();
+    let client = ReqwestClient::new(config)?;
+    Ok(client.into_service())
 }
 
 /// Creates the router with all middleware layers applied.

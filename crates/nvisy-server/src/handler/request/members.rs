@@ -32,15 +32,12 @@ pub struct ListMembersQuery {
     /// Filter by workspace role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
-
     /// Filter by 2FA status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_2fa: Option<bool>,
-
     /// Sort by field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<MemberSortField>,
-
     /// Sort order (asc or desc).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order: Option<SortOrder>,

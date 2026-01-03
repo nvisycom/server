@@ -75,24 +75,23 @@ pub type Webhooks = Vec<Webhook>;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebhookResult {
-    /// Whether the webhook delivery was successful (2xx status code).
-    pub success: bool,
     /// HTTP status code returned by the webhook endpoint.
-    pub status_code: Option<u16>,
+    pub status_code: u16,
     /// Time taken to receive a response in milliseconds.
-    pub response_time_ms: Option<i64>,
-    /// Error message if the delivery failed.
-    pub error_message: Option<String>,
+    pub response_time_ms: i64,
 }
 
 impl WebhookResult {
     /// Creates a WebhookResult from the core webhook response.
     pub fn from_response(response: nvisy_service::webhook::WebhookResponse) -> Self {
+        let duration_ms = response
+            .duration()
+            .total(jiff::Unit::Millisecond)
+            .unwrap_or(0.0) as i64;
+
         Self {
-            success: response.success,
             status_code: response.status_code,
-            response_time_ms: response.response_time_ms.map(|ms| ms as i64),
-            error_message: response.error,
+            response_time_ms: duration_ms,
         }
     }
 }

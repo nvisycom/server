@@ -108,18 +108,6 @@ CREATE TYPE REQUIRE_MODE AS ENUM (
 COMMENT ON TYPE REQUIRE_MODE IS
     'Processing requirements for input files based on content type.';
 
--- Create virus scan status enum
-CREATE TYPE VIRUS_SCAN_STATUS AS ENUM (
-    'pending',      -- Scan is pending
-    'clean',        -- No virus detected
-    'infected',     -- Virus detected
-    'suspicious',   -- Suspicious activity detected
-    'unknown'       -- Unable to determine status
-);
-
-COMMENT ON TYPE VIRUS_SCAN_STATUS IS
-    'Security scan results for uploaded files.';
-
 -- Create content segmentation enum
 CREATE TYPE CONTENT_SEGMENTATION AS ENUM (
     'none',         -- No segmentation applied
@@ -156,7 +144,6 @@ CREATE TABLE document_files (
     require_mode            REQUIRE_MODE     NOT NULL DEFAULT 'none',
     processing_priority     INTEGER          NOT NULL DEFAULT 5,
     processing_status       PROCESSING_STATUS NOT NULL DEFAULT 'pending',
-    virus_scan_status       VIRUS_SCAN_STATUS NOT NULL DEFAULT 'pending',
 
     CONSTRAINT document_files_processing_priority_range CHECK (processing_priority BETWEEN 1 AND 10),
 
@@ -176,13 +163,10 @@ CREATE TABLE document_files (
     CONSTRAINT document_files_storage_path_not_empty CHECK (trim(storage_path) <> ''),
     CONSTRAINT document_files_storage_bucket_not_empty CHECK (trim(storage_bucket) <> ''),
 
-    -- Configuration and retention policy
+    -- Configuration
     metadata                JSONB            NOT NULL DEFAULT '{}',
-    keep_for_sec            INTEGER          DEFAULT NULL,
-    auto_delete_at          TIMESTAMPTZ      DEFAULT NULL,
 
     CONSTRAINT document_files_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 8192),
-    CONSTRAINT document_files_retention_period CHECK (keep_for_sec IS NULL OR keep_for_sec BETWEEN 3600 AND 157680000),
 
     -- Lifecycle timestamps
     created_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
@@ -191,27 +175,8 @@ CREATE TABLE document_files (
 
     CONSTRAINT document_files_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT document_files_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT document_files_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
-    CONSTRAINT document_files_auto_delete_after_created CHECK (auto_delete_at IS NULL OR auto_delete_at > created_at)
+    CONSTRAINT document_files_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
 );
-
--- Create auto-delete trigger function
-CREATE OR REPLACE FUNCTION set_document_file_auto_delete()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF NEW.keep_for_sec IS NOT NULL THEN
-        NEW.auto_delete_at := NEW.created_at + (NEW.keep_for_sec || ' seconds')::INTERVAL;
-    ELSE
-        NEW.auto_delete_at := NULL;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create auto-delete trigger
-CREATE TRIGGER document_files_auto_delete_trigger
-    BEFORE INSERT OR UPDATE OF keep_for_sec ON document_files
-    FOR EACH ROW EXECUTE FUNCTION set_document_file_auto_delete();
 
 -- Set up automatic updated_at trigger
 SELECT setup_updated_at('document_files');
@@ -229,10 +194,6 @@ CREATE INDEX document_files_hash_dedup_idx
     ON document_files (file_hash_sha256, file_size_bytes)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX document_files_cleanup_idx
-    ON document_files (auto_delete_at)
-    WHERE auto_delete_at IS NOT NULL AND deleted_at IS NULL;
-
 CREATE INDEX document_files_tags_search_idx
     ON document_files USING gin (tags)
     WHERE array_length(tags, 1) > 0 AND deleted_at IS NULL;
@@ -243,7 +204,7 @@ CREATE INDEX document_files_indexed_idx
 
 -- Add table and column comments
 COMMENT ON TABLE document_files IS
-    'Source files for document processing with pipeline management and security scanning.';
+    'Source files for document processing with pipeline management.';
 
 COMMENT ON COLUMN document_files.id IS 'Unique file identifier';
 COMMENT ON COLUMN document_files.workspace_id IS 'Parent workspace reference (required)';
@@ -254,9 +215,8 @@ COMMENT ON COLUMN document_files.original_filename IS 'Original upload filename 
 COMMENT ON COLUMN document_files.file_extension IS 'File extension (1-20 alphanumeric)';
 COMMENT ON COLUMN document_files.tags IS 'Classification tags (max 32)';
 COMMENT ON COLUMN document_files.require_mode IS 'Processing mode required';
-COMMENT ON COLUMN document_files.processing_priority IS 'Priority 1-10 (1=highest)';
+COMMENT ON COLUMN document_files.processing_priority IS 'Priority 1-10 (10=highest)';
 COMMENT ON COLUMN document_files.processing_status IS 'Current processing status';
-COMMENT ON COLUMN document_files.virus_scan_status IS 'Security scan result';
 COMMENT ON COLUMN document_files.is_indexed IS 'Whether file content has been indexed for search';
 COMMENT ON COLUMN document_files.content_segmentation IS 'Content segmentation strategy';
 COMMENT ON COLUMN document_files.visual_support IS 'Whether to enable visual content processing';
@@ -265,8 +225,6 @@ COMMENT ON COLUMN document_files.file_hash_sha256 IS 'SHA256 content hash';
 COMMENT ON COLUMN document_files.storage_path IS 'Storage system path';
 COMMENT ON COLUMN document_files.storage_bucket IS 'Storage bucket/container';
 COMMENT ON COLUMN document_files.metadata IS 'Extended metadata (JSON, 2B-8KB)';
-COMMENT ON COLUMN document_files.keep_for_sec IS 'Retention period (1h-5y)';
-COMMENT ON COLUMN document_files.auto_delete_at IS 'Automatic deletion timestamp';
 COMMENT ON COLUMN document_files.parent_id IS 'Parent file reference for hierarchical relationships';
 COMMENT ON COLUMN document_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN document_files.updated_at IS 'Last modification timestamp';
@@ -420,6 +378,16 @@ COMMENT ON COLUMN document_comments.created_at IS 'Comment creation timestamp';
 COMMENT ON COLUMN document_comments.updated_at IS 'Last edit timestamp';
 COMMENT ON COLUMN document_comments.deleted_at IS 'Soft deletion timestamp';
 
+-- Create annotation type enum
+CREATE TYPE ANNOTATION_TYPE AS ENUM (
+    'note',         -- General text note/annotation
+    'highlight',    -- Highlighted text selection
+    'comment'       -- Comment on specific content
+);
+
+COMMENT ON TYPE ANNOTATION_TYPE IS
+    'Type classification for document annotations.';
+
 -- Create document annotations table - Annotations for document content
 CREATE TABLE document_annotations (
     -- Primary identifiers
@@ -431,10 +399,9 @@ CREATE TABLE document_annotations (
 
     -- Annotation content
     content             TEXT             NOT NULL,
-    annotation_type     TEXT             NOT NULL DEFAULT 'note',
+    annotation_type     ANNOTATION_TYPE  NOT NULL DEFAULT 'note',
 
     CONSTRAINT document_annotations_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
-    CONSTRAINT document_annotations_type_format CHECK (annotation_type ~ '^[a-z_]+$'),
 
     -- Metadata
     metadata            JSONB            NOT NULL DEFAULT '{}',
@@ -522,45 +489,6 @@ ORDER BY df.processing_priority DESC, df.created_at ASC;
 
 COMMENT ON VIEW processing_queue IS
     'Files queued for processing, ordered by priority and age.';
-
--- Create cleanup function
-CREATE OR REPLACE FUNCTION cleanup_expired_documents()
-RETURNS TABLE (
-    files_cleaned INTEGER,
-    versions_cleaned INTEGER,
-    storage_freed_mb DECIMAL(10,2)
-)
-LANGUAGE plpgsql AS $$
-DECLARE
-    file_count INTEGER := 0;
-    version_count INTEGER := 0;
-    storage_freed DECIMAL(10,2) := 0.00;
-BEGIN
-    -- Clean up expired files
-    WITH deleted_files AS (
-        UPDATE document_files
-        SET deleted_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE (
-            auto_delete_at < CURRENT_TIMESTAMP
-            OR EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) > keep_for_sec
-        )
-        AND deleted_at IS NULL
-        RETURNING file_size_bytes
-    )
-    SELECT COUNT(*), ROUND(COALESCE(SUM(file_size_bytes), 0) / 1048576.0, 2)
-    INTO file_count, storage_freed
-    FROM deleted_files;
-
-    -- Clean up expired versions
-
-
-    RETURN QUERY SELECT file_count, version_count, storage_freed;
-END;
-$$;
-
-COMMENT ON FUNCTION cleanup_expired_documents() IS
-    'Cleans up expired files and versions based on retention policies. Returns cleanup statistics.';
 
 -- Create duplicate detection function
 CREATE OR REPLACE FUNCTION find_duplicate_files(_document_id UUID DEFAULT NULL)

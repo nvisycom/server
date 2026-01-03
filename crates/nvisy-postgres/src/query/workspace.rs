@@ -2,9 +2,9 @@
 
 use std::future::Future;
 
+use diesel::dsl::now;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -150,7 +150,7 @@ impl WorkspaceRepository for PgConnection {
         diesel::update(workspaces)
             .filter(id.eq(workspace_id))
             .filter(deleted_at.is_null())
-            .set(deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;

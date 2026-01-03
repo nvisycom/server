@@ -337,9 +337,8 @@ impl WorkspaceInviteRepository for PgConnection {
     }
 
     async fn cleanup_expired_invites(&mut self) -> PgResult<usize> {
+        use diesel::dsl::now;
         use schema::workspace_invites::dsl::*;
-
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         let updated_count = diesel::update(workspace_invites)
             .filter(expires_at.lt(now))
@@ -353,12 +352,13 @@ impl WorkspaceInviteRepository for PgConnection {
     }
 
     async fn get_pending_invites(&mut self, proj_id: Uuid) -> PgResult<Vec<WorkspaceInvite>> {
+        use diesel::dsl::now;
         use schema::workspace_invites::dsl::*;
 
         let invites = workspace_invites
             .filter(workspace_id.eq(proj_id))
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
+            .filter(expires_at.gt(now))
             .select(WorkspaceInvite::as_select())
             .order(created_at.desc())
             .load(self)
@@ -454,13 +454,14 @@ impl WorkspaceInviteRepository for PgConnection {
         ws_id: Uuid,
         email: &str,
     ) -> PgResult<Option<WorkspaceInvite>> {
+        use diesel::dsl::now;
         use schema::workspace_invites::dsl::*;
 
         let invite = workspace_invites
             .filter(workspace_id.eq(ws_id))
             .filter(invitee_email.eq(email))
             .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.gt(jiff_diesel::Timestamp::from(Timestamp::now())))
+            .filter(expires_at.gt(now))
             .select(WorkspaceInvite::as_select())
             .first(self)
             .await

@@ -1,8 +1,6 @@
 //! Webhook delivery response types.
 
-use std::collections::HashMap;
-use std::time::Duration;
-
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,90 +11,47 @@ pub struct WebhookResponse {
     pub response_id: Uuid,
     /// Request ID this response corresponds to.
     pub request_id: Uuid,
-    /// Whether the delivery was successful.
-    pub success: bool,
-    /// HTTP status code from the webhook endpoint.
-    pub status_code: Option<u16>,
-    /// Response body from the webhook endpoint (truncated if large).
-    pub body: Option<String>,
-    /// Error message if delivery failed.
-    pub error: Option<String>,
-    /// Response time in milliseconds.
-    pub response_time_ms: Option<u64>,
-    /// Response headers from the webhook endpoint.
-    pub headers: HashMap<String, String>,
+    /// HTTP status code from the webhook endpoint (0 if request failed before response).
+    pub status_code: u16,
+    /// Timestamp when the request was initiated.
+    pub started_at: Timestamp,
+    /// Timestamp when the response was received.
+    pub finished_at: Timestamp,
 }
 
 impl WebhookResponse {
-    /// Creates a new successful webhook response.
-    pub fn success(request_id: Uuid, status_code: u16) -> Self {
+    /// Creates a new webhook response.
+    pub fn new(request_id: Uuid, status_code: u16, started_at: Timestamp) -> Self {
         Self {
             response_id: Uuid::now_v7(),
             request_id,
-            success: true,
-            status_code: Some(status_code),
-            body: None,
-            error: None,
-            response_time_ms: None,
-            headers: HashMap::new(),
+            status_code,
+            started_at,
+            finished_at: Timestamp::now(),
         }
     }
 
-    /// Creates a new failed webhook response.
-    pub fn failure(request_id: Uuid, error: impl Into<String>) -> Self {
-        Self {
-            response_id: Uuid::now_v7(),
-            request_id,
-            success: false,
-            status_code: None,
-            body: None,
-            error: Some(error.into()),
-            response_time_ms: None,
-            headers: HashMap::new(),
-        }
+    /// Returns whether the delivery was successful (2xx status code).
+    pub fn is_success(&self) -> bool {
+        (200..300).contains(&self.status_code)
     }
 
-    /// Sets the response time.
-    pub fn with_duration(mut self, duration: Duration) -> Self {
-        self.response_time_ms = Some(duration.as_millis() as u64);
-        self
-    }
-
-    /// Sets the response body.
-    pub fn with_body(mut self, body: impl Into<String>) -> Self {
-        self.body = Some(body.into());
-        self
-    }
-
-    /// Sets the status code.
-    pub fn with_status_code(mut self, status_code: u16) -> Self {
-        self.status_code = Some(status_code);
-        self
-    }
-
-    /// Adds a response header.
-    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.headers.insert(name.into(), value.into());
-        self
-    }
-
-    /// Sets multiple response headers.
-    pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
-        self.headers.extend(headers);
-        self
+    /// Calculates the response time as a duration.
+    pub fn duration(&self) -> jiff::Span {
+        self.started_at.until(self.finished_at).unwrap_or_default()
     }
 
     /// Checks if the response indicates a retryable error.
     pub fn is_retryable(&self) -> bool {
-        if self.success {
+        if self.is_success() {
             return false;
         }
 
-        // Retry on server errors (5xx) or specific client errors
-        match self.status_code {
-            Some(code) => code >= 500 || code == 408 || code == 429,
-            None => true, // Network errors are retryable
-        }
+        // Network errors (status 0) or server errors (5xx) or specific client errors are retryable
+        self.status_code == 0
+            || self.status_code >= 500
+            || self.status_code == 408
+            || self.status_code == 429
     }
 }
 
@@ -107,63 +62,36 @@ mod tests {
     #[test]
     fn test_success_response() {
         let request_id = Uuid::new_v4();
-        let response = WebhookResponse::success(request_id, 200);
+        let started_at = Timestamp::now();
+        let response = WebhookResponse::new(request_id, 200, started_at);
 
-        assert!(response.success);
+        assert!(response.is_success());
         assert_eq!(response.request_id, request_id);
-        assert_eq!(response.status_code, Some(200));
-        assert!(response.error.is_none());
-    }
-
-    #[test]
-    fn test_failure_response() {
-        let request_id = Uuid::new_v4();
-        let response = WebhookResponse::failure(request_id, "Connection timeout");
-
-        assert!(!response.success);
-        assert_eq!(response.request_id, request_id);
-        assert!(response.status_code.is_none());
-        assert_eq!(response.error, Some("Connection timeout".to_string()));
-    }
-
-    #[test]
-    fn test_response_with_duration() {
-        let response =
-            WebhookResponse::success(Uuid::new_v4(), 200).with_duration(Duration::from_millis(150));
-
-        assert_eq!(response.response_time_ms, Some(150));
+        assert_eq!(response.status_code, 200);
     }
 
     #[test]
     fn test_is_retryable() {
+        let started_at = Timestamp::now();
+
         // Success is not retryable
-        assert!(!WebhookResponse::success(Uuid::new_v4(), 200).is_retryable());
+        assert!(!WebhookResponse::new(Uuid::new_v4(), 200, started_at).is_retryable());
 
         // 5xx errors are retryable
-        let mut response = WebhookResponse::failure(Uuid::new_v4(), "Server error");
-        response.status_code = Some(500);
-        assert!(response.is_retryable());
-
-        response.status_code = Some(503);
-        assert!(response.is_retryable());
+        assert!(WebhookResponse::new(Uuid::new_v4(), 500, started_at).is_retryable());
+        assert!(WebhookResponse::new(Uuid::new_v4(), 503, started_at).is_retryable());
 
         // 429 Too Many Requests is retryable
-        response.status_code = Some(429);
-        assert!(response.is_retryable());
+        assert!(WebhookResponse::new(Uuid::new_v4(), 429, started_at).is_retryable());
 
         // 408 Request Timeout is retryable
-        response.status_code = Some(408);
-        assert!(response.is_retryable());
+        assert!(WebhookResponse::new(Uuid::new_v4(), 408, started_at).is_retryable());
 
         // 4xx errors (except 408, 429) are not retryable
-        response.status_code = Some(400);
-        assert!(!response.is_retryable());
+        assert!(!WebhookResponse::new(Uuid::new_v4(), 400, started_at).is_retryable());
+        assert!(!WebhookResponse::new(Uuid::new_v4(), 404, started_at).is_retryable());
 
-        response.status_code = Some(404);
-        assert!(!response.is_retryable());
-
-        // Network errors (no status code) are retryable
-        response.status_code = None;
-        assert!(response.is_retryable());
+        // Network errors (status 0) are retryable
+        assert!(WebhookResponse::new(Uuid::new_v4(), 0, started_at).is_retryable());
     }
 }

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-use crate::types::{FileFilter, FileSortBy, ProcessingStatus, SortOrder, VirusScanStatus};
+use crate::types::{FileFilter, FileSortBy, ProcessingStatus, SortOrder};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document file database operations.
@@ -78,13 +78,6 @@ pub trait DocumentFileRepository {
         status: ProcessingStatus,
     ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
 
-    /// Updates the virus scan status of a file.
-    fn update_virus_scan_status(
-        &mut self,
-        file_id: Uuid,
-        scan_status: VirusScanStatus,
-    ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
-
     /// Finds multiple files by their IDs in a single query.
     fn find_document_files_by_ids(
         &mut self,
@@ -122,13 +115,6 @@ pub trait DocumentFileRepository {
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
 
-    /// Finds files with a specific virus scan status.
-    fn find_files_by_scan_status(
-        &mut self,
-        scan_status: VirusScanStatus,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
-
     /// Finds files that failed processing.
     fn find_failed_files(
         &mut self,
@@ -147,11 +133,6 @@ pub trait DocumentFileRepository {
         &mut self,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<BigDecimal>> + Send;
-
-    /// Soft deletes files past their auto-delete timestamp.
-    ///
-    /// Returns the count of affected files.
-    fn cleanup_auto_delete_files(&mut self) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Resets failed files to pending status for reprocessing.
     ///
@@ -279,10 +260,11 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn delete_document_file(&mut self, file_id: Uuid) -> PgResult<()> {
+        use diesel::dsl::now;
         use schema::document_files::{self, dsl};
 
         diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;
@@ -328,21 +310,6 @@ impl DocumentFileRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(file)
-    }
-
-    async fn update_virus_scan_status(
-        &mut self,
-        file_id: Uuid,
-        scan_status: VirusScanStatus,
-    ) -> PgResult<DocumentFile> {
-        self.update_document_file(
-            file_id,
-            UpdateDocumentFile {
-                virus_scan_status: Some(scan_status),
-                ..Default::default()
-            },
-        )
-        .await
     }
 
     async fn find_document_files_by_ids(
@@ -461,27 +428,6 @@ impl DocumentFileRepository for PgConnection {
         Ok(files)
     }
 
-    async fn find_files_by_scan_status(
-        &mut self,
-        scan_status: VirusScanStatus,
-        pagination: Pagination,
-    ) -> PgResult<Vec<DocumentFile>> {
-        use schema::document_files::{self, dsl};
-
-        let files = document_files::table
-            .filter(dsl::virus_scan_status.eq(scan_status))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentFile::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(files)
-    }
-
     async fn find_failed_files(&mut self, pagination: Pagination) -> PgResult<Vec<DocumentFile>> {
         use schema::document_files::{self, dsl};
 
@@ -534,20 +480,6 @@ impl DocumentFileRepository for PgConnection {
         Ok(usage.unwrap_or_else(|| BigDecimal::from(0)))
     }
 
-    async fn cleanup_auto_delete_files(&mut self) -> PgResult<usize> {
-        use schema::document_files::{self, dsl};
-
-        let affected = diesel::update(document_files::table)
-            .filter(dsl::auto_delete_at.le(jiff_diesel::Timestamp::from(Timestamp::now())))
-            .filter(dsl::deleted_at.is_null())
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
-            .execute(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(affected)
-    }
-
     async fn reset_failed_processing(&mut self, file_ids: Vec<Uuid>) -> PgResult<usize> {
         use schema::document_files::{self, dsl};
 
@@ -563,6 +495,7 @@ impl DocumentFileRepository for PgConnection {
     }
 
     async fn purge_old_files(&mut self, retention_days: i32) -> PgResult<usize> {
+        use diesel::dsl::now;
         use schema::document_files::{self, dsl};
 
         let cutoff_date = jiff_diesel::Timestamp::from(
@@ -572,7 +505,7 @@ impl DocumentFileRepository for PgConnection {
         let affected = diesel::update(document_files::table)
             .filter(dsl::created_at.lt(cutoff_date))
             .filter(dsl::deleted_at.is_null())
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;

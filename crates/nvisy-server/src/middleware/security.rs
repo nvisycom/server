@@ -18,8 +18,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
-/// Default maximum request body size: 16MB.
-pub const DEFAULT_MAX_BODY_SIZE: usize = 16 * 1024 * 1024;
+use crate::utility::constants::DEFAULT_MAX_BODY_SIZE;
 
 /// Extension trait for `axum::`[`Router`] to apply security middleware.
 ///

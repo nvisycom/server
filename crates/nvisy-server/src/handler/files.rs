@@ -11,30 +11,28 @@ use std::str::FromStr;
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::body::Body;
-use axum::extract::{Multipart, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-use nvisy_postgres::query::{DocumentFileRepository, WorkspaceRepository};
+use nvisy_postgres::query::DocumentFileRepository;
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
+    AuthProvider, AuthState, Json, Multipart, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
     DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ListFilesQuery,
     Pagination, UpdateFile as UpdateFileRequest, WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, File, Files};
+use crate::handler::response::{self, ErrorResponse, File, Files};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
+use crate::utility::constants::MAX_FILE_SIZE;
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
-
-/// Maximum file size: 100MB
-const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<DocumentFile> {
@@ -77,17 +75,7 @@ async fn list_files(
         )
         .await?;
 
-    let response: Files = files
-        .into_iter()
-        .map(|f| File {
-            file_id: f.id,
-            display_name: f.display_name,
-            file_size: f.file_size_bytes,
-            status: f.processing_status,
-            processing_priority: Some(f.processing_priority),
-            updated_at: Some(f.updated_at.into()),
-        })
-        .collect();
+    let response: Files = response::File::from_models(files);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -131,9 +119,6 @@ async fn upload_file(
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
         .await?;
 
-    // Load workspace for settings (keep_for_sec is no longer used, files have their own expiration)
-    let _workspace = conn.find_workspace_by_id(path_params.workspace_id).await?;
-
     let mut uploaded_files = Vec::new();
 
     while let Some(field) = multipart.next_field().await.map_err(|err| {
@@ -142,26 +127,13 @@ async fn upload_file(
             .with_message("Invalid multipart data")
             .with_context(format!("Failed to parse multipart form: {}", err))
     })? {
-        let filename = if let Some(filename) = field.file_name() {
-            filename.to_string()
-        } else {
-            tracing::debug!(target: TRACING_TARGET, "Skipping field without filename");
-            continue;
-        };
+        let filename = field
+            .file_name()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("file_{}.bin", Uuid::now_v7()));
 
         // Validate and sanitize filename
         let filename = validate_filename(&filename)?;
-
-        let content_type = field
-            .content_type()
-            .map(|ct| ct.to_string())
-            .unwrap_or_else(|| "application/octet-stream".to_string());
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            content_type = %content_type,
-            "Processing file upload"
-        );
 
         // Read file data with size limit to prevent DoS
         let mut data = Vec::new();
@@ -201,11 +173,41 @@ async fn upload_file(
         // Extract SHA-256 hash from content data
         let sha256_bytes = content_data.compute_sha256().to_vec();
 
-        // Generate a temporary ID to create the storage path
-        let temp_file_id = Uuid::now_v7();
-        let object_key = input_fs.create_key(path_params.workspace_id, temp_file_id);
+        // Generate file ID and storage path
+        let file_id = Uuid::now_v7();
+        let object_key = input_fs.create_key(path_params.workspace_id, file_id);
 
-        // Create file record in database with storage path
+        // Upload to NATS document store first (external system)
+        // This order ensures we don't have orphaned DB records if storage fails
+        tracing::debug!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            size = file_size_bytes,
+            "Uploading file to storage"
+        );
+
+        input_fs
+            .put(&object_key, &content_data)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    file_id = %file_id,
+                    "Failed to upload file to storage"
+                );
+                ErrorKind::InternalServerError
+                    .with_message("Failed to upload file")
+                    .with_context(format!("Storage upload failed: {}", err))
+            })?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            file_id = %file_id,
+            "File uploaded to storage"
+        );
+
+        // Create file record in database after successful storage upload
         let file_record = NewDocumentFile {
             workspace_id: path_params.workspace_id,
             document_id: None,
@@ -217,71 +219,36 @@ async fn upload_file(
             storage_path: object_key.as_str().to_string(),
             storage_bucket: Some(InputFiles::bucket_name().to_string()),
             file_hash_sha256: sha256_bytes,
-            auto_delete_at: None,
             ..Default::default()
         };
 
-        // Insert file record into database
-        let created_file = conn
-            .create_document_file(file_record)
-            .await
-            .map_err(|err| {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to create file record");
-                ErrorKind::InternalServerError
-                    .with_message("Failed to save file metadata")
-                    .with_context(format!("Database error: {}", err))
-            })?;
-
-        let file_id = created_file.id;
-
-        // Upload to NATS document store
-        tracing::debug!(
-            target: TRACING_TARGET,
-            file_id = %file_id,
-            size = file_size_bytes,
-            "Uploading file to storage"
-        );
-
-        let put_result = input_fs.put(&object_key, &content_data).await;
-
-        // If NATS upload fails, clean up the database record
-        if let Err(err) = put_result {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                file_id = %file_id,
-                "Failed to upload file to storage, cleaning up database record"
-            );
-
-            // Best effort cleanup - delete the orphan database record
-            if let Err(cleanup_err) = conn.delete_document_file(file_id).await {
+        let created_file = match conn.create_document_file(file_record).await {
+            Ok(file) => file,
+            Err(err) => {
                 tracing::error!(
                     target: TRACING_TARGET,
-                    error = %cleanup_err,
+                    error = %err,
                     file_id = %file_id,
-                    "Failed to cleanup orphan file record"
+                    "Failed to create file record, cleaning up storage"
                 );
+
+                // Best effort cleanup - delete the orphan storage object
+                if let Err(cleanup_err) = input_fs.delete(&object_key).await {
+                    tracing::error!(
+                        target: TRACING_TARGET,
+                        error = %cleanup_err,
+                        file_id = %file_id,
+                        "Failed to cleanup orphan storage object"
+                    );
+                }
+
+                return Err(ErrorKind::InternalServerError
+                    .with_message("Failed to save file metadata")
+                    .with_context(format!("Database error: {}", err)));
             }
-
-            return Err(ErrorKind::InternalServerError
-                .with_message("Failed to upload file")
-                .with_context(format!("Storage upload failed: {}", err)));
-        }
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            file_id = %file_id,
-            "File uploaded to storage"
-        );
-
-        let uploaded_file = File {
-            file_id: created_file.id,
-            display_name: created_file.display_name,
-            file_size: created_file.file_size_bytes,
-            status: created_file.processing_status,
-            processing_priority: Some(created_file.processing_priority),
-            updated_at: Some(created_file.updated_at.into()),
         };
+
+        let uploaded_file = response::File::from_model(created_file.clone());
 
         // Publish file processing job to queue
         let job = nvisy_nats::stream::DocumentJob::new_file_processing(
@@ -385,16 +352,10 @@ async fn update_file(
 
     tracing::info!(target: TRACING_TARGET, "File updated");
 
-    let response = File {
-        file_id: updated_file.id,
-        display_name: updated_file.display_name,
-        file_size: updated_file.file_size_bytes,
-        status: updated_file.processing_status,
-        processing_priority: Some(updated_file.processing_priority),
-        updated_at: Some(updated_file.updated_at.into()),
-    };
-
-    Ok((StatusCode::OK, Json(response)))
+    Ok((
+        StatusCode::OK,
+        Json(response::File::from_model(updated_file)),
+    ))
 }
 
 fn update_file_docs(op: TransformOperation) -> TransformOperation {

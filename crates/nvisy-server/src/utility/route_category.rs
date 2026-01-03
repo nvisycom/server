@@ -12,15 +12,25 @@ use axum::http::Uri;
 /// functional area of the API.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RouteCategory {
+    /// Authentication routes (`/auth/*`).
     Authentication,
-    UserManagement,
-    WorkspaceManagement,
-    DocumentProcessing,
-    FileOperations,
-    Automation,
-    Support,
-    Monitoring,
+    /// Account management routes (`/accounts/*`).
+    Accounts,
+    /// Workspace management routes (`/workspaces/*`).
+    Workspaces,
+    /// Document routes (`/documents/*`).
+    Documents,
+    /// File operations routes (`/files/*`).
+    Files,
+    /// Integration routes (`/integrations/*`).
+    Integrations,
+    /// Webhook routes (`/webhooks/*`).
+    Webhooks,
+    /// Health and monitoring routes (`/monitors/*`).
+    Monitors,
+    /// API documentation routes (`/api/*`).
     Api,
+    /// Unknown or uncategorized routes.
     Unknown,
 }
 
@@ -32,19 +42,19 @@ impl RouteCategory {
         if path.starts_with("/auth/") {
             Self::Authentication
         } else if path.starts_with("/accounts/") {
-            Self::UserManagement
+            Self::Accounts
         } else if path.starts_with("/workspaces/") {
-            Self::WorkspaceManagement
-        } else if path.contains("/documents/") {
-            Self::DocumentProcessing
-        } else if path.contains("/inputs/") || path.contains("/outputs/") {
-            Self::FileOperations
-        } else if path.starts_with("/automation/") {
-            Self::Automation
-        } else if path.starts_with("/support/") || path.starts_with("/feedback/") {
-            Self::Support
+            Self::Workspaces
+        } else if path.starts_with("/documents/") {
+            Self::Documents
+        } else if path.starts_with("/files/") {
+            Self::Files
+        } else if path.starts_with("/integrations/") {
+            Self::Integrations
+        } else if path.starts_with("/webhooks/") {
+            Self::Webhooks
         } else if path.starts_with("/monitors/") {
-            Self::Monitoring
+            Self::Monitors
         } else if path.starts_with("/api/") {
             Self::Api
         } else {
@@ -56,13 +66,13 @@ impl RouteCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Authentication => "auth",
-            Self::UserManagement => "users",
-            Self::WorkspaceManagement => "workspaces",
-            Self::DocumentProcessing => "documents",
-            Self::FileOperations => "files",
-            Self::Automation => "automation",
-            Self::Support => "support",
-            Self::Monitoring => "monitoring",
+            Self::Accounts => "accounts",
+            Self::Workspaces => "workspaces",
+            Self::Documents => "documents",
+            Self::Files => "files",
+            Self::Integrations => "integrations",
+            Self::Webhooks => "webhooks",
+            Self::Monitors => "monitors",
             Self::Api => "api",
             Self::Unknown => "unknown",
         }
@@ -81,31 +91,31 @@ mod tests {
         );
         assert_eq!(
             RouteCategory::from_uri(&"/accounts/123".parse().unwrap()),
-            RouteCategory::UserManagement
+            RouteCategory::Accounts
         );
         assert_eq!(
             RouteCategory::from_uri(&"/workspaces/456".parse().unwrap()),
-            RouteCategory::WorkspaceManagement
+            RouteCategory::Workspaces
         );
         assert_eq!(
-            RouteCategory::from_uri(&"/workspaces/456/documents/789".parse().unwrap()),
-            RouteCategory::WorkspaceManagement
+            RouteCategory::from_uri(&"/documents/789".parse().unwrap()),
+            RouteCategory::Documents
         );
         assert_eq!(
-            RouteCategory::from_uri(&"/documents/789/inputs/".parse().unwrap()),
-            RouteCategory::DocumentProcessing
+            RouteCategory::from_uri(&"/files/abc".parse().unwrap()),
+            RouteCategory::Files
         );
         assert_eq!(
-            RouteCategory::from_uri(&"/automation/batch".parse().unwrap()),
-            RouteCategory::Automation
+            RouteCategory::from_uri(&"/integrations/def".parse().unwrap()),
+            RouteCategory::Integrations
         );
         assert_eq!(
-            RouteCategory::from_uri(&"/support/tickets".parse().unwrap()),
-            RouteCategory::Support
+            RouteCategory::from_uri(&"/webhooks/ghi".parse().unwrap()),
+            RouteCategory::Webhooks
         );
         assert_eq!(
             RouteCategory::from_uri(&"/monitors/health".parse().unwrap()),
-            RouteCategory::Monitoring
+            RouteCategory::Monitors
         );
         assert_eq!(
             RouteCategory::from_uri(&"/api/swagger".parse().unwrap()),

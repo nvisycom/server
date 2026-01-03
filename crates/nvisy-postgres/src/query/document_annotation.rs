@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::Pagination;
 use crate::model::{DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation};
+use crate::types::AnnotationType;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document annotation database operations.
@@ -46,7 +47,7 @@ pub trait DocumentAnnotationRepository {
     fn find_annotations_by_type(
         &mut self,
         file_id: Uuid,
-        annotation_type: &str,
+        annotation_type: AnnotationType,
         pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
@@ -157,7 +158,7 @@ impl DocumentAnnotationRepository for PgConnection {
     async fn find_annotations_by_type(
         &mut self,
         file_id: Uuid,
-        annotation_type: &str,
+        annotation_type: AnnotationType,
         pagination: Pagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
         use schema::document_annotations::{self, dsl};
@@ -196,10 +197,11 @@ impl DocumentAnnotationRepository for PgConnection {
     }
 
     async fn delete_annotation(&mut self, annotation_id: Uuid) -> PgResult<()> {
+        use diesel::dsl::now;
         use schema::document_annotations::{self, dsl};
 
         diesel::update(document_annotations::table.filter(dsl::id.eq(annotation_id)))
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;

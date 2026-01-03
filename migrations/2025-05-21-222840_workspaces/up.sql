@@ -16,7 +16,6 @@ CREATE TABLE workspaces (
     -- Workspace settings
     require_approval BOOLEAN            NOT NULL DEFAULT TRUE,
     enable_comments  BOOLEAN            NOT NULL DEFAULT TRUE,
-    auto_cleanup     BOOLEAN            NOT NULL DEFAULT TRUE,
 
     -- Tags and extended metadata
     tags             TEXT[]             NOT NULL DEFAULT '{}',
@@ -59,10 +58,6 @@ CREATE INDEX workspaces_owner_lookup_idx
 CREATE INDEX workspaces_tags_lookup_idx
     ON workspaces USING gin (tags)
     WHERE array_length(tags, 1) > 0 AND deleted_at IS NULL;
-
-CREATE INDEX workspaces_cleanup_idx
-    ON workspaces (created_at, auto_cleanup)
-    WHERE auto_cleanup = TRUE AND deleted_at IS NULL;
 
 CREATE INDEX workspaces_metadata_lookup_idx
     ON workspaces USING gin (metadata)
@@ -342,13 +337,17 @@ COMMENT ON TYPE INTEGRATION_STATUS IS
     'Defines the operational status of workspace integrations.';
 
 CREATE TYPE INTEGRATION_TYPE AS ENUM (
-    'webhook',      -- Generic webhook integration
-    'storage',      -- External storage integration (S3, etc.)
-    'other'         -- Other integration types
+    'storage',       -- Files/documents (Drive, S3, SharePoint, Dropbox)
+    'communication', -- Email, chat (Gmail, Slack, Teams)
+    'business',      -- CRM, finance, legal (Salesforce, QuickBooks)
+    'analytics',     -- Data platforms (Snowflake, Tableau, Looker)
+    'automation',    -- No-code automation (Zapier, Make)
+    'developer',     -- API/webhook integrations
+    'industry'       -- Specialized verticals (healthcare, insurance)
 );
 
 COMMENT ON TYPE INTEGRATION_TYPE IS
-    'Defines the type/category of workspace integrations.';
+    'Defines the functional category of workspace integrations.';
 
 -- Workspace integrations table definition
 CREATE TABLE workspace_integrations (

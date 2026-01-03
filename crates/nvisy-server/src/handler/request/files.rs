@@ -17,14 +17,11 @@ pub struct UpdateFile {
     /// New display name for the file.
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
-
     /// New processing priority (1-10, higher = more priority).
     #[validate(range(min = 1, max = 10))]
     pub processing_priority: Option<i32>,
-
     /// Document ID to assign the file to.
     pub document_id: Option<Uuid>,
-
     /// Knowledge extraction settings update.
     #[serde(flatten)]
     pub knowledge: Option<UpdateFileKnowledge>,
@@ -52,10 +49,8 @@ impl UpdateFile {
 pub struct UpdateFileKnowledge {
     /// Whether the file is indexed for knowledge extraction.
     pub is_indexed: Option<bool>,
-
     /// Content segmentation strategy for knowledge extraction.
     pub content_segmentation: Option<ContentSegmentation>,
-
     /// Whether visual elements are supported for knowledge extraction.
     pub visual_support: Option<bool>,
 }
@@ -75,7 +70,6 @@ pub struct DownloadMultipleFilesRequest {
 pub struct DownloadArchivedFilesRequest {
     /// Archive format.
     pub format: ArchiveFormat,
-
     /// Optional specific file IDs (if None, downloads all workspace files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_ids: Option<Vec<Uuid>>,
@@ -89,11 +83,9 @@ pub struct ListFilesQuery {
     /// Filter by file formats.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formats: Option<Vec<FileFormat>>,
-
     /// Sort by field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<FileSortField>,
-
     /// Sort order (asc or desc).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order: Option<SortOrder>,

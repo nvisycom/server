@@ -75,8 +75,8 @@ impl Error {
     }
 
     /// Adds a source error to this error.
-    pub fn with_source(mut self, source: BoxedError) -> Self {
-        self.source = Some(source);
+    pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        self.source = Some(Box::new(source));
         self
     }
 

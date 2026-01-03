@@ -43,10 +43,10 @@ pub use document_versions::DocumentVersionConstraints;
 pub use documents::DocumentConstraints;
 use serde::{Deserialize, Serialize};
 pub use workspace_activities::WorkspaceActivitiesConstraints;
+pub use workspace_integration_runs::WorkspaceIntegrationRunConstraints;
 pub use workspace_integrations::WorkspaceIntegrationConstraints;
 pub use workspace_invites::WorkspaceInviteConstraints;
 pub use workspace_members::WorkspaceMemberConstraints;
-pub use workspace_integration_runs::WorkspaceIntegrationRunConstraints;
 pub use workspace_webhooks::WorkspaceWebhookConstraints;
 pub use workspaces::WorkspaceConstraints;
 

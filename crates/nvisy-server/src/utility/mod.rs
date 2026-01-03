@@ -1,5 +1,6 @@
 //! Utility modules for common functionality across the crate.
 
+pub mod constants;
 pub mod route_category;
 pub mod tracing_targets;
 

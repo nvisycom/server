@@ -8,8 +8,11 @@
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::http::StatusCode;
+use nvisy_postgres::PgError;
 use nvisy_postgres::model::NewWorkspaceMember;
-use nvisy_postgres::query::{WorkspaceInviteRepository, WorkspaceMemberRepository};
+use nvisy_postgres::query::{
+    WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
+};
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
@@ -18,7 +21,7 @@ use crate::handler::request::{
     CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, ListInvitesQuery,
     Pagination, ReplyInvite, WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, Invite, InviteCode, Invites, Member};
+use crate::handler::response::{ErrorResponse, Invite, InviteCode, InvitePreview, Invites, Member};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -227,8 +230,34 @@ async fn reply_to_invite(
     }
 
     let workspace_invite = if request.accept_invite {
+        // Check if user is already a member
+        if conn
+            .find_workspace_member(invite.workspace_id, auth_state.account_id)
+            .await?
+            .is_some()
+        {
+            return Err(ErrorKind::Conflict
+                .with_message("You are already a member of this workspace")
+                .with_resource("workspace_member"));
+        }
+
+        let invite_id = invite.id;
+        let workspace_id = invite.workspace_id;
+        let invited_role = invite.invited_role;
+        let account_id = auth_state.account_id;
+
         let accepted = conn
-            .accept_invite(path_params.invite_id, auth_state.account_id)
+            .transaction(|conn| {
+                Box::pin(async move {
+                    let accepted = conn.accept_invite(invite_id, account_id).await?;
+
+                    let new_member =
+                        NewWorkspaceMember::new(workspace_id, account_id, invited_role);
+                    conn.add_workspace_member(new_member).await?;
+
+                    Ok::<_, PgError>(accepted)
+                })
+            })
             .await?;
 
         tracing::info!(target: TRACING_TARGET, "Invitation accepted");
@@ -312,18 +341,17 @@ fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Joins a workspace using an invite code.
+/// Previews a workspace invitation before joining.
 ///
-/// Allows a user to join a workspace by providing a valid invite code.
-/// The user will be added as a member with the role specified when the
-/// invite code was generated.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
-async fn join_via_invite_code(
+/// Returns basic workspace information for an invite code, allowing users
+/// to see what workspace they're about to join before accepting.
+/// This endpoint does not require authentication.
+#[tracing::instrument(skip_all)]
+async fn preview_invite_code(
     PgPool(mut conn): PgPool,
-    AuthState(auth_state): AuthState,
     Path(path_params): Path<InviteCodePathParams>,
-) -> Result<(StatusCode, Json<Member>)> {
-    tracing::info!(target: TRACING_TARGET, "Attempting to join workspace via invite code");
+) -> Result<(StatusCode, Json<InvitePreview>)> {
+    tracing::debug!(target: TRACING_TARGET, "Previewing invite code");
 
     let Some(invite) = conn.find_invite_by_token(&path_params.invite_code).await? else {
         return Err(ErrorKind::NotFound
@@ -337,48 +365,128 @@ async fn join_via_invite_code(
             .with_resource("invite_code"));
     }
 
-    // Check if user is already a member
-    if conn
-        .find_workspace_member(invite.workspace_id, auth_state.account_id)
-        .await?
-        .is_some()
-    {
-        return Err(ErrorKind::Conflict
-            .with_message("You are already a member of this workspace")
-            .with_resource("workspace_member"));
-    }
-
-    let new_member = NewWorkspaceMember::new(
-        invite.workspace_id,
-        auth_state.account_id,
-        invite.invited_role,
-    );
-
-    conn.add_workspace_member(new_member).await?;
-
-    let Some((workspace_member, account)) = conn
-        .find_workspace_member_with_account(invite.workspace_id, auth_state.account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound.with_resource("workspace_member"));
+    let Some(workspace) = conn.find_workspace_by_id(invite.workspace_id).await? else {
+        return Err(ErrorKind::NotFound
+            .with_resource("workspace")
+            .with_message("Workspace not found"));
     };
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
-        workspace_id = %invite.workspace_id,
-        role = ?invite.invited_role,
-        "User joined workspace via invite code ",
+        workspace_id = %workspace.id,
+        "Invite preview retrieved"
     );
 
     Ok((
-        StatusCode::CREATED,
-        Json(Member::from_model(workspace_member, account)),
+        StatusCode::OK,
+        Json(InvitePreview::from_models(workspace, invite)),
     ))
 }
 
-fn join_via_invite_code_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Join via invite code")
-        .description("Joins a workspace using a valid invite code. The user becomes a member with the role specified in the code.")
+fn preview_invite_code_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Preview invite")
+        .description("Returns workspace information for an invite code, allowing users to preview the workspace before joining. Does not require authentication.")
+        .response::<200, Json<InvitePreview>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Responds to a workspace invite code.
+///
+/// Allows a user to accept or decline a workspace invite code.
+/// If accepted (the default), the user will be added as a member with the role
+/// specified when the invite code was generated. If declined, no action is taken.
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+async fn reply_to_invite_code(
+    PgPool(mut conn): PgPool,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<InviteCodePathParams>,
+    Json(request): Json<Option<ReplyInvite>>,
+) -> Result<(StatusCode, Json<Option<Member>>)> {
+    let accept = request.map(|r| r.accept_invite).unwrap_or(true);
+
+    tracing::info!(target: TRACING_TARGET, accept, "Responding to invite code");
+
+    let Some(invite) = conn.find_invite_by_token(&path_params.invite_code).await? else {
+        return Err(ErrorKind::NotFound
+            .with_resource("invite_code")
+            .with_message("Invalid invite code"));
+    };
+
+    if !invite.can_be_used() {
+        return Err(ErrorKind::BadRequest
+            .with_message("This invite code has expired or is no longer valid")
+            .with_resource("invite_code"));
+    }
+
+    if accept {
+        // Check if user is already a member
+        if conn
+            .find_workspace_member(invite.workspace_id, auth_state.account_id)
+            .await?
+            .is_some()
+        {
+            return Err(ErrorKind::Conflict
+                .with_message("You are already a member of this workspace")
+                .with_resource("workspace_member"));
+        }
+
+        let invite_id = invite.id;
+        let workspace_id = invite.workspace_id;
+        let invited_role = invite.invited_role;
+        let account_id = auth_state.account_id;
+
+        let (workspace_member, account) = conn
+            .transaction(|conn| {
+                Box::pin(async move {
+                    conn.accept_invite(invite_id, account_id).await?;
+
+                    let new_member =
+                        NewWorkspaceMember::new(workspace_id, account_id, invited_role);
+                    conn.add_workspace_member(new_member).await?;
+
+                    let result = conn
+                        .find_workspace_member_with_account(workspace_id, account_id)
+                        .await?
+                        .ok_or_else(|| {
+                            PgError::Unexpected("Member not found after insert".into())
+                        })?;
+
+                    Ok::<_, PgError>(result)
+                })
+            })
+            .await?;
+
+        tracing::info!(
+            target: TRACING_TARGET,
+            workspace_id = %workspace_id,
+            role = ?invited_role,
+            "User joined workspace via invite code",
+        );
+
+        Ok((
+            StatusCode::CREATED,
+            Json(Some(Member::from_model(workspace_member, account))),
+        ))
+    } else {
+        let workspace_id = invite.workspace_id;
+
+        conn.reject_invite(invite.id, auth_state.account_id).await?;
+
+        tracing::info!(
+            target: TRACING_TARGET,
+            workspace_id = %workspace_id,
+            "User declined invite code",
+        );
+
+        Ok((StatusCode::OK, Json(None)))
+    }
+}
+
+fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Reply to invite code")
+        .description("Accepts or declines a workspace invite code. If accepted (the default when no body is provided), the user becomes a member with the role specified in the code. If declined, no action is taken.")
+        .response::<200, Json<Option<Member>>>()
         .response::<201, Json<Member>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -420,12 +528,16 @@ pub fn routes() -> ApiRouter<ServiceState> {
             delete_with(cancel_invite, cancel_invite_docs),
         )
         .api_route(
-            "/invites/{invite_id}/reply/",
-            patch_with(reply_to_invite, reply_to_invite_docs),
+            "/invites/{invite_id}/",
+            post_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(
-            "/invites/{invite_code}/join/",
-            post_with(join_via_invite_code, join_via_invite_code_docs),
+            "/invites/code/{invite_code}/",
+            get_with(preview_invite_code, preview_invite_code_docs),
+        )
+        .api_route(
+            "/invites/code/{invite_code}/",
+            post_with(reply_to_invite_code, reply_to_invite_code_docs),
         )
         .with_path_items(|item| item.tag("Invites"))
 }

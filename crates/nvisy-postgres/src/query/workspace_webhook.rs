@@ -4,7 +4,6 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -210,11 +209,12 @@ impl WorkspaceWebhookRepository for PgConnection {
     }
 
     async fn delete_workspace_webhook(&mut self, webhook_id: Uuid) -> PgResult<()> {
+        use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
 
         diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;
@@ -223,12 +223,12 @@ impl WorkspaceWebhookRepository for PgConnection {
     }
 
     async fn record_webhook_success(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
+        use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
 
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(last_triggered_at.eq(Some(now)))
+            .set(last_triggered_at.eq(now))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
@@ -238,13 +238,12 @@ impl WorkspaceWebhookRepository for PgConnection {
     }
 
     async fn record_webhook_failure(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
+        use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
-
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(last_triggered_at.eq(Some(now)))
+            .set(last_triggered_at.eq(now))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await

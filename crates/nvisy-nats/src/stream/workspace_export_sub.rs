@@ -3,8 +3,8 @@
 use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 
-use super::workspace_export::WorkspaceExportJob;
 use super::subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
+use super::workspace_export::WorkspaceExportJob;
 use crate::Result;
 
 /// Workspace export job subscriber wrapping the base StreamSubscriber.

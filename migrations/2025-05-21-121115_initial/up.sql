@@ -150,13 +150,18 @@ $$;
 COMMENT ON FUNCTION cleanup_expired_records(_tbl REGCLASS, _expired_column TEXT) IS
     'Soft deletes expired records based on the specified expiration column. Returns the number of records cleaned up.';
 
--- Security token generation function
+-- Security token generation function (URL-safe base64)
 CREATE OR REPLACE FUNCTION generate_secure_token(_length INTEGER DEFAULT 32)
 RETURNS TEXT
 LANGUAGE plpgsql AS $$
 BEGIN
-    -- Generate a cryptographically secure random token
-    RETURN ENCODE(gen_random_bytes(_length), 'base64');
+    -- Generate a cryptographically secure random token using URL-safe base64
+    -- Replace + with -, / with _, and remove padding =
+    RETURN TRANSLATE(
+        REPLACE(ENCODE(gen_random_bytes(_length), 'base64'), '=', ''),
+        '+/',
+        '-_'
+    );
 EXCEPTION
     WHEN OTHERS THEN
         RAISE EXCEPTION 'Error generating secure token: %', SQLERRM;
@@ -164,7 +169,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION generate_secure_token(_length INTEGER) IS
-    'Generates a cryptographically secure random token of the specified byte length, base64 encoded.';
+    'Generates a cryptographically secure random token of the specified byte length, URL-safe base64 encoded.';
 
 -- Email validation function
 CREATE OR REPLACE FUNCTION is_valid_email(_email TEXT)

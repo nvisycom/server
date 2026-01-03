@@ -2,6 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::DocumentAnnotation;
+use nvisy_postgres::types::AnnotationType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,7 +20,7 @@ pub struct Annotation {
     /// Annotation content.
     pub content: String,
     /// Annotation type.
-    pub annotation_type: String,
+    pub annotation_type: AnnotationType,
     /// When the annotation was created.
     pub created_at: Timestamp,
     /// When the annotation was last updated.

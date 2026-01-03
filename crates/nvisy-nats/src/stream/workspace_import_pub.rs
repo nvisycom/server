@@ -3,8 +3,8 @@
 use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 
-use super::workspace_import::WorkspaceImportJob;
 use super::publisher::StreamPublisher;
+use super::workspace_import::WorkspaceImportJob;
 use crate::Result;
 
 /// Workspace import job publisher wrapping the base StreamPublisher

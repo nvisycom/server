@@ -4,8 +4,8 @@ use async_nats::jetstream::Context;
 use derive_more::{Deref, DerefMut};
 use uuid::Uuid;
 
-use super::workspace_event::{WorkspaceEvent, WorkspaceWsMessage};
 use super::publisher::StreamPublisher;
+use super::workspace_event::{WorkspaceEvent, WorkspaceWsMessage};
 use crate::Result;
 
 /// Workspace event publisher for broadcasting WebSocket messages.
@@ -26,7 +26,11 @@ impl WorkspaceEventPublisher {
     /// Publish a WebSocket message to a specific workspace.
     ///
     /// Messages are published to the subject `PROJECT_EVENTS.{workspace_id}`.
-    pub async fn publish_message(&self, workspace_id: Uuid, message: WorkspaceWsMessage) -> Result<()> {
+    pub async fn publish_message(
+        &self,
+        workspace_id: Uuid,
+        message: WorkspaceWsMessage,
+    ) -> Result<()> {
         let event = WorkspaceEvent::new(workspace_id, message);
         let subject = workspace_id.to_string();
         self.publisher.publish(&subject, &event).await

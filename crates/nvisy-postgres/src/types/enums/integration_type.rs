@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the type/category of a workspace integration.
+/// Defines the functional category of a workspace integration.
 ///
 /// This enumeration corresponds to the `INTEGRATION_TYPE` PostgreSQL enum and is used
 /// to categorize different types of third-party integrations that can be connected to workspaces.
@@ -15,33 +15,39 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::IntegrationType"]
 pub enum IntegrationType {
-    /// Generic webhook integration
-    #[db_rename = "webhook"]
-    #[serde(rename = "webhook")]
-    Webhook,
-
-    /// External storage integration (S3, etc.)
+    /// Files/documents (Drive, S3, SharePoint, Dropbox)
     #[db_rename = "storage"]
     #[serde(rename = "storage")]
+    #[default]
     Storage,
 
-    /// Other integration types
-    #[db_rename = "other"]
-    #[serde(rename = "other")]
-    #[default]
-    Other,
-}
+    /// Email, chat (Gmail, Slack, Teams)
+    #[db_rename = "communication"]
+    #[serde(rename = "communication")]
+    Communication,
 
-impl IntegrationType {
-    /// Returns whether this is a webhook integration.
-    #[inline]
-    pub fn is_webhook(self) -> bool {
-        matches!(self, IntegrationType::Webhook)
-    }
+    /// CRM, finance, legal (Salesforce, QuickBooks)
+    #[db_rename = "business"]
+    #[serde(rename = "business")]
+    Business,
 
-    /// Returns whether this is a storage integration.
-    #[inline]
-    pub fn is_storage(self) -> bool {
-        matches!(self, IntegrationType::Storage)
-    }
+    /// Data platforms (Snowflake, Tableau, Looker)
+    #[db_rename = "analytics"]
+    #[serde(rename = "analytics")]
+    Analytics,
+
+    /// No-code automation (Zapier, Make)
+    #[db_rename = "automation"]
+    #[serde(rename = "automation")]
+    Automation,
+
+    /// API/webhook integrations
+    #[db_rename = "developer"]
+    #[serde(rename = "developer")]
+    Developer,
+
+    /// Specialized verticals (healthcare, insurance)
+    #[db_rename = "industry"]
+    #[serde(rename = "industry")]
+    Industry,
 }

@@ -51,7 +51,7 @@ impl WebhookService {
 
         match &result {
             Ok(response) => {
-                if response.success {
+                if response.is_success() {
                     tracing::debug!(
                         target: TRACING_TARGET,
                         request_id = %request.request_id,
@@ -66,7 +66,6 @@ impl WebhookService {
                         request_id = %request.request_id,
                         response_id = %response.response_id,
                         status_code = ?response.status_code,
-                        error = ?response.error,
                         elapsed_ms = elapsed.as_millis(),
                         "Webhook delivery failed"
                     );

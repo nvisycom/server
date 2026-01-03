@@ -161,7 +161,9 @@ async fn check_event_permission(
         WorkspaceWsMessage::WorkspaceUpdated(_) => Permission::UpdateWorkspace,
 
         // System events - always allowed (sent by server)
-        WorkspaceWsMessage::Join(_) | WorkspaceWsMessage::Leave(_) | WorkspaceWsMessage::Error(_) => {
+        WorkspaceWsMessage::Join(_)
+        | WorkspaceWsMessage::Leave(_)
+        | WorkspaceWsMessage::Error(_) => {
             return Ok(());
         }
     };
@@ -332,7 +334,10 @@ async fn handle_client_message(
             // Publish with fresh timestamp
             let msg_with_ts = WorkspaceWsMessage::typing(ctx.account_id, None);
 
-            if let Err(e) = publisher.publish_message(ctx.workspace_id, msg_with_ts).await {
+            if let Err(e) = publisher
+                .publish_message(ctx.workspace_id, msg_with_ts)
+                .await
+            {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     connection_id = %ctx.connection_id,
@@ -373,7 +378,9 @@ async fn handle_client_message(
                 metrics.increment_published();
             }
         }
-        WorkspaceWsMessage::Join(_) | WorkspaceWsMessage::Leave(_) | WorkspaceWsMessage::Error(_) => {
+        WorkspaceWsMessage::Join(_)
+        | WorkspaceWsMessage::Leave(_)
+        | WorkspaceWsMessage::Error(_) => {
             tracing::debug!(
                 target: TRACING_TARGET,
                 connection_id = %ctx.connection_id,
@@ -470,24 +477,21 @@ async fn handle_workspace_websocket(
 
     // Create subscriber with unique consumer name for this connection
     let consumer_name = format!("ws-{}", ctx.connection_id);
-    let subscriber = match WorkspaceEventSubscriber::new_for_workspace(
-        jetstream,
-        &consumer_name,
-        workspace_id,
-    )
-    .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(
-                target: TRACING_TARGET,
-                connection_id = %ctx.connection_id,
-                error = %e,
-                "failed to create event subscriber, aborting connection"
-            );
-            return;
-        }
-    };
+    let subscriber =
+        match WorkspaceEventSubscriber::new_for_workspace(jetstream, &consumer_name, workspace_id)
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    connection_id = %ctx.connection_id,
+                    error = %e,
+                    "failed to create event subscriber, aborting connection"
+                );
+                return;
+            }
+        };
 
     // Get message stream
     let mut message_stream = match subscriber.subscribe().await {
@@ -805,7 +809,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
             "/workspaces/{workspace_id}/ws/",
-            get_with(workspace_websocket_handler, workspace_websocket_handler_docs),
+            get_with(
+                workspace_websocket_handler,
+                workspace_websocket_handler_docs,
+            ),
         )
         .with_path_items(|item| item.tag("WebSocket"))
 }

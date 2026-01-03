@@ -4,7 +4,6 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
 use uuid::Uuid;
 
 use super::Pagination;
@@ -180,10 +179,11 @@ impl DocumentCommentRepository for PgConnection {
     }
 
     async fn delete_comment(&mut self, comment_id: Uuid) -> PgResult<()> {
+        use diesel::dsl::now;
         use schema::document_comments::{self, dsl};
 
         diesel::update(document_comments::table.filter(dsl::id.eq(comment_id)))
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;

@@ -7,12 +7,14 @@
 
 mod enhanced_form;
 mod enhanced_json;
+mod enhanced_multipart;
 mod enhanced_path;
 mod enhanced_query;
 mod validated_json;
 
 pub use self::enhanced_form::Form;
 pub use self::enhanced_json::Json;
+pub use self::enhanced_multipart::Multipart;
 pub use self::enhanced_path::Path;
 pub use self::enhanced_query::Query;
 pub use self::validated_json::ValidateJson;

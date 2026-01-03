@@ -127,9 +127,8 @@ impl AccountNotificationRepository for PgConnection {
         account_id: Uuid,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
+        use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};
-
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -149,9 +148,8 @@ impl AccountNotificationRepository for PgConnection {
         notification_type: NotificationEvent,
         pagination: Pagination,
     ) -> PgResult<Vec<AccountNotification>> {
+        use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};
-
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
@@ -238,9 +236,8 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn delete_expired_notifications(&mut self) -> PgResult<usize> {
+        use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};
-
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         diesel::delete(
             account_notifications::table
@@ -253,10 +250,8 @@ impl AccountNotificationRepository for PgConnection {
     }
 
     async fn count_unread_notifications(&mut self, account_id: Uuid) -> PgResult<i64> {
-        use diesel::dsl::count_star;
+        use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
-
-        let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))

@@ -20,8 +20,6 @@ pub struct Workspace {
     pub description: Option<String>,
     /// Tags associated with the workspace.
     pub tags: Vec<String>,
-    /// Whether to automatically delete processed files after expiration.
-    pub auto_cleanup: bool,
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
     /// Whether comments are enabled for this workspace.
@@ -45,7 +43,6 @@ impl Workspace {
             display_name: workspace.display_name,
             description: workspace.description,
             tags,
-            auto_cleanup: workspace.auto_cleanup,
             require_approval: workspace.require_approval,
             enable_comments: workspace.enable_comments,
             created_by: workspace.created_by,
@@ -66,7 +63,6 @@ impl Workspace {
             display_name: workspace.display_name,
             description: workspace.description,
             tags,
-            auto_cleanup: workspace.auto_cleanup,
             require_approval: workspace.require_approval,
             enable_comments: workspace.enable_comments,
             created_by: workspace.created_by,

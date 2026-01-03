@@ -43,29 +43,32 @@ pub use document_job_sub::{
 pub use event::{
     CancelledStatus, CompletedStatus, EventPriority, EventStatus, FailedStatus, ProcessingStatus,
 };
+// Re-export base publisher/subscriber types
+pub use publisher::StreamPublisher;
+pub use subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
 // Re-export workspace event types (WebSocket real-time communication)
 pub use workspace_event::{
     DocumentCreatedEvent, DocumentDeletedEvent, DocumentUpdateEvent, ErrorEvent,
     FileProcessedEvent, FileRedactedEvent, FileVerifiedEvent, JoinEvent, LeaveEvent,
-    MemberAddedEvent, MemberPresenceEvent, MemberRemovedEvent, WorkspaceEvent, WorkspaceUpdatedEvent,
-    WorkspaceWsMessage, TypingEvent,
+    MemberAddedEvent, MemberPresenceEvent, MemberRemovedEvent, TypingEvent, WorkspaceEvent,
+    WorkspaceUpdatedEvent, WorkspaceWsMessage,
 };
 pub use workspace_event_pub::WorkspaceEventPublisher;
 pub use workspace_event_sub::{
-    WorkspaceEventBatchStream, WorkspaceEventMessage, WorkspaceEventStream, WorkspaceEventSubscriber,
+    WorkspaceEventBatchStream, WorkspaceEventMessage, WorkspaceEventStream,
+    WorkspaceEventSubscriber,
 };
 // Re-export workspace export types
 pub use workspace_export::{WorkspaceExportJob, WorkspaceExportPayload};
 pub use workspace_export_pub::WorkspaceExportPublisher;
 pub use workspace_export_sub::{
-    WorkspaceExportBatchStream, WorkspaceExportMessage, WorkspaceExportStream, WorkspaceExportSubscriber,
+    WorkspaceExportBatchStream, WorkspaceExportMessage, WorkspaceExportStream,
+    WorkspaceExportSubscriber,
 };
 // Re-export workspace import types
 pub use workspace_import::{WorkspaceImportJob, WorkspaceImportPayload};
 pub use workspace_import_pub::WorkspaceImportPublisher;
 pub use workspace_import_sub::{
-    WorkspaceImportBatchStream, WorkspaceImportMessage, WorkspaceImportStream, WorkspaceImportSubscriber,
+    WorkspaceImportBatchStream, WorkspaceImportMessage, WorkspaceImportStream,
+    WorkspaceImportSubscriber,
 };
-// Re-export base publisher/subscriber types
-pub use publisher::StreamPublisher;
-pub use subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};

@@ -122,7 +122,7 @@ mod test {
     use aide::axum::ApiRouter;
     use axum::Router;
     use axum_test::TestServer;
-    use nvisy_reqwest::WebhookClient;
+    use nvisy_reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
     use crate::service::{ServiceConfig, ServiceState};
@@ -133,7 +133,7 @@ mod test {
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
         let inference_service = nvisy_service::inference::MockConfig::default().into_services();
-        let webhook_service = WebhookClient::with_defaults()?.into_service();
+        let webhook_service = ReqwestClient::with_defaults()?.into_service();
         let state = ServiceState::new(config, inference_service, webhook_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
