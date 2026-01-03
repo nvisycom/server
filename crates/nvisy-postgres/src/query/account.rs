@@ -7,8 +7,8 @@ use diesel_async::RunQueryDsl;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{Account, NewAccount, UpdateAccount};
+use crate::types::OffsetPagination;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account database operations.
@@ -63,12 +63,12 @@ pub trait AccountRepository {
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
 
-    /// Lists all active accounts with pagination support.
+    /// Lists all active accounts with offset pagination.
     ///
     /// Retrieves accounts ordered by creation time with most recent first.
-    fn list_accounts(
+    fn offset_list_accounts(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
     /// Updates the account password and records the change timestamp.
@@ -124,7 +124,7 @@ pub trait AccountRepository {
     fn find_accounts_by_verification_status(
         &mut self,
         is_verified: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
     /// Finds accounts filtered by their suspension status.
@@ -133,7 +133,7 @@ pub trait AccountRepository {
     fn find_accounts_by_suspension_status(
         &mut self,
         is_suspended: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
     /// Finds accounts created within the last 30 days.
@@ -141,7 +141,7 @@ pub trait AccountRepository {
     /// Useful for onboarding analytics and new user tracking.
     fn find_recently_created_accounts(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
     /// Finds accounts with no recent activity (no login in last 90 days).
@@ -149,7 +149,7 @@ pub trait AccountRepository {
     /// Useful for identifying dormant accounts for cleanup or re-engagement.
     fn find_inactive_accounts(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 
     /// Finds accounts registered with a specific email domain.
@@ -158,7 +158,7 @@ pub trait AccountRepository {
     fn find_accounts_by_domain(
         &mut self,
         domain: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 }
 
@@ -247,7 +247,10 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn list_accounts(&mut self, pagination: Pagination) -> PgResult<Vec<Account>> {
+    async fn offset_list_accounts(
+        &mut self,
+        pagination: OffsetPagination,
+    ) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 
         accounts::table
@@ -346,7 +349,7 @@ impl AccountRepository for PgConnection {
     async fn find_accounts_by_verification_status(
         &mut self,
         is_verified: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 
@@ -365,7 +368,7 @@ impl AccountRepository for PgConnection {
     async fn find_accounts_by_suspension_status(
         &mut self,
         is_suspended: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 
@@ -383,7 +386,7 @@ impl AccountRepository for PgConnection {
 
     async fn find_recently_created_accounts(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 
@@ -402,7 +405,10 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_inactive_accounts(&mut self, pagination: Pagination) -> PgResult<Vec<Account>> {
+    async fn find_inactive_accounts(
+        &mut self,
+        pagination: OffsetPagination,
+    ) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 
         let ninety_days_ago = Timestamp::now() - Span::new().days(90);
@@ -423,7 +429,7 @@ impl AccountRepository for PgConnection {
     async fn find_accounts_by_domain(
         &mut self,
         domain: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Account>> {
         use schema::accounts::{self, dsl};
 

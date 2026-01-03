@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::DocumentFile;
-use nvisy_postgres::types::{ContentSegmentation, ProcessingStatus};
+use nvisy_postgres::types::{ContentSegmentation, CursorPage, ProcessingStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -72,5 +72,33 @@ impl File {
     }
 }
 
-/// Response for file uploads.
+/// Response for file uploads (simple list without pagination).
 pub type Files = Vec<File>;
+
+/// Paginated response for file listing.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesPage {
+    /// The files in this page.
+    pub items: Vec<File>,
+    /// Total count of files matching the query (if requested).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<i64>,
+    /// Whether there are more files after this page.
+    pub has_more: bool,
+    /// Cursor to fetch the next page, if there are more files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+impl FilesPage {
+    /// Creates a FilesPage from a CursorPage of DocumentFile models.
+    pub fn from_cursor_page(page: CursorPage<DocumentFile>) -> Self {
+        Self {
+            items: page.items.into_iter().map(File::from_model).collect(),
+            total: page.total,
+            has_more: page.has_more,
+            next_cursor: page.next_cursor,
+        }
+    }
+}

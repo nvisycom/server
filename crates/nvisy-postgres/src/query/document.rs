@@ -6,9 +6,8 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{Document, NewDocument, UpdateDocument};
-use crate::types::DocumentStatus;
+use crate::types::{DocumentStatus, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document database operations.
@@ -28,18 +27,18 @@ pub trait DocumentRepository {
         document_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Document>>> + Send;
 
-    /// Finds documents associated with a specific workspace.
-    fn find_documents_by_workspace(
+    /// Lists documents associated with a specific workspace with offset pagination.
+    fn offset_list_workspace_documents(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
-    /// Finds documents created by a specific account.
-    fn find_documents_by_account(
+    /// Lists documents created by a specific account with offset pagination.
+    fn offset_list_account_documents(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
     /// Updates a document with new information and metadata.
@@ -52,10 +51,10 @@ pub trait DocumentRepository {
     /// Soft deletes a document by setting the deletion timestamp.
     fn delete_document(&mut self, document_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Lists documents with pagination support.
-    fn list_documents(
+    /// Lists all documents with offset pagination.
+    fn offset_list_documents(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
     /// Searches documents by name or description with optional workspace filtering.
@@ -63,14 +62,14 @@ pub trait DocumentRepository {
         &mut self,
         search_query: &str,
         workspace_id: Option<Uuid>,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
     /// Finds documents filtered by their current status.
     fn find_documents_by_status(
         &mut self,
         status: DocumentStatus,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 }
 
@@ -103,10 +102,10 @@ impl DocumentRepository for PgConnection {
         Ok(document)
     }
 
-    async fn find_documents_by_workspace(
+    async fn offset_list_workspace_documents(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
@@ -124,10 +123,10 @@ impl DocumentRepository for PgConnection {
         Ok(documents)
     }
 
-    async fn find_documents_by_account(
+    async fn offset_list_account_documents(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
@@ -175,7 +174,10 @@ impl DocumentRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_documents(&mut self, pagination: Pagination) -> PgResult<Vec<Document>> {
+    async fn offset_list_documents(
+        &mut self,
+        pagination: OffsetPagination,
+    ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -195,7 +197,7 @@ impl DocumentRepository for PgConnection {
         &mut self,
         search_query: &str,
         workspace_id: Option<Uuid>,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
@@ -224,7 +226,7 @@ impl DocumentRepository for PgConnection {
     async fn find_documents_by_status(
         &mut self,
         status: DocumentStatus,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 

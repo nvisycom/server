@@ -7,6 +7,7 @@ use uuid::Uuid;
 /// Path parameters for workspace-level operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspacePathParams {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
@@ -15,6 +16,7 @@ pub struct WorkspacePathParams {
 /// Path parameters for document operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentPathParams {
     /// Unique identifier of the document.
     pub document_id: Uuid,
@@ -23,6 +25,7 @@ pub struct DocumentPathParams {
 /// Path parameters for workspace member operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MemberPathParams {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
@@ -36,6 +39,7 @@ pub struct MemberPathParams {
 /// derived from the invite record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct InvitePathParams {
     /// Unique identifier of the invite.
     pub invite_id: Uuid,
@@ -44,6 +48,7 @@ pub struct InvitePathParams {
 /// Path parameters for joining via invite code.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct InviteCodePathParams {
     /// The invite code to use for joining the workspace.
     pub invite_code: String,
@@ -55,6 +60,7 @@ pub struct InviteCodePathParams {
 /// derived from the integration record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct IntegrationPathParams {
     /// Unique identifier of the integration.
     pub integration_id: Uuid,
@@ -63,6 +69,7 @@ pub struct IntegrationPathParams {
 /// Path parameters for file operations within a workspace context.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceFilePathParams {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
@@ -76,6 +83,7 @@ pub struct WorkspaceFilePathParams {
 /// derived from the file record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct FilePathParams {
     /// Unique identifier of the file.
     pub file_id: Uuid,
@@ -84,6 +92,7 @@ pub struct FilePathParams {
 /// Path parameters for version operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct VersionPathParams {
     /// Unique identifier of the version.
     pub version_id: Uuid,
@@ -95,6 +104,7 @@ pub struct VersionPathParams {
 /// derived from the file record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct FileCommentPathParams {
     /// Unique identifier of the file.
     pub file_id: Uuid,
@@ -108,6 +118,7 @@ pub struct FileCommentPathParams {
 /// derived from the webhook record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct WebhookPathParams {
     /// Unique identifier of the webhook.
     pub webhook_id: Uuid,
@@ -119,6 +130,7 @@ pub struct WebhookPathParams {
 /// derived from the annotation record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AnnotationPathParams {
     /// Unique identifier of the annotation.
     pub annotation_id: Uuid,
@@ -130,6 +142,7 @@ pub struct AnnotationPathParams {
 /// derived from the run record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct IntegrationRunPathParams {
     /// Unique identifier of the integration run.
     pub run_id: Uuid,
@@ -141,6 +154,7 @@ pub struct IntegrationRunPathParams {
 /// by comparing with the authenticated user's account ID.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TokenPathParams {
     /// Unique identifier of the API token.
     pub token_id: Uuid,

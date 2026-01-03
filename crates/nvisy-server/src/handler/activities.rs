@@ -9,7 +9,7 @@ use nvisy_postgres::query::WorkspaceActivityRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, Query};
 use crate::handler::Result;
-use crate::handler::request::{Pagination, WorkspacePathParams};
+use crate::handler::request::{OffsetPaginationQuery, WorkspacePathParams};
 use crate::handler::response::{Activities, Activity, ErrorResponse};
 use crate::service::ServiceState;
 
@@ -28,7 +28,7 @@ async fn list_activities(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Activities>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
 
@@ -41,7 +41,7 @@ async fn list_activities(
         .await?;
 
     let activities = conn
-        .list_workspace_activity(path_params.workspace_id, pagination.into())
+        .offset_list_workspace_activity(path_params.workspace_id, pagination.into())
         .await?;
 
     let activities: Activities = Activity::from_models(activities);
@@ -69,7 +69,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspace_id}/activities/",
+            "/workspaces/{workspaceId}/activities/",
             get_with(list_activities, list_activities_docs),
         )
         .with_path_items(|item| item.tag("Activities"))

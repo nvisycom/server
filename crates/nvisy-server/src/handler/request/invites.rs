@@ -1,6 +1,8 @@
 //! Workspace invite request types.
 
-use nvisy_postgres::types::{InviteFilter, InviteSortBy, SortOrder, WorkspaceRole};
+use nvisy_postgres::types::{
+    InviteFilter, InviteSortBy, InviteSortField, SortOrder, WorkspaceRole,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -129,16 +131,6 @@ pub struct ListInvitesQuery {
     pub order: Option<SortOrder>,
 }
 
-/// Fields to sort invites by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum InviteSortField {
-    /// Sort by invitee email.
-    Email,
-    /// Sort by creation date.
-    Date,
-}
-
 impl ListInvitesQuery {
     /// Converts to filter model.
     pub fn to_filter(&self) -> InviteFilter {
@@ -148,9 +140,7 @@ impl ListInvitesQuery {
     /// Converts to sort model.
     pub fn to_sort(&self) -> InviteSortBy {
         let order = self.order.unwrap_or_default();
-        match self.sort_by {
-            Some(InviteSortField::Email) => InviteSortBy::Email(order),
-            Some(InviteSortField::Date) | None => InviteSortBy::Date(order),
-        }
+        let field = self.sort_by.unwrap_or_default();
+        InviteSortBy::new(field, order)
     }
 }

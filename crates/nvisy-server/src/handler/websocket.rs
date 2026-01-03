@@ -808,7 +808,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspace_id}/ws/",
+            "/workspaces/{workspaceId}/ws/",
             get_with(
                 workspace_websocket_handler,
                 workspace_websocket_handler_docs,

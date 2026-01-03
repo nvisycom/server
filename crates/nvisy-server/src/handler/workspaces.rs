@@ -15,7 +15,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CreateWorkspace, Pagination, UpdateNotificationSettings, UpdateWorkspace, WorkspacePathParams,
+    CreateWorkspace, OffsetPaginationQuery, UpdateNotificationSettings, UpdateWorkspace, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, NotificationSettings, Workspace, Workspaces};
 use crate::handler::{ErrorKind, Result};
@@ -77,10 +77,10 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
 async fn list_workspaces(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Query(pagination): Query<Pagination>,
+    Query(offset_pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Workspaces>)> {
     let workspace_memberships = conn
-        .list_user_workspaces_with_details(auth_state.account_id, pagination.into())
+        .list_user_workspaces_with_details(auth_state.account_id, offset_pagination.into())
         .await?;
 
     let workspaces: Workspaces = workspace_memberships
@@ -342,13 +342,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_workspaces, list_workspaces_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/",
+            "/workspaces/{workspaceId}/",
             get_with(read_workspace, read_workspace_docs)
                 .patch_with(update_workspace, update_workspace_docs)
                 .delete_with(delete_workspace, delete_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/notifications",
+            "/workspaces/{workspaceId}/notifications",
             get_with(get_notification_settings, get_notification_settings_docs).patch_with(
                 update_notification_settings,
                 update_notification_settings_docs,

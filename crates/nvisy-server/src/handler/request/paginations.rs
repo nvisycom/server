@@ -1,84 +1,88 @@
-//! Pagination request types with performance and security considerations.
+//! Pagination request types for API endpoints.
 //!
-//! This module provides pagination utilities that balance usability with performance
-//! and security. It includes both offset-based and cursor-based pagination support
-//! with comprehensive validation to prevent expensive database queries.
+//! This module re-exports pagination types from nvisy-postgres and provides
+//! API-specific wrappers with validation for HTTP query parameters.
 
-use nvisy_postgres::query::Pagination as QueryPagination;
+use nvisy_postgres::types::{CursorPagination, OffsetPagination};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-/// Pagination parameters with performance and security validation.
+/// Default pagination limit.
+const DEFAULT_LIMIT: u32 = 20;
+/// Maximum pagination limit.
+const MAX_LIMIT: u32 = 100;
+/// Maximum offset for offset-based pagination.
+const MAX_OFFSET: u32 = 100_000;
+
+/// Offset-based pagination query parameters.
 ///
-/// `Pagination` allows clients to retrieve data in chunks, which helps manage
-/// large datasets by specifying how many records to skip and how many to fetch.
+/// Use this for admin dashboards or when users need to jump to specific pages.
+/// For infinite scroll or API iteration, prefer [`CursorQuery`].
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
-pub struct Pagination {
+#[serde(rename_all = "camelCase")]
+pub struct OffsetPaginationQuery {
     /// The number of records to skip before starting to return results.
-    ///
-    /// For performance reasons, this is limited to prevent expensive deep
-    /// pagination queries. Consider using cursor-based pagination for
-    /// better performance when dealing with large datasets.
-    ///
-    /// **Performance Impact**: High offsets require the database to scan
-    /// and skip many records, which can be slow for large tables.
-    #[validate(range(min = 0, max = 100000))]
+    #[validate(range(max = 100000))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
 
-    /// The maximum number of records to return in a single request.
-    ///
-    /// This is balanced between usability and performance. Very large limits
-    /// can cause memory pressure and slow response times.
-    #[validate(range(min = 1, max = 1000))]
+    /// The maximum number of records to return (1-100, default: 20).
+    #[validate(range(min = 1, max = 100))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 }
 
-impl Pagination {
-    /// Default pagination limit.
-    const DEFAULT_LIMIT: u32 = 10;
-    /// Default pagination offset.
-    const DEFAULT_OFFSET: u32 = 0;
-
-    /// Returns a new [`Pagination`].
-    #[inline]
-    pub fn new(offset: u32, limit: u32) -> Self {
-        Self {
-            offset: Some(offset),
-            limit: Some(limit),
-        }
-    }
-
-    /// Returns a [`Pagination`] with the given offset.
-    #[inline]
-    pub fn with_offset(mut self, offset: u32) -> Self {
-        self.offset = Some(offset);
-        self
-    }
-
-    /// Returns a [`Pagination`] with the given limit.
-    #[inline]
-    pub fn with_limit(mut self, limit: u32) -> Self {
-        self.limit = Some(limit);
-        self
-    }
-
+impl OffsetPaginationQuery {
     /// Returns the pagination offset.
+    #[inline]
     pub fn offset(&self) -> u32 {
-        self.offset.unwrap_or(Self::DEFAULT_OFFSET)
+        self.offset.unwrap_or(0).min(MAX_OFFSET)
     }
 
     /// Returns the pagination limit.
+    #[inline]
     pub fn limit(&self) -> u32 {
-        self.limit.unwrap_or(Self::DEFAULT_LIMIT)
+        self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
     }
 }
 
-impl From<Pagination> for QueryPagination {
-    fn from(pagination: Pagination) -> Self {
-        Self {
-            offset: pagination.offset() as i64,
-            limit: pagination.limit() as i64,
-        }
+impl From<OffsetPaginationQuery> for OffsetPagination {
+    fn from(query: OffsetPaginationQuery) -> Self {
+        Self::new(query.limit() as i64, query.offset() as i64)
+    }
+}
+
+/// Cursor-based pagination query parameters.
+///
+/// This is the preferred pagination method for API endpoints. It provides:
+/// - Consistent performance regardless of page depth
+/// - Stable results even when items are added/removed
+/// - Efficient "load more" / infinite scroll patterns
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorPaginationQuery {
+    /// The maximum number of records to return (1-100, default: 20).
+    #[validate(range(min = 1, max = 100))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+
+    /// Cursor pointing to the last item of the previous page.
+    /// Obtain this from the `nextCursor` field in the response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+}
+
+impl CursorPaginationQuery {
+    /// Returns the pagination limit.
+    #[inline]
+    pub fn limit(&self) -> u32 {
+        self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
+    }
+}
+
+impl From<CursorPaginationQuery> for CursorPagination {
+    fn from(query: CursorPaginationQuery) -> Self {
+        Self::from_cursor_string(query.limit() as i64, query.after.as_deref())
     }
 }

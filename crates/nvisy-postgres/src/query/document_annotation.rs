@@ -7,9 +7,8 @@ use diesel_async::RunQueryDsl;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation};
-use crate::types::AnnotationType;
+use crate::types::{AnnotationType, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document annotation database operations.
@@ -29,18 +28,18 @@ pub trait DocumentAnnotationRepository {
         annotation_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentAnnotation>>> + Send;
 
-    /// Finds all annotations for a specific document file.
-    fn find_annotations_by_file(
+    /// Lists all annotations for a specific document file with offset pagination.
+    fn offset_list_file_annotations(
         &mut self,
         file_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
-    /// Finds all annotations created by a specific account.
-    fn find_annotations_by_account(
+    /// Lists all annotations created by a specific account with offset pagination.
+    fn offset_list_account_annotations(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
     /// Finds annotations of a specific type for a document file.
@@ -48,7 +47,7 @@ pub trait DocumentAnnotationRepository {
         &mut self,
         file_id: Uuid,
         annotation_type: AnnotationType,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
     /// Updates an annotation with new content or metadata.
@@ -67,7 +66,7 @@ pub trait DocumentAnnotationRepository {
     /// Finds annotations created within the last 7 days.
     fn find_recent_annotations(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentAnnotation>>> + Send;
 
     /// Checks if an account owns a specific annotation.
@@ -113,10 +112,10 @@ impl DocumentAnnotationRepository for PgConnection {
         Ok(annotation)
     }
 
-    async fn find_annotations_by_file(
+    async fn offset_list_file_annotations(
         &mut self,
         file_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
         use schema::document_annotations::{self, dsl};
 
@@ -134,10 +133,10 @@ impl DocumentAnnotationRepository for PgConnection {
         Ok(annotations)
     }
 
-    async fn find_annotations_by_account(
+    async fn offset_list_account_annotations(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
         use schema::document_annotations::{self, dsl};
 
@@ -159,7 +158,7 @@ impl DocumentAnnotationRepository for PgConnection {
         &mut self,
         file_id: Uuid,
         annotation_type: AnnotationType,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
         use schema::document_annotations::{self, dsl};
 
@@ -211,7 +210,7 @@ impl DocumentAnnotationRepository for PgConnection {
 
     async fn find_recent_annotations(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentAnnotation>> {
         use schema::document_annotations::{self, dsl};
 

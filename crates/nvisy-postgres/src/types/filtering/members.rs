@@ -1,28 +1,10 @@
-//! Query options for workspace member queries.
+//! Filtering options for workspace member queries.
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::SortOrder;
 use crate::types::WorkspaceRole;
-
-/// Sorting options for workspace members.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum MemberSortBy {
-    /// Sort by display name.
-    Name(SortOrder),
-    /// Sort by join date.
-    Date(SortOrder),
-}
-
-impl Default for MemberSortBy {
-    fn default() -> Self {
-        Self::Date(SortOrder::Desc)
-    }
-}
 
 /// Filter options for workspace members.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

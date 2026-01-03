@@ -6,12 +6,12 @@ pub mod sql_types {
     pub struct ActionTokenType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "annotation_type"))]
-    pub struct AnnotationType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "activity_type"))]
     pub struct ActivityType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "annotation_type"))]
+    pub struct AnnotationType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "api_token_type"))]

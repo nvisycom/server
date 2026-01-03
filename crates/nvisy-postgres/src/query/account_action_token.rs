@@ -6,9 +6,8 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{AccountActionToken, NewAccountActionToken, UpdateAccountActionToken};
-use crate::types::ActionTokenType;
+use crate::types::{ActionTokenType, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account action token database operations.
@@ -70,7 +69,7 @@ pub trait AccountActionTokenRepository {
         &mut self,
         account_id: Uuid,
         include_used: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountActionToken>>> + Send;
 
     /// Lists tokens filtered by action type with comprehensive filtering.
@@ -79,7 +78,7 @@ pub trait AccountActionTokenRepository {
         action: ActionTokenType,
         include_used: bool,
         include_expired: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountActionToken>>> + Send;
 
     /// Invalidates all unused tokens for an account.
@@ -228,7 +227,7 @@ impl AccountActionTokenRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         include_used: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<AccountActionToken>> {
         use schema::account_action_tokens::{self, dsl};
 
@@ -252,7 +251,7 @@ impl AccountActionTokenRepository for PgConnection {
         action: ActionTokenType,
         include_used: bool,
         include_expired: bool,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<AccountActionToken>> {
         use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};

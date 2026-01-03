@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::query::WorkspaceIntegrationRunRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, Query};
-use crate::handler::request::{IntegrationRunPathParams, Pagination, WorkspacePathParams};
+use crate::handler::request::{IntegrationRunPathParams, OffsetPaginationQuery, WorkspacePathParams};
 use crate::handler::response::{ErrorResponse, IntegrationRun, IntegrationRuns};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -28,7 +28,7 @@ async fn list_workspace_runs(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(pagination): Query<Pagination>,
+    Query(offset_pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<IntegrationRuns>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace integration runs");
 
@@ -41,7 +41,7 @@ async fn list_workspace_runs(
         .await?;
 
     let runs = conn
-        .find_runs_by_workspace(path_params.workspace_id, pagination.into())
+        .find_runs_by_workspace(path_params.workspace_id, offset_pagination.into())
         .await?;
 
     let runs: IntegrationRuns = IntegrationRun::from_models(runs);
@@ -111,9 +111,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspace_id}/runs/",
+            "/workspaces/{workspaceId}/runs/",
             get_with(list_workspace_runs, list_workspace_runs_docs),
         )
-        .api_route("/runs/{run_id}", get_with(get_run, get_run_docs))
+        .api_route("/runs/{runId}", get_with(get_run, get_run_docs))
         .with_path_items(|item| item.tag("Integration Runs"))
 }

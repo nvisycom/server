@@ -7,9 +7,11 @@ use diesel_async::RunQueryDsl;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
-use crate::types::{InviteFilter, InviteSortBy, InviteStatus, SortOrder};
+use crate::types::{
+    Cursor, CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField,
+    InviteStatus, OffsetPagination, SortOrder,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace invitation database operations.
@@ -63,31 +65,24 @@ pub trait WorkspaceInviteRepository {
         updated_by_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
-    /// Lists all invitations for a specific workspace with pagination support.
-    fn list_workspace_invites(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
-
-    /// Lists invitations for a workspace with sorting and filtering options.
+    /// Lists invitations for a workspace with offset pagination.
     ///
     /// Supports filtering by role and sorting by email or date.
-    /// Note: Sorting by email requires a JOIN with accounts table.
-    fn list_workspace_invites_filtered(
+    fn offset_list_workspace_invites(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
-    /// Lists invitations for a specific email with pagination support.
-    fn list_invites_by_email(
+    /// Lists invitations for a workspace with cursor pagination.
+    fn cursor_list_workspace_invites(
         &mut self,
-        email: Option<&str>,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
+        proj_id: Uuid,
+        pagination: CursorPagination,
+        filter: InviteFilter,
+    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceInvite>>> + Send;
 
     /// Performs system-wide cleanup of expired invitations.
     fn cleanup_expired_invites(&mut self) -> impl Future<Output = PgResult<usize>> + Send;
@@ -102,7 +97,7 @@ pub trait WorkspaceInviteRepository {
     fn find_invites_by_status(
         &mut self,
         status: InviteStatus,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
     /// Finds invitations that are approaching their expiration time.
@@ -124,15 +119,6 @@ pub trait WorkspaceInviteRepository {
         &mut self,
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
-
-    /// Lists invitations for a workspace.
-    fn list_workspace_invites_with_filter(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
-        sort_by: InviteSortBy,
-        filter: InviteFilter,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
     /// Finds a pending invite by workspace and email.
     fn find_pending_invite_by_email(
@@ -247,30 +233,10 @@ impl WorkspaceInviteRepository for PgConnection {
         self.update_workspace_invite(invite_id, changes).await
     }
 
-    async fn list_workspace_invites(
+    async fn offset_list_workspace_invites(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
-    ) -> PgResult<Vec<WorkspaceInvite>> {
-        use schema::workspace_invites::dsl::*;
-
-        let invites = workspace_invites
-            .filter(workspace_id.eq(proj_id))
-            .select(WorkspaceInvite::as_select())
-            .order(created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(invites)
-    }
-
-    async fn list_workspace_invites_filtered(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> PgResult<Vec<WorkspaceInvite>> {
@@ -287,15 +253,17 @@ impl WorkspaceInviteRepository for PgConnection {
         }
 
         // Apply sorting
-        let query = match sort_by {
-            InviteSortBy::Email(SortOrder::Asc) => {
+        let query = match (sort_by.field, sort_by.order) {
+            (InviteSortField::Email, SortOrder::Asc) => {
                 query.order(workspace_invites::invitee_email.asc().nulls_last())
             }
-            InviteSortBy::Email(SortOrder::Desc) => {
+            (InviteSortField::Email, SortOrder::Desc) => {
                 query.order(workspace_invites::invitee_email.desc().nulls_last())
             }
-            InviteSortBy::Date(SortOrder::Asc) => query.order(workspace_invites::created_at.asc()),
-            InviteSortBy::Date(SortOrder::Desc) => {
+            (InviteSortField::Date, SortOrder::Asc) => {
+                query.order(workspace_invites::created_at.asc())
+            }
+            (InviteSortField::Date, SortOrder::Desc) => {
                 query.order(workspace_invites::created_at.desc())
             }
         };
@@ -311,29 +279,87 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invites)
     }
 
-    async fn list_invites_by_email(
+    async fn cursor_list_workspace_invites(
         &mut self,
-        email: Option<&str>,
-        pagination: Pagination,
-    ) -> PgResult<Vec<WorkspaceInvite>> {
+        proj_id: Uuid,
+        pagination: CursorPagination,
+        filter: InviteFilter,
+    ) -> PgResult<CursorPage<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
-        let mut query = workspace_invites.into_boxed();
+        // Get total count only if requested
+        let total = if pagination.include_count {
+            let mut count_query = workspace_invites
+                .filter(workspace_id.eq(proj_id))
+                .filter(invite_status.ne(InviteStatus::Canceled))
+                .into_boxed();
 
-        if let Some(e) = email {
-            query = query.filter(invitee_email.eq(e));
+            if let Some(role) = filter.role {
+                count_query = count_query.filter(invited_role.eq(role));
+            }
+
+            Some(
+                count_query
+                    .count()
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        // Build query with cursor
+        let mut query = workspace_invites
+            .filter(workspace_id.eq(proj_id))
+            .filter(invite_status.ne(InviteStatus::Canceled))
+            .into_boxed();
+
+        if let Some(role) = filter.role {
+            query = query.filter(invited_role.eq(role));
         }
 
-        let invites = query
+        if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            query = query.filter(
+                created_at
+                    .lt(cursor_ts)
+                    .or(created_at.eq(cursor_ts).and(id.lt(cursor.id))),
+            );
+        }
+
+        let fetch_limit = pagination.fetch_limit();
+        let mut items: Vec<WorkspaceInvite> = query
             .select(WorkspaceInvite::as_select())
-            .order(created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
+            .order((created_at.desc(), id.desc()))
+            .limit(fetch_limit)
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(invites)
+        let has_more = items.len() as i64 > pagination.limit;
+        if has_more {
+            items.pop();
+        }
+
+        let next_cursor = if has_more {
+            items.last().map(|i| {
+                Cursor {
+                    timestamp: i.created_at.into(),
+                    id: i.id,
+                }
+                .encode()
+            })
+        } else {
+            None
+        };
+
+        Ok(CursorPage {
+            items,
+            total,
+            has_more,
+            next_cursor,
+        })
     }
 
     async fn cleanup_expired_invites(&mut self) -> PgResult<usize> {
@@ -371,7 +397,7 @@ impl WorkspaceInviteRepository for PgConnection {
     async fn find_invites_by_status(
         &mut self,
         status: InviteStatus,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
@@ -436,17 +462,6 @@ impl WorkspaceInviteRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(invite)
-    }
-
-    async fn list_workspace_invites_with_filter(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
-        sort_by: InviteSortBy,
-        filter: InviteFilter,
-    ) -> PgResult<Vec<WorkspaceInvite>> {
-        self.list_workspace_invites_filtered(proj_id, pagination, sort_by, filter)
-            .await
     }
 
     async fn find_pending_invite_by_email(

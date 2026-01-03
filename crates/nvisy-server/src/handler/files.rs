@@ -23,10 +23,10 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    DownloadArchivedFilesRequest, DownloadMultipleFilesRequest, FilePathParams, ListFilesQuery,
-    Pagination, UpdateFile as UpdateFileRequest, WorkspacePathParams,
+    CursorPaginationQuery, DownloadArchivedFilesRequest, DownloadMultipleFilesRequest,
+    FilePathParams, ListFilesQuery, UpdateFile, WorkspacePathParams,
 };
-use crate::handler::response::{self, ErrorResponse, File, Files};
+use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
 use crate::utility::constants::MAX_FILE_SIZE;
@@ -45,7 +45,7 @@ async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<D
         })
 }
 
-/// Lists files in a workspace with optional filtering and sorting.
+/// Lists files in a workspace with cursor-based pagination.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -58,28 +58,28 @@ async fn list_files(
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
     Query(query): Query<ListFilesQuery>,
-    Query(pagination): Query<Pagination>,
-) -> Result<(StatusCode, Json<Files>)> {
+    Query(pagination): Query<CursorPaginationQuery>,
+) -> Result<(StatusCode, Json<FilesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing files");
 
     auth_claims
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewFiles)
         .await?;
 
-    let files = conn
-        .find_workspace_files_filtered(
+    let page = conn
+        .cursor_list_workspace_files(
             path_params.workspace_id,
             pagination.into(),
-            query.to_sort(),
             query.to_filter(),
         )
         .await?;
 
-    let response: Files = response::File::from_models(files);
+    let response = FilesPage::from_cursor_page(page);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        file_count = response.len(),
+        file_count = response.items.len(),
+        has_more = response.has_more,
         "Files listed"
     );
 
@@ -89,9 +89,9 @@ async fn list_files(
 fn list_files_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List files")
         .description(
-            "Lists all files in a workspace with optional filtering by format and sorting.",
+            "Lists files in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages.",
         )
-        .response::<200, Json<Files>>()
+        .response::<200, Json<FilesPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -329,7 +329,7 @@ async fn update_file(
     PgPool(mut conn): PgPool,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<UpdateFileRequest>,
+    ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating file");
 
@@ -659,11 +659,13 @@ async fn download_archived_files(
         conn.find_document_files_by_ids(&specific_ids).await?
     } else {
         // Get all workspace files using the workspace-scoped query
-        conn.find_document_files_by_workspace(
+        conn.cursor_list_workspace_files(
             path_params.workspace_id,
-            Pagination::default().into(),
+            Default::default(),
+            Default::default(),
         )
         .await?
+        .items
     };
 
     // Filter to only files belonging to this workspace and not deleted
@@ -780,20 +782,20 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspace_id}/files/",
+            "/workspaces/{workspaceId}/files/",
             get_with(list_files, list_files_docs).post_with(upload_file, upload_file_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/files/download",
+            "/workspaces/{workspaceId}/files/download",
             post_with(download_multiple_files, download_multiple_files_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/files/archive",
+            "/workspaces/{workspaceId}/files/archive",
             post_with(download_archived_files, download_archived_files_docs),
         )
         // File-specific routes (file ID is globally unique)
         .api_route(
-            "/files/{file_id}",
+            "/files/{fileId}",
             patch_with(update_file, update_file_docs)
                 .get_with(download_file, download_file_docs)
                 .delete_with(delete_file, delete_file_docs),

@@ -7,7 +7,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::Pagination;
+use crate::types::OffsetPagination;
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -36,7 +36,7 @@ pub trait WorkspaceRepository {
     fn find_workspaces_by_creator(
         &mut self,
         creator_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 
     /// Updates a workspace with partial changes.
@@ -55,7 +55,7 @@ pub trait WorkspaceRepository {
     /// Returns workspaces ordered by update time with most recent first.
     fn list_workspaces(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 
     /// Searches workspaces by name or description.
@@ -64,14 +64,14 @@ pub trait WorkspaceRepository {
     fn search_workspaces(
         &mut self,
         search_query: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 
     /// Finds workspaces with overlapping tags.
     fn find_workspaces_by_tags(
         &mut self,
         search_tags: &[String],
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 }
 
@@ -107,7 +107,7 @@ impl WorkspaceRepository for PgConnection {
     async fn find_workspaces_by_creator(
         &mut self,
         creator_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
@@ -158,7 +158,7 @@ impl WorkspaceRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_workspaces(&mut self, pagination: Pagination) -> PgResult<Vec<Workspace>> {
+    async fn list_workspaces(&mut self, pagination: OffsetPagination) -> PgResult<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
         let workspace_list = workspaces
@@ -177,7 +177,7 @@ impl WorkspaceRepository for PgConnection {
     async fn search_workspaces(
         &mut self,
         search_query: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
@@ -203,7 +203,7 @@ impl WorkspaceRepository for PgConnection {
     async fn find_workspaces_by_tags(
         &mut self,
         search_tags: &[String],
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 

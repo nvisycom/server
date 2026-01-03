@@ -7,9 +7,8 @@ use diesel_async::RunQueryDsl;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{NewWorkspaceIntegration, UpdateWorkspaceIntegration, WorkspaceIntegration};
-use crate::types::{IntegrationFilter, IntegrationStatus};
+use crate::types::{CursorPage, CursorPagination, IntegrationStatus, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace integration database operations.
@@ -42,20 +41,19 @@ pub trait WorkspaceIntegrationRepository {
         integration_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Lists all integrations for a specific workspace.
-    fn list_workspace_integrations(
+    /// Lists integrations for a workspace with offset pagination.
+    fn offset_list_workspace_integrations(
         &mut self,
         proj_id: Uuid,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
 
-    /// Lists integrations for a workspace with filtering options.
-    ///
-    /// Supports filtering by integration type.
-    fn list_workspace_integrations_filtered(
+    /// Lists integrations for a workspace with cursor pagination.
+    fn cursor_list_workspace_integrations(
         &mut self,
         proj_id: Uuid,
-        filter: IntegrationFilter,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
+        pagination: CursorPagination,
+    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceIntegration>>> + Send;
 
     /// Finds all integrations matching a specific sync status.
     fn find_integrations_by_status(
@@ -83,12 +81,6 @@ pub trait WorkspaceIntegrationRepository {
         integration_id: Uuid,
         _updated_by: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceIntegration>> + Send;
-
-    /// Lists only active integrations for a specific workspace.
-    fn list_active_integrations(
-        &mut self,
-        proj_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
 
     /// Updates the sync status of an integration.
     fn update_integration_status(
@@ -124,14 +116,14 @@ pub trait WorkspaceIntegrationRepository {
     fn list_integrations_by_creator(
         &mut self,
         creator_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
 
     /// Finds integrations matching a name pattern across all workspaces.
     fn find_integrations_by_name_pattern(
         &mut self,
         name_pattern: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegration>>> + Send;
 
     /// Gets integrations that have been recently updated within a time window.
@@ -215,9 +207,10 @@ impl WorkspaceIntegrationRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_workspace_integrations(
+    async fn offset_list_workspace_integrations(
         &mut self,
         proj_id: Uuid,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegration>> {
         use schema::workspace_integrations::dsl::*;
 
@@ -225,6 +218,8 @@ impl WorkspaceIntegrationRepository for PgConnection {
             .filter(workspace_id.eq(proj_id))
             .select(WorkspaceIntegration::as_select())
             .order(created_at.desc())
+            .limit(pagination.limit)
+            .offset(pagination.offset)
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -232,30 +227,61 @@ impl WorkspaceIntegrationRepository for PgConnection {
         Ok(integrations)
     }
 
-    async fn list_workspace_integrations_filtered(
+    async fn cursor_list_workspace_integrations(
         &mut self,
         proj_id: Uuid,
-        filter: IntegrationFilter,
-    ) -> PgResult<Vec<WorkspaceIntegration>> {
+        pagination: CursorPagination,
+    ) -> PgResult<CursorPage<WorkspaceIntegration>> {
         use schema::workspace_integrations::dsl::*;
 
-        let mut query = workspace_integrations
-            .filter(workspace_id.eq(proj_id))
-            .into_boxed();
+        let total = if pagination.include_count {
+            Some(
+                workspace_integrations
+                    .filter(workspace_id.eq(proj_id))
+                    .count()
+                    .get_result::<i64>(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
 
-        // Apply integration type filter
-        if let Some(int_type) = filter.integration_type {
-            query = query.filter(integration_type.eq(int_type));
-        }
+        let limit = pagination.limit + 1;
 
-        let integrations = query
-            .select(WorkspaceIntegration::as_select())
-            .order(created_at.desc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
+        let items: Vec<WorkspaceIntegration> = if let Some(cursor) = &pagination.after {
+            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-        Ok(integrations)
+            workspace_integrations
+                .filter(workspace_id.eq(proj_id))
+                .filter(
+                    created_at
+                        .lt(&cursor_time)
+                        .or(created_at.eq(&cursor_time).and(id.lt(cursor.id))),
+                )
+                .select(WorkspaceIntegration::as_select())
+                .order((created_at.desc(), id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            workspace_integrations
+                .filter(workspace_id.eq(proj_id))
+                .select(WorkspaceIntegration::as_select())
+                .order((created_at.desc(), id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
+
+        Ok(CursorPage::new(
+            items,
+            total,
+            pagination.limit,
+            |i: &WorkspaceIntegration| (i.created_at.into(), i.id),
+        ))
     }
 
     async fn find_integrations_by_status(
@@ -318,24 +344,6 @@ impl WorkspaceIntegrationRepository for PgConnection {
         };
 
         self.update_integration(integration_id, changes).await
-    }
-
-    async fn list_active_integrations(
-        &mut self,
-        proj_id: Uuid,
-    ) -> PgResult<Vec<WorkspaceIntegration>> {
-        use schema::workspace_integrations::dsl::*;
-
-        let integrations = workspace_integrations
-            .filter(workspace_id.eq(proj_id))
-            .filter(is_active.eq(true))
-            .select(WorkspaceIntegration::as_select())
-            .order(created_at.desc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(integrations)
     }
 
     async fn update_integration_status(
@@ -410,7 +418,7 @@ impl WorkspaceIntegrationRepository for PgConnection {
     async fn list_integrations_by_creator(
         &mut self,
         creator_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegration>> {
         use schema::workspace_integrations::dsl::*;
 
@@ -430,7 +438,7 @@ impl WorkspaceIntegrationRepository for PgConnection {
     async fn find_integrations_by_name_pattern(
         &mut self,
         name_pattern: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegration>> {
         use schema::workspace_integrations::dsl::*;
 

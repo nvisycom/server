@@ -19,7 +19,7 @@ use crate::extract::{
 };
 use crate::handler::request::{
     CreateInvite, GenerateInviteCode, InviteCodePathParams, InvitePathParams, ListInvitesQuery,
-    Pagination, ReplyInvite, WorkspacePathParams,
+    OffsetPaginationQuery, ReplyInvite, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Invite, InviteCode, InvitePreview, Invites, Member};
 use crate::handler::{ErrorKind, Result};
@@ -121,7 +121,7 @@ async fn list_invites(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     Query(query): Query<ListInvitesQuery>,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Invites>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace invitations");
 
@@ -130,7 +130,7 @@ async fn list_invites(
         .await?;
 
     let workspace_invites = conn
-        .list_workspace_invites_with_filter(
+        .offset_list_workspace_invites(
             path_params.workspace_id,
             pagination.into(),
             query.to_sort(),
@@ -515,28 +515,28 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspace_id}/invites/",
+            "/workspaces/{workspaceId}/invites/",
             post_with(send_invite, send_invite_docs).get_with(list_invites, list_invites_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/invites/code/",
+            "/workspaces/{workspaceId}/invites/code/",
             post_with(generate_invite_code, generate_invite_code_docs),
         )
         // Invite-specific routes (invite ID is globally unique)
         .api_route(
-            "/invites/{invite_id}/",
+            "/invites/{inviteId}/",
             delete_with(cancel_invite, cancel_invite_docs),
         )
         .api_route(
-            "/invites/{invite_id}/",
+            "/invites/{inviteId}/",
             post_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(
-            "/invites/code/{invite_code}/",
+            "/invites/code/{inviteCode}/",
             get_with(preview_invite_code, preview_invite_code_docs),
         )
         .api_route(
-            "/invites/code/{invite_code}/",
+            "/invites/code/{inviteCode}/",
             post_with(reply_to_invite_code, reply_to_invite_code_docs),
         )
         .with_path_items(|item| item.tag("Invites"))

@@ -11,7 +11,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    AnnotationPathParams, CreateAnnotation, FilePathParams, Pagination, UpdateAnnotation,
+    AnnotationPathParams, CreateAnnotation, FilePathParams, OffsetPaginationQuery, UpdateAnnotation,
 };
 use crate::handler::response::{Annotation, Annotations, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -107,7 +107,7 @@ async fn list_annotations(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Annotations>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing annotations");
 
@@ -118,7 +118,7 @@ async fn list_annotations(
         .await?;
 
     let annotations = conn
-        .find_annotations_by_file(path_params.file_id, pagination.into())
+        .offset_list_file_annotations(path_params.file_id, pagination.into())
         .await?;
 
     let annotations: Annotations = Annotation::from_models(annotations);
@@ -275,12 +275,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/files/{file_id}/annotations/",
+            "/files/{fileId}/annotations/",
             post_with(create_annotation, create_annotation_docs)
                 .get_with(list_annotations, list_annotations_docs),
         )
         .api_route(
-            "/annotations/{annotation_id}",
+            "/annotations/{annotationId}",
             get_with(get_annotation, get_annotation_docs)
                 .patch_with(update_annotation, update_annotation_docs)
                 .delete_with(delete_annotation, delete_annotation_docs),

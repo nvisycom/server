@@ -1,6 +1,8 @@
 //! Workspace member request types.
 
-use nvisy_postgres::types::{MemberFilter, MemberSortBy, SortOrder, WorkspaceRole};
+use nvisy_postgres::types::{
+    MemberFilter, MemberSortBy, MemberSortField, SortOrder, WorkspaceRole,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -43,16 +45,6 @@ pub struct ListMembersQuery {
     pub order: Option<SortOrder>,
 }
 
-/// Fields to sort members by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MemberSortField {
-    /// Sort by display name.
-    Name,
-    /// Sort by join date.
-    Date,
-}
-
 impl ListMembersQuery {
     /// Converts to filter model.
     pub fn to_filter(&self) -> MemberFilter {
@@ -65,9 +57,7 @@ impl ListMembersQuery {
     /// Converts to sort model.
     pub fn to_sort(&self) -> MemberSortBy {
         let order = self.order.unwrap_or_default();
-        match self.sort_by {
-            Some(MemberSortField::Name) => MemberSortBy::Name(order),
-            Some(MemberSortField::Date) | None => MemberSortBy::Date(order),
-        }
+        let field = self.sort_by.unwrap_or_default();
+        MemberSortBy::new(field, order)
     }
 }

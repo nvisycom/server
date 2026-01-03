@@ -9,7 +9,8 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::query::{Pagination, WorkspaceWebhookRepository};
+use nvisy_postgres::query::WorkspaceWebhookRepository;
+use nvisy_postgres::types::OffsetPagination;
 use nvisy_service::webhook::{WebhookRequest, WebhookService};
 use url::Url;
 
@@ -98,7 +99,7 @@ async fn list_webhooks(
         .await?;
 
     let webhooks = conn
-        .list_workspace_webhooks(path_params.workspace_id, Pagination::default())
+        .offset_list_workspace_webhooks(path_params.workspace_id, OffsetPagination::default())
         .await?;
 
     let webhooks: Webhooks = Webhook::from_models(webhooks);
@@ -329,19 +330,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspace_id}/webhooks/",
+            "/workspaces/{workspaceId}/webhooks/",
             post_with(create_webhook, create_webhook_docs)
                 .get_with(list_webhooks, list_webhooks_docs),
         )
         // Webhook-specific routes (webhook ID is globally unique)
         .api_route(
-            "/webhooks/{webhook_id}/",
+            "/webhooks/{webhookId}/",
             get_with(read_webhook, read_webhook_docs)
                 .put_with(update_webhook, update_webhook_docs)
                 .delete_with(delete_webhook, delete_webhook_docs),
         )
         .api_route(
-            "/webhooks/{webhook_id}/test/",
+            "/webhooks/{webhookId}/test/",
             post_with(test_webhook, test_webhook_docs),
         )
         .with_path_items(|item| item.tag("Webhooks"))

@@ -10,12 +10,11 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
 use nvisy_postgres::model::UpdateAccountApiToken;
-use nvisy_postgres::query::{
-    AccountApiTokenRepository, AccountRepository, Pagination as QueryPagination,
-};
+use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::types::OffsetPagination as QueryPagination;
 use uuid::Uuid;
 
-use super::request::{CreateApiToken, Pagination, TokenPathParams, UpdateApiToken};
+use super::request::{CreateApiToken, OffsetPaginationQuery, TokenPathParams, UpdateApiToken};
 use super::response::{ApiToken, ApiTokenWithJWT, ApiTokens, ErrorResponse};
 use crate::extract::{
     AuthClaims, AuthHeader, AuthState, Json, Path, PgPool, Query, TypedHeader, ValidateJson,
@@ -82,7 +81,7 @@ fn create_api_token_docs(op: TransformOperation) -> TransformOperation {
 async fn list_api_tokens(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<ApiTokens>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing API tokens");
 
@@ -248,7 +247,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_api_tokens, list_api_tokens_docs),
         )
         .api_route(
-            "/api-tokens/{token_id}/",
+            "/api-tokens/{tokenId}/",
             get_with(read_api_token, read_api_token_docs)
                 .patch_with(update_api_token, update_api_token_docs)
                 .delete_with(revoke_api_token, revoke_api_token_docs),

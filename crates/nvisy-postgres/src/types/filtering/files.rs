@@ -1,29 +1,8 @@
-//! Query options for document file queries.
+//! Filtering options for document file queries.
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use super::SortOrder;
-
-/// Sorting options for document files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum FileSortBy {
-    /// Sort by file name.
-    Name(SortOrder),
-    /// Sort by upload date.
-    Date(SortOrder),
-    /// Sort by file size.
-    Size(SortOrder),
-}
-
-impl Default for FileSortBy {
-    fn default() -> Self {
-        Self::Date(SortOrder::Desc)
-    }
-}
 
 /// File format categories for filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

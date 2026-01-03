@@ -6,9 +6,8 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
-use crate::types::{WebhookEvent, WebhookStatus};
+use crate::types::{Cursor, CursorPage, CursorPagination, OffsetPagination, WebhookStatus};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace webhook database operations.
@@ -27,26 +26,19 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
 
-    /// Lists all webhooks for a workspace.
-    fn list_workspace_webhooks(
+    /// Lists all webhooks for a workspace with offset pagination.
+    fn offset_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
 
-    /// Lists active webhooks for a workspace.
-    fn list_active_workspace_webhooks(
+    /// Lists all webhooks for a workspace with cursor pagination.
+    fn cursor_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
-
-    /// Finds webhooks subscribed to a specific event.
-    fn find_webhooks_for_event(
-        &mut self,
-        workspace_id: Uuid,
-        event: WebhookEvent,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
+        pagination: CursorPagination,
+    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceWebhook>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
@@ -127,10 +119,10 @@ impl WorkspaceWebhookRepository for PgConnection {
         Ok(webhook)
     }
 
-    async fn list_workspace_webhooks(
+    async fn offset_list_workspace_webhooks(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceWebhook>> {
         use schema::workspace_webhooks::dsl::*;
 
@@ -148,46 +140,75 @@ impl WorkspaceWebhookRepository for PgConnection {
         Ok(webhooks)
     }
 
-    async fn list_active_workspace_webhooks(
+    async fn cursor_list_workspace_webhooks(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
-    ) -> PgResult<Vec<WorkspaceWebhook>> {
+        pagination: CursorPagination,
+    ) -> PgResult<CursorPage<WorkspaceWebhook>> {
         use schema::workspace_webhooks::dsl::*;
 
-        let webhooks = workspace_webhooks
+        // Get total count only if requested
+        let total = if pagination.include_count {
+            Some(
+                workspace_webhooks
+                    .filter(workspace_id.eq(proj_id))
+                    .filter(deleted_at.is_null())
+                    .count()
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        // Build query with cursor
+        let mut query = workspace_webhooks
             .filter(workspace_id.eq(proj_id))
-            .filter(status.eq(WebhookStatus::Active))
             .filter(deleted_at.is_null())
+            .into_boxed();
+
+        if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            query = query.filter(
+                created_at
+                    .lt(cursor_ts)
+                    .or(created_at.eq(cursor_ts).and(id.lt(cursor.id))),
+            );
+        }
+
+        let fetch_limit = pagination.fetch_limit();
+        let mut items: Vec<WorkspaceWebhook> = query
             .select(WorkspaceWebhook::as_select())
-            .order(created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
+            .order((created_at.desc(), id.desc()))
+            .limit(fetch_limit)
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(webhooks)
-    }
+        let has_more = items.len() as i64 > pagination.limit;
+        if has_more {
+            items.pop();
+        }
 
-    async fn find_webhooks_for_event(
-        &mut self,
-        proj_id: Uuid,
-        event: WebhookEvent,
-    ) -> PgResult<Vec<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::*;
+        let next_cursor = if has_more {
+            items.last().map(|w| {
+                Cursor {
+                    timestamp: w.created_at.into(),
+                    id: w.id,
+                }
+                .encode()
+            })
+        } else {
+            None
+        };
 
-        let webhooks = workspace_webhooks
-            .filter(workspace_id.eq(proj_id))
-            .filter(status.eq(WebhookStatus::Active))
-            .filter(events.contains(vec![Some(event)]))
-            .filter(deleted_at.is_null())
-            .select(WorkspaceWebhook::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(webhooks)
+        Ok(CursorPage {
+            items,
+            total,
+            has_more,
+            next_cursor,
+        })
     }
 
     async fn update_workspace_webhook(

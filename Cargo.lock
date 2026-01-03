@@ -2489,6 +2489,7 @@ dependencies = [
 name = "nvisy-postgres"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bigdecimal",
  "clap",
  "deadpool",

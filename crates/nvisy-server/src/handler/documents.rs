@@ -15,7 +15,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CreateDocument, DocumentPathParams, Pagination, UpdateDocument, WorkspacePathParams,
+    CreateDocument, DocumentPathParams, OffsetPaginationQuery, UpdateDocument, WorkspacePathParams,
 };
 use crate::handler::response::{Document, Documents, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -81,7 +81,7 @@ async fn get_all_documents(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Documents>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
@@ -94,7 +94,7 @@ async fn get_all_documents(
         .await?;
 
     let documents = conn
-        .find_documents_by_workspace(path_params.workspace_id, pagination.into())
+        .offset_list_workspace_documents(path_params.workspace_id, pagination.into())
         .await?;
 
     let response: Documents = Document::from_models(documents);
@@ -265,12 +265,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspace_id}/documents",
+            "/workspaces/{workspaceId}/documents",
             post_with(create_document, create_document_docs)
                 .get_with(get_all_documents, get_all_documents_docs),
         )
         .api_route(
-            "/documents/{document_id}",
+            "/documents/{documentId}",
             get_with(get_document, get_document_docs)
                 .patch_with(update_document, update_document_docs)
                 .delete_with(delete_document, delete_document_docs),

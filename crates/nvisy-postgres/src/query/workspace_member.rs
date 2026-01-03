@@ -6,11 +6,13 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{
     Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
 };
-use crate::types::{MemberFilter, MemberSortBy, SortOrder, WorkspaceRole};
+use crate::types::{
+    Cursor, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
+    OffsetPagination, SortOrder, WorkspaceRole,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace member database operations.
@@ -46,26 +48,24 @@ pub trait WorkspaceMemberRepository {
         member_account_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Lists members of a workspace.
-    ///
-    /// Returns members ordered by role and creation date.
-    fn list_workspace_members(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
-
-    /// Lists members of a workspace with sorting and filtering options.
+    /// Lists members of a workspace with offset pagination.
     ///
     /// Supports filtering by role and 2FA status, and sorting by name or date.
-    /// Note: Sorting by name requires a JOIN with accounts table.
-    fn list_workspace_members_filtered(
+    fn offset_list_workspace_members(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+
+    /// Lists members of a workspace with cursor pagination.
+    fn cursor_list_workspace_members(
+        &mut self,
+        proj_id: Uuid,
+        pagination: CursorPagination,
+        filter: MemberFilter,
+    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceMember>>> + Send;
 
     /// Lists workspaces where a user is a member.
     ///
@@ -73,14 +73,14 @@ pub trait WorkspaceMemberRepository {
     fn list_user_workspaces(
         &mut self,
         user_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
 
     /// Lists user workspaces with full workspace details via JOIN.
     fn list_user_workspaces_with_details(
         &mut self,
         user_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<(Workspace, WorkspaceMember)>>> + Send;
 
     /// Gets a user's role in a workspace for permission checking.
@@ -106,13 +106,13 @@ pub trait WorkspaceMemberRepository {
         user_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
 
-    /// Lists members of a workspace with account details.
+    /// Lists members of a workspace with account details using offset pagination.
     ///
     /// Returns members with their associated account information (email, display name).
-    fn list_workspace_members_with_accounts(
+    fn offset_list_workspace_members_with_accounts(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
     ) -> impl Future<Output = PgResult<Vec<(WorkspaceMember, Account)>>> + Send;
@@ -207,30 +207,10 @@ impl WorkspaceMemberRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_workspace_members(
+    async fn offset_list_workspace_members(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
-    ) -> PgResult<Vec<WorkspaceMember>> {
-        use schema::workspace_members::dsl::*;
-
-        let members = workspace_members
-            .filter(workspace_id.eq(proj_id))
-            .select(WorkspaceMember::as_select())
-            .order((member_role.asc(), created_at.asc()))
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(members)
-    }
-
-    async fn list_workspace_members_filtered(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
     ) -> PgResult<Vec<WorkspaceMember>> {
@@ -251,11 +231,13 @@ impl WorkspaceMemberRepository for PgConnection {
         // doesn't have a 2FA field. Will be added when 2FA is implemented.
 
         // Apply sorting
-        let query = match sort_by {
-            MemberSortBy::Name(SortOrder::Asc) => query.order(accounts::display_name.asc()),
-            MemberSortBy::Name(SortOrder::Desc) => query.order(accounts::display_name.desc()),
-            MemberSortBy::Date(SortOrder::Asc) => query.order(workspace_members::created_at.asc()),
-            MemberSortBy::Date(SortOrder::Desc) => {
+        let query = match (sort_by.field, sort_by.order) {
+            (MemberSortField::Name, SortOrder::Asc) => query.order(accounts::display_name.asc()),
+            (MemberSortField::Name, SortOrder::Desc) => query.order(accounts::display_name.desc()),
+            (MemberSortField::Date, SortOrder::Asc) => {
+                query.order(workspace_members::created_at.asc())
+            }
+            (MemberSortField::Date, SortOrder::Desc) => {
                 query.order(workspace_members::created_at.desc())
             }
         };
@@ -271,10 +253,91 @@ impl WorkspaceMemberRepository for PgConnection {
         Ok(members)
     }
 
+    async fn cursor_list_workspace_members(
+        &mut self,
+        proj_id: Uuid,
+        pagination: CursorPagination,
+        filter: MemberFilter,
+    ) -> PgResult<CursorPage<WorkspaceMember>> {
+        use schema::workspace_members::dsl::*;
+
+        // Get total count only if requested
+        let total = if pagination.include_count {
+            let mut count_query = workspace_members
+                .filter(workspace_id.eq(proj_id))
+                .into_boxed();
+
+            if let Some(role) = filter.role {
+                count_query = count_query.filter(member_role.eq(role));
+            }
+
+            Some(
+                count_query
+                    .count()
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        // Build query with cursor
+        let mut query = workspace_members
+            .filter(workspace_id.eq(proj_id))
+            .into_boxed();
+
+        if let Some(role) = filter.role {
+            query = query.filter(member_role.eq(role));
+        }
+
+        if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            query = query.filter(
+                created_at
+                    .lt(cursor_ts)
+                    .or(created_at.eq(cursor_ts).and(account_id.lt(cursor.id))),
+            );
+        }
+
+        let fetch_limit = pagination.fetch_limit();
+        let mut items: Vec<WorkspaceMember> = query
+            .select(WorkspaceMember::as_select())
+            .order((created_at.desc(), account_id.desc()))
+            .limit(fetch_limit)
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        let has_more = items.len() as i64 > pagination.limit;
+        if has_more {
+            items.pop();
+        }
+
+        let next_cursor = if has_more {
+            items.last().map(|m| {
+                Cursor {
+                    timestamp: m.created_at.into(),
+                    id: m.account_id,
+                }
+                .encode()
+            })
+        } else {
+            None
+        };
+
+        Ok(CursorPage {
+            items,
+            total,
+            has_more,
+            next_cursor,
+        })
+    }
+
     async fn list_user_workspaces(
         &mut self,
         user_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceMember>> {
         use schema::workspace_members::dsl::*;
 
@@ -294,7 +357,7 @@ impl WorkspaceMemberRepository for PgConnection {
     async fn list_user_workspaces_with_details(
         &mut self,
         user_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<(Workspace, WorkspaceMember)>> {
         use schema::{workspace_members, workspaces};
 
@@ -367,10 +430,10 @@ impl WorkspaceMemberRepository for PgConnection {
         Ok(is_member)
     }
 
-    async fn list_workspace_members_with_accounts(
+    async fn offset_list_workspace_members_with_accounts(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
     ) -> PgResult<Vec<(WorkspaceMember, Account)>> {
@@ -386,11 +449,13 @@ impl WorkspaceMemberRepository for PgConnection {
             query = query.filter(workspace_members::member_role.eq(role));
         }
 
-        let query = match sort_by {
-            MemberSortBy::Name(SortOrder::Asc) => query.order(accounts::display_name.asc()),
-            MemberSortBy::Name(SortOrder::Desc) => query.order(accounts::display_name.desc()),
-            MemberSortBy::Date(SortOrder::Asc) => query.order(workspace_members::created_at.asc()),
-            MemberSortBy::Date(SortOrder::Desc) => {
+        let query = match (sort_by.field, sort_by.order) {
+            (MemberSortField::Name, SortOrder::Asc) => query.order(accounts::display_name.asc()),
+            (MemberSortField::Name, SortOrder::Desc) => query.order(accounts::display_name.desc()),
+            (MemberSortField::Date, SortOrder::Asc) => {
+                query.order(workspace_members::created_at.asc())
+            }
+            (MemberSortField::Date, SortOrder::Desc) => {
                 query.order(workspace_members::created_at.desc())
             }
         };

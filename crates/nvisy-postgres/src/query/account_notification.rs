@@ -7,9 +7,8 @@ use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
-use crate::types::NotificationEvent;
+use crate::types::{CursorPage, CursorPagination, NotificationEvent, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account notification database operations.
@@ -29,21 +28,31 @@ pub trait AccountNotificationRepository {
         notification_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<AccountNotification>>> + Send;
 
-    /// Finds active notifications for an account.
+    /// Lists active notifications for an account with offset pagination.
     ///
     /// Excludes expired notifications, ordered by creation date.
-    fn find_notifications_by_account(
+    fn offset_list_notifications(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountNotification>>> + Send;
+
+    /// Lists notifications for an account with cursor-based pagination.
+    ///
+    /// Excludes expired notifications, ordered by creation date descending.
+    /// Returns a page with total count and next cursor for pagination.
+    fn cursor_list_notifications(
+        &mut self,
+        account_id: Uuid,
+        pagination: CursorPagination,
+    ) -> impl Future<Output = PgResult<CursorPage<AccountNotification>>> + Send;
 
     /// Finds notifications filtered by type for an account.
     fn find_notifications_by_type(
         &mut self,
         account_id: Uuid,
         notification_type: NotificationEvent,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountNotification>>> + Send;
 
     /// Marks a notification as read with current timestamp.
@@ -122,10 +131,10 @@ impl AccountNotificationRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_notifications_by_account(
+    async fn offset_list_notifications(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<AccountNotification>> {
         use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};
@@ -142,11 +151,70 @@ impl AccountNotificationRepository for PgConnection {
             .map_err(PgError::from)
     }
 
+    async fn cursor_list_notifications(
+        &mut self,
+        acct_id: Uuid,
+        pagination: CursorPagination,
+    ) -> PgResult<CursorPage<AccountNotification>> {
+        use diesel::dsl::{count_star, now};
+        use schema::account_notifications::{self, dsl};
+
+        // Build base filter for non-expired notifications
+        let base_filter = dsl::account_id
+            .eq(acct_id)
+            .and(dsl::expires_at.is_null().or(dsl::expires_at.gt(now)));
+
+        // Get total count only if requested
+        let total = if pagination.include_count {
+            Some(
+                account_notifications::table
+                    .filter(base_filter)
+                    .select(count_star())
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        // Build query with cursor if provided
+        let items = if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            account_notifications::table
+                .filter(base_filter)
+                .filter(
+                    dsl::created_at
+                        .lt(cursor_ts)
+                        .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
+                )
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(pagination.fetch_limit())
+                .select(AccountNotification::as_select())
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            account_notifications::table
+                .filter(base_filter)
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(pagination.fetch_limit())
+                .select(AccountNotification::as_select())
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
+
+        Ok(CursorPage::new(items, total, pagination.limit, |n| {
+            (n.created_at.into(), n.id)
+        }))
+    }
+
     async fn find_notifications_by_type(
         &mut self,
         account_id: Uuid,
         notification_type: NotificationEvent,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<AccountNotification>> {
         use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};

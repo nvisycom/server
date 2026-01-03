@@ -8,9 +8,8 @@ use ipnet::IpNet;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
-use crate::types::ActivityType;
+use crate::types::{ActivityType, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Parameters for logging entity-specific activities.
@@ -40,18 +39,18 @@ pub trait WorkspaceActivityRepository {
         activity: NewWorkspaceActivity,
     ) -> impl Future<Output = PgResult<WorkspaceActivity>> + Send;
 
-    /// Lists activities for a specific workspace with pagination support.
-    fn list_workspace_activity(
+    /// Lists activities for a specific workspace with offset pagination.
+    fn offset_list_workspace_activity(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets recent activities across all workspaces for a specific user.
     fn get_user_recent_activity(
         &mut self,
         user_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets activities of a specific type within a workspace.
@@ -59,7 +58,7 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         proj_id: Uuid,
         activity_type_filter: ActivityType,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets recent activities for a user within a specified time window.
@@ -67,13 +66,6 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         user_id: Uuid,
         hours: i64,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
-
-    /// Gets all activities for a workspace with pagination support.
-    fn get_activities_by_workspace(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Logs integration-related activity using standardized parameters.
@@ -116,7 +108,7 @@ pub trait WorkspaceActivityRepository {
     fn get_system_activities(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets activities originating from a specific IP address for security analysis.
@@ -124,7 +116,7 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         proj_id: Uuid,
         ip_addr: IpNet,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Cleans up old activity logs to manage database size and performance.
@@ -151,10 +143,10 @@ impl WorkspaceActivityRepository for PgConnection {
         Ok(activity)
     }
 
-    async fn list_workspace_activity(
+    async fn offset_list_workspace_activity(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::dsl::*;
 
@@ -174,7 +166,7 @@ impl WorkspaceActivityRepository for PgConnection {
     async fn get_user_recent_activity(
         &mut self,
         user_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::dsl::*;
 
@@ -195,7 +187,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         proj_id: Uuid,
         activity_type_filter: ActivityType,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::dsl::*;
 
@@ -228,26 +220,6 @@ impl WorkspaceActivityRepository for PgConnection {
             .select(WorkspaceActivity::as_select())
             .order(created_at.desc())
             .limit(50)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(activities)
-    }
-
-    async fn get_activities_by_workspace(
-        &mut self,
-        proj_id: Uuid,
-        pagination: Pagination,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::dsl::*;
-
-        let activities = workspace_activities
-            .filter(workspace_id.eq(proj_id))
-            .select(WorkspaceActivity::as_select())
-            .order(created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -383,7 +355,7 @@ impl WorkspaceActivityRepository for PgConnection {
     async fn get_system_activities(
         &mut self,
         proj_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::dsl::*;
 
@@ -405,7 +377,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         proj_id: Uuid,
         ip_addr: IpNet,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::dsl::*;
 

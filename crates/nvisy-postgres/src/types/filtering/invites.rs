@@ -1,28 +1,10 @@
-//! Query options for workspace invite queries.
+//! Filtering options for workspace invite queries.
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::SortOrder;
 use crate::types::WorkspaceRole;
-
-/// Sorting options for workspace invites.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum InviteSortBy {
-    /// Sort by invitee email.
-    Email(SortOrder),
-    /// Sort by creation date.
-    Date(SortOrder),
-}
-
-impl Default for InviteSortBy {
-    fn default() -> Self {
-        Self::Date(SortOrder::Desc)
-    }
-}
 
 /// Filter options for workspace invites.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

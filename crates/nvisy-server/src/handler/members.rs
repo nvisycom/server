@@ -15,7 +15,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    ListMembersQuery, MemberPathParams, Pagination, UpdateMember, WorkspacePathParams,
+    ListMembersQuery, MemberPathParams, OffsetPaginationQuery, UpdateMember, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Member, Members};
 use crate::handler::{ErrorKind, Result};
@@ -40,7 +40,7 @@ async fn list_members(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     Query(query): Query<ListMembersQuery>,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Members>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
 
@@ -49,7 +49,7 @@ async fn list_members(
         .await?;
 
     let workspace_members = conn
-        .list_workspace_members_with_accounts(
+        .offset_list_workspace_members_with_accounts(
             path_params.workspace_id,
             pagination.into(),
             query.to_sort(),
@@ -336,19 +336,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspace_id}/members/",
+            "/workspaces/{workspaceId}/members/",
             get_with(list_members, list_members_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/members/leave",
+            "/workspaces/{workspaceId}/members/leave",
             post_with(leave_workspace, leave_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/members/{account_id}/",
+            "/workspaces/{workspaceId}/members/{accountId}/",
             get_with(get_member, get_member_docs).delete_with(delete_member, delete_member_docs),
         )
         .api_route(
-            "/workspaces/{workspace_id}/members/{account_id}/role",
+            "/workspaces/{workspaceId}/members/{accountId}/role",
             patch_with(update_member, update_member_docs),
         )
         .with_path_items(|item| item.tag("Members"))

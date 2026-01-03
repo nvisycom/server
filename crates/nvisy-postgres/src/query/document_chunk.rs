@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use pgvector::Vector;
 use uuid::Uuid;
 
-use super::Pagination;
+use crate::types::OffsetPagination;
 use crate::model::{DocumentChunk, NewDocumentChunk, UpdateDocumentChunk};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -38,7 +38,7 @@ pub trait DocumentChunkRepository {
     fn list_file_chunks(
         &mut self,
         file_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentChunk>>> + Send;
 
     /// Lists all chunks for a file ordered by chunk index.
@@ -75,7 +75,7 @@ pub trait DocumentChunkRepository {
     /// Finds chunks without embeddings.
     fn find_chunks_without_embeddings(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentChunk>>> + Send;
 
     /// Finds chunks without embeddings for a specific file.
@@ -163,7 +163,7 @@ impl DocumentChunkRepository for PgConnection {
     async fn list_file_chunks(
         &mut self,
         file_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentChunk>> {
         use schema::document_chunks::{self, dsl};
 
@@ -259,7 +259,7 @@ impl DocumentChunkRepository for PgConnection {
 
     async fn find_chunks_without_embeddings(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentChunk>> {
         use schema::document_chunks::{self, dsl};
 

@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
 use uuid::Uuid;
 
-use super::Pagination;
+use crate::types::OffsetPagination;
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -57,14 +57,14 @@ pub trait AccountApiTokenRepository {
     fn list_account_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
 
     /// Lists all non-deleted tokens for an account including expired ones.
     fn list_all_account_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountApiToken>>> + Send;
 
     /// Soft-deletes all expired tokens system-wide.
@@ -160,7 +160,7 @@ impl AccountApiTokenRepository for PgConnection {
     async fn list_account_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<AccountApiToken>> {
         use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
@@ -181,7 +181,7 @@ impl AccountApiTokenRepository for PgConnection {
     async fn list_all_account_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<AccountApiToken>> {
         use schema::account_api_tokens::{self, dsl};
 

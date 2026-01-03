@@ -14,7 +14,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CreateIntegration, IntegrationPathParams, ListIntegrationsQuery, Pagination, UpdateIntegration,
+    CreateIntegration, IntegrationPathParams, OffsetPaginationQuery, UpdateIntegration,
     UpdateIntegrationCredentials, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Integration, Integrations};
@@ -102,8 +102,7 @@ async fn list_integrations(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(query): Query<ListIntegrationsQuery>,
-    Query(_pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Integrations>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace integrations");
 
@@ -116,7 +115,7 @@ async fn list_integrations(
         .await?;
 
     let integrations = conn
-        .list_workspace_integrations_filtered(path_params.workspace_id, query.to_filter())
+        .offset_list_workspace_integrations(path_params.workspace_id, pagination.into())
         .await?;
 
     let integrations: Integrations = Integration::from_models(integrations);
@@ -364,19 +363,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspace_id}/integrations/",
+            "/workspaces/{workspaceId}/integrations/",
             post_with(create_integration, create_integration_docs)
                 .get_with(list_integrations, list_integrations_docs),
         )
         // Integration-specific routes (integration ID is globally unique)
         .api_route(
-            "/integrations/{integration_id}/",
+            "/integrations/{integrationId}/",
             get_with(read_integration, read_integration_docs)
                 .put_with(update_integration, update_integration_docs)
                 .delete_with(delete_integration, delete_integration_docs),
         )
         .api_route(
-            "/integrations/{integration_id}/credentials/",
+            "/integrations/{integrationId}/credentials/",
             patch_with(
                 update_integration_credentials,
                 update_integration_credentials_docs,

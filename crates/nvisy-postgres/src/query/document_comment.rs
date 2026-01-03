@@ -6,8 +6,8 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
+use crate::types::OffsetPagination;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document comment database operations.
@@ -27,25 +27,25 @@ pub trait DocumentCommentRepository {
         comment_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<DocumentComment>>> + Send;
 
-    /// Finds all comments for a specific file.
-    fn find_comments_by_file(
+    /// Lists all comments for a specific file with offset pagination.
+    fn offset_list_file_comments(
         &mut self,
         file_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
-    /// Finds all comments created by a specific account.
-    fn find_comments_by_account(
+    /// Lists all comments created by a specific account with offset pagination.
+    fn offset_list_account_comments(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
     /// Finds comments where an account was mentioned or replied to.
     fn find_comments_mentioning_account(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentComment>>> + Send;
 
     /// Updates a comment with new content and metadata.
@@ -98,10 +98,10 @@ impl DocumentCommentRepository for PgConnection {
         Ok(comment)
     }
 
-    async fn find_comments_by_file(
+    async fn offset_list_file_comments(
         &mut self,
         file_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentComment>> {
         use schema::document_comments::{self, dsl};
 
@@ -119,10 +119,10 @@ impl DocumentCommentRepository for PgConnection {
         Ok(comments)
     }
 
-    async fn find_comments_by_account(
+    async fn offset_list_account_comments(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentComment>> {
         use schema::document_comments::{self, dsl};
 
@@ -143,7 +143,7 @@ impl DocumentCommentRepository for PgConnection {
     async fn find_comments_mentioning_account(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<DocumentComment>> {
         use schema::document_comments::{self, dsl};
 

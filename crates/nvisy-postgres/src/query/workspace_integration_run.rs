@@ -7,11 +7,10 @@ use diesel_async::RunQueryDsl;
 use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{
     NewWorkspaceIntegrationRun, UpdateWorkspaceIntegrationRun, WorkspaceIntegrationRun,
 };
-use crate::types::IntegrationStatus;
+use crate::types::{IntegrationStatus, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace run database operations.
@@ -35,14 +34,14 @@ pub trait WorkspaceIntegrationRunRepository {
     fn find_runs_by_workspace(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Finds all runs for a specific integration.
     fn find_runs_by_integration(
         &mut self,
         integration_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Finds runs matching a specific status for a workspace.
@@ -50,7 +49,7 @@ pub trait WorkspaceIntegrationRunRepository {
         &mut self,
         workspace_id: Uuid,
         status: IntegrationStatus,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Finds runs of a specific type for a workspace.
@@ -58,21 +57,21 @@ pub trait WorkspaceIntegrationRunRepository {
         &mut self,
         workspace_id: Uuid,
         run_type: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Finds all runs triggered by a specific account.
     fn find_runs_by_account(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Finds all failed runs for a workspace.
     fn find_failed_runs(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Finds all currently in-progress runs.
@@ -87,7 +86,7 @@ pub trait WorkspaceIntegrationRunRepository {
     fn find_recent_runs(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceIntegrationRun>>> + Send;
 
     /// Updates a run with new status, results, or metadata.
@@ -151,7 +150,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
     async fn find_runs_by_workspace(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 
@@ -171,7 +170,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
     async fn find_runs_by_integration(
         &mut self,
         integration_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 
@@ -192,7 +191,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         status: IntegrationStatus,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 
@@ -214,7 +213,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         run_type: &str,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 
@@ -235,7 +234,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
     async fn find_runs_by_account(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 
@@ -255,7 +254,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
     async fn find_failed_runs(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 
@@ -301,7 +300,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
     async fn find_recent_runs(
         &mut self,
         workspace_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceIntegrationRun>> {
         use schema::workspace_integration_runs::{self, dsl};
 

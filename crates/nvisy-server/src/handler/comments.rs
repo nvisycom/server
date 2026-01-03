@@ -10,7 +10,7 @@ use nvisy_postgres::query::{DocumentCommentRepository, DocumentFileRepository};
 
 use crate::extract::{AuthState, Json, Path, PgPool, Query, ValidateJson};
 use crate::handler::request::{
-    CreateComment, FileCommentPathParams, FilePathParams, Pagination, UpdateComment,
+    CreateComment, FileCommentPathParams, FilePathParams, OffsetPaginationQuery, UpdateComment,
 };
 use crate::handler::response::{Comment, Comments, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
@@ -84,7 +84,7 @@ async fn list_comments(
     PgPool(mut conn): PgPool,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Comments>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing comments");
 
@@ -92,7 +92,7 @@ async fn list_comments(
     let _ = find_file(&mut conn, path_params.file_id).await?;
 
     let comments = conn
-        .find_comments_by_file(path_params.file_id, pagination.into())
+        .offset_list_file_comments(path_params.file_id, pagination.into())
         .await?;
 
     tracing::debug!(
@@ -254,11 +254,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/files/{file_id}/comments",
+            "/files/{fileId}/comments",
             post_with(post_comment, post_comment_docs).get_with(list_comments, list_comments_docs),
         )
         .api_route(
-            "/files/{file_id}/comments/{comment_id}",
+            "/files/{fileId}/comments/{commentId}",
             patch_with(update_comment, update_comment_docs)
                 .delete_with(delete_comment, delete_comment_docs),
         )

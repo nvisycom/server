@@ -9,7 +9,7 @@ use nvisy_postgres::query::AccountNotificationRepository;
 
 use crate::extract::{AuthState, Json, PgPool, Query};
 use crate::handler::Result;
-use crate::handler::request::Pagination;
+use crate::handler::request::OffsetPaginationQuery;
 use crate::handler::response::{ErrorResponse, Notification, Notifications, UnreadStatus};
 use crate::service::ServiceState;
 
@@ -24,12 +24,12 @@ const TRACING_TARGET: &str = "nvisy_server::handler::notifications";
 async fn list_notifications(
     PgPool(mut conn): PgPool,
     AuthState(auth_state): AuthState,
-    Query(pagination): Query<Pagination>,
+    Query(pagination): Query<OffsetPaginationQuery>,
 ) -> Result<(StatusCode, Json<Notifications>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing notifications");
 
     let notifications = conn
-        .find_notifications_by_account(auth_state.account_id, pagination.into())
+        .offset_list_notifications(auth_state.account_id, pagination.into())
         .await?;
 
     // Mark all unread notifications as read
