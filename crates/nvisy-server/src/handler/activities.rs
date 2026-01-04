@@ -4,13 +4,15 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceActivityRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, Query};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query};
 use crate::handler::Result;
-use crate::handler::request::{OffsetPaginationQuery, WorkspacePathParams};
-use crate::handler::response::{Activities, Activity, ErrorResponse};
+use crate::handler::request::{CursorPagination, WorkspacePathParams};
+use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
 use crate::service::ServiceState;
 
 /// Tracing target for activity operations.
@@ -25,12 +27,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::activities";
     )
 )]
 async fn list_activities(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<Activities>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<ActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -40,25 +44,25 @@ async fn list_activities(
         )
         .await?;
 
-    let activities = conn
-        .offset_list_workspace_activity(path_params.workspace_id, pagination.into())
+    let page = conn
+        .cursor_list_workspace_activity(path_params.workspace_id, pagination.into())
         .await?;
 
-    let activities: Activities = Activity::from_models(activities);
+    let response = ActivitiesPage::from_cursor_page(page, Activity::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        activity_count = activities.len(),
+        activity_count = response.items.len(),
         "Workspace activities listed"
     );
 
-    Ok((StatusCode::OK, Json(activities)))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_activities_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspace activities")
         .description("Returns all activity log entries for a workspace.")
-        .response::<200, Json<Activities>>()
+        .response::<200, Json<ActivitiesPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }

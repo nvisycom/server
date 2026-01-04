@@ -9,11 +9,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
 use crate::handler::utility::{flatten_events, parse_headers};
 
 /// Workspace webhook response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Webhook {
     /// Unique webhook identifier.
@@ -43,7 +44,6 @@ pub struct Webhook {
 }
 
 impl Webhook {
-    /// Creates a Webhook response from a database model.
     pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
         Self {
             webhook_id: webhook.id,
@@ -60,19 +60,14 @@ impl Webhook {
             updated_at: webhook.updated_at.into(),
         }
     }
-
-    /// Creates a list of Webhook responses from database models.
-    pub fn from_models(models: Vec<model::WorkspaceWebhook>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
-    }
 }
 
-/// Response for listing workspace webhooks.
-pub type Webhooks = Vec<Webhook>;
+/// Paginated response for workspace webhooks.
+pub type WebhooksPage = Page<Webhook>;
 
 /// Result of a webhook delivery attempt.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebhookResult {
     /// HTTP status code returned by the webhook endpoint.

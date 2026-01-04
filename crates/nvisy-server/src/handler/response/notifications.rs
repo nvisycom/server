@@ -7,6 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Response type for an account notification.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -37,8 +39,8 @@ pub struct Notification {
     pub expires_at: Option<Timestamp>,
 }
 
-/// List of notifications.
-pub type Notifications = Vec<Notification>;
+/// Paginated list of notifications.
+pub type NotificationsPage = Page<Notification>;
 
 /// Response type for unread notifications status.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -49,7 +51,6 @@ pub struct UnreadStatus {
 }
 
 impl Notification {
-    /// Creates a Notification response from a database model.
     pub fn from_model(notification: AccountNotification) -> Self {
         Self {
             id: notification.id,
@@ -63,10 +64,5 @@ impl Notification {
             created_at: notification.created_at.into(),
             expires_at: notification.expires_at.map(Into::into),
         }
-    }
-
-    /// Creates a list of Notification responses from database models.
-    pub fn from_models(models: Vec<AccountNotification>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
     }
 }

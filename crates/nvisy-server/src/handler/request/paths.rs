@@ -98,16 +98,14 @@ pub struct VersionPathParams {
     pub version_id: Uuid,
 }
 
-/// Path parameters for file comment operations (file ID only).
+/// Path parameters for comment operations (comment ID only).
 ///
-/// Since file IDs are globally unique UUIDs, workspace context can be
-/// derived from the file record itself for authorization purposes.
+/// Since comment IDs are globally unique UUIDs, file/workspace context can be
+/// derived from the comment record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct FileCommentPathParams {
-    /// Unique identifier of the file.
-    pub file_id: Uuid,
+pub struct CommentPathParams {
     /// Unique identifier of the comment.
     pub comment_id: Uuid,
 }

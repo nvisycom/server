@@ -7,9 +7,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Workspace response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     /// ID of the workspace.
@@ -73,12 +75,12 @@ impl Workspace {
     }
 }
 
-/// Response for listing all workspaces associated with the account.
-pub type Workspaces = Vec<Workspace>;
+/// Paginated list of workspaces.
+pub type WorkspacesPage = Page<Workspace>;
 
 /// Response for notification settings within a workspace.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationSettings {
     /// Whether to send email notifications.

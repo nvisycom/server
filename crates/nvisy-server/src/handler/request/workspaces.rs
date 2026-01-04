@@ -52,18 +52,6 @@ impl CreateWorkspace {
     }
 }
 
-/// Request payload for workspace archival or restoration.
-///
-/// Used when archiving a workspace to record the reason for the action.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchiveWorkspace {
-    /// Reason for archiving (1-200 characters).
-    #[validate(length(min = 1, max = 200))]
-    pub reason: String,
-}
-
 /// Request payload to update an existing workspace.
 ///
 /// All fields are optional; only provided fields will be updated.
@@ -84,8 +72,6 @@ pub struct UpdateWorkspace {
 }
 
 impl UpdateWorkspace {
-    /// Converts this request into an [`UpdateWorkspaceModel`] for database update.
-    #[inline]
     pub fn into_model(self) -> UpdateWorkspaceModel {
         UpdateWorkspaceModel {
             display_name: self.display_name,
@@ -111,8 +97,6 @@ pub struct UpdateNotificationSettings {
 }
 
 impl UpdateNotificationSettings {
-    /// Converts this request into an [`UpdateWorkspaceMember`] for database update.
-    #[inline]
     pub fn into_model(self) -> UpdateWorkspaceMember {
         UpdateWorkspaceMember {
             notify_via_email: self.notify_via_email,

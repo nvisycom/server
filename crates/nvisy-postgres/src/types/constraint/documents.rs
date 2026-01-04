@@ -21,8 +21,6 @@ pub enum DocumentConstraints {
     // Document metadata constraints
     #[strum(serialize = "documents_metadata_size")]
     MetadataSize,
-    #[strum(serialize = "documents_settings_size")]
-    SettingsSize,
 
     // Document chronological constraints
     #[strum(serialize = "documents_updated_after_created")]
@@ -45,8 +43,7 @@ impl DocumentConstraints {
             DocumentConstraints::DisplayNameLength
             | DocumentConstraints::DescriptionLengthMax
             | DocumentConstraints::TagsCountMax
-            | DocumentConstraints::MetadataSize
-            | DocumentConstraints::SettingsSize => ConstraintCategory::Validation,
+            | DocumentConstraints::MetadataSize => ConstraintCategory::Validation,
 
             DocumentConstraints::UpdatedAfterCreated
             | DocumentConstraints::DeletedAfterCreated

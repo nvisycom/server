@@ -77,8 +77,6 @@ pub struct UpdateIntegration {
 }
 
 impl UpdateIntegration {
-    /// Converts this request into an [`UpdateWorkspaceIntegration`].
-    #[inline]
     pub fn into_model(self) -> UpdateWorkspaceIntegration {
         UpdateWorkspaceIntegration {
             integration_name: self.integration_name,

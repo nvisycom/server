@@ -28,7 +28,7 @@ impl std::fmt::Debug for OllamaClientInner {
 /// Ollama client for interacting with Ollama API services.
 ///
 /// This client wraps the `ollama-rs` crate and implements the
-/// [`InferenceProvider`] trait from nvisy-service.
+/// `InferenceProvider` trait from nvisy-service.
 ///
 /// # Examples
 ///
@@ -40,8 +40,6 @@ impl std::fmt::Debug for OllamaClientInner {
 ///     .with_vlm_model("llava");
 /// let client = OllamaClient::new(config)?;
 /// ```
-///
-/// [`InferenceProvider`]: nvisy_service::InferenceProvider
 #[derive(Clone, Debug)]
 pub struct OllamaClient {
     inner: Arc<OllamaClientInner>,

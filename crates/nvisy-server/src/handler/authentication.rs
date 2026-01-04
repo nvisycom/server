@@ -10,14 +10,14 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
 use jiff::{Span, Timestamp};
-use nvisy_postgres::JiffTimestamp;
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::{ApiTokenType, HasDeletedAt};
+use nvisy_postgres::{JiffTimestamp, PgClient};
 
 use super::request::{Login, Signup};
 use super::response::{AuthToken, ErrorResponse};
-use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, PgPool, TypedHeader, ValidateJson};
+use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
     PasswordHasher, PasswordStrength, ServiceState, SessionKeys, UserAgentParser,
@@ -50,7 +50,7 @@ fn create_auth_header(
 /// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
@@ -59,6 +59,7 @@ async fn login(
 ) -> Result<(StatusCode, Json<AuthToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Login attempt");
 
+    let mut conn = pg_client.get_connection().await?;
     let account = conn.find_account_by_email(&request.email_address).await?;
 
     // Always perform password hashing to prevent timing attacks
@@ -107,14 +108,14 @@ async fn login(
     let new_token = NewAccountApiToken {
         account_id: account.id,
         name: ua_parser.parse(user_agent.as_str()),
-        ip_address: crate::utility::placeholder_ip(),
-        user_agent: user_agent.to_string(),
+        ip_address: Some(crate::utility::placeholder_ip()),
+        user_agent: Some(user_agent.to_string()),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
         expired_at: Some(expired_at.into()),
     };
 
-    let account_api_token = conn.create_token(new_token).await?;
+    let account_api_token = conn.create_account_api_token(new_token).await?;
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
@@ -149,7 +150,7 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     State(auth_keys): State<SessionKeys>,
@@ -163,6 +164,8 @@ async fn signup(
     let user_inputs = build_password_user_inputs(&request.display_name, &request.email_address);
     password_strength.validate_password(&request.password, &user_inputs)?;
     let password_hash = auth_hasher.hash_password(&request.password)?;
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Check if email already exists
     if conn.email_exists(&request.email_address).await? {
@@ -194,13 +197,13 @@ async fn signup(
     let new_token = NewAccountApiToken {
         account_id: account.id,
         name: ua_parser.parse(&user_agent_str),
-        ip_address: crate::utility::placeholder_ip(),
-        user_agent: user_agent_str,
+        ip_address: Some(crate::utility::placeholder_ip()),
+        user_agent: Some(user_agent_str),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
         expired_at,
     };
-    let account_api_token = conn.create_token(new_token).await?;
+    let account_api_token = conn.create_account_api_token(new_token).await?;
 
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
@@ -240,11 +243,19 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
         token_id = %auth_claims.token_id,
     )
 )]
-async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> Result<StatusCode> {
+async fn logout(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_claims): AuthState,
+) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Logging out");
 
+    let mut conn = pg_client.get_connection().await?;
+
     // Verify API token exists before attempting to delete
-    let token_exists = conn.find_token_by_id(auth_claims.token_id).await?.is_some();
+    let token_exists = conn
+        .find_account_api_token_by_id(auth_claims.token_id)
+        .await?
+        .is_some();
 
     if !token_exists {
         tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent token");
@@ -252,7 +263,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
     }
 
     // Delete the API token
-    let deleted = conn.delete_token_by_id(auth_claims.token_id).await?;
+    let deleted = conn.delete_account_api_token(auth_claims.token_id).await?;
 
     if deleted {
         tracing::info!(target: TRACING_TARGET, "Logout successful");
@@ -262,7 +273,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
     tokio::spawn(async move {
-        if let Err(e) = conn.cleanup_expired_tokens().await {
+        if let Err(e) = conn.cleanup_expired_account_api_tokens().await {
             tracing::debug!(
                 target: TRACING_TARGET_CLEANUP,
                 error = %e,

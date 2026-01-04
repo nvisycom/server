@@ -20,7 +20,7 @@ pub struct DocumentAnnotation {
     pub account_id: Uuid,
     /// Annotation text content.
     pub content: String,
-    /// Type of annotation (note, highlight, comment).
+    /// Type of annotation (note, highlight).
     pub annotation_type: AnnotationType,
     /// Extended metadata including position/location.
     pub metadata: serde_json::Value,
@@ -91,11 +91,6 @@ impl DocumentAnnotation {
     /// Returns whether this is a highlight annotation.
     pub fn is_highlight(&self) -> bool {
         self.annotation_type.is_highlight()
-    }
-
-    /// Returns whether this is a comment annotation.
-    pub fn is_comment(&self) -> bool {
-        self.annotation_type.is_comment()
     }
 
     /// Returns the content length.

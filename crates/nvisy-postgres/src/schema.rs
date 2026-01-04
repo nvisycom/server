@@ -22,10 +22,6 @@ pub mod sql_types {
     pub struct ContentSegmentation;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "document_status"))]
-    pub struct DocumentStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "integration_status"))]
     pub struct IntegrationStatus;
 
@@ -72,11 +68,9 @@ diesel::table! {
         account_id -> Uuid,
         action_type -> ActionTokenType,
         action_data -> Jsonb,
-        ip_address -> Inet,
-        user_agent -> Text,
+        ip_address -> Nullable<Inet>,
+        user_agent -> Nullable<Text>,
         device_id -> Nullable<Text>,
-        attempt_count -> Int4,
-        max_attempts -> Int4,
         issued_at -> Timestamptz,
         expired_at -> Timestamptz,
         used_at -> Nullable<Timestamptz>,
@@ -93,8 +87,8 @@ diesel::table! {
         account_id -> Uuid,
         name -> Text,
         session_type -> ApiTokenType,
-        ip_address -> Inet,
-        user_agent -> Text,
+        ip_address -> Nullable<Inet>,
+        user_agent -> Nullable<Text>,
         is_remembered -> Bool,
         issued_at -> Timestamptz,
         expired_at -> Nullable<Timestamptz>,
@@ -176,9 +170,8 @@ diesel::table! {
         content_sha256 -> Bytea,
         content_size -> Int4,
         token_count -> Int4,
-        embedding -> Nullable<Vector>,
-        embedding_model -> Nullable<Text>,
-        embedded_at -> Nullable<Timestamptz>,
+        embedding -> Vector,
+        embedding_model -> Text,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -240,7 +233,6 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::DocumentStatus;
 
     documents (id) {
         id -> Uuid,
@@ -249,9 +241,7 @@ diesel::table! {
         display_name -> Text,
         description -> Nullable<Text>,
         tags -> Array<Nullable<Text>>,
-        status -> DocumentStatus,
         metadata -> Jsonb,
-        settings -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
@@ -264,7 +254,7 @@ diesel::table! {
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
-        id -> Int8,
+        id -> Uuid,
         workspace_id -> Uuid,
         account_id -> Nullable<Uuid>,
         activity_type -> ActivityType,

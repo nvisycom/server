@@ -7,6 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Response type for a document annotation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -27,11 +29,10 @@ pub struct Annotation {
     pub updated_at: Timestamp,
 }
 
-/// List of annotations.
-pub type Annotations = Vec<Annotation>;
+/// Paginated list of annotations.
+pub type AnnotationsPage = Page<Annotation>;
 
 impl Annotation {
-    /// Creates an Annotation response from a database model.
     pub fn from_model(annotation: DocumentAnnotation) -> Self {
         Self {
             id: annotation.id,
@@ -42,10 +43,5 @@ impl Annotation {
             created_at: annotation.created_at.into(),
             updated_at: annotation.updated_at.into(),
         }
-    }
-
-    /// Creates a list of Annotation responses from database models.
-    pub fn from_models(models: Vec<DocumentAnnotation>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
     }
 }

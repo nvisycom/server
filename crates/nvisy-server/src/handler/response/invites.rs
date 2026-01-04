@@ -7,13 +7,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Workspace invite with complete information.
 ///
 /// This response includes all the essential information about an
 /// invitation, including the unique invite ID that can be used to track or cancel
 /// the invitation later.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Invite {
     /// Unique identifier of the invitation.
@@ -38,7 +40,6 @@ pub struct Invite {
 }
 
 impl Invite {
-    /// Creates an Invite response from a database model.
     pub fn from_model(invite: WorkspaceInvite) -> Self {
         // Only include invite_token for open invitations (no invitee_email)
         let invite_token = if invite.invitee_email.is_none() {
@@ -59,19 +60,14 @@ impl Invite {
             updated_at: invite.updated_at.into(),
         }
     }
-
-    /// Creates a list of Invite responses from database models.
-    pub fn from_models(models: Vec<WorkspaceInvite>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
-    }
 }
 
-/// Response for listing workspace invitations.
-pub type Invites = Vec<Invite>;
+/// Paginated response for workspace invitations.
+pub type InvitesPage = Page<Invite>;
 
 /// Response containing a generated shareable invite code.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCode {
     /// The generated invite code that can be shared.
@@ -101,7 +97,7 @@ impl InviteCode {
 /// This is a public-facing response that shows workspace information
 /// to help users decide whether to join via an invite code.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InvitePreview {
     /// ID of the workspace.

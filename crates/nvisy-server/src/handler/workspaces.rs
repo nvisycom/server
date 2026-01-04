@@ -6,18 +6,20 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgError;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
 use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
+use nvisy_postgres::{PgClient, PgError};
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
-};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    CreateWorkspace, OffsetPaginationQuery, UpdateNotificationSettings, UpdateWorkspace, WorkspacePathParams,
+    CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
+    WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, NotificationSettings, Workspace, Workspaces};
+use crate::handler::response::{
+    ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
+};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -30,13 +32,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
 /// granting full management permissions.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_workspace(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     ValidateJson(request): ValidateJson<CreateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace");
 
     let new_workspace = request.into_model(auth_state.account_id);
+    let mut conn = pg_client.get_connection().await?;
     let creator_id = auth_state.account_id;
 
     let (workspace, membership) = conn
@@ -75,32 +78,32 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
 /// in each workspace.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_workspaces(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Query(offset_pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<Workspaces>)> {
-    let workspace_memberships = conn
-        .list_user_workspaces_with_details(auth_state.account_id, offset_pagination.into())
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<WorkspacesPage>)> {
+    let mut conn = pg_client.get_connection().await?;
+    let page = conn
+        .cursor_list_account_workspaces_with_details(auth_state.account_id, pagination.into())
         .await?;
 
-    let workspaces: Workspaces = workspace_memberships
-        .into_iter()
-        .map(|(workspace, membership)| Workspace::from_model_with_membership(workspace, membership))
-        .collect();
+    let response = Page::from_cursor_page(page, |(workspace, member)| {
+        Workspace::from_model_with_membership(workspace, member)
+    });
 
     tracing::info!(
         target: TRACING_TARGET,
-        workspace_count = workspaces.len(),
+        workspace_count = response.items.len(),
         "Workspaces listed",
     );
 
-    Ok((StatusCode::OK, Json(workspaces)))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspaces")
         .description("Returns all workspaces the authenticated user is a member of.")
-        .response::<200, Json<Workspaces>>()
+        .response::<200, Json<WorkspacesPage>>()
         .response::<401, Json<ErrorResponse>>()
 }
 
@@ -115,10 +118,11 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn read_workspace(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
+    let mut conn = pg_client.get_connection().await?;
     let member = auth_state
         .authorize_workspace(
             &mut conn,
@@ -162,13 +166,14 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_workspace(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace");
 
+    let mut conn = pg_client.get_connection().await?;
     let member = auth_state
         .authorize_workspace(
             &mut conn,
@@ -214,12 +219,13 @@ fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_workspace(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace");
 
+    let mut conn = pg_client.get_connection().await?;
     auth_state
         .authorize_workspace(
             &mut conn,
@@ -253,10 +259,11 @@ fn delete_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_notification_settings(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
 ) -> Result<(StatusCode, Json<NotificationSettings>)> {
+    let mut conn = pg_client.get_connection().await?;
     let Some(member) = conn
         .find_workspace_member(path_params.workspace_id, auth_state.account_id)
         .await?
@@ -291,11 +298,13 @@ fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation 
     )
 )]
 async fn update_notification_settings(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<UpdateNotificationSettings>,
 ) -> Result<(StatusCode, Json<NotificationSettings>)> {
+    let mut conn = pg_client.get_connection().await?;
+
     // Verify membership exists
     if conn
         .find_workspace_member(path_params.workspace_id, auth_state.account_id)

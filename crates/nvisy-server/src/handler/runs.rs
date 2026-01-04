@@ -4,12 +4,14 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceIntegrationRunRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, Query};
-use crate::handler::request::{IntegrationRunPathParams, OffsetPaginationQuery, WorkspacePathParams};
-use crate::handler::response::{ErrorResponse, IntegrationRun, IntegrationRuns};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query};
+use crate::handler::request::{CursorPagination, IntegrationRunPathParams, WorkspacePathParams};
+use crate::handler::response::{ErrorResponse, IntegrationRun, IntegrationRunsPage};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -25,12 +27,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::integration_runs";
     )
 )]
 async fn list_workspace_runs(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(offset_pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<IntegrationRuns>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<IntegrationRunsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace integration runs");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -40,25 +44,29 @@ async fn list_workspace_runs(
         )
         .await?;
 
-    let runs = conn
-        .find_runs_by_workspace(path_params.workspace_id, offset_pagination.into())
+    let page = conn
+        .cursor_list_workspace_integration_runs(path_params.workspace_id, pagination.into())
         .await?;
-
-    let runs: IntegrationRuns = IntegrationRun::from_models(runs);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        run_count = runs.len(),
+        run_count = page.items.len(),
         "Workspace integration runs listed"
     );
 
-    Ok((StatusCode::OK, Json(runs)))
+    Ok((
+        StatusCode::OK,
+        Json(IntegrationRunsPage::from_cursor_page(
+            page,
+            IntegrationRun::from_model,
+        )),
+    ))
 }
 
 fn list_workspace_runs_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspace integration runs")
         .description("Returns all integration runs for a workspace.")
-        .response::<200, Json<IntegrationRuns>>()
+        .response::<200, Json<IntegrationRunsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -72,14 +80,16 @@ fn list_workspace_runs_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_run(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationRunPathParams>,
 ) -> Result<(StatusCode, Json<IntegrationRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting integration run");
 
+    let mut conn = pg_client.get_connection().await?;
+
     let run = conn
-        .find_run_by_id(path_params.run_id)
+        .find_workspace_integration_run_by_id(path_params.run_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound

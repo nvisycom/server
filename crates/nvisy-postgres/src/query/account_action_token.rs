@@ -13,67 +13,60 @@ use crate::{PgConnection, PgError, PgResult, schema};
 /// Repository for account action token database operations.
 ///
 /// Handles temporary action tokens for password resets, email verification, and other
-/// time-sensitive operations with expiration and attempt tracking.
+/// time-sensitive operations with expiration tracking.
 pub trait AccountActionTokenRepository {
-    /// Creates a new action token for the specified account.
-    fn create_token(
+    /// Creates a new account action token.
+    fn create_account_action_token(
         &mut self,
         new_token: NewAccountActionToken,
     ) -> impl Future<Output = PgResult<AccountActionToken>> + Send;
 
-    /// Finds a valid token by UUID and action type.
+    /// Finds a valid account action token by UUID and action type.
     ///
     /// Only returns unused, unexpired tokens matching both criteria.
-    fn find_token(
+    fn find_account_action_token(
         &mut self,
         token_uuid: Uuid,
         action: ActionTokenType,
     ) -> impl Future<Output = PgResult<Option<AccountActionToken>>> + Send;
 
-    /// Finds the most recent valid token for an account and action type.
-    fn find_account_token(
+    /// Finds the most recent valid account action token for an account and action type.
+    fn find_account_action_token_by_account(
         &mut self,
         account_id: Uuid,
         action: ActionTokenType,
     ) -> impl Future<Output = PgResult<Option<AccountActionToken>>> + Send;
 
-    /// Updates a token's properties with new values.
-    fn update_token(
+    /// Updates an account action token.
+    fn update_account_action_token(
         &mut self,
         token_uuid: Uuid,
         updates: UpdateAccountActionToken,
     ) -> impl Future<Output = PgResult<AccountActionToken>> + Send;
 
-    /// Increments the attempt count after a failed validation.
-    fn increment_token_attempts(
+    /// Marks an account action token as used.
+    fn use_account_action_token(
         &mut self,
         token_uuid: Uuid,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<AccountActionToken>> + Send;
 
-    /// Marks a token as used after successful action completion.
-    fn use_token(
+    /// Invalidates an account action token by marking it as used.
+    fn invalidate_account_action_token(
         &mut self,
         token_uuid: Uuid,
-        account_id: Uuid,
-    ) -> impl Future<Output = PgResult<AccountActionToken>> + Send;
+    ) -> impl Future<Output = PgResult<bool>> + Send;
 
-    /// Invalidates a token by marking it as used.
-    ///
-    /// Returns true if a token was invalidated, false if not found.
-    fn invalidate_token(&mut self, token_uuid: Uuid)
-    -> impl Future<Output = PgResult<bool>> + Send;
-
-    /// Lists tokens for a specific account with optional used filter.
-    fn list_account_tokens(
+    /// Lists account action tokens for an account with optional used filter.
+    fn offset_list_account_action_tokens(
         &mut self,
         account_id: Uuid,
         include_used: bool,
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountActionToken>>> + Send;
 
-    /// Lists tokens filtered by action type with comprehensive filtering.
-    fn list_tokens_by_action(
+    /// Lists account action tokens by type with filtering options.
+    fn offset_list_account_action_tokens_by_type(
         &mut self,
         action: ActionTokenType,
         include_used: bool,
@@ -81,26 +74,22 @@ pub trait AccountActionTokenRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<AccountActionToken>>> + Send;
 
-    /// Invalidates all unused tokens for an account.
-    ///
-    /// Optionally filters by action type. Returns count of invalidated tokens.
-    fn invalidate_account_tokens(
+    /// Invalidates all unused account action tokens for an account.
+    fn invalidate_all_account_action_tokens(
         &mut self,
         account_id: Uuid,
         action: Option<ActionTokenType>,
     ) -> impl Future<Output = PgResult<i64>> + Send;
 
-    /// Deletes expired and used tokens for cleanup.
-    ///
-    /// Optionally scoped to a specific account. Returns count of deleted tokens.
-    fn cleanup_expired_tokens(
+    /// Deletes expired and used account action tokens.
+    fn cleanup_expired_account_action_tokens(
         &mut self,
         account_id: Option<Uuid>,
     ) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
 impl AccountActionTokenRepository for PgConnection {
-    async fn create_token(
+    async fn create_account_action_token(
         &mut self,
         new_token: NewAccountActionToken,
     ) -> PgResult<AccountActionToken> {
@@ -114,7 +103,7 @@ impl AccountActionTokenRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_token(
+    async fn find_account_action_token(
         &mut self,
         token_uuid: Uuid,
         action: ActionTokenType,
@@ -134,7 +123,7 @@ impl AccountActionTokenRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_account_token(
+    async fn find_account_action_token_by_account(
         &mut self,
         account_id: Uuid,
         action: ActionTokenType,
@@ -155,7 +144,7 @@ impl AccountActionTokenRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn update_token(
+    async fn update_account_action_token(
         &mut self,
         token_uuid: Uuid,
         updates: UpdateAccountActionToken,
@@ -170,26 +159,7 @@ impl AccountActionTokenRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn increment_token_attempts(
-        &mut self,
-        token_uuid: Uuid,
-        account_id: Uuid,
-    ) -> PgResult<AccountActionToken> {
-        use schema::account_action_tokens::{self, dsl};
-
-        diesel::update(
-            account_action_tokens::table
-                .filter(dsl::action_token.eq(token_uuid))
-                .filter(dsl::account_id.eq(account_id)),
-        )
-        .set(dsl::attempt_count.eq(dsl::attempt_count + 1))
-        .returning(AccountActionToken::as_returning())
-        .get_result(self)
-        .await
-        .map_err(PgError::from)
-    }
-
-    async fn use_token(
+    async fn use_account_action_token(
         &mut self,
         token_uuid: Uuid,
         account_id: Uuid,
@@ -209,7 +179,7 @@ impl AccountActionTokenRepository for PgConnection {
         .map_err(PgError::from)
     }
 
-    async fn invalidate_token(&mut self, token_uuid: Uuid) -> PgResult<bool> {
+    async fn invalidate_account_action_token(&mut self, token_uuid: Uuid) -> PgResult<bool> {
         use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 
@@ -223,7 +193,7 @@ impl AccountActionTokenRepository for PgConnection {
         Ok(rows_affected > 0)
     }
 
-    async fn list_account_tokens(
+    async fn offset_list_account_action_tokens(
         &mut self,
         account_id: Uuid,
         include_used: bool,
@@ -246,7 +216,7 @@ impl AccountActionTokenRepository for PgConnection {
         query.load(self).await.map_err(PgError::from)
     }
 
-    async fn list_tokens_by_action(
+    async fn offset_list_account_action_tokens_by_type(
         &mut self,
         action: ActionTokenType,
         include_used: bool,
@@ -275,7 +245,7 @@ impl AccountActionTokenRepository for PgConnection {
         query.load(self).await.map_err(PgError::from)
     }
 
-    async fn invalidate_account_tokens(
+    async fn invalidate_all_account_action_tokens(
         &mut self,
         account_id: Uuid,
         action: Option<ActionTokenType>,
@@ -302,7 +272,10 @@ impl AccountActionTokenRepository for PgConnection {
             .map(|rows| rows as i64)
     }
 
-    async fn cleanup_expired_tokens(&mut self, account_id: Option<Uuid>) -> PgResult<i64> {
+    async fn cleanup_expired_account_action_tokens(
+        &mut self,
+        account_id: Option<Uuid>,
+    ) -> PgResult<i64> {
         use diesel::dsl::now;
         use schema::account_action_tokens::{self, dsl};
 

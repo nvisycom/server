@@ -25,7 +25,7 @@ use crate::{Error, Result};
 ///
 /// Text entity annotation:
 /// ```rust
-/// use nvisy_service::{Annotation, AnnotationType, TextSpan};
+/// use nvisy_service::inference::{Annotation, AnnotationType, TextSpan};
 ///
 /// let annotation = Annotation::new(AnnotationType::Entity, "PERSON")
 ///     .with_text_span(TextSpan::new(0, 12))
@@ -34,7 +34,7 @@ use crate::{Error, Result};
 ///
 /// Image object detection:
 /// ```rust
-/// use nvisy_service::{Annotation, AnnotationType, BoundingBox};
+/// use nvisy_service::inference::{Annotation, AnnotationType, BoundingBox};
 ///
 /// let annotation = Annotation::new(AnnotationType::Object, "car")
 ///     .with_bounding_box(BoundingBox::new(100.0, 150.0, 200.0, 300.0))

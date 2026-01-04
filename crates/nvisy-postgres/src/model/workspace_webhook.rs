@@ -23,40 +23,28 @@ use crate::types::{
 pub struct WorkspaceWebhook {
     /// Unique webhook identifier.
     pub id: Uuid,
-
     /// Reference to the workspace this webhook belongs to.
     pub workspace_id: Uuid,
-
     /// Human-readable name for the webhook.
     pub display_name: String,
-
     /// Description of the webhook's purpose.
     pub description: String,
-
     /// Webhook endpoint URL.
     pub url: String,
-
     /// Array of event types this webhook subscribes to.
     pub events: Vec<Option<WebhookEvent>>,
-
     /// Custom headers to include in webhook requests.
     pub headers: serde_json::Value,
-
     /// Current status of the webhook.
     pub status: WebhookStatus,
-
     /// Timestamp of last webhook trigger.
     pub last_triggered_at: Option<Timestamp>,
-
     /// Account that created this webhook.
     pub created_by: Uuid,
-
     /// Timestamp when this webhook was created.
     pub created_at: Timestamp,
-
     /// Timestamp when this webhook was last modified.
     pub updated_at: Timestamp,
-
     /// Timestamp when this webhook was soft-deleted.
     pub deleted_at: Option<Timestamp>,
 }
@@ -68,25 +56,18 @@ pub struct WorkspaceWebhook {
 pub struct NewWorkspaceWebhook {
     /// Reference to the workspace this webhook will belong to.
     pub workspace_id: Uuid,
-
     /// Human-readable name for the webhook.
     pub display_name: String,
-
     /// Description of the webhook's purpose.
     pub description: String,
-
     /// Webhook endpoint URL.
     pub url: String,
-
     /// Array of event types this webhook subscribes to.
     pub events: Vec<Option<WebhookEvent>>,
-
     /// Custom headers to include in webhook requests.
     pub headers: Option<serde_json::Value>,
-
     /// Initial status of the webhook.
     pub status: Option<WebhookStatus>,
-
     /// Account creating this webhook.
     pub created_by: Uuid,
 }
@@ -98,25 +79,18 @@ pub struct NewWorkspaceWebhook {
 pub struct UpdateWorkspaceWebhook {
     /// Updated name for the webhook.
     pub display_name: Option<String>,
-
     /// Updated description.
     pub description: Option<String>,
-
     /// Updated endpoint URL.
     pub url: Option<String>,
-
     /// Updated event subscriptions.
     pub events: Option<Vec<Option<WebhookEvent>>>,
-
     /// Updated custom headers.
     pub headers: Option<serde_json::Value>,
-
     /// Updated status.
     pub status: Option<WebhookStatus>,
-
     /// Updated last triggered timestamp.
     pub last_triggered_at: Option<Option<Timestamp>>,
-
     /// Soft deletion timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
 }

@@ -35,7 +35,9 @@ pub use document::{Document, NewDocument, UpdateDocument};
 pub use document_annotation::{
     DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation,
 };
-pub use document_chunk::{DocumentChunk, NewDocumentChunk, UpdateDocumentChunk};
+pub use document_chunk::{
+    DocumentChunk, NewDocumentChunk, UpdateDocumentChunk,
+};
 pub use document_comment::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
 pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 // Workspace models

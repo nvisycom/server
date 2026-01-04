@@ -6,9 +6,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Represents a document comment.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Comment {
     /// ID of the comment.
@@ -29,8 +31,10 @@ pub struct Comment {
     pub updated_at: Timestamp,
 }
 
+/// Paginated list of comments.
+pub type CommentsPage = Page<Comment>;
+
 impl Comment {
-    /// Creates a Comment response from a database model.
     pub fn from_model(comment: model::DocumentComment) -> Self {
         Self {
             comment_id: comment.id,
@@ -43,12 +47,4 @@ impl Comment {
             updated_at: comment.updated_at.into(),
         }
     }
-
-    /// Creates a list of Comment responses from database models.
-    pub fn from_models(models: Vec<model::DocumentComment>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
-    }
 }
-
-/// Response for listing comments.
-pub type Comments = Vec<Comment>;

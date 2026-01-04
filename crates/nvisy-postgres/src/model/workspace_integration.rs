@@ -32,40 +32,28 @@ use crate::types::{
 pub struct WorkspaceIntegration {
     /// Unique integration identifier.
     pub id: Uuid,
-
     /// Reference to the workspace this integration belongs to.
     pub workspace_id: Uuid,
-
     /// Human-readable name for the integration.
     pub integration_name: String,
-
     /// Detailed description of the integration's purpose and functionality.
     pub description: String,
-
     /// Type of third-party service this integration connects to.
     pub integration_type: IntegrationType,
-
     /// Structured configuration and service-specific metadata.
     pub metadata: serde_json::Value,
-
     /// Encrypted authentication credentials for the external service.
     pub credentials: serde_json::Value,
-
     /// Whether the integration is currently active and enabled.
     pub is_active: bool,
-
     /// Timestamp of the most recent successful synchronization.
     pub last_sync_at: Option<Timestamp>,
-
     /// Current status of synchronization operations.
     pub sync_status: Option<IntegrationStatus>,
-
     /// Account that originally created this integration.
     pub created_by: Uuid,
-
     /// Timestamp when this integration was first created.
     pub created_at: Timestamp,
-
     /// Timestamp when this integration was last modified.
     pub updated_at: Timestamp,
 }
@@ -81,31 +69,22 @@ pub struct WorkspaceIntegration {
 pub struct NewWorkspaceIntegration {
     /// Reference to the workspace this integration will belong to.
     pub workspace_id: Uuid,
-
     /// Human-readable name for the integration.
     pub integration_name: String,
-
     /// Detailed description of the integration's purpose.
     pub description: String,
-
     /// Type of external service being integrated.
     pub integration_type: IntegrationType,
-
     /// Optional initial configuration and metadata.
     pub metadata: Option<serde_json::Value>,
-
     /// Optional authentication credentials for the external service.
     pub credentials: Option<serde_json::Value>,
-
     /// Whether the integration should be active immediately.
     pub is_active: Option<bool>,
-
     /// Optional timestamp of last synchronization.
     pub last_sync_at: Option<Timestamp>,
-
     /// Optional initial synchronization status.
     pub sync_status: Option<IntegrationStatus>,
-
     /// Account creating this integration.
     pub created_by: Uuid,
 }
@@ -121,25 +100,18 @@ pub struct NewWorkspaceIntegration {
 pub struct UpdateWorkspaceIntegration {
     /// Updated human-readable name for the integration.
     pub integration_name: Option<String>,
-
     /// Updated description of the integration's purpose.
     pub description: Option<String>,
-
     /// Updated type of external service being integrated.
     pub integration_type: Option<IntegrationType>,
-
     /// Updated configuration and service-specific metadata.
     pub metadata: Option<serde_json::Value>,
-
     /// Updated authentication credentials for the external service.
     pub credentials: Option<serde_json::Value>,
-
     /// Updated active status for the integration.
     pub is_active: Option<bool>,
-
     /// Updated timestamp of last successful synchronization.
     pub last_sync_at: Option<Option<Timestamp>>,
-
     /// Updated synchronization status.
     pub sync_status: Option<Option<IntegrationStatus>>,
 }

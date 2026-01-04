@@ -9,15 +9,15 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::UpdateAccountApiToken;
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use nvisy_postgres::types::OffsetPagination as QueryPagination;
 use uuid::Uuid;
 
-use super::request::{CreateApiToken, OffsetPaginationQuery, TokenPathParams, UpdateApiToken};
-use super::response::{ApiToken, ApiTokenWithJWT, ApiTokens, ErrorResponse};
+use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
+use super::response::{ApiToken, ApiTokenWithJWT, ApiTokensPage, ErrorResponse};
 use crate::extract::{
-    AuthClaims, AuthHeader, AuthState, Json, Path, PgPool, Query, TypedHeader, ValidateJson,
+    AuthClaims, AuthHeader, AuthState, Json, Path, Query, TypedHeader, ValidateJson,
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ServiceState, SessionKeys};
@@ -29,19 +29,21 @@ const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 ///
 /// Returns the token with a JWT that can be used for authentication.
 /// The JWT is only shown once upon creation.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
 async fn create_api_token(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(auth_keys): State<SessionKeys>,
-    AuthState(auth_state): AuthState,
+    AuthState(auth_claims): AuthState,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<CreateApiToken>,
 ) -> Result<(StatusCode, Json<ApiTokenWithJWT>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating API token");
 
+    let mut conn = pg_client.get_connection().await?;
+
     // Fetch the account to generate JWT claims
     let account = conn
-        .find_account_by_id(auth_state.account_id)
+        .find_account_by_id(auth_claims.account_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -49,8 +51,8 @@ async fn create_api_token(
                 .with_message("Account not found")
         })?;
 
-    let new_token = request.into_model(auth_state.account_id, user_agent.to_string())?;
-    let api_token = conn.create_token(new_token).await?;
+    let new_token = request.into_model(auth_claims.account_id, user_agent.to_string())?;
+    let api_token = conn.create_account_api_token(new_token).await?;
 
     // Generate JWT for the new token
     let auth_claims = AuthClaims::new(&account, &api_token);
@@ -79,46 +81,34 @@ fn create_api_token_docs(op: TransformOperation) -> TransformOperation {
 /// Lists API tokens for the authenticated account.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_api_tokens(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Query(pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<ApiTokens>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<ApiTokensPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing API tokens");
 
-    // Validate pagination parameters
-    if let Some(limit) = pagination.limit {
-        if limit == 0 {
-            return Err(ErrorKind::BadRequest
-                .with_resource("pagination")
-                .with_message("Limit must be greater than 0"));
-        }
+    let mut conn = pg_client.get_connection().await?;
 
-        if limit > 100 {
-            return Err(ErrorKind::BadRequest
-                .with_resource("pagination")
-                .with_message("Limit cannot exceed 100"));
-        }
-    }
-
-    let tokens = conn
-        .list_account_tokens(auth_state.account_id, QueryPagination::from(pagination))
+    let page = conn
+        .cursor_list_account_api_tokens(auth_state.account_id, pagination.into())
         .await?;
-
-    let api_tokens: ApiTokens = ApiToken::from_models(tokens);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        count = api_tokens.len(),
+        count = page.items.len(),
         "API tokens listed",
     );
 
-    Ok((StatusCode::OK, Json(api_tokens)))
+    Ok((
+        StatusCode::OK,
+        Json(ApiTokensPage::from_cursor_page(page, ApiToken::from_model)),
+    ))
 }
 
 fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List API tokens")
         .description("Returns all API tokens for the authenticated account.")
-        .response::<200, Json<ApiTokens>>()
+        .response::<200, Json<ApiTokensPage>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
 }
@@ -126,11 +116,13 @@ fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
 /// Gets a specific API token by ID.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn read_api_token(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path): Path<TokenPathParams>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading API token");
+
+    let mut conn = pg_client.get_connection().await?;
 
     let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
 
@@ -150,12 +142,14 @@ fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
 /// Updates an existing API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn update_api_token(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path): Path<TokenPathParams>,
     ValidateJson(request): ValidateJson<UpdateApiToken>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating API token");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify the token exists and belongs to the authenticated account
     let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
@@ -165,7 +159,9 @@ async fn update_api_token(
         ..Default::default()
     };
 
-    let updated_token = conn.update_token_by_id(token.id, update_token).await?;
+    let updated_token = conn
+        .update_account_api_token(token.id, update_token)
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, "API token updated");
 
@@ -184,16 +180,18 @@ fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
 /// Revokes (soft deletes) an API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn revoke_api_token(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path): Path<TokenPathParams>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Revoking API token");
 
+    let mut conn = pg_client.get_connection().await?;
+
     // Verify the token exists and belongs to the authenticated account
     let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
 
-    let deleted = conn.delete_token_by_id(token.id).await?;
+    let deleted = conn.delete_account_api_token(token.id).await?;
 
     if !deleted {
         return Err(ErrorKind::BadRequest
@@ -221,7 +219,7 @@ async fn find_account_token(
     account_id: Uuid,
     token_id: Uuid,
 ) -> Result<nvisy_postgres::model::AccountApiToken> {
-    let Some(token) = conn.find_token_by_id(token_id).await? else {
+    let Some(token) = conn.find_account_api_token_by_id(token_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")
             .with_message("API token not found"));

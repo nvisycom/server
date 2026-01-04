@@ -4,11 +4,9 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use crate::model::{Account, NewAccount, UpdateAccount};
-use crate::types::OffsetPagination;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account database operations.
@@ -63,23 +61,6 @@ pub trait AccountRepository {
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
 
-    /// Lists all active accounts with offset pagination.
-    ///
-    /// Retrieves accounts ordered by creation time with most recent first.
-    fn offset_list_accounts(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Updates the account password and records the change timestamp.
-    ///
-    /// Sets a new password hash and updates the password_changed_at field.
-    fn update_password(
-        &mut self,
-        account_id: Uuid,
-        password_hash: String,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
-
     /// Verifies an account by setting the verification status to true.
     ///
     /// Typically called after email verification is complete.
@@ -117,49 +98,6 @@ pub trait AccountRepository {
         email: &str,
         exclude_account_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
-
-    /// Finds accounts filtered by their verification status.
-    ///
-    /// Useful for finding unverified accounts that may need reminder emails.
-    fn find_accounts_by_verification_status(
-        &mut self,
-        is_verified: bool,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Finds accounts filtered by their suspension status.
-    ///
-    /// Useful for administrative review of suspended accounts.
-    fn find_accounts_by_suspension_status(
-        &mut self,
-        is_suspended: bool,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Finds accounts created within the last 30 days.
-    ///
-    /// Useful for onboarding analytics and new user tracking.
-    fn find_recently_created_accounts(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Finds accounts with no recent activity (no login in last 90 days).
-    ///
-    /// Useful for identifying dormant accounts for cleanup or re-engagement.
-    fn find_inactive_accounts(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
-
-    /// Finds accounts registered with a specific email domain.
-    ///
-    /// Useful for organization-based filtering and analytics.
-    fn find_accounts_by_domain(
-        &mut self,
-        domain: &str,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Account>>> + Send;
 }
 
 impl AccountRepository for PgConnection {
@@ -247,39 +185,6 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn offset_list_accounts(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        accounts::table
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
-    async fn update_password(
-        &mut self,
-        account_id: Uuid,
-        password_hash: String,
-    ) -> PgResult<Account> {
-        self.update_account(
-            account_id,
-            UpdateAccount {
-                password_hash: Some(password_hash),
-                password_changed_at: Some(jiff_diesel::Timestamp::from(Timestamp::now())),
-                ..Default::default()
-            },
-        )
-        .await
-    }
-
     async fn verify_account(&mut self, account_id: Uuid) -> PgResult<Account> {
         self.update_account(
             account_id,
@@ -344,106 +249,5 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(count > 0)
-    }
-
-    async fn find_accounts_by_verification_status(
-        &mut self,
-        is_verified: bool,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        accounts::table
-            .filter(dsl::is_verified.eq(is_verified))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
-    async fn find_accounts_by_suspension_status(
-        &mut self,
-        is_suspended: bool,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        accounts::table
-            .filter(dsl::is_suspended.eq(is_suspended))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
-    async fn find_recently_created_accounts(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        let thirty_days_ago = Timestamp::now() - Span::new().days(30);
-        let thirty_days_ago = jiff_diesel::Timestamp::from(thirty_days_ago);
-
-        accounts::table
-            .filter(dsl::created_at.gt(thirty_days_ago))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
-    async fn find_inactive_accounts(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        let ninety_days_ago = Timestamp::now() - Span::new().days(90);
-        let ninety_days_ago = jiff_diesel::Timestamp::from(ninety_days_ago);
-
-        accounts::table
-            .filter(dsl::updated_at.lt(ninety_days_ago))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
-    }
-
-    async fn find_accounts_by_domain(
-        &mut self,
-        domain: &str,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        let domain_pattern = format!("%@{}", domain);
-
-        accounts::table
-            .filter(dsl::email_address.like(domain_pattern))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Account::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)
     }
 }

@@ -5,14 +5,16 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{DocumentCommentRepository, DocumentFileRepository};
 
-use crate::extract::{AuthState, Json, Path, PgPool, Query, ValidateJson};
+use crate::extract::{AuthState, Json, Path, Query, ValidateJson};
 use crate::handler::request::{
-    CreateComment, FileCommentPathParams, FilePathParams, OffsetPaginationQuery, UpdateComment,
+    CommentPathParams, CreateComment, CursorPagination, FilePathParams, UpdateComment,
 };
-use crate::handler::response::{Comment, Comments, ErrorResponse};
+use crate::handler::response::{Comment, CommentsPage, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -28,12 +30,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::comments";
     )
 )]
 async fn post_comment(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating comment");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify file exists
     let _ = find_file(&mut conn, path_params.file_id).await?;
@@ -51,7 +55,7 @@ async fn post_comment(
     }
 
     let comment = conn
-        .create_comment(request.into_model(auth_claims.account_id, path_params.file_id))
+        .create_document_comment(request.into_model(auth_claims.account_id, path_params.file_id))
         .await?;
 
     tracing::info!(
@@ -81,33 +85,37 @@ fn post_comment_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn list_comments(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Query(pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<Comments>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<CommentsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing comments");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify file exists
     let _ = find_file(&mut conn, path_params.file_id).await?;
 
-    let comments = conn
-        .offset_list_file_comments(path_params.file_id, pagination.into())
+    let page = conn
+        .cursor_list_file_document_comments(path_params.file_id, pagination.into())
         .await?;
+
+    let response = CommentsPage::from_cursor_page(page, Comment::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        comment_count = comments.len(),
+        comment_count = response.items.len(),
         "Comments listed",
     );
 
-    Ok((StatusCode::OK, Json(Comment::from_models(comments))))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_comments_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List comments")
         .description("Returns all comments for a file.")
-        .response::<200, Json<Comments>>()
+        .response::<200, Json<CommentsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
@@ -117,30 +125,21 @@ fn list_comments_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        file_id = %path_params.file_id,
         comment_id = %path_params.comment_id,
     )
 )]
 async fn update_comment(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-    Path(path_params): Path<FileCommentPathParams>,
+    Path(path_params): Path<CommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating comment");
 
-    // Verify file exists
-    let _ = find_file(&mut conn, path_params.file_id).await?;
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch comment and verify ownership
     let existing_comment = find_comment(&mut conn, path_params.comment_id).await?;
-
-    // Verify comment belongs to the file in the path
-    if existing_comment.file_id != path_params.file_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Comment does not belong to this file.")
-            .with_resource("comment"));
-    }
 
     // Check ownership
     if existing_comment.account_id != auth_claims.account_id {
@@ -150,7 +149,7 @@ async fn update_comment(
     }
 
     let comment = conn
-        .update_comment(path_params.comment_id, request.into_model())
+        .update_document_comment(path_params.comment_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Comment updated");
@@ -173,29 +172,20 @@ fn update_comment_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
-        file_id = %path_params.file_id,
         comment_id = %path_params.comment_id,
     )
 )]
 async fn delete_comment(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
-    Path(path_params): Path<FileCommentPathParams>,
+    Path(path_params): Path<CommentPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting comment");
 
-    // Verify file exists
-    let _ = find_file(&mut conn, path_params.file_id).await?;
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch comment and verify ownership
     let existing_comment = find_comment(&mut conn, path_params.comment_id).await?;
-
-    // Verify comment belongs to the file in the path
-    if existing_comment.file_id != path_params.file_id {
-        return Err(ErrorKind::NotFound
-            .with_message("Comment does not belong to this file.")
-            .with_resource("comment"));
-    }
 
     // Check ownership
     if existing_comment.account_id != auth_claims.account_id {
@@ -204,17 +194,17 @@ async fn delete_comment(
             .with_resource("comment"));
     }
 
-    conn.delete_comment(path_params.comment_id).await?;
+    conn.delete_document_comment(path_params.comment_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Comment deleted");
 
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn delete_comment_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete comment")
         .description("Deletes a comment by ID.")
-        .response_with::<200, (), _>(|res| res.description("Comment deleted."))
+        .response_with::<204, (), _>(|res| res.description("Comment deleted."))
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -239,11 +229,13 @@ async fn find_comment(
     conn: &mut nvisy_postgres::PgConn,
     comment_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::DocumentComment> {
-    conn.find_comment_by_id(comment_id).await?.ok_or_else(|| {
-        ErrorKind::NotFound
-            .with_message("Comment not found.")
-            .with_resource("comment")
-    })
+    conn.find_document_comment_by_id(comment_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Comment not found.")
+                .with_resource("comment")
+        })
 }
 
 /// Returns a [`Router`] with all comment-related routes.
@@ -258,7 +250,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(post_comment, post_comment_docs).get_with(list_comments, list_comments_docs),
         )
         .api_route(
-            "/files/{fileId}/comments/{commentId}",
+            "/comments/{commentId}",
             patch_with(update_comment, update_comment_docs)
                 .delete_with(delete_comment, delete_comment_docs),
         )

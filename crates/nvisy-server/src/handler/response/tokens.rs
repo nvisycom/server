@@ -7,6 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// API token response structure.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +39,6 @@ pub struct ApiToken {
 }
 
 impl ApiToken {
-    /// Creates an ApiToken response from a database model.
     pub fn from_model(token: AccountApiToken) -> Self {
         let is_expired = token.is_expired();
         Self {
@@ -51,12 +52,9 @@ impl ApiToken {
             last_used_at: token.last_used_at.map(Into::into),
         }
     }
+}
 
-    /// Creates a list of ApiToken responses from database models.
-    pub fn from_models(models: Vec<AccountApiToken>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
-    }
-
+impl ApiToken {
     /// Creates an `ApiTokenWithJWT` by adding a JWT token string.
     pub fn with_jwt(self, jwt: String) -> ApiTokenWithJWT {
         ApiTokenWithJWT {
@@ -71,8 +69,8 @@ impl ApiToken {
     }
 }
 
-/// Response for listing API tokens.
-pub type ApiTokens = Vec<ApiToken>;
+/// Paginated response for API tokens.
+pub type ApiTokensPage = Page<ApiToken>;
 
 /// API token with JWT token string (only returned on creation).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 /// Response returned after successful authentication (login/signup).
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthToken {
     /// The JWT API token for authentication.

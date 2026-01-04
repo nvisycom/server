@@ -17,7 +17,6 @@ pub struct UpdateMember {
 }
 
 impl UpdateMember {
-    /// Converts to database model.
     pub fn into_model(self) -> nvisy_postgres::model::UpdateWorkspaceMember {
         nvisy_postgres::model::UpdateWorkspaceMember {
             member_role: Some(self.role),
@@ -30,7 +29,7 @@ impl UpdateMember {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListMembersQuery {
+pub struct ListMembers {
     /// Filter by workspace role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
@@ -45,7 +44,7 @@ pub struct ListMembersQuery {
     pub order: Option<SortOrder>,
 }
 
-impl ListMembersQuery {
+impl ListMembers {
     /// Converts to filter model.
     pub fn to_filter(&self) -> MemberFilter {
         MemberFilter {

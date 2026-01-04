@@ -96,8 +96,8 @@ impl CreateApiToken {
         Ok(NewAccountApiToken {
             account_id,
             name: sanitized_name,
-            ip_address: crate::utility::placeholder_ip(),
-            user_agent,
+            ip_address: Some(crate::utility::placeholder_ip()),
+            user_agent: Some(user_agent),
             session_type: Some(ApiTokenType::Api),
             is_remembered: Some(true),
             expired_at: self.expires_in.to_expiry_timestamp().map(Into::into),

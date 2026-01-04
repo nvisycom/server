@@ -15,16 +15,17 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
 use nvisy_postgres::query::DocumentFileRepository;
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Multipart, Path, Permission, PgPool, Query, ValidateJson,
+    AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CursorPaginationQuery, DownloadArchivedFilesRequest, DownloadMultipleFilesRequest,
-    FilePathParams, ListFilesQuery, UpdateFile, WorkspacePathParams,
+    CursorPagination, DownloadArchivedFiles, DownloadMultipleFiles, FilePathParams, ListFiles,
+    UpdateFile, WorkspacePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
@@ -54,13 +55,15 @@ async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<D
     )
 )]
 async fn list_files(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
-    Query(query): Query<ListFilesQuery>,
-    Query(pagination): Query<CursorPaginationQuery>,
+    Query(files_query): Query<ListFiles>,
+    Query(cursor_pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<FilesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing files");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewFiles)
@@ -69,17 +72,17 @@ async fn list_files(
     let page = conn
         .cursor_list_workspace_files(
             path_params.workspace_id,
-            pagination.into(),
-            query.to_filter(),
+            cursor_pagination.into(),
+            files_query.to_filter(),
         )
         .await?;
 
-    let response = FilesPage::from_cursor_page(page);
+    let response = FilesPage::from_cursor_page(page, File::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
         file_count = response.items.len(),
-        has_more = response.has_more,
+        has_more = response.next_cursor.is_some(),
         "Files listed"
     );
 
@@ -105,7 +108,7 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn upload_file(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
@@ -114,6 +117,8 @@ async fn upload_file(
     tracing::info!(target: TRACING_TARGET, "Uploading files");
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
@@ -326,12 +331,14 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_file(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating file");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the file first to get workspace context for authorization
     let file = find_file(&mut conn, path_params.file_id).await?;
@@ -377,7 +384,7 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn download_file(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
@@ -385,6 +392,8 @@ async fn download_file(
     tracing::debug!(target: TRACING_TARGET, "Downloading file");
 
     let input_fs = nats_client.document_store::<InputFiles>().await?;
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the file first to get workspace context for authorization
     let file = find_file(&mut conn, path_params.file_id).await?;
@@ -473,11 +482,13 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_file(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "File Deleting");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the file first to get workspace context for authorization
     let file = find_file(&mut conn, path_params.file_id).await?;
@@ -524,14 +535,16 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn download_multiple_files(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     State(archive): State<ArchiveService>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<DownloadMultipleFilesRequest>,
+    ValidateJson(request): ValidateJson<DownloadMultipleFiles>,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading multiple files as archive");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_workspace(
@@ -634,14 +647,16 @@ fn download_multiple_files_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn download_archived_files(
-    Path(path_params): Path<WorkspacePathParams>,
-    AuthState(auth_claims): AuthState,
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     State(archive): State<ArchiveService>,
-    Json(request): Json<DownloadArchivedFilesRequest>,
+    Path(path_params): Path<WorkspacePathParams>,
+    AuthState(auth_claims): AuthState,
+    Json(request): Json<DownloadArchivedFiles>,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading archived files");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_workspace(

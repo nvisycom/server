@@ -25,11 +25,6 @@ pub enum AnnotationType {
     #[db_rename = "highlight"]
     #[serde(rename = "highlight")]
     Highlight,
-
-    /// Comment on specific content
-    #[db_rename = "comment"]
-    #[serde(rename = "comment")]
-    Comment,
 }
 
 impl AnnotationType {
@@ -43,11 +38,5 @@ impl AnnotationType {
     #[inline]
     pub fn is_highlight(self) -> bool {
         matches!(self, AnnotationType::Highlight)
-    }
-
-    /// Returns whether this is a comment annotation.
-    #[inline]
-    pub fn is_comment(self) -> bool {
-        matches!(self, AnnotationType::Comment)
     }
 }

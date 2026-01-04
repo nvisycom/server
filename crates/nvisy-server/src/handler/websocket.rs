@@ -17,7 +17,7 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission};
 use crate::handler::request::WorkspacePathParams;
 use crate::handler::response::ErrorResponse;
 use crate::handler::{ErrorKind, Result};
@@ -747,7 +747,6 @@ async fn handle_workspace_websocket(
     workspace_id = %path_params.workspace_id
 ))]
 async fn workspace_websocket_handler(
-    PgPool(mut conn): PgPool,
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     AuthState(auth_claims): AuthState,
@@ -765,6 +764,7 @@ async fn workspace_websocket_handler(
     );
 
     // Verify workspace exists and user has basic access
+    let mut conn = pg_client.get_connection().await?;
 
     // Check if user has minimum permission to view documents
     auth_claims

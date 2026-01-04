@@ -119,7 +119,7 @@ impl GenerateInviteCode {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListInvitesQuery {
+pub struct ListInvites {
     /// Filter by invited role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
@@ -131,7 +131,7 @@ pub struct ListInvitesQuery {
     pub order: Option<SortOrder>,
 }
 
-impl ListInvitesQuery {
+impl ListInvites {
     /// Converts to filter model.
     pub fn to_filter(&self) -> InviteFilter {
         InviteFilter { role: self.role }

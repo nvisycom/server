@@ -7,6 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Response type for an integration run.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -39,11 +41,10 @@ pub struct IntegrationRun {
     pub created_at: Timestamp,
 }
 
-/// List of integration runs.
-pub type IntegrationRuns = Vec<IntegrationRun>;
+/// Paginated response for integration runs.
+pub type IntegrationRunsPage = Page<IntegrationRun>;
 
 impl IntegrationRun {
-    /// Creates an IntegrationRun response from a database model.
     pub fn from_model(run: WorkspaceIntegrationRun) -> Self {
         Self {
             id: run.id,
@@ -58,10 +59,5 @@ impl IntegrationRun {
             completed_at: run.completed_at.map(Into::into),
             created_at: run.created_at.into(),
         }
-    }
-
-    /// Creates a list of IntegrationRun responses from database models.
-    pub fn from_models(models: Vec<WorkspaceIntegrationRun>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
     }
 }

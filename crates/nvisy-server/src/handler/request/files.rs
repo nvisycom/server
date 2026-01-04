@@ -28,7 +28,6 @@ pub struct UpdateFile {
 }
 
 impl UpdateFile {
-    /// Converts this request into a database model.
     pub fn into_model(self) -> UpdateDocumentFile {
         UpdateDocumentFile {
             display_name: self.display_name,
@@ -58,7 +57,7 @@ pub struct UpdateFileKnowledge {
 /// Request to download multiple files.
 #[derive(Debug, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DownloadMultipleFilesRequest {
+pub struct DownloadMultipleFiles {
     /// File IDs to download (1-100 files).
     #[validate(length(min = 1, max = 100))]
     pub file_ids: Vec<Uuid>,
@@ -67,7 +66,7 @@ pub struct DownloadMultipleFilesRequest {
 /// Request to download files as an archive.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DownloadArchivedFilesRequest {
+pub struct DownloadArchivedFiles {
     /// Archive format.
     pub format: ArchiveFormat,
     /// Optional specific file IDs (if None, downloads all workspace files).
@@ -79,13 +78,13 @@ pub struct DownloadArchivedFilesRequest {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListFilesQuery {
+pub struct ListFiles {
     /// Filter by file formats.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formats: Option<Vec<FileFormat>>,
 }
 
-impl ListFilesQuery {
+impl ListFiles {
     /// Converts to filter model.
     pub fn to_filter(&self) -> FileFilter {
         FileFilter {

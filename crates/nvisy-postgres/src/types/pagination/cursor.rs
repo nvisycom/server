@@ -36,7 +36,7 @@ impl Cursor {
 
     /// Encodes the cursor as a URL-safe base64 string.
     pub fn encode(&self) -> String {
-        let data = format!("{}:{}", self.timestamp, self.id);
+        let data = format!("{}|{}", self.timestamp, self.id);
         BASE64_URL_SAFE_NO_PAD.encode(data.as_bytes())
     }
 
@@ -46,7 +46,7 @@ impl Cursor {
     pub fn decode(encoded: &str) -> Option<Self> {
         let bytes = BASE64_URL_SAFE_NO_PAD.decode(encoded).ok()?;
         let data = String::from_utf8(bytes).ok()?;
-        let (timestamp_str, id_str) = data.split_once(':')?;
+        let (timestamp_str, id_str) = data.split_once('|')?;
 
         let timestamp = timestamp_str.parse().ok()?;
         let id = id_str.parse().ok()?;
@@ -153,9 +153,7 @@ pub struct CursorPage<T> {
     /// Total count of items matching the query (across all pages).
     /// Only present if `include_count` was set in the pagination request.
     pub total: Option<i64>,
-    /// Whether there are more items after this page.
-    pub has_more: bool,
-    /// Cursor to fetch the next page, if there are more items.
+    /// Cursor to fetch the next page. Present only when more items exist.
     pub next_cursor: Option<String>,
 }
 
@@ -190,7 +188,6 @@ impl<T> CursorPage<T> {
         Self {
             items,
             total,
-            has_more,
             next_cursor,
         }
     }
@@ -200,9 +197,13 @@ impl<T> CursorPage<T> {
         Self {
             items: Vec::new(),
             total: Some(0),
-            has_more: false,
             next_cursor: None,
         }
+    }
+
+    /// Returns true if there are more items to fetch.
+    pub fn has_more(&self) -> bool {
+        self.next_cursor.is_some()
     }
 
     /// Maps the items to a different type.
@@ -213,7 +214,6 @@ impl<T> CursorPage<T> {
         CursorPage {
             items: self.items.into_iter().map(f).collect(),
             total: self.total,
-            has_more: self.has_more,
             next_cursor: self.next_cursor,
         }
     }
@@ -287,7 +287,7 @@ mod tests {
 
         assert_eq!(page.items.len(), 50);
         assert_eq!(page.total, Some(100));
-        assert!(page.has_more);
+        assert!(page.has_more());
         assert!(page.next_cursor.is_some());
     }
 
@@ -298,7 +298,7 @@ mod tests {
 
         assert_eq!(page.items.len(), 30);
         assert_eq!(page.total, Some(30));
-        assert!(!page.has_more);
+        assert!(!page.has_more());
         assert!(page.next_cursor.is_none());
     }
 

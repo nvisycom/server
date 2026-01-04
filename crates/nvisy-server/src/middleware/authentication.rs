@@ -84,7 +84,7 @@ pub async fn validate_token_middleware(
 
     // Verify token exists in database and update last_used_at
     let mut conn = pg_database.get_connection().await?;
-    let token = conn.touch_token(auth_claims.token_id).await;
+    let token = conn.touch_account_api_token(auth_claims.token_id).await;
 
     if token.is_err() {
         tracing::warn!(

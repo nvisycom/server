@@ -24,14 +24,14 @@ use crate::{Error, Result};
 ///
 /// User text message:
 /// ```rust
-/// use nvisy_service::{Message, MessageRole};
+/// use nvisy_service::inference::{Message, MessageRole};
 ///
 /// let message = Message::new(MessageRole::User, "What is the capital of France?");
 /// ```
 ///
 /// Assistant response with metadata:
 /// ```rust
-/// use nvisy_service::{Message, MessageRole};
+/// use nvisy_service::inference::{Message, MessageRole};
 ///
 /// let response = Message::new(MessageRole::Assistant, "The capital of France is Paris.")
 ///     .with_model("gpt-4")
@@ -173,7 +173,7 @@ impl Message {
 ///
 /// Creating a new chat:
 /// ```rust
-/// use nvisy_service::{Chat, Message, MessageRole};
+/// use nvisy_service::inference::{Chat, Message, MessageRole};
 ///
 /// let mut chat = Chat::new();
 ///

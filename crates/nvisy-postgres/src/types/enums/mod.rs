@@ -21,7 +21,6 @@ pub mod workspace_role;
 // Document-related enumerations
 pub mod annotation_type;
 pub mod content_segmentation;
-pub mod document_status;
 pub mod processing_status;
 pub mod require_mode;
 
@@ -30,7 +29,6 @@ pub use activity_type::{ActivityCategory, ActivityType};
 pub use annotation_type::AnnotationType;
 pub use api_token_type::ApiTokenType;
 pub use content_segmentation::ContentSegmentation;
-pub use document_status::DocumentStatus;
 pub use integration_status::IntegrationStatus;
 pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;

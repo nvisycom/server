@@ -5,7 +5,6 @@ use std::future::Future;
 use bigdecimal::BigDecimal;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
@@ -65,27 +64,6 @@ pub trait DocumentFileRepository {
     /// Soft deletes a file by setting the deletion timestamp.
     fn delete_document_file(&mut self, file_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Retrieves files awaiting processing.
-    ///
-    /// Returns files ordered by priority and creation time.
-    fn get_pending_files(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
-
-    /// Updates the processing status of a file.
-    fn update_processing_status(
-        &mut self,
-        file_id: Uuid,
-        status: ProcessingStatus,
-    ) -> impl Future<Output = PgResult<DocumentFile>> + Send;
-
-    /// Finds multiple files by their IDs in a single query.
-    fn find_document_files_by_ids(
-        &mut self,
-        file_ids: &[Uuid],
-    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
-
     /// Lists all files in a workspace with sorting and filtering options.
     ///
     /// Supports filtering by file format and sorting by name, date, or size.
@@ -118,40 +96,17 @@ pub trait DocumentFileRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
 
-    /// Finds files that failed processing.
-    fn find_failed_files(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
-
-    /// Finds files exceeding a size threshold.
-    fn find_large_files(
-        &mut self,
-        size_threshold: i64,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
-
     /// Calculates total storage usage for an account.
-    fn get_user_storage_usage(
+    fn get_account_storage_usage(
         &mut self,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<BigDecimal>> + Send;
 
-    /// Resets failed files to pending status for reprocessing.
-    ///
-    /// Returns the count of affected files.
-    fn reset_failed_processing(
+    /// Finds multiple files by their IDs.
+    fn find_document_files_by_ids(
         &mut self,
-        file_ids: Vec<Uuid>,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
-
-    /// Soft deletes files older than the retention period.
-    ///
-    /// Returns the count of affected files.
-    fn purge_old_files(
-        &mut self,
-        retention_days: i32,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+        file_ids: &[Uuid],
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
 }
 
 impl DocumentFileRepository for PgConnection {
@@ -273,66 +228,6 @@ impl DocumentFileRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(())
-    }
-
-    async fn get_pending_files(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<DocumentFile>> {
-        use schema::document_files::{self, dsl};
-
-        let files = document_files::table
-            .filter(dsl::processing_status.eq(ProcessingStatus::Pending))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::processing_priority.desc())
-            .then_order_by(dsl::created_at.asc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentFile::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(files)
-    }
-
-    async fn update_processing_status(
-        &mut self,
-        file_id: Uuid,
-        status: ProcessingStatus,
-    ) -> PgResult<DocumentFile> {
-        use schema::document_files::{self, dsl};
-
-        let updates = UpdateDocumentFile {
-            processing_status: Some(status),
-            ..Default::default()
-        };
-
-        let file = diesel::update(document_files::table.filter(dsl::id.eq(file_id)))
-            .set(&updates)
-            .returning(DocumentFile::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(file)
-    }
-
-    async fn find_document_files_by_ids(
-        &mut self,
-        file_ids: &[Uuid],
-    ) -> PgResult<Vec<DocumentFile>> {
-        use schema::document_files::{self, dsl};
-
-        let files = document_files::table
-            .filter(dsl::id.eq_any(file_ids))
-            .filter(dsl::deleted_at.is_null())
-            .select(DocumentFile::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(files)
     }
 
     async fn offset_list_workspace_files(
@@ -494,48 +389,7 @@ impl DocumentFileRepository for PgConnection {
         Ok(files)
     }
 
-    async fn find_failed_files(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<DocumentFile>> {
-        use schema::document_files::{self, dsl};
-
-        let files = document_files::table
-            .filter(dsl::processing_status.eq(ProcessingStatus::Failed))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::updated_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentFile::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(files)
-    }
-
-    async fn find_large_files(
-        &mut self,
-        size_threshold: i64,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<DocumentFile>> {
-        use schema::document_files::{self, dsl};
-
-        let files = document_files::table
-            .filter(dsl::file_size_bytes.gt(size_threshold))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::file_size_bytes.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(DocumentFile::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(files)
-    }
-
-    async fn get_user_storage_usage(&mut self, account_id: Uuid) -> PgResult<BigDecimal> {
+    async fn get_account_storage_usage(&mut self, account_id: Uuid) -> PgResult<BigDecimal> {
         use schema::document_files::{self, dsl};
 
         let usage: Option<BigDecimal> = document_files::table
@@ -549,36 +403,20 @@ impl DocumentFileRepository for PgConnection {
         Ok(usage.unwrap_or_else(|| BigDecimal::from(0)))
     }
 
-    async fn reset_failed_processing(&mut self, file_ids: Vec<Uuid>) -> PgResult<usize> {
+    async fn find_document_files_by_ids(
+        &mut self,
+        file_ids: &[Uuid],
+    ) -> PgResult<Vec<DocumentFile>> {
         use schema::document_files::{self, dsl};
 
-        let affected = diesel::update(document_files::table)
+        let files = document_files::table
             .filter(dsl::id.eq_any(file_ids))
-            .filter(dsl::processing_status.eq(ProcessingStatus::Failed))
-            .set(dsl::processing_status.eq(ProcessingStatus::Pending))
-            .execute(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(affected)
-    }
-
-    async fn purge_old_files(&mut self, retention_days: i32) -> PgResult<usize> {
-        use diesel::dsl::now;
-        use schema::document_files::{self, dsl};
-
-        let cutoff_date = jiff_diesel::Timestamp::from(
-            Timestamp::now() - Span::new().days(retention_days as i64),
-        );
-
-        let affected = diesel::update(document_files::table)
-            .filter(dsl::created_at.lt(cutoff_date))
             .filter(dsl::deleted_at.is_null())
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
+            .select(DocumentFile::as_select())
+            .load(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(affected)
+        Ok(files)
     }
 }

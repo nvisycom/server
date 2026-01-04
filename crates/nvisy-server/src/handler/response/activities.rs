@@ -7,12 +7,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Response type for a workspace activity.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Activity {
     /// Unique activity identifier.
-    pub id: i64,
+    pub id: Uuid,
     /// Workspace ID.
     pub workspace_id: Uuid,
     /// Account that performed the activity.
@@ -26,11 +28,10 @@ pub struct Activity {
     pub created_at: Timestamp,
 }
 
-/// List of activities.
-pub type Activities = Vec<Activity>;
+/// Paginated list of activities.
+pub type ActivitiesPage = Page<Activity>;
 
 impl Activity {
-    /// Creates an Activity response from a database model.
     pub fn from_model(activity: WorkspaceActivity) -> Self {
         Self {
             id: activity.id,
@@ -40,10 +41,5 @@ impl Activity {
             description: activity.description,
             created_at: activity.created_at.into(),
         }
-    }
-
-    /// Creates a list of Activity responses from database models.
-    pub fn from_models(models: Vec<WorkspaceActivity>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
     }
 }

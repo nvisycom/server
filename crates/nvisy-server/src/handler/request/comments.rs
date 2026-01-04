@@ -48,7 +48,6 @@ pub struct UpdateComment {
 }
 
 impl UpdateComment {
-    /// Converts to database model.
     pub fn into_model(self) -> nvisy_postgres::model::UpdateDocumentComment {
         nvisy_postgres::model::UpdateDocumentComment {
             content: self.content,

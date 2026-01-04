@@ -7,17 +7,17 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceMemberRepository;
 use nvisy_postgres::types::WorkspaceRole;
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
-};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    ListMembersQuery, MemberPathParams, OffsetPaginationQuery, UpdateMember, WorkspacePathParams,
+    CursorPagination, ListMembers, MemberPathParams, UpdateMember, WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, Member, Members};
+use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -36,42 +36,45 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
     )
 )]
 async fn list_members(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(query): Query<ListMembersQuery>,
-    Query(pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<Members>)> {
+    Query(query): Query<ListMembers>,
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<MembersPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
         .await?;
 
-    let workspace_members = conn
-        .offset_list_workspace_members_with_accounts(
+    let page = conn
+        .cursor_list_workspace_members_with_accounts(
             path_params.workspace_id,
             pagination.into(),
-            query.to_sort(),
             query.to_filter(),
         )
         .await?;
 
-    let members: Members = Member::from_models(workspace_members);
-
     tracing::info!(
         target: TRACING_TARGET,
-        member_count = members.len(),
-        "Workspace members listed ",
+        member_count = page.items.len(),
+        "Workspace members listed",
     );
 
-    Ok((StatusCode::OK, Json(members)))
+    let response = Page::from_cursor_page(page, |(member, account)| {
+        Member::from_model(member, account)
+    });
+
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_members_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List members")
         .description("Returns a paginated list of workspace members with their roles and status.")
-        .response::<200, Json<Members>>()
+        .response::<200, Json<MembersPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -90,11 +93,13 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_member(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
@@ -144,11 +149,13 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_member(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Removing workspace member");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -213,12 +220,14 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_member(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMember>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ManageRoles)
@@ -296,11 +305,13 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn leave_workspace(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Member leaving workspace");
+
+    let mut conn = pg_client.get_connection().await?;
 
     let Some(_member) = conn
         .find_workspace_member(path_params.workspace_id, auth_state.account_id)

@@ -20,9 +20,6 @@ impl From<DocumentConstraints> for Error<'static> {
             DocumentConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Document metadata size is invalid")
             }
-            DocumentConstraints::SettingsSize => {
-                ErrorKind::BadRequest.with_message("Document settings size is invalid")
-            }
             DocumentConstraints::UpdatedAfterCreated
             | DocumentConstraints::DeletedAfterCreated
             | DocumentConstraints::DeletedAfterUpdated => {

@@ -17,12 +17,6 @@ pub enum AccountActionTokenConstraints {
     // Token validation constraints
     #[strum(serialize = "account_action_tokens_action_data_size")]
     ActionDataSize,
-    #[strum(serialize = "account_action_tokens_user_agent_not_empty")]
-    UserAgentNotEmpty,
-    #[strum(serialize = "account_action_tokens_attempt_count_range")]
-    AttemptCountRange,
-    #[strum(serialize = "account_action_tokens_max_attempts_range")]
-    MaxAttemptsRange,
 
     // Token chronological constraints
     #[strum(serialize = "account_action_tokens_expired_after_issued")]
@@ -42,10 +36,7 @@ impl AccountActionTokenConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            AccountActionTokenConstraints::ActionDataSize
-            | AccountActionTokenConstraints::UserAgentNotEmpty
-            | AccountActionTokenConstraints::AttemptCountRange
-            | AccountActionTokenConstraints::MaxAttemptsRange => ConstraintCategory::Validation,
+            AccountActionTokenConstraints::ActionDataSize => ConstraintCategory::Validation,
 
             AccountActionTokenConstraints::ExpiredAfterIssued
             | AccountActionTokenConstraints::UsedAfterIssued

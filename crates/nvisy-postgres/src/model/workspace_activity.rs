@@ -22,7 +22,7 @@ use crate::types::{ActivityCategory, ActivityType, HasCreatedAt, HasSecurityCont
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspaceActivity {
     /// Unique activity log entry identifier.
-    pub id: i64,
+    pub id: Uuid,
     /// Reference to the workspace where activity occurred.
     pub workspace_id: Uuid,
     /// Reference to the account that performed the activity.

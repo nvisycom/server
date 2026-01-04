@@ -9,17 +9,17 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_postgres::types::OffsetPagination;
 use nvisy_service::webhook::{WebhookRequest, WebhookService};
 use url::Url;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    CreateWebhook, TestWebhook, UpdateWebhook as UpdateWebhookRequest, WebhookPathParams,
-    WorkspacePathParams,
+    CreateWebhook, CursorPagination, TestWebhook, UpdateWebhook as UpdateWebhookRequest,
+    WebhookPathParams, WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, Webhook, WebhookResult, Webhooks};
+use crate::handler::response::{ErrorResponse, Webhook, WebhookResult, WebhooksPage};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -37,12 +37,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
     )
 )]
 async fn create_webhook(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateWebhook>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -84,11 +86,14 @@ fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn list_webhooks(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-) -> Result<(StatusCode, Json<Webhooks>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<WebhooksPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace webhooks");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -98,25 +103,26 @@ async fn list_webhooks(
         )
         .await?;
 
-    let webhooks = conn
-        .offset_list_workspace_webhooks(path_params.workspace_id, OffsetPagination::default())
+    let page = conn
+        .cursor_list_workspace_webhooks(path_params.workspace_id, pagination.into())
         .await?;
-
-    let webhooks: Webhooks = Webhook::from_models(webhooks);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        webhook_count = webhooks.len(),
-        "Workspace webhooks listed ",
+        webhook_count = page.items.len(),
+        "Workspace webhooks listed",
     );
 
-    Ok((StatusCode::OK, Json(webhooks)))
+    Ok((
+        StatusCode::OK,
+        Json(WebhooksPage::from_cursor_page(page, Webhook::from_model)),
+    ))
 }
 
 fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List webhooks")
         .description("Returns all configured webhooks for the workspace without secrets.")
-        .response::<200, Json<Webhooks>>()
+        .response::<200, Json<WebhooksPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -132,11 +138,13 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn read_webhook(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace webhook");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the webhook first to get workspace context for authorization
     let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
@@ -170,12 +178,14 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_webhook(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace webhook");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the webhook first to get workspace context for authorization
     let existing = find_webhook(&mut conn, path_params.webhook_id).await?;
@@ -215,11 +225,13 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_webhook(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace webhook");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the webhook first to get workspace context for authorization
     let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;
@@ -257,13 +269,15 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn test_webhook(
-    PgPool(mut conn): PgPool,
-    AuthState(auth_state): AuthState,
+    State(pg_client): State<PgClient>,
     State(webhook_service): State<WebhookService>,
+    AuthState(auth_state): AuthState,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(_request): ValidateJson<TestWebhook>,
 ) -> Result<(StatusCode, Json<WebhookResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the webhook to get URL
     let webhook = find_webhook(&mut conn, path_params.webhook_id).await?;

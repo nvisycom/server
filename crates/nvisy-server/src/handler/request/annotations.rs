@@ -52,7 +52,6 @@ pub struct UpdateAnnotation {
 }
 
 impl UpdateAnnotation {
-    /// Converts to database model.
     pub fn into_model(self) -> UpdateDocumentAnnotation {
         UpdateDocumentAnnotation {
             content: self.content,

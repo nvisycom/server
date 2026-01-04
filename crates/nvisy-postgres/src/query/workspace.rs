@@ -7,8 +7,8 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::types::OffsetPagination;
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
+use crate::types::OffsetPagination;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace database operations.
@@ -29,15 +29,6 @@ pub trait WorkspaceRepository {
         &mut self,
         workspace_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
-
-    /// Finds workspaces created by a user.
-    ///
-    /// Retrieves workspaces ordered by creation date with newest first.
-    fn find_workspaces_by_creator(
-        &mut self,
-        creator_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 
     /// Updates a workspace with partial changes.
     fn update_workspace(
@@ -102,27 +93,6 @@ impl WorkspaceRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(workspace)
-    }
-
-    async fn find_workspaces_by_creator(
-        &mut self,
-        creator_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Workspace>> {
-        use schema::workspaces::dsl::*;
-
-        let workspace_list = workspaces
-            .filter(created_by.eq(creator_id))
-            .filter(deleted_at.is_null())
-            .select(Workspace::as_select())
-            .order(created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(workspace_list)
     }
 
     async fn update_workspace(

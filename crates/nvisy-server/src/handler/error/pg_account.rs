@@ -101,15 +101,6 @@ impl From<AccountActionTokenConstraints> for Error<'static> {
             AccountActionTokenConstraints::ActionDataSize => {
                 ErrorKind::BadRequest.with_message("Action data size is invalid")
             }
-            AccountActionTokenConstraints::UserAgentNotEmpty => {
-                ErrorKind::BadRequest.with_message("User agent cannot be empty")
-            }
-            AccountActionTokenConstraints::AttemptCountRange => {
-                ErrorKind::BadRequest.with_message("Invalid attempt count")
-            }
-            AccountActionTokenConstraints::MaxAttemptsRange => {
-                ErrorKind::InternalServerError.into_error()
-            }
             AccountActionTokenConstraints::ExpiredAfterIssued
             | AccountActionTokenConstraints::UsedAfterIssued
             | AccountActionTokenConstraints::UsedBeforeExpired => {

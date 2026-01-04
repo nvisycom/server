@@ -279,7 +279,7 @@ COMMENT ON TYPE ACTIVITY_TYPE IS
 -- Workspace activities table definition
 CREATE TABLE workspace_activities (
     -- Primary identifier
-    id            BIGSERIAL PRIMARY KEY,
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
     workspace_id    UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
@@ -316,7 +316,7 @@ CREATE INDEX workspace_activities_activity_type_idx
 COMMENT ON TABLE workspace_activities IS
     'Comprehensive audit log for all workspace activities and changes.';
 
-COMMENT ON COLUMN workspace_activities.id IS 'Unique activity log entry identifier';
+COMMENT ON COLUMN workspace_activities.id IS 'Unique activity log entry identifier (UUID)';
 COMMENT ON COLUMN workspace_activities.workspace_id IS 'Reference to the workspace';
 COMMENT ON COLUMN workspace_activities.account_id IS 'Account that performed the activity (NULL for system)';
 COMMENT ON COLUMN workspace_activities.activity_type IS 'Type of activity performed';

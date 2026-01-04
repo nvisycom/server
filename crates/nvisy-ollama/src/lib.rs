@@ -6,9 +6,7 @@
 //!
 //! Ollama client library for nvisy, providing embeddings, OCR, and VLM capabilities.
 //!
-//! The [`OllamaClient`] implements the [`InferenceProvider`] trait from nvisy-service.
-//!
-//! [`InferenceProvider`]: nvisy_service::InferenceProvider
+//! The [`OllamaClient`] implements the `InferenceProvider` trait from `nvisy-service`.
 
 /// Tracing target for the main library.
 pub const TRACING_TARGET: &str = "nvisy_ollama";

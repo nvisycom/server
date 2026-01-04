@@ -4,7 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::{Span, Timestamp};
+use jiff::Timestamp;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
@@ -25,14 +25,14 @@ pub trait WorkspaceInviteRepository {
         invite: NewWorkspaceInvite,
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
-    /// Finds an invitation by its unique token string.
-    fn find_invite_by_token(
+    /// Finds a workspace invitation by its unique token string.
+    fn find_workspace_invite_by_token(
         &mut self,
         token: &str,
     ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
 
-    /// Finds an invitation by its unique identifier.
-    fn find_invite_by_id(
+    /// Finds a workspace invitation by its unique identifier.
+    fn find_workspace_invite_by_id(
         &mut self,
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
@@ -45,83 +45,66 @@ pub trait WorkspaceInviteRepository {
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
     /// Accepts a workspace invitation and marks it as successfully processed.
-    fn accept_invite(
+    fn accept_workspace_invite(
         &mut self,
         invite_id: Uuid,
         _acceptor_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
     /// Rejects or declines a workspace invitation.
-    fn reject_invite(
+    fn reject_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
     /// Cancels a workspace invitation before it can be used.
-    fn cancel_invite(
+    fn cancel_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
-    /// Lists invitations for a workspace with offset pagination.
+    /// Lists workspace invitations with offset pagination.
     ///
     /// Supports filtering by role and sorting by email or date.
     fn offset_list_workspace_invites(
         &mut self,
-        proj_id: Uuid,
+        workspace_id: Uuid,
         pagination: OffsetPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
-    /// Lists invitations for a workspace with cursor pagination.
+    /// Lists workspace invitations with cursor pagination.
     fn cursor_list_workspace_invites(
         &mut self,
-        proj_id: Uuid,
+        workspace_id: Uuid,
         pagination: CursorPagination,
         filter: InviteFilter,
     ) -> impl Future<Output = PgResult<CursorPage<WorkspaceInvite>>> + Send;
 
-    /// Performs system-wide cleanup of expired invitations.
-    fn cleanup_expired_invites(&mut self) -> impl Future<Output = PgResult<usize>> + Send;
+    /// Performs system-wide cleanup of expired workspace invitations.
+    fn cleanup_expired_workspace_invites(&mut self)
+    -> impl Future<Output = PgResult<usize>> + Send;
 
-    /// Retrieves all pending invitations for a specific workspace.
-    fn get_pending_invites(
-        &mut self,
-        proj_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
-
-    /// Finds invitations filtered by their current status.
-    fn find_invites_by_status(
+    /// Finds workspace invitations filtered by their current status.
+    fn find_workspace_invites_by_status(
         &mut self,
         status: InviteStatus,
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
 
-    /// Finds invitations that are approaching their expiration time.
-    fn find_expiring_invites(
-        &mut self,
-        hours: i64,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
-
-    /// Revokes an invitation through administrative action.
-    fn revoke_invite(
+    /// Revokes a workspace invitation through administrative action.
+    fn revoke_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
         _reason: Option<String>,
     ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
 
-    /// Retrieves an invitation by its unique identifier.
-    fn get_invite_by_id(
-        &mut self,
-        invite_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
-
-    /// Finds a pending invite by workspace and email.
-    fn find_pending_invite_by_email(
+    /// Finds a pending workspace invitation by workspace and email.
+    fn find_pending_workspace_invite_by_email(
         &mut self,
         workspace_id: Uuid,
         email: &str,
@@ -145,7 +128,10 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invite)
     }
 
-    async fn find_invite_by_token(&mut self, token: &str) -> PgResult<Option<WorkspaceInvite>> {
+    async fn find_workspace_invite_by_token(
+        &mut self,
+        token: &str,
+    ) -> PgResult<Option<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
         let invite = workspace_invites
@@ -159,7 +145,10 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invite)
     }
 
-    async fn find_invite_by_id(&mut self, invite_id: Uuid) -> PgResult<Option<WorkspaceInvite>> {
+    async fn find_workspace_invite_by_id(
+        &mut self,
+        invite_id: Uuid,
+    ) -> PgResult<Option<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
         let invite = workspace_invites
@@ -191,7 +180,7 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invite)
     }
 
-    async fn accept_invite(
+    async fn accept_workspace_invite(
         &mut self,
         invite_id: Uuid,
         _acceptor_id: Uuid,
@@ -205,7 +194,7 @@ impl WorkspaceInviteRepository for PgConnection {
         self.update_workspace_invite(invite_id, changes).await
     }
 
-    async fn reject_invite(
+    async fn reject_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
@@ -219,7 +208,7 @@ impl WorkspaceInviteRepository for PgConnection {
         self.update_workspace_invite(invite_id, changes).await
     }
 
-    async fn cancel_invite(
+    async fn cancel_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
@@ -235,7 +224,7 @@ impl WorkspaceInviteRepository for PgConnection {
 
     async fn offset_list_workspace_invites(
         &mut self,
-        proj_id: Uuid,
+        workspace_id: Uuid,
         pagination: OffsetPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
@@ -243,7 +232,7 @@ impl WorkspaceInviteRepository for PgConnection {
         use schema::workspace_invites;
 
         let mut query = workspace_invites::table
-            .filter(workspace_invites::workspace_id.eq(proj_id))
+            .filter(workspace_invites::workspace_id.eq(workspace_id))
             .filter(workspace_invites::invite_status.ne(InviteStatus::Canceled))
             .into_boxed();
 
@@ -281,21 +270,21 @@ impl WorkspaceInviteRepository for PgConnection {
 
     async fn cursor_list_workspace_invites(
         &mut self,
-        proj_id: Uuid,
+        workspace_id: Uuid,
         pagination: CursorPagination,
         filter: InviteFilter,
     ) -> PgResult<CursorPage<WorkspaceInvite>> {
-        use schema::workspace_invites::dsl::*;
+        use schema::workspace_invites::{self, dsl};
 
         // Get total count only if requested
         let total = if pagination.include_count {
-            let mut count_query = workspace_invites
-                .filter(workspace_id.eq(proj_id))
-                .filter(invite_status.ne(InviteStatus::Canceled))
+            let mut count_query = workspace_invites::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::invite_status.ne(InviteStatus::Canceled))
                 .into_boxed();
 
             if let Some(role) = filter.role {
-                count_query = count_query.filter(invited_role.eq(role));
+                count_query = count_query.filter(dsl::invited_role.eq(role));
             }
 
             Some(
@@ -310,28 +299,28 @@ impl WorkspaceInviteRepository for PgConnection {
         };
 
         // Build query with cursor
-        let mut query = workspace_invites
-            .filter(workspace_id.eq(proj_id))
-            .filter(invite_status.ne(InviteStatus::Canceled))
+        let mut query = workspace_invites::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::invite_status.ne(InviteStatus::Canceled))
             .into_boxed();
 
         if let Some(role) = filter.role {
-            query = query.filter(invited_role.eq(role));
+            query = query.filter(dsl::invited_role.eq(role));
         }
 
         if let Some(cursor) = &pagination.after {
             let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
             query = query.filter(
-                created_at
+                dsl::created_at
                     .lt(cursor_ts)
-                    .or(created_at.eq(cursor_ts).and(id.lt(cursor.id))),
+                    .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
             );
         }
 
         let fetch_limit = pagination.fetch_limit();
         let mut items: Vec<WorkspaceInvite> = query
             .select(WorkspaceInvite::as_select())
-            .order((created_at.desc(), id.desc()))
+            .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(fetch_limit)
             .load(self)
             .await
@@ -357,12 +346,11 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(CursorPage {
             items,
             total,
-            has_more,
             next_cursor,
         })
     }
 
-    async fn cleanup_expired_invites(&mut self) -> PgResult<usize> {
+    async fn cleanup_expired_workspace_invites(&mut self) -> PgResult<usize> {
         use diesel::dsl::now;
         use schema::workspace_invites::dsl::*;
 
@@ -377,24 +365,7 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(updated_count)
     }
 
-    async fn get_pending_invites(&mut self, proj_id: Uuid) -> PgResult<Vec<WorkspaceInvite>> {
-        use diesel::dsl::now;
-        use schema::workspace_invites::dsl::*;
-
-        let invites = workspace_invites
-            .filter(workspace_id.eq(proj_id))
-            .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.gt(now))
-            .select(WorkspaceInvite::as_select())
-            .order(created_at.desc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(invites)
-    }
-
-    async fn find_invites_by_status(
+    async fn find_workspace_invites_by_status(
         &mut self,
         status: InviteStatus,
         pagination: OffsetPagination,
@@ -414,28 +385,7 @@ impl WorkspaceInviteRepository for PgConnection {
         Ok(invites)
     }
 
-    async fn find_expiring_invites(&mut self, hours: i64) -> PgResult<Vec<WorkspaceInvite>> {
-        use schema::workspace_invites::dsl::*;
-
-        let expiry_threshold =
-            jiff_diesel::Timestamp::from(Timestamp::now() + Span::new().hours(hours));
-
-        let invites = workspace_invites
-            .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.between(
-                jiff_diesel::Timestamp::from(Timestamp::now()),
-                expiry_threshold,
-            ))
-            .select(WorkspaceInvite::as_select())
-            .order(expires_at.asc())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(invites)
-    }
-
-    async fn revoke_invite(
+    async fn revoke_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
@@ -450,33 +400,19 @@ impl WorkspaceInviteRepository for PgConnection {
         self.update_workspace_invite(invite_id, changes).await
     }
 
-    async fn get_invite_by_id(&mut self, invite_id: Uuid) -> PgResult<Option<WorkspaceInvite>> {
-        use schema::workspace_invites::dsl::*;
-
-        let invite = workspace_invites
-            .filter(id.eq(invite_id))
-            .select(WorkspaceInvite::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(PgError::from)?;
-
-        Ok(invite)
-    }
-
-    async fn find_pending_invite_by_email(
+    async fn find_pending_workspace_invite_by_email(
         &mut self,
-        ws_id: Uuid,
+        workspace_id: Uuid,
         email: &str,
     ) -> PgResult<Option<WorkspaceInvite>> {
         use diesel::dsl::now;
-        use schema::workspace_invites::dsl::*;
+        use schema::workspace_invites::{self, dsl};
 
-        let invite = workspace_invites
-            .filter(workspace_id.eq(ws_id))
-            .filter(invitee_email.eq(email))
-            .filter(invite_status.eq(InviteStatus::Pending))
-            .filter(expires_at.gt(now))
+        let invite = workspace_invites::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::invitee_email.eq(email))
+            .filter(dsl::invite_status.eq(InviteStatus::Pending))
+            .filter(dsl::expires_at.gt(now))
             .select(WorkspaceInvite::as_select())
             .first(self)
             .await

@@ -35,7 +35,7 @@ impl UserAgentParser {
     ///
     /// Extracts the browser/application name, version, OS, and device category
     /// from the user agent, falling back to "Unknown" if parsing fails. The
-    /// result is truncated to [`TOKEN_NAME_MAX_LENGTH`] characters.
+    /// result is truncated to 64 characters.
     ///
     /// # Examples
     ///

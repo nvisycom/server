@@ -7,9 +7,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Workspace integration response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Integration {
     /// Unique integration identifier.
@@ -47,7 +49,6 @@ pub struct Integration {
 }
 
 impl Integration {
-    /// Creates an Integration response from a database model.
     pub fn from_model(integration: model::WorkspaceIntegration) -> Self {
         Self {
             integration_id: integration.id,
@@ -63,12 +64,7 @@ impl Integration {
             updated_at: integration.updated_at.into(),
         }
     }
-
-    /// Creates a list of Integration responses from database models.
-    pub fn from_models(models: Vec<model::WorkspaceIntegration>) -> Vec<Self> {
-        models.into_iter().map(Self::from_model).collect()
-    }
 }
 
-/// Response for listing workspace integrations.
-pub type Integrations = Vec<Integration>;
+/// Paginated response for workspace integrations.
+pub type IntegrationsPage = Page<Integration>;

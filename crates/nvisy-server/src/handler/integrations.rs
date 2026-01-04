@@ -7,17 +7,17 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceIntegrationRepository;
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
-};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    CreateIntegration, IntegrationPathParams, OffsetPaginationQuery, UpdateIntegration,
+    CreateIntegration, CursorPagination, IntegrationPathParams, UpdateIntegration,
     UpdateIntegrationCredentials, WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, Integration, Integrations};
+use crate::handler::response::{ErrorResponse, Integration, IntegrationsPage};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -37,12 +37,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::integrations";
     )
 )]
 async fn create_integration(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace integration");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -52,19 +54,8 @@ async fn create_integration(
         )
         .await?;
 
-    // Check if integration name is already used in this workspace
-    let name_is_unique = conn
-        .is_integration_name_unique(path_params.workspace_id, &request.integration_name, None)
-        .await?;
-
-    if !name_is_unique {
-        return Err(
-            ErrorKind::Conflict.with_message("Integration name already exists in workspace")
-        );
-    }
-
     let new_integration = request.into_model(path_params.workspace_id, auth_state.account_id);
-    let integration = conn.create_integration(new_integration).await?;
+    let integration = conn.create_workspace_integration(new_integration).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -99,12 +90,14 @@ fn create_integration_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn list_integrations(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
-    Query(pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<Integrations>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<IntegrationsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace integrations");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(
@@ -114,25 +107,29 @@ async fn list_integrations(
         )
         .await?;
 
-    let integrations = conn
-        .offset_list_workspace_integrations(path_params.workspace_id, pagination.into())
+    let page = conn
+        .cursor_list_workspace_integrations(path_params.workspace_id, pagination.into())
         .await?;
-
-    let integrations: Integrations = Integration::from_models(integrations);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        integration_count = integrations.len(),
-        "Workspace integrations listed ",
+        integration_count = page.items.len(),
+        "Workspace integrations listed",
     );
 
-    Ok((StatusCode::OK, Json(integrations)))
+    Ok((
+        StatusCode::OK,
+        Json(IntegrationsPage::from_cursor_page(
+            page,
+            Integration::from_model,
+        )),
+    ))
 }
 
 fn list_integrations_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List integrations")
         .description("Returns all configured integrations for the workspace.")
-        .response::<200, Json<Integrations>>()
+        .response::<200, Json<IntegrationsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -148,11 +145,13 @@ fn list_integrations_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn read_integration(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace integration");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the integration first to get workspace context for authorization
     let integration = find_integration(&mut conn, path_params.integration_id).await?;
@@ -190,12 +189,14 @@ fn read_integration_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_integration(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateIntegration>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace integration");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the integration first to get workspace context for authorization
     let existing = find_integration(&mut conn, path_params.integration_id).await?;
@@ -208,27 +209,8 @@ async fn update_integration(
         )
         .await?;
 
-    // Check if new name conflicts with existing integrations
-    if let Some(ref new_name) = request.integration_name
-        && new_name != &existing.integration_name
-    {
-        let name_is_unique = conn
-            .is_integration_name_unique(
-                existing.workspace_id,
-                new_name,
-                Some(path_params.integration_id),
-            )
-            .await?;
-
-        if !name_is_unique {
-            return Err(
-                ErrorKind::Conflict.with_message("Integration name already exists in workspace")
-            );
-        }
-    }
-
     let integration = conn
-        .update_integration(path_params.integration_id, request.into_model())
+        .update_workspace_integration(path_params.integration_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Integration updated");
@@ -257,12 +239,14 @@ fn update_integration_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_integration_credentials(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
     ValidateJson(request): ValidateJson<UpdateIntegrationCredentials>,
 ) -> Result<(StatusCode, Json<Integration>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating integration credentials");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the integration first to get workspace context for authorization
     let existing = find_integration(&mut conn, path_params.integration_id).await?;
@@ -275,12 +259,13 @@ async fn update_integration_credentials(
         )
         .await?;
 
+    let changes = nvisy_postgres::model::UpdateWorkspaceIntegration {
+        credentials: Some(request.credentials),
+        ..Default::default()
+    };
+
     let integration = conn
-        .update_integration_auth(
-            path_params.integration_id,
-            request.credentials,
-            auth_state.account_id,
-        )
+        .update_workspace_integration(path_params.integration_id, changes)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Integration credentials updated");
@@ -309,11 +294,13 @@ fn update_integration_credentials_docs(op: TransformOperation) -> TransformOpera
     )
 )]
 async fn delete_integration(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<IntegrationPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace integration");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Fetch the integration first to get workspace context for authorization
     let integration = find_integration(&mut conn, path_params.integration_id).await?;
@@ -326,7 +313,8 @@ async fn delete_integration(
         )
         .await?;
 
-    conn.delete_integration(path_params.integration_id).await?;
+    conn.delete_workspace_integration(path_params.integration_id)
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, "Integration deleted");
 
@@ -347,7 +335,7 @@ async fn find_integration(
     conn: &mut nvisy_postgres::PgConn,
     integration_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::WorkspaceIntegration> {
-    conn.find_integration_by_id(integration_id)
+    conn.find_workspace_integration_by_id(integration_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound

@@ -8,14 +8,14 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgConn;
 use nvisy_postgres::model::Account as AccountModel;
 use nvisy_postgres::query::AccountRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::request::UpdateAccount;
 use super::response::{Account, ErrorResponse};
-use crate::extract::{AuthState, Json, PgPool, ValidateJson};
+use crate::extract::{AuthState, Json, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
@@ -28,11 +28,12 @@ const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
     fields(account_id = %auth_claims.account_id)
 )]
 async fn get_own_account(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading account");
 
+    let mut conn = pg_client.get_connection().await?;
     let account = find_account(&mut conn, auth_claims.account_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account read");
@@ -53,7 +54,7 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
     fields(account_id = %auth_claims.account_id)
 )]
 async fn update_own_account(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
     AuthState(auth_claims): AuthState,
@@ -61,6 +62,7 @@ async fn update_own_account(
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating account");
 
+    let mut conn = pg_client.get_connection().await?;
     let current_account = find_account(&mut conn, auth_claims.account_id).await?;
 
     // Validate and hash password if provided
@@ -119,11 +121,12 @@ fn update_own_account_docs(op: TransformOperation) -> TransformOperation {
     fields(account_id = %auth_claims.account_id)
 )]
 async fn delete_own_account(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting account");
 
+    let mut conn = pg_client.get_connection().await?;
     conn.delete_account(auth_claims.account_id)
         .await?
         .ok_or_else(|| {

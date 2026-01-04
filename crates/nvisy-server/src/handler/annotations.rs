@@ -4,16 +4,16 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{DocumentAnnotationRepository, DocumentFileRepository};
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, PgPool, Query, ValidateJson,
-};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    AnnotationPathParams, CreateAnnotation, FilePathParams, OffsetPaginationQuery, UpdateAnnotation,
+    AnnotationPathParams, CreateAnnotation, CursorPagination, FilePathParams, UpdateAnnotation
 };
-use crate::handler::response::{Annotation, Annotations, ErrorResponse};
+use crate::handler::response::{Annotation, AnnotationsPage, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -25,7 +25,7 @@ async fn find_annotation(
     conn: &mut nvisy_postgres::PgConn,
     annotation_id: uuid::Uuid,
 ) -> Result<nvisy_postgres::model::DocumentAnnotation> {
-    conn.find_annotation_by_id(annotation_id)
+    conn.find_document_annotation_by_id(annotation_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -57,13 +57,14 @@ async fn find_file(
     )
 )]
 async fn create_annotation(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<FilePathParams>,
     ValidateJson(request): ValidateJson<CreateAnnotation>,
 ) -> Result<(StatusCode, Json<Annotation>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating annotation");
 
+    let mut conn = pg_client.get_connection().await?;
     let file = find_file(&mut conn, path_params.file_id).await?;
 
     auth_state
@@ -71,7 +72,7 @@ async fn create_annotation(
         .await?;
 
     let new_annotation = request.into_model(path_params.file_id, auth_state.account_id);
-    let annotation = conn.create_annotation(new_annotation).await?;
+    let annotation = conn.create_document_annotation(new_annotation).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -104,38 +105,39 @@ fn create_annotation_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn list_annotations(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<FilePathParams>,
-    Query(pagination): Query<OffsetPaginationQuery>,
-) -> Result<(StatusCode, Json<Annotations>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<AnnotationsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing annotations");
 
+    let mut conn = pg_client.get_connection().await?;
     let file = find_file(&mut conn, path_params.file_id).await?;
 
     auth_state
         .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewDocuments)
         .await?;
 
-    let annotations = conn
-        .offset_list_file_annotations(path_params.file_id, pagination.into())
+    let page = conn
+        .cursor_list_file_document_annotations(path_params.file_id, pagination.into())
         .await?;
 
-    let annotations: Annotations = Annotation::from_models(annotations);
+    let response = AnnotationsPage::from_cursor_page(page, Annotation::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        annotation_count = annotations.len(),
+        annotation_count = response.items.len(),
         "Annotations listed"
     );
 
-    Ok((StatusCode::OK, Json(annotations)))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_annotations_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List annotations")
         .description("Returns all annotations for a file.")
-        .response::<200, Json<Annotations>>()
+        .response::<200, Json<AnnotationsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -150,12 +152,13 @@ fn list_annotations_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_annotation(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<AnnotationPathParams>,
 ) -> Result<(StatusCode, Json<Annotation>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting annotation");
 
+    let mut conn = pg_client.get_connection().await?;
     let annotation = find_annotation(&mut conn, path_params.annotation_id).await?;
     let file = find_file(&mut conn, annotation.document_file_id).await?;
 
@@ -186,13 +189,14 @@ fn get_annotation_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_annotation(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<AnnotationPathParams>,
     ValidateJson(request): ValidateJson<UpdateAnnotation>,
 ) -> Result<(StatusCode, Json<Annotation>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating annotation");
 
+    let mut conn = pg_client.get_connection().await?;
     let annotation = find_annotation(&mut conn, path_params.annotation_id).await?;
 
     // Only the owner can update their annotation
@@ -207,7 +211,7 @@ async fn update_annotation(
         .await?;
 
     let updated = conn
-        .update_annotation(path_params.annotation_id, request.into_model())
+        .update_document_annotation(path_params.annotation_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Annotation updated");
@@ -234,12 +238,13 @@ fn update_annotation_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_annotation(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<AnnotationPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting annotation");
 
+    let mut conn = pg_client.get_connection().await?;
     let annotation = find_annotation(&mut conn, path_params.annotation_id).await?;
 
     // Only the owner can delete their annotation
@@ -253,7 +258,8 @@ async fn delete_annotation(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::CreateDocuments)
         .await?;
 
-    conn.delete_annotation(path_params.annotation_id).await?;
+    conn.delete_document_annotation(path_params.annotation_id)
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, "Annotation deleted");
 

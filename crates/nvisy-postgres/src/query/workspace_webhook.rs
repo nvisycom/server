@@ -121,16 +121,16 @@ impl WorkspaceWebhookRepository for PgConnection {
 
     async fn offset_list_workspace_webhooks(
         &mut self,
-        proj_id: Uuid,
+        workspace_id: Uuid,
         pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::{self, dsl};
 
-        let webhooks = workspace_webhooks
-            .filter(workspace_id.eq(proj_id))
-            .filter(deleted_at.is_null())
+        let webhooks = workspace_webhooks::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
             .select(WorkspaceWebhook::as_select())
-            .order(created_at.desc())
+            .order(dsl::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .load(self)
@@ -142,17 +142,17 @@ impl WorkspaceWebhookRepository for PgConnection {
 
     async fn cursor_list_workspace_webhooks(
         &mut self,
-        proj_id: Uuid,
+        workspace_id: Uuid,
         pagination: CursorPagination,
     ) -> PgResult<CursorPage<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::{self, dsl};
 
         // Get total count only if requested
         let total = if pagination.include_count {
             Some(
-                workspace_webhooks
-                    .filter(workspace_id.eq(proj_id))
-                    .filter(deleted_at.is_null())
+                workspace_webhooks::table
+                    .filter(dsl::workspace_id.eq(workspace_id))
+                    .filter(dsl::deleted_at.is_null())
                     .count()
                     .get_result(self)
                     .await
@@ -163,24 +163,24 @@ impl WorkspaceWebhookRepository for PgConnection {
         };
 
         // Build query with cursor
-        let mut query = workspace_webhooks
-            .filter(workspace_id.eq(proj_id))
-            .filter(deleted_at.is_null())
+        let mut query = workspace_webhooks::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
         if let Some(cursor) = &pagination.after {
             let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
             query = query.filter(
-                created_at
+                dsl::created_at
                     .lt(cursor_ts)
-                    .or(created_at.eq(cursor_ts).and(id.lt(cursor.id))),
+                    .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
             );
         }
 
         let fetch_limit = pagination.fetch_limit();
         let mut items: Vec<WorkspaceWebhook> = query
             .select(WorkspaceWebhook::as_select())
-            .order((created_at.desc(), id.desc()))
+            .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(fetch_limit)
             .load(self)
             .await
@@ -206,7 +206,6 @@ impl WorkspaceWebhookRepository for PgConnection {
         Ok(CursorPage {
             items,
             total,
-            has_more,
             next_cursor,
         })
     }

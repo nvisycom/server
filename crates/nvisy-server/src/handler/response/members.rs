@@ -7,9 +7,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::Page;
+
 /// Represents a workspace member.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
     /// Account ID of the member.
@@ -49,5 +51,5 @@ impl Member {
     }
 }
 
-/// Response for listing workspace members.
-pub type Members = Vec<Member>;
+/// Paginated response for workspace members.
+pub type MembersPage = Page<Member>;

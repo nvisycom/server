@@ -56,7 +56,6 @@ pub struct UpdateDocument {
 }
 
 impl UpdateDocument {
-    /// Converts this request into a database model.
     pub fn into_model(self) -> UpdateDocumentModel {
         UpdateDocumentModel {
             display_name: self.display_name,

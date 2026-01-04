@@ -23,9 +23,9 @@ pub struct AccountApiToken {
     /// Type of token (web, mobile, api, etc.).
     pub session_type: ApiTokenType,
     /// IP address from which the token was initiated.
-    pub ip_address: IpNet,
+    pub ip_address: Option<IpNet>,
     /// User agent string from the client browser/application.
-    pub user_agent: String,
+    pub user_agent: Option<String>,
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: bool,
     /// Timestamp of token creation.
@@ -50,9 +50,9 @@ pub struct NewAccountApiToken {
     /// Type of token (web, mobile, api, etc.).
     pub session_type: Option<ApiTokenType>,
     /// IP address from which the token was initiated.
-    pub ip_address: IpNet,
+    pub ip_address: Option<IpNet>,
     /// User agent string from the client browser/application.
-    pub user_agent: String,
+    pub user_agent: Option<String>,
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid.
@@ -187,10 +187,10 @@ impl HasExpiresAt for AccountApiToken {
 
 impl HasSecurityContext for AccountApiToken {
     fn ip_address(&self) -> Option<IpNet> {
-        Some(self.ip_address)
+        self.ip_address
     }
 
     fn user_agent(&self) -> Option<&str> {
-        Some(&self.user_agent)
+        self.user_agent.as_deref()
     }
 }
