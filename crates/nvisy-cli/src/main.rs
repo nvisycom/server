@@ -8,19 +8,21 @@ mod server;
 use std::process;
 
 use axum::Router;
-use nvisy_reqwest::{ReqwestClient, ReqwestClientConfig};
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::{
     RouterObservabilityExt, RouterOpenApiExt, RouterRecoveryExt, RouterSecurityExt,
 };
-use nvisy_server::service::{ServiceConfig, ServiceState};
-use nvisy_service::webhook::WebhookService;
+use nvisy_server::service::{ServiceState, WorkerHandles};
 
-use crate::config::{Cli, MiddlewareConfig, create_services};
+use crate::config::{Cli, MiddlewareConfig, create_inference_service, create_webhook_service};
 
-// Tracing target constants
+/// Tracing target for server startup events.
 pub const TRACING_TARGET_SERVER_STARTUP: &str = "nvisy_cli::server::startup";
+
+/// Tracing target for server shutdown events.
 pub const TRACING_TARGET_SERVER_SHUTDOWN: &str = "nvisy_cli::server::shutdown";
+
+/// Tracing target for configuration events.
 pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 
 #[tokio::main]
@@ -50,29 +52,35 @@ async fn run() -> anyhow::Result<()> {
     cli.validate()?;
     cli.log();
 
-    let services = create_services(&cli)?;
-    let state = create_service_state(&cli.service, services).await?;
+    // Create services
+    let inference = create_inference_service(&cli)?;
+    let webhook = create_webhook_service()?;
+
+    // Initialize application state
+    let state = ServiceState::new(cli.service.clone(), inference, webhook).await?;
+
+    // Spawn background workers
+    let workers = WorkerHandles::spawn(&state, &cli.service.worker_config);
+    tracing::info!(
+        target: TRACING_TARGET_SERVER_STARTUP,
+        "Document processing workers started"
+    );
+
+    // Build router
     let router = create_router(state, &cli.middleware);
 
-    server::serve(router, cli.server).await?;
+    // Run the HTTP server
+    let result = server::serve(router, cli.server).await;
+
+    // Shutdown workers
+    tracing::info!(
+        target: TRACING_TARGET_SERVER_SHUTDOWN,
+        "Stopping document processing workers"
+    );
+    workers.shutdown();
+
+    result?;
     Ok(())
-}
-
-/// Creates the service state from configuration.
-async fn create_service_state(
-    config: &ServiceConfig,
-    inference: nvisy_service::inference::InferenceService,
-) -> anyhow::Result<ServiceState> {
-    let webhook_service = create_webhook_service()?;
-    let state = ServiceState::new(config.clone(), inference, webhook_service).await?;
-    Ok(state)
-}
-
-/// Creates the webhook service.
-fn create_webhook_service() -> anyhow::Result<WebhookService> {
-    let config = ReqwestClientConfig::default();
-    let client = ReqwestClient::new(config)?;
-    Ok(client.into_service())
 }
 
 /// Creates the router with all middleware layers applied.

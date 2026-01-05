@@ -7,7 +7,8 @@ use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::service::security::{SessionKeys, SessionKeysConfig};
-use crate::service::{Error, Result};
+use crate::service::worker::WorkerConfig;
+use crate::{Error, Result};
 
 /// App [`state`] configuration.
 ///
@@ -28,6 +29,10 @@ pub struct ServiceConfig {
     /// Authentication key paths configuration.
     #[cfg_attr(any(test, feature = "config"), command(flatten))]
     pub session_config: SessionKeysConfig,
+
+    /// Background worker configuration.
+    #[cfg_attr(any(test, feature = "config"), command(flatten))]
+    pub worker_config: WorkerConfig,
 }
 
 impl ServiceConfig {

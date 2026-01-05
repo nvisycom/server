@@ -1,6 +1,6 @@
-//! AI service provider configuration based on compile-time features.
+//! Service provider configuration based on compile-time features.
 //!
-//! This module creates [`InferenceService`] based on the enabled feature flags:
+//! This module creates services based on the enabled feature flags:
 //!
 //! - `ollama`: Use Ollama for embeddings, VLM, and OCR
 //! - `mock`: Use mock providers (fallback when no real provider is selected)
@@ -9,6 +9,7 @@
 
 #[cfg(any(feature = "mock", feature = "ollama"))]
 use nvisy_service::inference::InferenceService;
+use nvisy_service::webhook::WebhookService;
 
 #[cfg(any(feature = "mock", feature = "ollama"))]
 use super::Cli;
@@ -31,7 +32,7 @@ compile_error!(
 ///
 /// Returns an error if a provider cannot be initialized.
 #[cfg(feature = "ollama")]
-pub fn create_services(cli: &Cli) -> anyhow::Result<InferenceService> {
+pub fn create_inference_service(cli: &Cli) -> anyhow::Result<InferenceService> {
     use anyhow::Context;
     use nvisy_ollama::OllamaClient;
     let client = OllamaClient::new(cli.ollama.clone()).context("failed to create Ollama client")?;
@@ -40,6 +41,14 @@ pub fn create_services(cli: &Cli) -> anyhow::Result<InferenceService> {
 
 /// Creates inference service using mock providers for testing.
 #[cfg(all(feature = "mock", not(feature = "ollama")))]
-pub fn create_services(_cli: &Cli) -> anyhow::Result<InferenceService> {
+pub fn create_inference_service(_cli: &Cli) -> anyhow::Result<InferenceService> {
     Ok(InferenceService::mock())
+}
+
+/// Creates webhook service for external HTTP callbacks.
+pub fn create_webhook_service() -> anyhow::Result<WebhookService> {
+    use nvisy_reqwest::{ReqwestClient, ReqwestClientConfig};
+    let config = ReqwestClientConfig::default();
+    let client = ReqwestClient::new(config)?;
+    Ok(client.into_service())
 }

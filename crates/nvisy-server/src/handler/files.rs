@@ -14,8 +14,8 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{DocumentBucket, DocumentKey, DocumentStore};
-use nvisy_nats::stream::DocumentJobPublisher;
+use nvisy_nats::object::{DocumentKey, DocumentStore, Files as FilesBucket};
+use nvisy_nats::stream::{DocumentJobPublisher, PreprocessingData};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{DocumentFile, NewDocumentFile};
 use nvisy_postgres::query::DocumentFileRepository;
@@ -106,8 +106,8 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
 struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
-    document_store: DocumentStore,
-    publisher: DocumentJobPublisher,
+    document_store: DocumentStore<FilesBucket>,
+    publisher: DocumentJobPublisher<PreprocessingData>,
 }
 
 /// Processes a single file from a multipart upload using streaming.
@@ -154,7 +154,6 @@ async fn process_single_file(
     // Step 2: Create DB record with all storage info (Postgres generates its own id)
     let file_record = NewDocumentFile {
         workspace_id: ctx.workspace_id,
-        document_id: None,
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
         original_filename: Some(filename),
@@ -162,7 +161,7 @@ async fn process_single_file(
         file_size_bytes: put_result.size() as i64,
         file_hash_sha256: put_result.sha256().to_vec(),
         storage_path: document_key.to_string(),
-        storage_bucket: DocumentBucket::Files.to_string(),
+        storage_bucket: ctx.document_store.bucket().to_owned(),
         processing_status: Some(ProcessingStatus::Pending),
         ..Default::default()
     };
@@ -170,27 +169,22 @@ async fn process_single_file(
     let created_file = conn.create_document_file(file_record).await?;
 
     // Step 3: Publish job to queue (use Postgres-generated file ID)
-    let job = nvisy_nats::stream::DocumentJob::new_file_processing(
+    let job = nvisy_nats::stream::DocumentJob::new(
         created_file.id,
-        ctx.workspace_id,
-        ctx.account_id,
         document_key.to_string(),
         file_extension,
-        put_result.size() as i64,
+        PreprocessingData::default(),
     );
 
-    ctx.publisher
-        .publish("pending", &job)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                file_id = %created_file.id,
-                "Failed to publish document job"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
-        })?;
+    ctx.publisher.publish_job(&job).await.map_err(|err| {
+        tracing::error!(
+            target: TRACING_TARGET,
+            error = %err,
+            file_id = %created_file.id,
+            "Failed to publish document job"
+        );
+        ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
+    })?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -225,9 +219,11 @@ async fn upload_file(
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
         .await?;
 
-    let document_store = nats_client.document_store(DocumentBucket::Files).await?;
+    let document_store = nats_client.document_store::<FilesBucket>().await?;
 
-    let publisher = nats_client.document_job_publisher().await?;
+    let publisher = nats_client
+        .document_job_publisher::<PreprocessingData>()
+        .await?;
 
     let ctx = FileUploadContext {
         workspace_id: path_params.workspace_id,
@@ -349,7 +345,7 @@ async fn download_file(
         .await?;
 
     let document_store = nats_client
-        .document_store(DocumentBucket::Files)
+        .document_store::<FilesBucket>()
         .await
         .map_err(|err| {
             tracing::error!(
@@ -564,7 +560,7 @@ async fn download_archived_files(
         .await?;
 
     let document_store = nats_client
-        .document_store(DocumentBucket::Files)
+        .document_store::<FilesBucket>()
         .await
         .map_err(|err| {
             tracing::error!(

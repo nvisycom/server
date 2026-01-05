@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! Cli
-//! ├── service: ServiceConfig      # Database, NATS, auth keys
+//! ├── service: ServiceConfig      # Database, NATS, auth keys, workers
 //! ├── middleware: MiddlewareConfig # CORS, OpenAPI, recovery/timeouts
 //! ├── server: ServerConfig         # Host, port, TLS, shutdown
 //! └── ollama: OllamaConfig         # Ollama embeddings/VLM/OCR
@@ -33,7 +33,7 @@ use anyhow::Context;
 use clap::Parser;
 pub use middleware::MiddlewareConfig;
 use nvisy_server::service::ServiceConfig;
-pub use provider::create_services;
+pub use provider::{create_inference_service, create_webhook_service};
 use serde::{Deserialize, Serialize};
 pub use server::ServerConfig;
 use tracing_subscriber::EnvFilter;
@@ -45,7 +45,7 @@ use crate::{TRACING_TARGET_CONFIG, TRACING_TARGET_SERVER_STARTUP};
 /// Complete CLI configuration.
 ///
 /// Combines all configuration groups for the nvisy server:
-/// - [`ServiceConfig`]: External service connections (Postgres, NATS)
+/// - [`ServiceConfig`]: External service connections (Postgres, NATS, workers)
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
 /// - `OllamaConfig`: Ollama AI services configuration (feature-gated)
@@ -63,7 +63,7 @@ pub struct Cli {
     #[clap(flatten)]
     pub middleware: MiddlewareConfig,
 
-    /// External service configuration (databases, message queues).
+    /// External service configuration (databases, message queues, workers).
     #[clap(flatten)]
     pub service: ServiceConfig,
 

@@ -57,7 +57,6 @@ pub struct ErrorResponse<'a> {
 }
 
 impl<'a> ErrorResponse<'a> {
-    // 4xx Client Errors
     pub const BAD_REQUEST: Self = Self::new(
         "bad_request",
         "Invalid request data.",
@@ -65,19 +64,21 @@ impl<'a> ErrorResponse<'a> {
     );
     pub const CONFLICT: Self =
         Self::new("conflict", "Resource state conflict.", StatusCode::CONFLICT);
-    pub const FORBIDDEN: Self = Self::new("forbidden", "Access denied.", StatusCode::FORBIDDEN);
+    pub const FORBIDDEN: Self = Self::new(
+        "forbidden",
+        "Resource access denied.",
+        StatusCode::FORBIDDEN,
+    );
     pub const GATEWAY_TIMEOUT: Self = Self::new(
         "gateway_timeout",
         "Request timed out.",
         StatusCode::GATEWAY_TIMEOUT,
     );
-    // 5xx Server Errors
     pub const INTERNAL_SERVER_ERROR: Self = Self::new(
         "internal_server_error",
         "Internal server error.",
         StatusCode::INTERNAL_SERVER_ERROR,
     );
-    // Authentication Errors
     pub const MALFORMED_AUTH_TOKEN: Self = Self::new(
         "malformed_auth_token",
         "Malformed auth token.",

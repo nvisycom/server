@@ -1,5 +1,7 @@
 //! Document file store for NATS object storage.
 
+use std::marker::PhantomData;
+
 use async_nats::jetstream;
 use derive_more::{Deref, DerefMut};
 
@@ -13,19 +15,25 @@ use crate::Result;
 ///
 /// This is a specialized wrapper around [`ObjectStore`] that uses
 /// [`DocumentKey`] for addressing and provides document-specific operations.
+///
+/// The store is generic over the bucket type, providing compile-time
+/// type safety for bucket operations.
 #[derive(Clone, Deref, DerefMut)]
-pub struct DocumentStore {
+pub struct DocumentStore<B: DocumentBucket> {
     #[deref]
     #[deref_mut]
     inner: ObjectStore,
-    bucket: DocumentBucket,
+    _marker: PhantomData<B>,
 }
 
-impl DocumentStore {
-    /// Creates a new document store for the specified bucket.
-    pub async fn new(jetstream: &jetstream::Context, bucket: DocumentBucket) -> Result<Self> {
-        let inner = ObjectStore::new(jetstream, bucket.name(), bucket.max_age()).await?;
-        Ok(Self { inner, bucket })
+impl<B: DocumentBucket> DocumentStore<B> {
+    /// Creates a new document store for the specified bucket type.
+    pub async fn new(jetstream: &jetstream::Context) -> Result<Self> {
+        let inner = ObjectStore::new(jetstream, B::NAME, B::MAX_AGE).await?;
+        Ok(Self {
+            inner,
+            _marker: PhantomData,
+        })
     }
 
     /// Streams data to the store while computing SHA-256 hash on-the-fly.
@@ -57,9 +65,9 @@ impl DocumentStore {
         self.inner.exists(&key.to_string()).await
     }
 
-    /// Retrieves the document bucket associated with this store.
+    /// Returns the bucket name for this store.
     #[inline]
-    pub fn bucket(&self) -> DocumentBucket {
-        self.bucket
+    pub fn bucket(&self) -> &'static str {
+        B::NAME
     }
 }

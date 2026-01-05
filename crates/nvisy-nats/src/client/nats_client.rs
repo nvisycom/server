@@ -39,7 +39,10 @@ use tokio::time::timeout;
 use super::nats_config::NatsConfig;
 use crate::kv::{ApiTokenStore, CacheStore};
 use crate::object::{DocumentBucket, DocumentStore};
-use crate::stream::{DocumentJobPublisher, WorkspaceEventPublisher, WorkspaceEventSubscriber};
+use crate::stream::{
+    DocumentJobPublisher, DocumentJobSubscriber, Stage, WorkspaceEventPublisher,
+    WorkspaceEventSubscriber,
+};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -164,16 +167,25 @@ impl NatsClient {
         ApiTokenStore::new(&self.inner.jetstream, ttl).await
     }
 
-    /// Get or create a document store for the specified bucket.
+    /// Get or create a document store for the specified bucket type.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn document_store(&self, bucket: DocumentBucket) -> Result<DocumentStore> {
-        DocumentStore::new(&self.inner.jetstream, bucket).await
+    pub async fn document_store<B: DocumentBucket>(&self) -> Result<DocumentStore<B>> {
+        DocumentStore::new(&self.inner.jetstream).await
     }
 
-    /// Create a document job publisher.
+    /// Create a document job publisher for a specific stage.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn document_job_publisher(&self) -> Result<DocumentJobPublisher> {
+    pub async fn document_job_publisher<S: Stage>(&self) -> Result<DocumentJobPublisher<S>> {
         DocumentJobPublisher::new(&self.inner.jetstream).await
+    }
+
+    /// Create a document job subscriber for a specific stage.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn document_job_subscriber<S: Stage>(
+        &self,
+        consumer_name: &str,
+    ) -> Result<DocumentJobSubscriber<S>> {
+        DocumentJobSubscriber::new(&self.inner.jetstream, consumer_name).await
     }
 
     /// Create a workspace event publisher.

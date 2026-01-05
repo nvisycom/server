@@ -23,16 +23,12 @@ mod workspace_event_sub;
 
 pub use document_job::{
     CompressionLevel, DocumentJob, PostprocessingData, PreprocessingData, ProcessingData,
-    ProcessingQuality, ProcessingStage,
+    ProcessingQuality, STREAM_NAME as DOCUMENT_JOB_STREAM, Stage,
 };
 pub use document_job_pub::DocumentJobPublisher;
-pub use document_job_sub::{
-    DocumentJobBatchStream, DocumentJobMessage, DocumentJobStream, DocumentJobSubscriber,
-};
+pub use document_job_sub::DocumentJobSubscriber;
 pub use document_task::{GenerateInfoType, InsertValue, MergeOrder, PredefinedTask, SplitStrategy};
-pub use event::{
-    CancelledStatus, CompletedStatus, EventPriority, EventStatus, FailedStatus, ProcessingStatus,
-};
+pub use event::EventPriority;
 pub use publisher::StreamPublisher;
 pub use subscriber::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
 pub use workspace_event::{

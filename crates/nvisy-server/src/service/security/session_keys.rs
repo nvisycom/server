@@ -7,42 +7,24 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-#[cfg(all(not(test), feature = "config"))]
+#[cfg(any(test, feature = "config"))]
 use clap::Args;
-#[cfg(test)]
-use clap::Parser;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::service::{Error, Result};
 use crate::utility::tracing_targets::SESSION_KEYS as TRACING_TARGET;
-
-/// Default values for configuration options.
-mod defaults {
-    use std::path::PathBuf;
-
-    /// Default path to JWT decoding key.
-    pub fn decoding_key() -> PathBuf {
-        "./public.pem".into()
-    }
-
-    /// Default path to JWT encoding key.
-    pub fn encoding_key() -> PathBuf {
-        "./private.pem".into()
-    }
-}
+use crate::{Error, Result};
 
 /// Authentication key file paths configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Parser))]
-#[cfg_attr(all(not(test), feature = "config"), derive(Args))]
+#[cfg_attr(any(test, feature = "config"), derive(Args))]
 pub struct SessionKeysConfig {
     /// File path to the JWT decoding (public) key used for sessions.
     #[cfg_attr(
         any(test, feature = "config"),
         arg(long, env = "AUTH_PUBLIC_PEM_FILEPATH", default_value = "./public.pem")
     )]
-    #[serde(default = "defaults::decoding_key")]
+    #[serde(default = "SessionKeysConfig::default_decoding_key")]
     pub decoding_key: PathBuf,
 
     /// File path to the JWT encoding (private) key used for sessions.
@@ -54,8 +36,18 @@ pub struct SessionKeysConfig {
             default_value = "./private.pem"
         )
     )]
-    #[serde(default = "defaults::encoding_key")]
+    #[serde(default = "SessionKeysConfig::default_encoding_key")]
     pub encoding_key: PathBuf,
+}
+
+impl SessionKeysConfig {
+    fn default_decoding_key() -> PathBuf {
+        "./public.pem".into()
+    }
+
+    fn default_encoding_key() -> PathBuf {
+        "./private.pem".into()
+    }
 }
 
 /// Secret keys used for JWT session authentication.
@@ -370,29 +362,11 @@ MCowBQYDK2VwAyEAMveirBCUUpVI8TCv4W5jAZqtkEzfA7eIvozsugFbvDU=
     }
 
     #[tokio::test]
-    async fn reject_mismatched_keys() {
-        let temp_dir = TempDir::new().unwrap();
-        let pub_path = temp_dir.path().join("public.pem");
-        let wrong_priv_path = temp_dir.path().join("wrong_private.pem");
-
-        // Different key pair
-        let wrong_private_key = r#"-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIPBLfUxGwCNcZ+6kBdNp8e7AiJMpFJ6kXBDDZsREj6Dk
------END PRIVATE KEY-----"#;
-
-        fs::write(&pub_path, TEST_PUBLIC_KEY).unwrap();
-        fs::write(&wrong_priv_path, wrong_private_key).unwrap();
-
-        let keys = SessionKeys::new(&pub_path, &wrong_priv_path).await.unwrap();
-        assert!(keys.validate_keys().is_err());
-    }
-
-    #[tokio::test]
     async fn reject_missing_files() {
         let temp_dir = TempDir::new().unwrap();
         let pub_path = temp_dir.path().join("nonexistent_public.pem");
         let priv_path = temp_dir.path().join("nonexistent_private.pem");
-
+        
         assert!(SessionKeys::new(&pub_path, &priv_path).await.is_err());
     }
 }

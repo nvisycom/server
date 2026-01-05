@@ -3,11 +3,26 @@
 use jiff::Timestamp;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::document_task::PredefinedTask;
-use super::event::{EventPriority, EventStatus};
+use super::event::EventPriority;
+
+/// Stream name for document jobs.
+pub const STREAM_NAME: &str = "DOCUMENT_JOBS";
+
+/// Marker trait for document processing stages.
+///
+/// Each stage represents a distinct phase in the document processing pipeline,
+/// with its own stream subject for NATS routing.
+pub trait Stage: Serialize + DeserializeOwned + Clone + Send + Sync + 'static {
+    /// Stage name for logging and debugging.
+    const NAME: &'static str;
+    /// NATS stream subject suffix for this stage.
+    const SUBJECT: &'static str;
+}
 
 /// Preprocessing stage data.
 ///
@@ -46,6 +61,11 @@ impl Default for PreprocessingData {
     }
 }
 
+impl Stage for PreprocessingData {
+    const NAME: &'static str = "preprocessing";
+    const SUBJECT: &'static str = "preprocessing";
+}
+
 /// Processing stage data.
 ///
 /// Runs when a user requests changes to the document. Changes are typically
@@ -80,6 +100,11 @@ pub struct ProcessingData {
     pub custom_params: Option<serde_json::Value>,
 }
 
+impl Stage for ProcessingData {
+    const NAME: &'static str = "processing";
+    const SUBJECT: &'static str = "processing";
+}
+
 /// Postprocessing stage data.
 ///
 /// Runs when a user downloads the file. Prepares the final output:
@@ -103,29 +128,15 @@ pub struct PostprocessingData {
     pub cleanup_tasks: Option<Vec<String>>,
 }
 
-/// Document processing stage with associated data.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(tag = "stage", content = "data", rename_all = "snake_case")]
-pub enum ProcessingStage {
-    /// File upload: validation, OCR, embeddings.
-    Preprocessing(PreprocessingData),
-    /// User changes: apply annotations via VLM.
-    Processing(ProcessingData),
-    /// File download: format conversion.
-    Postprocessing(PostprocessingData),
-}
-
-impl Default for ProcessingStage {
-    fn default() -> Self {
-        Self::Preprocessing(PreprocessingData::default())
-    }
+impl Stage for PostprocessingData {
+    const NAME: &'static str = "postprocessing";
+    const SUBJECT: &'static str = "postprocessing";
 }
 
 /// Processing quality level.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum ProcessingQuality {
     /// Fast processing with lower quality.
     Fast,
@@ -138,41 +149,40 @@ pub enum ProcessingQuality {
 /// Compression level for output files.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum CompressionLevel {
     /// No compression.
     None,
-    /// Low compression, fast.
-    Low,
     /// Medium compression, balanced.
-    Medium,
+    Normal,
     /// High compression, slower but smaller files.
     High,
-    /// Maximum compression, slowest but smallest files.
-    Maximum,
 }
 
 /// Document processing job.
 ///
 /// Represents a unit of work in the document processing pipeline.
-/// Each job targets a specific file and processing stage.
+/// Each job targets a specific file and is typed by its processing stage.
+///
+/// The generic parameter `S` determines the stage (preprocessing, processing,
+/// or postprocessing), enabling compile-time type safety and stage-specific
+/// stream routing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct DocumentJob {
+#[serde(bound = "")]
+pub struct DocumentJob<S: Stage> {
     /// Unique job identifier (UUID v7 for time-ordering).
     pub id: Uuid,
     /// Database file ID to process.
     pub file_id: Uuid,
     /// Storage path in NATS object store (DocumentKey encoded).
-    pub storage_path: String,
+    pub object_key: String,
     /// File extension for format detection.
     pub file_extension: String,
-    /// Processing stage with associated data.
-    pub stage: ProcessingStage,
+    /// Stage-specific data.
+    pub data: S,
     /// Job priority.
     pub priority: EventPriority,
-    /// Job status.
-    pub status: EventStatus,
     /// When the job was created.
     pub created_at: Timestamp,
     /// NATS subject to publish result to (for internal job chaining).
@@ -183,92 +193,16 @@ pub struct DocumentJob {
     pub idempotency_key: Option<String>,
 }
 
-impl DocumentJob {
-    /// Creates a new preprocessing job (file upload).
-    pub fn new(file_id: Uuid, storage_path: String, file_extension: String) -> Self {
+impl<S: Stage> DocumentJob<S> {
+    /// Creates a new document job with the given stage data.
+    pub fn new(file_id: Uuid, storage_path: String, file_extension: String, data: S) -> Self {
         Self {
             id: Uuid::now_v7(),
             file_id,
-            storage_path,
+            object_key: storage_path,
             file_extension,
-            stage: ProcessingStage::default(),
+            data,
             priority: EventPriority::Normal,
-            status: EventStatus::Pending,
-            created_at: Timestamp::now(),
-            callback_subject: None,
-            idempotency_key: None,
-        }
-    }
-
-    /// Creates a new file processing job (compatibility constructor).
-    pub fn new_file_processing(
-        file_id: Uuid,
-        _workspace_id: Uuid,
-        _account_id: Uuid,
-        storage_path: String,
-        file_extension: String,
-        _file_size_bytes: i64,
-    ) -> Self {
-        Self::new(file_id, storage_path, file_extension)
-    }
-
-    /// Creates a preprocessing job (file upload).
-    pub fn preprocessing(
-        file_id: Uuid,
-        storage_path: String,
-        file_extension: String,
-        data: PreprocessingData,
-    ) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            file_id,
-            storage_path,
-            file_extension,
-            stage: ProcessingStage::Preprocessing(data),
-            priority: EventPriority::Normal,
-            status: EventStatus::Pending,
-            created_at: Timestamp::now(),
-            callback_subject: None,
-            idempotency_key: None,
-        }
-    }
-
-    /// Creates a processing job (user changes via annotations).
-    pub fn processing(
-        file_id: Uuid,
-        storage_path: String,
-        file_extension: String,
-        data: ProcessingData,
-    ) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            file_id,
-            storage_path,
-            file_extension,
-            stage: ProcessingStage::Processing(data),
-            priority: EventPriority::Normal,
-            status: EventStatus::Pending,
-            created_at: Timestamp::now(),
-            callback_subject: None,
-            idempotency_key: None,
-        }
-    }
-
-    /// Creates a postprocessing job (file download).
-    pub fn postprocessing(
-        file_id: Uuid,
-        storage_path: String,
-        file_extension: String,
-        data: PostprocessingData,
-    ) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            file_id,
-            storage_path,
-            file_extension,
-            stage: ProcessingStage::Postprocessing(data),
-            priority: EventPriority::Normal,
-            status: EventStatus::Pending,
             created_at: Timestamp::now(),
             callback_subject: None,
             idempotency_key: None,
@@ -302,7 +236,7 @@ impl DocumentJob {
     /// Returns the storage path.
     #[inline]
     pub fn storage_path(&self) -> &str {
-        &self.storage_path
+        &self.object_key
     }
 
     /// Returns the file extension.
@@ -311,25 +245,22 @@ impl DocumentJob {
         &self.file_extension
     }
 
-    /// Returns the processing stage.
+    /// Returns a reference to the stage data.
     #[inline]
-    pub fn stage(&self) -> &ProcessingStage {
-        &self.stage
+    pub fn data(&self) -> &S {
+        &self.data
     }
 
-    /// Checks if the job is in preprocessing stage.
-    pub fn is_preprocessing(&self) -> bool {
-        matches!(self.stage, ProcessingStage::Preprocessing(_))
+    /// Returns the stage name.
+    #[inline]
+    pub fn stage_name(&self) -> &'static str {
+        S::NAME
     }
 
-    /// Checks if the job is in processing stage.
-    pub fn is_processing(&self) -> bool {
-        matches!(self.stage, ProcessingStage::Processing(_))
-    }
-
-    /// Checks if the job is in postprocessing stage.
-    pub fn is_postprocessing(&self) -> bool {
-        matches!(self.stage, ProcessingStage::Postprocessing(_))
+    /// Returns the stream subject for this job's stage.
+    #[inline]
+    pub fn subject(&self) -> &'static str {
+        S::SUBJECT
     }
 
     /// Returns job age since creation.
@@ -357,14 +288,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_document_job_new() {
+    fn test_preprocessing_job_new() {
         let file_id = Uuid::now_v7();
-        let job = DocumentJob::new(file_id, "storage/path".to_string(), "pdf".to_string());
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PreprocessingData::default(),
+        );
 
         assert_eq!(job.file_id(), file_id);
         assert_eq!(job.storage_path(), "storage/path");
         assert_eq!(job.file_extension(), "pdf");
-        assert!(job.is_preprocessing());
+        assert_eq!(job.stage_name(), "preprocessing");
+        assert_eq!(job.subject(), "preprocessing");
     }
 
     #[test]
@@ -391,10 +328,10 @@ mod tests {
     }
 
     #[test]
-    fn test_document_job_processing_with_prompt() {
+    fn test_processing_job_with_prompt() {
         let file_id = Uuid::now_v7();
 
-        let job = DocumentJob::processing(
+        let job = DocumentJob::new(
             file_id,
             "storage/path".to_string(),
             "pdf".to_string(),
@@ -407,13 +344,14 @@ mod tests {
             },
         );
 
-        assert!(job.is_processing());
-        if let ProcessingStage::Processing(data) = job.stage() {
-            assert_eq!(data.prompt, "Apply the highlighted changes");
-            assert_eq!(data.context, Some("This is a legal document".to_string()));
-            assert!(data.annotation_ids.is_none());
-            assert_eq!(data.tasks.len(), 1);
-        }
+        assert_eq!(job.stage_name(), "processing");
+        assert_eq!(job.data().prompt, "Apply the highlighted changes");
+        assert_eq!(
+            job.data().context,
+            Some("This is a legal document".to_string())
+        );
+        assert!(job.data().annotation_ids.is_none());
+        assert_eq!(job.data().tasks.len(), 1);
     }
 
     #[test]
@@ -439,32 +377,35 @@ mod tests {
     }
 
     #[test]
-    fn test_document_job_postprocessing() {
+    fn test_postprocessing_job() {
         let file_id = Uuid::now_v7();
-        let job = DocumentJob::postprocessing(
+        let job = DocumentJob::new(
             file_id,
             "storage/path".to_string(),
             "pdf".to_string(),
             PostprocessingData {
                 target_format: Some("docx".to_string()),
-                compression_level: Some(CompressionLevel::Medium),
+                compression_level: Some(CompressionLevel::Normal),
                 ..Default::default()
             },
         );
 
-        assert!(job.is_postprocessing());
-        if let ProcessingStage::Postprocessing(data) = job.stage() {
-            assert_eq!(data.target_format, Some("docx".to_string()));
-            assert_eq!(data.compression_level, Some(CompressionLevel::Medium));
-        }
+        assert_eq!(job.stage_name(), "postprocessing");
+        assert_eq!(job.data().target_format, Some("docx".to_string()));
+        assert_eq!(job.data().compression_level, Some(CompressionLevel::Normal));
     }
 
     #[test]
     fn test_job_with_callback_and_idempotency() {
         let file_id = Uuid::now_v7();
-        let job = DocumentJob::new(file_id, "storage/path".to_string(), "pdf".to_string())
-            .with_callback("results.preprocessing")
-            .with_idempotency_key("upload-123");
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PreprocessingData::default(),
+        )
+        .with_callback("results.preprocessing")
+        .with_idempotency_key("upload-123");
 
         assert_eq!(
             job.callback_subject,
@@ -474,18 +415,25 @@ mod tests {
     }
 
     #[test]
-    fn test_processing_stage_serialization() {
-        let stage = ProcessingStage::Preprocessing(PreprocessingData {
-            validate_metadata: true,
-            run_ocr: true,
-            generate_embeddings: true,
-            generate_thumbnails: Some(true),
-        });
+    fn test_job_serialization_roundtrip() {
+        let file_id = Uuid::now_v7();
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PreprocessingData {
+                validate_metadata: true,
+                run_ocr: true,
+                generate_embeddings: true,
+                generate_thumbnails: Some(true),
+            },
+        );
 
-        let json = serde_json::to_string(&stage).unwrap();
-        let parsed: ProcessingStage = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&job).unwrap();
+        let parsed: DocumentJob<PreprocessingData> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(stage, parsed);
+        assert_eq!(job.file_id, parsed.file_id);
+        assert_eq!(job.data, parsed.data);
     }
 
     #[test]
@@ -496,5 +444,27 @@ mod tests {
 
         let parsed: CompressionLevel = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, CompressionLevel::High);
+    }
+
+    #[test]
+    fn test_processing_quality_serialization() {
+        let quality = ProcessingQuality::Fast;
+        let json = serde_json::to_string(&quality).unwrap();
+        assert_eq!(json, "\"fast\"");
+
+        let parsed: ProcessingQuality = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, ProcessingQuality::Fast);
+    }
+
+    #[test]
+    fn test_stage_constants() {
+        assert_eq!(PreprocessingData::NAME, "preprocessing");
+        assert_eq!(PreprocessingData::SUBJECT, "preprocessing");
+
+        assert_eq!(ProcessingData::NAME, "processing");
+        assert_eq!(ProcessingData::SUBJECT, "processing");
+
+        assert_eq!(PostprocessingData::NAME, "postprocessing");
+        assert_eq!(PostprocessingData::SUBJECT, "postprocessing");
     }
 }

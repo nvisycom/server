@@ -27,13 +27,13 @@ pub use crate::kv::{
 };
 // Object store types
 pub use crate::object::{
-    DocumentBucket, DocumentKey, DocumentStore, GetResult, ObjectStore, PutResult,
+    DocumentBucket, DocumentKey, DocumentStore, Files, GetResult, Intermediates, ObjectStore,
+    PutResult,
 };
 // Stream types
 pub use crate::stream::{
-    DocumentJob, DocumentJobPublisher, DocumentJobSubscriber, EventStatus, ProcessingStatus,
-    StreamPublisher, StreamSubscriber, WorkspaceEvent, WorkspaceEventPublisher,
-    WorkspaceEventSubscriber,
+    DocumentJob, DocumentJobPublisher, DocumentJobSubscriber, EventPriority, StreamPublisher,
+    StreamSubscriber, WorkspaceEvent, WorkspaceEventPublisher, WorkspaceEventSubscriber,
 };
 // Error types
 pub use crate::{Error, Result};

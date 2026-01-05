@@ -8,7 +8,7 @@ use uuid::Uuid;
 /// Predefined processing tasks that can be applied to documents.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(tag = "task", rename_all = "snake_case")]
+#[serde(tag = "task", rename_all = "camelCase")]
 pub enum PredefinedTask {
     /// Redact sensitive information matching patterns.
     Redact {
@@ -93,7 +93,7 @@ pub struct InsertValue {
 /// Types of information that can be generated.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum GenerateInfoType {
     /// Generate an executive summary.
     ExecutiveSummary,
@@ -114,7 +114,7 @@ pub enum GenerateInfoType {
 /// Strategy for splitting documents.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(tag = "by", rename_all = "snake_case")]
+#[serde(tag = "by", rename_all = "camelCase")]
 pub enum SplitStrategy {
     /// Split by page count.
     Pages {
@@ -143,7 +143,7 @@ pub enum SplitStrategy {
 /// Order for merging documents.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum MergeOrder {
     /// Use the order provided in file_ids.
     AsProvided,
@@ -239,8 +239,8 @@ mod tests {
         };
 
         let json = serde_json::to_string(&task).unwrap();
-        assert!(json.contains("generate_info"));
-        assert!(json.contains("executive_summary"));
+        assert!(json.contains("generateInfo"));
+        assert!(json.contains("executiveSummary"));
     }
 
     #[test]

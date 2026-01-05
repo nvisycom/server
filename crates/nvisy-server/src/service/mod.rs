@@ -5,12 +5,14 @@ mod compression;
 mod config;
 mod integration;
 mod security;
+mod worker;
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_service::inference::InferenceService;
 use nvisy_service::webhook::WebhookService;
 
+use crate::Result;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
@@ -18,8 +20,7 @@ pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
-// Re-export error types from crate root for convenience
-pub use crate::{Error, Result};
+pub use crate::service::worker::WorkerHandles;
 
 /// Application state.
 ///
