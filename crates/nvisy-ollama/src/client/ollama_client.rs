@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use nvisy_service::inference::InferenceService;
+use nvisy_inference::InferenceService;
 use ollama_rs::Ollama;
 
 use super::OllamaConfig;

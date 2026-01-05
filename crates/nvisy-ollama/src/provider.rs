@@ -1,11 +1,10 @@
 //! InferenceProvider implementation for Ollama.
 
 use jiff::Timestamp;
-use nvisy_service::inference::{
-    EmbeddingRequest, EmbeddingResponse, InferenceProvider, OcrRequest, OcrResponse, SharedContext,
-    UsageStats, VlmRequest, VlmResponse,
+use nvisy_inference::{
+    EmbeddingRequest, EmbeddingResponse, InferenceProvider, OcrRequest, OcrResponse, ServiceHealth,
+    SharedContext, UsageStats, VlmRequest, VlmResponse,
 };
-use nvisy_service::types::ServiceHealth;
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
 use ollama_rs::generation::embeddings::request::GenerateEmbeddingsRequest;
@@ -22,7 +21,7 @@ impl InferenceProvider for OllamaClient {
         &self,
         context: &SharedContext,
         request: &EmbeddingRequest,
-    ) -> nvisy_service::inference::Result<EmbeddingResponse> {
+    ) -> nvisy_inference::Result<EmbeddingResponse> {
         let model = self.embedding_model();
         let started_at = Timestamp::now();
 
@@ -35,7 +34,7 @@ impl InferenceProvider for OllamaClient {
 
         // Extract text from content
         let text = request.as_text().ok_or_else(|| {
-            nvisy_service::inference::Error::invalid_input()
+            nvisy_inference::Error::invalid_input()
                 .with_message("Only text content is supported for embeddings")
         })?;
 
@@ -50,8 +49,7 @@ impl InferenceProvider for OllamaClient {
             Ok(response) => {
                 // Take the first embedding (Ollama returns one embedding per request)
                 let embedding = response.embeddings.into_iter().next().ok_or_else(|| {
-                    nvisy_service::inference::Error::external_error()
-                        .with_message("No embedding returned")
+                    nvisy_inference::Error::external_error().with_message("No embedding returned")
                 })?;
 
                 // Estimate tokens from text length (rough approximation: ~4 chars per token)
@@ -85,7 +83,7 @@ impl InferenceProvider for OllamaClient {
                     "Embedding generation failed"
                 );
 
-                Err(nvisy_service::inference::Error::external_error()
+                Err(nvisy_inference::Error::external_error()
                     .with_message(format!("Ollama embedding error: {}", e)))
             }
         }
@@ -95,7 +93,7 @@ impl InferenceProvider for OllamaClient {
         &self,
         context: &SharedContext,
         request: &OcrRequest,
-    ) -> nvisy_service::inference::Result<OcrResponse> {
+    ) -> nvisy_inference::Result<OcrResponse> {
         let model = self.vlm_model();
         let started_at = Timestamp::now();
 
@@ -167,7 +165,7 @@ impl InferenceProvider for OllamaClient {
                     "OCR request failed"
                 );
 
-                Err(nvisy_service::inference::Error::external_error()
+                Err(nvisy_inference::Error::external_error()
                     .with_message(format!("Ollama OCR error: {}", e)))
             }
         }
@@ -177,7 +175,7 @@ impl InferenceProvider for OllamaClient {
         &self,
         context: &SharedContext,
         request: &VlmRequest,
-    ) -> nvisy_service::inference::Result<VlmResponse> {
+    ) -> nvisy_inference::Result<VlmResponse> {
         let model = self.vlm_model();
         let started_at = Timestamp::now();
 
@@ -257,18 +255,16 @@ impl InferenceProvider for OllamaClient {
                     "VLM request failed"
                 );
 
-                Err(nvisy_service::inference::Error::external_error()
+                Err(nvisy_inference::Error::external_error()
                     .with_message(format!("Ollama VLM error: {}", e)))
             }
         }
     }
 
-    async fn health_check(&self) -> nvisy_service::inference::Result<ServiceHealth> {
+    async fn health_check(&self) -> nvisy_inference::Result<ServiceHealth> {
         self.health_check()
             .await
             .map(|_| ServiceHealth::healthy())
-            .map_err(|e| {
-                nvisy_service::inference::Error::external_error().with_message(e.to_string())
-            })
+            .map_err(|e| nvisy_inference::Error::external_error().with_message(e.to_string()))
     }
 }

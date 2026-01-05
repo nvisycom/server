@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_service::webhook::{WebhookRequest, WebhookService};
+use nvisy_webhook::{WebhookRequest, WebhookService};
 use url::Url;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};

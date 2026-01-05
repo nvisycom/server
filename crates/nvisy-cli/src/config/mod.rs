@@ -32,6 +32,7 @@ use std::process;
 use anyhow::Context;
 use clap::Parser;
 pub use middleware::MiddlewareConfig;
+use nvisy_ollama::OllamaConfig;
 use nvisy_server::service::ServiceConfig;
 pub use provider::{create_inference_service, create_webhook_service};
 use serde::{Deserialize, Serialize};
@@ -49,7 +50,6 @@ use crate::{TRACING_TARGET_CONFIG, TRACING_TARGET_SERVER_STARTUP};
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
 /// - `OllamaConfig`: Ollama AI services configuration (feature-gated)
-/// - `MockConfig`: Testing AI services configuration (feature-gated)
 #[derive(Debug, Clone, Parser, Serialize, Deserialize)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy document processing server")]
@@ -63,19 +63,13 @@ pub struct Cli {
     #[clap(flatten)]
     pub middleware: MiddlewareConfig,
 
-    /// External service configuration (databases, message queues, workers).
+    /// External service configuration (databases, message queues).
     #[clap(flatten)]
     pub service: ServiceConfig,
 
     /// Ollama configuration for embeddings, VLM, and OCR.
-    #[cfg(feature = "ollama")]
     #[clap(flatten)]
-    pub ollama: nvisy_ollama::OllamaConfig,
-
-    /// Mock configuration for embeddings, VLM, and OCR.
-    #[cfg(feature = "mock")]
-    #[clap(flatten)]
-    pub mock: nvisy_service::inference::MockConfig,
+    pub ollama: OllamaConfig,
 }
 
 impl Cli {
@@ -158,8 +152,6 @@ impl Cli {
             cfg!(feature = "tls").then_some("tls"),
             cfg!(feature = "otel").then_some("otel"),
             cfg!(feature = "dotenv").then_some("dotenv"),
-            cfg!(feature = "mock").then_some("mock"),
-            cfg!(feature = "ollama").then_some("ollama"),
         ]
         .into_iter()
         .flatten()

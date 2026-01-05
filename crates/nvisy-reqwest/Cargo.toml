@@ -28,7 +28,7 @@ default = []
 
 [dependencies]
 # Internal crates
-nvisy-service = { workspace = true, features = [] }
+nvisy-webhook = { workspace = true }
 
 # HTTP client
 reqwest = { workspace = true, features = ["json"] }

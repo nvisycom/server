@@ -8,9 +8,9 @@ use super::http_error::{Error as HttpError, ErrorKind};
 /// Tracing target for service error conversions.
 const TRACING_TARGET: &str = "nvisy_server::handler::service";
 
-impl From<nvisy_service::Error> for HttpError<'static> {
-    fn from(error: nvisy_service::Error) -> Self {
-        use nvisy_service::ErrorKind as ServiceErrorKind;
+impl From<nvisy_webhook::Error> for HttpError<'static> {
+    fn from(error: nvisy_webhook::Error) -> Self {
+        use nvisy_webhook::ErrorKind as ServiceErrorKind;
 
         // Log the error with appropriate level based on error kind
         match error.kind {

@@ -12,7 +12,8 @@ use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::{
     RouterObservabilityExt, RouterOpenApiExt, RouterRecoveryExt, RouterSecurityExt,
 };
-use nvisy_server::service::{ServiceState, WorkerHandles};
+use nvisy_server::service::ServiceState;
+use nvisy_worker::{WorkerHandles, WorkerState};
 
 use crate::config::{Cli, MiddlewareConfig, create_inference_service, create_webhook_service};
 
@@ -57,10 +58,11 @@ async fn run() -> anyhow::Result<()> {
     let webhook = create_webhook_service()?;
 
     // Initialize application state
-    let state = ServiceState::new(cli.service.clone(), inference, webhook).await?;
+    let state = ServiceState::from_config(cli.service.clone(), webhook).await?;
 
-    // Spawn background workers
-    let workers = WorkerHandles::spawn(&state, &cli.service.worker_config);
+    // Create worker state and spawn background workers
+    let worker_state = WorkerState::new(state.postgres.clone(), state.nats.clone(), inference);
+    let workers = WorkerHandles::spawn(&worker_state);
     tracing::info!(
         target: TRACING_TARGET_SERVER_STARTUP,
         "Document processing workers started"

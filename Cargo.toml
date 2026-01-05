@@ -4,12 +4,15 @@
 resolver = "2"
 members = [
     "./crates/nvisy-cli",
+    "./crates/nvisy-core",
+    "./crates/nvisy-inference",
     "./crates/nvisy-nats",
     "./crates/nvisy-ollama",
     "./crates/nvisy-postgres",
     "./crates/nvisy-reqwest",
     "./crates/nvisy-server",
-    "./crates/nvisy-service",
+    "./crates/nvisy-webhook",
+    "./crates/nvisy-worker",
 ]
 
 [workspace.package]
@@ -31,14 +34,17 @@ documentation = "https://docs.rs/nvisy-server"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # External dependencies
+nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-reqwest = { path = "./crates/nvisy-reqwest", version = "0.1.0" }
 
 # Internal crates
-nvisy-service = { path = "./crates/nvisy-service", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
+nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
+nvisy-worker = { path = "./crates/nvisy-worker", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }

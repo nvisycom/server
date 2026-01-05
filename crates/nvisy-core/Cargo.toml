@@ -1,0 +1,40 @@
+[package]
+name = "nvisy-core"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+# JSON Schema support for API documentation
+schema = ["dep:schemars"]
+
+[dependencies]
+# Error handling
+thiserror = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Time
+jiff = { workspace = true, features = ["serde"] }
+
+# OpenAPI documentation (optional)
+schemars = { workspace = true, optional = true }

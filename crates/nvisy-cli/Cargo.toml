@@ -32,30 +32,28 @@ otel = ["tracing-subscriber/env-filter"]
 # This allows configuration via .env files in addition to CLI args
 dotenv = ["dep:dotenvy"]
 
-# AI service backends for embeddings, OCRs, and VLMs
-mock = ["nvisy-service/test-utils", "nvisy-service/config"]
-ollama = ["dep:nvisy-ollama"]
 
 [dependencies]
-# Internal crates
-nvisy-service = { workspace = true }
+# Internal and core services.
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
-nvisy-reqwest = { workspace = true }
+nvisy-inference = { workspace = true, features = [] }
+nvisy-webhook = { workspace = true, features = [] }
+
+# Service implementations.
+nvisy-ollama = { workspace = true, features = ["config"] }
+nvisy-reqwest = { workspace = true, features = [] }
 nvisy-server = { workspace = true, features = ["config"] }
+nvisy-worker = { workspace = true, features = ["config"] }
 
-# AI service backends (optional)
-nvisy-ollama = { workspace = true, features = ["config"], optional = true }
-
-# Async runtime
+# Async runtime, environment and CLI.
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+clap = { workspace = true, features = ["derive", "env"] }
+dotenvy = { workspace = true, features = [], optional = true }
 
 # HTTP server
 axum = { workspace = true, features = ["http2", "macros"] }
 axum-server = { workspace = true, features = ["tls-rustls"], optional = true }
-
-# CLI
-clap = { workspace = true, features = ["derive", "env"] }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -67,6 +65,3 @@ serde = { workspace = true, features = ["derive"] }
 # Error handling
 anyhow = { workspace = true, features = ["backtrace"] }
 thiserror = { workspace = true, features = [] }
-
-# Environment
-dotenvy = { workspace = true, optional = true }

@@ -132,9 +132,8 @@ mod test {
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
-        let inference_service = nvisy_service::inference::MockConfig::default().into_services();
         let webhook_service = ReqwestClient::with_defaults()?.into_service();
-        let state = ServiceState::new(config, inference_service, webhook_service).await?;
+        let state = ServiceState::from_config(config, webhook_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }

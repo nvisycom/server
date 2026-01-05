@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use hmac::{Hmac, Mac};
 use jiff::Timestamp;
-use nvisy_service::types::ServiceHealth;
+use nvisy_webhook::ServiceHealth;
 #[cfg(test)]
-use nvisy_service::types::ServiceStatus;
-use nvisy_service::webhook::{WebhookProvider, WebhookRequest, WebhookResponse, WebhookService};
+use nvisy_webhook::ServiceStatus;
+use nvisy_webhook::{WebhookProvider, WebhookRequest, WebhookResponse, WebhookService};
 use reqwest::Client;
 use sha2::Sha256;
 
@@ -34,7 +34,7 @@ struct ReqwestClientInner {
 ///
 /// ```rust,ignore
 /// use nvisy_reqwest::{ReqwestClient, ReqwestClientConfig};
-/// use nvisy_service::webhook::{WebhookRequest, WebhookContext};
+/// use nvisy_webhook::{WebhookRequest, WebhookContext};
 /// use url::Url;
 ///
 /// let config = ReqwestClientConfig::default();
@@ -123,7 +123,7 @@ impl ReqwestClient {
 
 #[async_trait::async_trait]
 impl WebhookProvider for ReqwestClient {
-    async fn deliver(&self, request: &WebhookRequest) -> nvisy_service::Result<WebhookResponse> {
+    async fn deliver(&self, request: &WebhookRequest) -> nvisy_webhook::Result<WebhookResponse> {
         let started_at = Timestamp::now();
         let timestamp = started_at.as_second();
 
@@ -179,7 +179,7 @@ impl WebhookProvider for ReqwestClient {
         Ok(response)
     }
 
-    async fn health_check(&self) -> nvisy_service::Result<ServiceHealth> {
+    async fn health_check(&self) -> nvisy_webhook::Result<ServiceHealth> {
         // The client is stateless and always healthy if it was created successfully
         Ok(ServiceHealth::healthy())
     }

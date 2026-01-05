@@ -16,25 +16,25 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
 }
 
-impl From<Error> for nvisy_service::Error {
+impl From<Error> for nvisy_webhook::Error {
     fn from(err: Error) -> Self {
         match err {
             Error::Reqwest(e) => {
                 if e.is_timeout() {
-                    nvisy_service::Error::timeout()
+                    nvisy_webhook::Error::timeout()
                         .with_message(e.to_string())
                         .with_source(e)
                 } else if e.is_connect() {
-                    nvisy_service::Error::network_error()
+                    nvisy_webhook::Error::network_error()
                         .with_message("Connection failed")
                         .with_source(e)
                 } else {
-                    nvisy_service::Error::network_error()
+                    nvisy_webhook::Error::network_error()
                         .with_message(e.to_string())
                         .with_source(e)
                 }
             }
-            Error::Serde(e) => nvisy_service::Error::serialization()
+            Error::Serde(e) => nvisy_webhook::Error::serialization()
                 .with_message(e.to_string())
                 .with_source(e),
         }

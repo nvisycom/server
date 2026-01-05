@@ -7,7 +7,7 @@
 //!
 //! ```rust,ignore
 //! use nvisy_reqwest::{ReqwestClient, ReqwestClientConfig};
-//! use nvisy_service::webhook::{WebhookRequest, WebhookService};
+//! use nvisy_webhook::{WebhookRequest, WebhookService};
 //!
 //! // Create a client with default configuration
 //! let client = ReqwestClient::with_defaults()?;

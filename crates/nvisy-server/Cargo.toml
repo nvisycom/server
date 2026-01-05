@@ -31,10 +31,9 @@ config = [
 
 [dependencies]
 # Internal crates
-nvisy-service = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
-nvisy-reqwest = { workspace = true }
+nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
@@ -99,9 +98,9 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 [dev-dependencies]
 # Internal crates
-nvisy-service = { workspace = true, features = ["test-utils", "config"] }
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
+nvisy-reqwest = { workspace = true, features = [] }
 
 clap = { workspace = true, features = ["derive", "env"] }
 axum-test = { workspace = true, features = [] }

@@ -5,12 +5,10 @@ mod compression;
 mod config;
 mod integration;
 mod security;
-mod worker;
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use nvisy_service::inference::InferenceService;
-use nvisy_service::webhook::WebhookService;
+use nvisy_webhook::WebhookService;
 
 use crate::Result;
 pub use crate::service::cache::HealthCache;
@@ -20,7 +18,6 @@ pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
-pub use crate::service::worker::WorkerHandles;
 
 /// Application state.
 ///
@@ -33,7 +30,6 @@ pub struct ServiceState {
     // External services:
     pub postgres: PgClient,
     pub nats: NatsClient,
-    pub inference: InferenceService,
     pub webhook: WebhookService,
 
     // Internal services:
@@ -50,15 +46,13 @@ impl ServiceState {
     /// Initializes application state from configuration.
     ///
     /// Connects to all external services and loads required resources.
-    pub async fn new(
+    pub async fn from_config(
         service_config: ServiceConfig,
-        inference_service: InferenceService,
         webhook_service: WebhookService,
     ) -> Result<Self> {
         let service_state = Self {
             postgres: service_config.connect_postgres().await?,
             nats: service_config.connect_nats().await?,
-            inference: inference_service,
             webhook: webhook_service,
 
             health_cache: HealthCache::new(),
@@ -87,7 +81,6 @@ macro_rules! impl_di {
 // External services:
 impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
-impl_di!(inference: InferenceService);
 impl_di!(webhook: WebhookService);
 
 // Internal services:

@@ -23,7 +23,7 @@ config = ["dep:clap"]
 
 [dependencies]
 # Internal crates
-nvisy-service = { workspace = true }
+nvisy-inference = { workspace = true }
 
 # Ollama client
 ollama-rs = { version = "0.3", features = ["default"] }

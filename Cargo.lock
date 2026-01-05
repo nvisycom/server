@@ -2428,17 +2428,53 @@ dependencies = [
  "axum-server",
  "clap",
  "dotenvy",
+ "nvisy-inference",
  "nvisy-nats",
  "nvisy-ollama",
  "nvisy-postgres",
  "nvisy-reqwest",
  "nvisy-server",
- "nvisy-service",
+ "nvisy-webhook",
+ "nvisy-worker",
  "serde",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "nvisy-core"
+version = "0.1.0"
+dependencies = [
+ "jiff",
+ "schemars 0.9.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+]
+
+[[package]]
+name = "nvisy-inference"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bytes",
+ "clap",
+ "derive_more",
+ "futures-util",
+ "jiff",
+ "nvisy-core",
+ "schemars 0.9.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2478,7 +2514,7 @@ dependencies = [
  "derive_builder",
  "futures",
  "jiff",
- "nvisy-service",
+ "nvisy-inference",
  "ollama-rs",
  "serde",
  "serde_json",
@@ -2524,7 +2560,7 @@ dependencies = [
  "hex",
  "hmac",
  "jiff",
- "nvisy-service",
+ "nvisy-webhook",
  "reqwest",
  "serde",
  "serde_json",
@@ -2560,7 +2596,7 @@ dependencies = [
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-reqwest",
- "nvisy-service",
+ "nvisy-webhook",
  "rand 0.10.0-rc.5",
  "regex",
  "schemars 0.9.0",
@@ -2586,24 +2622,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvisy-service"
+name = "nvisy-webhook"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64",
- "bytes",
- "clap",
- "derive_more",
- "futures-util",
  "jiff",
+ "nvisy-core",
  "schemars 0.9.0",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
- "tokio",
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "nvisy-worker"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "futures-util",
+ "nvisy-inference",
+ "nvisy-nats",
+ "nvisy-postgres",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

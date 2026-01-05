@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use nvisy_service::inference::InferenceService;
 use tokio::sync::RwLock;
 
 use crate::service::ServiceState;
@@ -204,11 +203,7 @@ impl HealthCache {
     pub async fn is_healthy(&self, service_state: &ServiceState) -> bool {
         self.cache
             .get_or_update(|| {
-                self.check_all_components(
-                    &service_state.postgres,
-                    &service_state.nats,
-                    &service_state.inference,
-                )
+                self.check_all_components(&service_state.postgres, &service_state.nats)
             })
             .await
     }
@@ -266,30 +261,21 @@ impl HealthCache {
     ///
     /// Detailed metrics are logged including per-service status and total duration.
     #[tracing::instrument(skip_all, target = TRACING_TARGET)]
-    async fn check_all_components(
-        &self,
-        pg_client: &PgClient,
-        nats_client: &NatsClient,
-        inference: &InferenceService,
-    ) -> bool {
+    async fn check_all_components(&self, pg_client: &PgClient, nats_client: &NatsClient) -> bool {
         let start = Instant::now();
 
         // Perform all health checks concurrently
-        let (db_healthy, nats_healthy, inference_healthy) = tokio::join!(
-            self.check_database(pg_client),
-            self.check_nats(nats_client),
-            self.check_inference(inference)
-        );
+        let (db_healthy, nats_healthy) =
+            tokio::join!(self.check_database(pg_client), self.check_nats(nats_client),);
 
         let check_duration = start.elapsed();
-        let overall_healthy = db_healthy && nats_healthy && inference_healthy;
+        let overall_healthy = db_healthy && nats_healthy;
 
         tracing::info!(
             target: TRACING_TARGET,
             duration_ms = check_duration.as_millis(),
             database_healthy = db_healthy,
             nats_healthy = nats_healthy,
-            inference_healthy = inference_healthy,
             overall_healthy = overall_healthy,
             "Health check completed"
         );
@@ -350,32 +336,6 @@ impl HealthCache {
                     target: TRACING_TARGET,
                     error = %e,
                     "nats health check failed"
-                );
-                false
-            }
-        }
-    }
-
-    /// Checks inference service health.
-    async fn check_inference(&self, inference: &InferenceService) -> bool {
-        use nvisy_service::types::ServiceStatus;
-
-        match inference.health_check().await {
-            Ok(health) => {
-                let healthy = health.status == ServiceStatus::Healthy;
-                tracing::debug!(
-                    target: TRACING_TARGET,
-                    healthy = healthy,
-                    status = ?health.status,
-                    "Inference health check completed"
-                );
-                healthy
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target: TRACING_TARGET,
-                    error = %e,
-                    "Inference health check failed"
                 );
                 false
             }
