@@ -15,7 +15,7 @@ use crate::handler::{Error, ErrorKind};
 /// better error messages for multipart form parsing failures.
 #[must_use]
 #[derive(Debug, Deref, DerefMut, From)]
-pub struct Multipart(AxumMultipart);
+pub struct Multipart(pub AxumMultipart);
 
 impl Multipart {
     /// Returns the inner Axum Multipart extractor.

@@ -21,8 +21,6 @@ pub enum AccountApiTokenConstraints {
     RegionCodeValid,
     #[strum(serialize = "account_api_tokens_country_code_valid")]
     CountryCodeValid,
-    #[strum(serialize = "account_api_tokens_user_agent_not_empty")]
-    UserAgentNotEmpty,
 
     // Token chronological constraints
     #[strum(serialize = "account_api_tokens_expired_after_issued")]
@@ -52,8 +50,7 @@ impl AccountApiTokenConstraints {
             | AccountApiTokenConstraints::NameLength
             | AccountApiTokenConstraints::DescriptionLength
             | AccountApiTokenConstraints::RegionCodeValid
-            | AccountApiTokenConstraints::CountryCodeValid
-            | AccountApiTokenConstraints::UserAgentNotEmpty => ConstraintCategory::Validation,
+            | AccountApiTokenConstraints::CountryCodeValid => ConstraintCategory::Validation,
 
             AccountApiTokenConstraints::ExpiredAfterIssued
             | AccountApiTokenConstraints::DeletedAfterIssued

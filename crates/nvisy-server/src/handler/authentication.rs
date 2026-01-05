@@ -108,7 +108,7 @@ async fn login(
     let new_token = NewAccountApiToken {
         account_id: account.id,
         name: ua_parser.parse(user_agent.as_str()),
-        ip_address: Some(crate::utility::placeholder_ip()),
+        ip_address: None,
         user_agent: Some(user_agent.to_string()),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
@@ -197,7 +197,7 @@ async fn signup(
     let new_token = NewAccountApiToken {
         account_id: account.id,
         name: ua_parser.parse(&user_agent_str),
-        ip_address: Some(crate::utility::placeholder_ip()),
+        ip_address: None,
         user_agent: Some(user_agent_str),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),

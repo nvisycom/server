@@ -114,3 +114,12 @@ impl From<PgError> for Error<'static> {
         }
     }
 }
+
+// Used only for transactions.
+impl From<nvisy_postgres::DieselError> for Error<'static> {
+    fn from(error: nvisy_postgres::DieselError) -> Self {
+        // Convert DieselError -> PgError -> Error
+        let pg_error: PgError = error.into();
+        pg_error.into()
+    }
+}

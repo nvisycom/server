@@ -1,16 +1,5 @@
 -- This migration creates tables for documents, files, processing pipeline, and security features
 
--- Create document status enum
-CREATE TYPE DOCUMENT_STATUS AS ENUM (
-    'draft',        -- Document is being created/edited
-    'processing',   -- Document is being processed
-    'ready',        -- Document is ready for use
-    'archived'      -- Document is archived but accessible
-);
-
-COMMENT ON TYPE DOCUMENT_STATUS IS
-    'Document lifecycle status for tracking processing and availability.';
-
 -- Create documents table - Document containers/folders
 CREATE TABLE documents (
     -- Primary identifiers
@@ -24,7 +13,6 @@ CREATE TABLE documents (
     display_name    TEXT             NOT NULL DEFAULT 'Untitled',
     description     TEXT                      DEFAULT NULL,
     tags            TEXT[]           NOT NULL DEFAULT '{}',
-    status          DOCUMENT_STATUS  NOT NULL DEFAULT 'draft',
 
     CONSTRAINT documents_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT documents_description_length_max CHECK (length(description) <= 2048),
@@ -32,10 +20,8 @@ CREATE TABLE documents (
 
     -- Configuration
     metadata        JSONB            NOT NULL DEFAULT '{}',
-    settings        JSONB            NOT NULL DEFAULT '{}',
 
     CONSTRAINT documents_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
-    CONSTRAINT documents_settings_size CHECK (length(settings::TEXT) BETWEEN 2 AND 8192),
 
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
@@ -51,8 +37,8 @@ CREATE TABLE documents (
 SELECT setup_updated_at('documents');
 
 -- Create indexes for documents
-CREATE INDEX documents_workspace_status_idx
-    ON documents (workspace_id, status, created_at DESC)
+CREATE INDEX documents_workspace_idx
+    ON documents (workspace_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX documents_account_recent_idx
@@ -69,7 +55,7 @@ CREATE INDEX documents_metadata_search_idx
 
 -- Add table and column comments
 COMMENT ON TABLE documents IS
-    'Document containers for organizing and managing file collections with metadata and settings.';
+    'Document containers for organizing and managing file collections with metadata.';
 
 COMMENT ON COLUMN documents.id IS 'Unique document identifier';
 COMMENT ON COLUMN documents.workspace_id IS 'Parent workspace reference';
@@ -77,9 +63,7 @@ COMMENT ON COLUMN documents.account_id IS 'Creating account reference';
 COMMENT ON COLUMN documents.display_name IS 'Human-readable document name (1-255 chars)';
 COMMENT ON COLUMN documents.description IS 'Document description (up to 2048 chars)';
 COMMENT ON COLUMN documents.tags IS 'Classification tags (max 32)';
-COMMENT ON COLUMN documents.status IS 'Current document lifecycle status';
 COMMENT ON COLUMN documents.metadata IS 'Extended metadata (JSON, 2B-16KB)';
-COMMENT ON COLUMN documents.settings IS 'Document configuration (JSON, 2B-8KB)';
 COMMENT ON COLUMN documents.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN documents.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN documents.deleted_at IS 'Soft deletion timestamp';
@@ -153,10 +137,10 @@ CREATE TABLE document_files (
     visual_support          BOOLEAN          NOT NULL DEFAULT FALSE,
 
     -- Storage and integrity
-    file_size_bytes         BIGINT           NOT NULL DEFAULT 0,
+    file_size_bytes         BIGINT           NOT NULL,
     file_hash_sha256        BYTEA            NOT NULL,
     storage_path            TEXT             NOT NULL,
-    storage_bucket          TEXT             NOT NULL DEFAULT '',
+    storage_bucket          TEXT             NOT NULL,
 
     CONSTRAINT document_files_file_size_min CHECK (file_size_bytes >= 0),
     CONSTRAINT document_files_file_hash_sha256_length CHECK (octet_length(file_hash_sha256) = 32),
@@ -182,7 +166,7 @@ CREATE TABLE document_files (
 SELECT setup_updated_at('document_files');
 
 -- Create indexes for document files
-CREATE INDEX document_files_document_status_idx
+CREATE INDEX document_files_processing_status_idx
     ON document_files (document_id, processing_status, created_at DESC)
     WHERE deleted_at IS NULL;
 
@@ -250,13 +234,10 @@ CREATE TABLE document_chunks (
     CONSTRAINT document_chunks_token_count_min CHECK (token_count >= 0),
 
     -- Vector embedding (1536 dimensions for OpenAI ada-002, adjust as needed)
-    embedding           VECTOR(1536)     DEFAULT NULL,
+    embedding           VECTOR(1536)     NOT NULL,
+    embedding_model     TEXT             NOT NULL,
 
-    -- Embedding metadata
-    embedding_model     TEXT             DEFAULT NULL,
-    embedded_at         TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT document_chunks_embedding_model_format CHECK (embedding_model IS NULL OR embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
+    CONSTRAINT document_chunks_embedding_model_format CHECK (embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
 
     -- Chunk metadata (positions, page numbers, etc.)
     metadata            JSONB            NOT NULL DEFAULT '{}',
@@ -301,7 +282,6 @@ COMMENT ON COLUMN document_chunks.content_size IS 'Size of chunk content in byte
 COMMENT ON COLUMN document_chunks.token_count IS 'Approximate token count for the chunk';
 COMMENT ON COLUMN document_chunks.embedding IS 'Vector embedding (1536 dimensions)';
 COMMENT ON COLUMN document_chunks.embedding_model IS 'Model used to generate the embedding';
-COMMENT ON COLUMN document_chunks.embedded_at IS 'Timestamp when embedding was generated';
 COMMENT ON COLUMN document_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
 COMMENT ON COLUMN document_chunks.created_at IS 'Chunk creation timestamp';
 COMMENT ON COLUMN document_chunks.updated_at IS 'Last modification timestamp';
@@ -453,7 +433,6 @@ CREATE VIEW document_processing_summary AS
 SELECT
     d.id,
     d.display_name,
-    d.status,
     d.workspace_id,
     COUNT(df.id) FILTER (WHERE df.deleted_at IS NULL) AS input_files_count,
     d.created_at,
@@ -461,7 +440,7 @@ SELECT
 FROM documents d
     LEFT JOIN document_files df ON d.id = df.document_id
 WHERE d.deleted_at IS NULL
-GROUP BY d.id, d.display_name, d.status, d.workspace_id, d.created_at, d.updated_at;
+GROUP BY d.id, d.display_name, d.workspace_id, d.created_at, d.updated_at;
 
 COMMENT ON VIEW document_processing_summary IS
     'Overview of document processing status, metrics, and costs.';

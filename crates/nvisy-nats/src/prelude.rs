@@ -16,6 +16,9 @@
 //! ```
 
 // Client types
+// Re-export ObjectInfo for convenience
+pub use async_nats::jetstream::object_store::ObjectInfo;
+
 pub use crate::client::{NatsClient, NatsConfig, NatsConnection};
 // Key-Value store types
 pub use crate::kv::{
@@ -24,8 +27,7 @@ pub use crate::kv::{
 };
 // Object store types
 pub use crate::object::{
-    ContentData, ContentSource, DocumentFileStore, ObjectHeaders, ObjectKey, ObjectKeyData,
-    ObjectMetadata, ObjectStore, ObjectStoreStats,
+    DocumentBucket, DocumentKey, DocumentStore, GetResult, ObjectStore, PutResult,
 };
 // Stream types
 pub use crate::stream::{

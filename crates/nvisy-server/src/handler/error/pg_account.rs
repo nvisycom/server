@@ -72,9 +72,6 @@ impl From<AccountApiTokenConstraints> for Error<'static> {
             AccountApiTokenConstraints::CountryCodeValid => {
                 ErrorKind::BadRequest.with_message("Invalid country code")
             }
-            AccountApiTokenConstraints::UserAgentNotEmpty => {
-                ErrorKind::BadRequest.with_message("User agent cannot be empty")
-            }
             AccountApiTokenConstraints::ExpiredAfterIssued
             | AccountApiTokenConstraints::DeletedAfterIssued
             | AccountApiTokenConstraints::LastUsedAfterIssued => {

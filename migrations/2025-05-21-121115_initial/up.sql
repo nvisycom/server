@@ -14,6 +14,12 @@ CREATE OR REPLACE FUNCTION trigger_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
+    -- Handle soft deletes: sync updated_at with deleted_at to satisfy constraints
+    IF (NEW.deleted_at IS DISTINCT FROM OLD.deleted_at AND NEW.deleted_at IS NOT NULL) THEN
+        NEW.updated_at := NEW.deleted_at;
+        RETURN NEW;
+    END IF;
+
     -- Only update if the row has actually changed (excluding updated_at itself)
     IF (NEW IS DISTINCT FROM OLD AND NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at) THEN
         NEW.updated_at := CURRENT_TIMESTAMP;
@@ -26,7 +32,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION trigger_updated_at() IS
-    'Automatically updates the updated_at timestamp when a row is modified, but only if the row has actually changed.';
+    'Automatically updates the updated_at timestamp when a row is modified. For soft deletes, syncs updated_at with deleted_at.';
 
 -- Trigger setup helper function
 CREATE OR REPLACE FUNCTION setup_updated_at(_tbl REGCLASS)

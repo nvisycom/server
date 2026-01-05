@@ -25,9 +25,6 @@ pub enum EventPriority {
 
     /// High priority - processed ahead of normal events.
     High = 2,
-
-    /// Critical priority - processed immediately with highest precedence.
-    Critical = 3,
 }
 
 impl EventPriority {
@@ -37,16 +34,10 @@ impl EventPriority {
         self as u8
     }
 
-    /// Returns true if this is a critical priority event.
-    #[inline]
-    pub const fn is_critical(self) -> bool {
-        matches!(self, Self::Critical)
-    }
-
     /// Returns true if this is a high or critical priority event.
     #[inline]
-    pub const fn is_high_or_critical(self) -> bool {
-        matches!(self, Self::High | Self::Critical)
+    pub const fn is_high(self) -> bool {
+        matches!(self, Self::High)
     }
 }
 
@@ -284,7 +275,6 @@ mod tests {
     fn test_priority_ordering() {
         assert!(EventPriority::Low < EventPriority::Normal);
         assert!(EventPriority::Normal < EventPriority::High);
-        assert!(EventPriority::High < EventPriority::Critical);
     }
 
     #[test]
@@ -292,25 +282,11 @@ mod tests {
         assert_eq!(EventPriority::Low.as_u8(), 0);
         assert_eq!(EventPriority::Normal.as_u8(), 1);
         assert_eq!(EventPriority::High.as_u8(), 2);
-        assert_eq!(EventPriority::Critical.as_u8(), 3);
     }
 
     #[test]
     fn test_priority_default() {
         assert_eq!(EventPriority::default(), EventPriority::Normal);
-    }
-
-    #[test]
-    fn test_priority_checks() {
-        assert!(!EventPriority::Low.is_critical());
-        assert!(!EventPriority::Normal.is_critical());
-        assert!(!EventPriority::High.is_critical());
-        assert!(EventPriority::Critical.is_critical());
-
-        assert!(!EventPriority::Low.is_high_or_critical());
-        assert!(!EventPriority::Normal.is_high_or_critical());
-        assert!(EventPriority::High.is_high_or_critical());
-        assert!(EventPriority::Critical.is_high_or_critical());
     }
 
     #[test]

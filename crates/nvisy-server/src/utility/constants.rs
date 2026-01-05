@@ -1,13 +1,13 @@
 //! Shared constants used across the server crate.
 
-/// Default maximum request body size: 100MB.
+/// Default maximum request body size: 4MB.
 ///
 /// Used for security middleware to limit incoming request body sizes
 /// and prevent denial-of-service attacks via large payloads.
-pub const DEFAULT_MAX_BODY_SIZE: usize = 100 * 1024 * 1024;
+pub const DEFAULT_MAX_BODY_SIZE: usize = 4 * 1024 * 1024;
 
 /// Maximum file size for uploads: 100MB.
 ///
 /// Used in file upload handlers to enforce file size limits
 /// before accepting file data into memory.
-pub const MAX_FILE_SIZE: usize = DEFAULT_MAX_BODY_SIZE;
+pub const DEFAULT_MAX_FILE_BODY_SIZE: usize = 100 * 1024 * 1024;

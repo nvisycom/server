@@ -54,11 +54,11 @@ pub struct UpdateFileKnowledge {
     pub visual_support: Option<bool>,
 }
 
-/// Request to download multiple files.
+/// Request to delete multiple files.
 #[derive(Debug, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DownloadMultipleFiles {
-    /// File IDs to download (1-100 files).
+pub struct DeleteFiles {
+    /// File IDs to delete (1-100 files).
     #[validate(length(min = 1, max = 100))]
     pub file_ids: Vec<Uuid>,
 }
@@ -66,7 +66,7 @@ pub struct DownloadMultipleFiles {
 /// Request to download files as an archive.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DownloadArchivedFiles {
+pub struct DownloadFiles {
     /// Archive format.
     pub format: ArchiveFormat,
     /// Optional specific file IDs (if None, downloads all workspace files).

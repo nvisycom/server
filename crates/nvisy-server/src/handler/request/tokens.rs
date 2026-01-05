@@ -96,7 +96,7 @@ impl CreateApiToken {
         Ok(NewAccountApiToken {
             account_id,
             name: sanitized_name,
-            ip_address: Some(crate::utility::placeholder_ip()),
+            ip_address: None,
             user_agent: Some(user_agent),
             session_type: Some(ApiTokenType::Api),
             is_remembered: Some(true),

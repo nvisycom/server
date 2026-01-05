@@ -37,8 +37,9 @@ use bytes::Bytes;
 use tokio::time::timeout;
 
 use super::nats_config::NatsConfig;
-use crate::kv::{ApiTokenStore, CacheStore, KvStore};
-use crate::object::{DocumentFileStore, DocumentLabel, ObjectStore};
+use crate::kv::{ApiTokenStore, CacheStore};
+use crate::object::{DocumentBucket, DocumentStore};
+use crate::stream::{DocumentJobPublisher, WorkspaceEventPublisher, WorkspaceEventSubscriber};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -121,18 +122,6 @@ impl NatsClient {
         })
     }
 
-    /// Get the underlying NATS client
-    #[must_use]
-    pub fn client(&self) -> &Client {
-        &self.inner.client
-    }
-
-    /// Get the JetStream context
-    #[must_use]
-    pub fn jetstream(&self) -> &jetstream::Context {
-        &self.inner.jetstream
-    }
-
     /// Get the configuration
     #[must_use]
     pub fn config(&self) -> &NatsConfig {
@@ -169,47 +158,52 @@ impl NatsClient {
         )
     }
 
-    /// Get server information.
-    #[must_use]
-    pub fn server_info(&self) -> async_nats::ServerInfo {
-        self.inner.client.server_info()
-    }
-
     /// Get or create an ApiTokenStore
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn api_token_store(&self, ttl: Option<Duration>) -> Result<ApiTokenStore> {
         ApiTokenStore::new(&self.inner.jetstream, ttl).await
     }
 
-    /// Get or create a KvStore for a specific bucket with typed values
+    /// Get or create a document store for the specified bucket.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn kv_store<T>(
-        &self,
-        bucket_name: &str,
-        description: Option<&str>,
-        ttl: Option<Duration>,
-    ) -> Result<KvStore<T>>
-    where
-        T: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
-    {
-        KvStore::new(&self.inner.jetstream, bucket_name, description, ttl).await
+    pub async fn document_store(&self, bucket: DocumentBucket) -> Result<DocumentStore> {
+        DocumentStore::new(&self.inner.jetstream, bucket).await
     }
 
-    /// Get or create a typed ObjectStore for a specific bucket with custom key and data types
+    /// Create a document job publisher.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn object_store<K: AsRef<str>>(
-        &self,
-        bucket_name: &str,
-        description: Option<&str>,
-        max_age: Option<Duration>,
-    ) -> Result<ObjectStore<K>> {
-        ObjectStore::new(&self.inner.jetstream, bucket_name, description, max_age).await
+    pub async fn document_job_publisher(&self) -> Result<DocumentJobPublisher> {
+        DocumentJobPublisher::new(&self.inner.jetstream).await
     }
 
-    /// Get or create a typed ObjectStore for a specific document label.
+    /// Create a workspace event publisher.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn document_store<S: DocumentLabel>(&self) -> Result<DocumentFileStore<S>> {
-        DocumentFileStore::new(&self.inner.jetstream).await
+    pub async fn workspace_event_publisher(&self) -> Result<WorkspaceEventPublisher> {
+        WorkspaceEventPublisher::new(&self.inner.jetstream).await
+    }
+
+    /// Create a workspace event subscriber.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn workspace_event_subscriber(
+        &self,
+        consumer_name: &str,
+    ) -> Result<WorkspaceEventSubscriber> {
+        WorkspaceEventSubscriber::new(&self.inner.jetstream, consumer_name).await
+    }
+
+    /// Create a workspace event subscriber filtered to a specific workspace.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn workspace_event_subscriber_for_workspace(
+        &self,
+        consumer_name: &str,
+        workspace_id: uuid::Uuid,
+    ) -> Result<WorkspaceEventSubscriber> {
+        WorkspaceEventSubscriber::new_for_workspace(
+            &self.inner.jetstream,
+            consumer_name,
+            workspace_id,
+        )
+        .await
     }
 
     /// Get or create a CacheStore for a specific namespace

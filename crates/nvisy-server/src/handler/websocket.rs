@@ -12,7 +12,7 @@ use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures::{SinkExt, StreamExt};
 use nvisy_nats::NatsClient;
-use nvisy_nats::stream::{WorkspaceEventPublisher, WorkspaceEventSubscriber, WorkspaceWsMessage};
+use nvisy_nats::stream::{WorkspaceEventPublisher, WorkspaceWsMessage};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
 use uuid::Uuid;
@@ -148,10 +148,12 @@ async fn check_event_permission(
         WorkspaceWsMessage::DocumentDeleted(_) => Permission::DeleteDocuments,
 
         // File events - require appropriate file permissions
-        WorkspaceWsMessage::FileProcessed(_) | WorkspaceWsMessage::FileVerified(_) => {
-            Permission::ViewFiles
-        }
-        WorkspaceWsMessage::FileRedacted(_) => Permission::DeleteFiles,
+        WorkspaceWsMessage::FilePreprocessed(_)
+        | WorkspaceWsMessage::FilePostprocessed(_)
+        | WorkspaceWsMessage::JobProgress(_)
+        | WorkspaceWsMessage::JobCompleted(_)
+        | WorkspaceWsMessage::JobFailed(_) => Permission::ViewFiles,
+        WorkspaceWsMessage::FileTransformed(_) => Permission::UpdateFiles,
 
         // Member management - require InviteMembers/RemoveMembers permission
         WorkspaceWsMessage::MemberAdded(_) => Permission::InviteMembers,
@@ -352,9 +354,12 @@ async fn handle_client_message(
         WorkspaceWsMessage::DocumentUpdate(_)
         | WorkspaceWsMessage::DocumentCreated(_)
         | WorkspaceWsMessage::DocumentDeleted(_)
-        | WorkspaceWsMessage::FileProcessed(_)
-        | WorkspaceWsMessage::FileRedacted(_)
-        | WorkspaceWsMessage::FileVerified(_)
+        | WorkspaceWsMessage::FilePreprocessed(_)
+        | WorkspaceWsMessage::FileTransformed(_)
+        | WorkspaceWsMessage::FilePostprocessed(_)
+        | WorkspaceWsMessage::JobProgress(_)
+        | WorkspaceWsMessage::JobCompleted(_)
+        | WorkspaceWsMessage::JobFailed(_)
         | WorkspaceWsMessage::MemberPresence(_)
         | WorkspaceWsMessage::MemberAdded(_)
         | WorkspaceWsMessage::MemberRemoved(_)
@@ -458,11 +463,8 @@ async fn handle_workspace_websocket(
         }
     };
 
-    // Get JetStream context
-    let jetstream = nats_client.jetstream();
-
     // Create publisher for this connection
-    let publisher = match WorkspaceEventPublisher::new(jetstream).await {
+    let publisher = match nats_client.workspace_event_publisher().await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(
@@ -477,21 +479,21 @@ async fn handle_workspace_websocket(
 
     // Create subscriber with unique consumer name for this connection
     let consumer_name = format!("ws-{}", ctx.connection_id);
-    let subscriber =
-        match WorkspaceEventSubscriber::new_for_workspace(jetstream, &consumer_name, workspace_id)
-            .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    connection_id = %ctx.connection_id,
-                    error = %e,
-                    "failed to create event subscriber, aborting connection"
-                );
-                return;
-            }
-        };
+    let subscriber = match nats_client
+        .workspace_event_subscriber_for_workspace(&consumer_name, workspace_id)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                target: TRACING_TARGET,
+                connection_id = %ctx.connection_id,
+                error = %e,
+                "failed to create event subscriber, aborting connection"
+            );
+            return;
+        }
+    };
 
     // Get message stream
     let mut message_stream = match subscriber.subscribe().await {

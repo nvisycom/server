@@ -5,32 +5,34 @@
 //! operations are secured with workspace-level authorization and include virus
 //! scanning and content validation.
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
+use futures::StreamExt;
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{DocumentFileStore, DocumentLabel, InputFiles, ObjectKey};
+use nvisy_nats::object::{DocumentBucket, DocumentKey, DocumentStore};
+use nvisy_nats::stream::DocumentJobPublisher;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
+use nvisy_postgres::model::{DocumentFile, NewDocumentFile};
 use nvisy_postgres::query::DocumentFileRepository;
+use nvisy_postgres::types::ProcessingStatus;
 use uuid::Uuid;
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CursorPagination, DownloadArchivedFiles, DownloadMultipleFiles, FilePathParams, ListFiles,
-    UpdateFile, WorkspacePathParams,
+    CursorPagination, DeleteFiles, DownloadFiles, FilePathParams, ListFiles, UpdateFile,
+    WorkspacePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
-use crate::utility::constants::MAX_FILE_SIZE;
+use crate::utility::DEFAULT_MAX_FILE_BODY_SIZE;
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
@@ -99,6 +101,107 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
+/// Context for processing a single file upload.
+#[derive(Clone)]
+struct FileUploadContext {
+    workspace_id: Uuid,
+    account_id: Uuid,
+    document_store: DocumentStore,
+    publisher: DocumentJobPublisher,
+}
+
+/// Processes a single file from a multipart upload using streaming.
+async fn process_single_file(
+    conn: &mut nvisy_postgres::PgConn,
+    ctx: &FileUploadContext,
+    field: axum::extract::multipart::Field<'_>,
+) -> Result<DocumentFile> {
+    let filename = field
+        .file_name()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("file_{}.bin", Uuid::now_v7()));
+
+    let file_extension = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("bin")
+        .to_lowercase();
+
+    // Generate document key with unique object ID for NATS storage
+    let document_key = DocumentKey::generate(ctx.workspace_id);
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        object_id = %document_key.object_id(),
+        "Streaming file to storage"
+    );
+
+    // Step 1: Stream upload to NATS (computes SHA-256 on-the-fly)
+    let reader = tokio_util::io::StreamReader::new(
+        field.map(|result| result.map_err(std::io::Error::other)),
+    );
+
+    let put_result = ctx.document_store.put(&document_key, reader).await?;
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        object_id = %document_key.object_id(),
+        size = put_result.size(),
+        sha256 = %put_result.sha256_hex(),
+        "File streamed to storage"
+    );
+
+    // Step 2: Create DB record with all storage info (Postgres generates its own id)
+    let file_record = NewDocumentFile {
+        workspace_id: ctx.workspace_id,
+        document_id: None,
+        account_id: ctx.account_id,
+        display_name: Some(filename.clone()),
+        original_filename: Some(filename),
+        file_extension: Some(file_extension.clone()),
+        file_size_bytes: put_result.size() as i64,
+        file_hash_sha256: put_result.sha256().to_vec(),
+        storage_path: document_key.to_string(),
+        storage_bucket: DocumentBucket::Files.to_string(),
+        processing_status: Some(ProcessingStatus::Pending),
+        ..Default::default()
+    };
+
+    let created_file = conn.create_document_file(file_record).await?;
+
+    // Step 3: Publish job to queue (use Postgres-generated file ID)
+    let job = nvisy_nats::stream::DocumentJob::new_file_processing(
+        created_file.id,
+        ctx.workspace_id,
+        ctx.account_id,
+        document_key.to_string(),
+        file_extension,
+        put_result.size() as i64,
+    );
+
+    ctx.publisher
+        .publish("pending", &job)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                file_id = %created_file.id,
+                "Failed to publish document job"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
+        })?;
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        file_id = %created_file.id,
+        job_id = %job.id,
+        "Document job published"
+    );
+
+    Ok(created_file)
+}
+
 /// Uploads input files to a workspace for processing.
 #[tracing::instrument(
     skip_all,
@@ -112,17 +215,26 @@ async fn upload_file(
     State(nats_client): State<NatsClient>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
-    mut multipart: Multipart,
+    Multipart(mut multipart): Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
-
-    let input_fs = nats_client.document_store::<InputFiles>().await?;
 
     let mut conn = pg_client.get_connection().await?;
 
     auth_claims
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
         .await?;
+
+    let document_store = nats_client.document_store(DocumentBucket::Files).await?;
+
+    let publisher = nats_client.document_job_publisher().await?;
+
+    let ctx = FileUploadContext {
+        workspace_id: path_params.workspace_id,
+        account_id: auth_claims.account_id,
+        document_store,
+        publisher,
+    };
 
     let mut uploaded_files = Vec::new();
 
@@ -132,174 +244,10 @@ async fn upload_file(
             .with_message("Invalid multipart data")
             .with_context(format!("Failed to parse multipart form: {}", err))
     })? {
-        let filename = field
-            .file_name()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| format!("file_{}.bin", Uuid::now_v7()));
-
-        // Validate and sanitize filename
-        let filename = validate_filename(&filename)?;
-
-        // Read file data with size limit to prevent DoS
-        let mut data = Vec::new();
-        let mut stream = field;
-
-        while let Some(chunk) = stream.chunk().await.map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read file chunk");
-            ErrorKind::BadRequest
-                .with_message("Failed to read file data")
-                .with_context(format!("Could not read file: {}", err))
-        })? {
-            // Check size before adding chunk to prevent memory exhaustion
-            if data.len() + chunk.len() > MAX_FILE_SIZE {
-                return Err(ErrorKind::BadRequest
-                    .with_message("File too large")
-                    .with_context(format!(
-                        "File exceeds maximum size of {} MB",
-                        MAX_FILE_SIZE / (1024 * 1024)
-                    )));
-            }
-            data.extend_from_slice(&chunk);
-        }
-
-        // Extract file extension
-        let file_extension = std::path::Path::new(&filename)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-
-        let file_size_bytes = data.len() as i64;
-
-        // Create content data with metadata
-        let content_data =
-            DocumentFileStore::<InputFiles>::create_content_data_with_metadata(data.into());
-
-        // Extract SHA-256 hash from content data
-        let sha256_bytes = content_data.compute_sha256().to_vec();
-
-        // Generate file ID and storage path
-        let file_id = Uuid::now_v7();
-        let object_key = input_fs.create_key(path_params.workspace_id, file_id);
-
-        // Upload to NATS document store first (external system)
-        // This order ensures we don't have orphaned DB records if storage fails
-        tracing::debug!(
-            target: TRACING_TARGET,
-            file_id = %file_id,
-            size = file_size_bytes,
-            "Uploading file to storage"
-        );
-
-        input_fs
-            .put(&object_key, &content_data)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    file_id = %file_id,
-                    "Failed to upload file to storage"
-                );
-                ErrorKind::InternalServerError
-                    .with_message("Failed to upload file")
-                    .with_context(format!("Storage upload failed: {}", err))
-            })?;
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            file_id = %file_id,
-            "File uploaded to storage"
-        );
-
-        // Create file record in database after successful storage upload
-        let file_record = NewDocumentFile {
-            workspace_id: path_params.workspace_id,
-            document_id: None,
-            account_id: auth_claims.account_id,
-            display_name: Some(filename.clone()),
-            original_filename: Some(filename.clone()),
-            file_extension: Some(file_extension.clone()),
-            file_size_bytes: Some(file_size_bytes),
-            storage_path: object_key.as_str().to_string(),
-            storage_bucket: Some(InputFiles::bucket_name().to_string()),
-            file_hash_sha256: sha256_bytes,
-            ..Default::default()
-        };
-
-        let created_file = match conn.create_document_file(file_record).await {
-            Ok(file) => file,
-            Err(err) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    file_id = %file_id,
-                    "Failed to create file record, cleaning up storage"
-                );
-
-                // Best effort cleanup - delete the orphan storage object
-                if let Err(cleanup_err) = input_fs.delete(&object_key).await {
-                    tracing::error!(
-                        target: TRACING_TARGET,
-                        error = %cleanup_err,
-                        file_id = %file_id,
-                        "Failed to cleanup orphan storage object"
-                    );
-                }
-
-                return Err(ErrorKind::InternalServerError
-                    .with_message("Failed to save file metadata")
-                    .with_context(format!("Database error: {}", err)));
-            }
-        };
-
-        let uploaded_file = response::File::from_model(created_file.clone());
-
-        // Publish file processing job to queue
-        let job = nvisy_nats::stream::DocumentJob::new_file_processing(
-            created_file.id,
-            path_params.workspace_id,
-            auth_claims.account_id,
-            object_key.as_str().to_string(),
-            file_extension.clone(),
-            file_size_bytes,
-        );
-
-        // Publish to document job queue using NATS helper methods
-        let jetstream = nats_client.jetstream();
-        let publisher = nvisy_nats::stream::DocumentJobPublisher::new(jetstream)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    file_id = %file_id,
-                    "Failed to create document job publisher"
-                );
-                ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
-            })?;
-
-        publisher.publish("pending", &job).await.map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                file_id = %file_id,
-                "Failed to publish document job"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
-        })?;
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            file_id = %file_id,
-            job_id = %job.id,
-            "Document job published"
-        );
-
-        uploaded_files.push(uploaded_file);
+        let created_file = process_single_file(&mut conn, &ctx, field).await?;
+        uploaded_files.push(response::File::from_model(created_file));
     }
 
-    // Check if any files were uploaded
     if uploaded_files.is_empty() {
         return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
     }
@@ -307,7 +255,7 @@ async fn upload_file(
     tracing::info!(
         target: TRACING_TARGET,
         file_count = uploaded_files.len(),
-        "Files uploaded ",
+        "Files uploaded",
     );
 
     Ok((StatusCode::CREATED, Json(uploaded_files)))
@@ -391,8 +339,6 @@ async fn download_file(
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading file");
 
-    let input_fs = nats_client.document_store::<InputFiles>().await?;
-
     let mut conn = pg_client.get_connection().await?;
 
     // Fetch the file first to get workspace context for authorization
@@ -402,8 +348,19 @@ async fn download_file(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::DownloadFiles)
         .await?;
 
-    // Create object key from storage path
-    let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
+    let document_store = nats_client
+        .document_store(DocumentBucket::Files)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                "Failed to create document store"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to initialize file storage")
+        })?;
+
+    let document_key = DocumentKey::from_str(&file.storage_path).map_err(|err| {
         tracing::error!(
             target: TRACING_TARGET,
             error = %err,
@@ -415,9 +372,9 @@ async fn download_file(
             .with_context(format!("Parse error: {}", err))
     })?;
 
-    // Get content from NATS document store
-    let content_data = input_fs
-        .get(&object_key)
+    // Get streaming content from NATS document store
+    let get_result = document_store
+        .get(&document_key)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -450,16 +407,20 @@ async fn download_file(
     );
     headers.insert(
         "content-length",
-        content_data.size().to_string().parse().unwrap(),
+        get_result.size().to_string().parse().unwrap(),
     );
-
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
 
-    tracing::debug!(target: TRACING_TARGET, "File downloaded");
+    tracing::debug!(
+        target: TRACING_TARGET,
+        file_id = %path_params.file_id,
+        size = get_result.size(),
+        "Streaming file download"
+    );
 
-    // Stream the file content
-    let bytes = content_data.into_bytes().to_vec();
-    let body = Body::from(bytes);
+    // Stream the file content using ReaderStream
+    let stream = tokio_util::io::ReaderStream::new(get_result.into_reader());
+    let body = Body::from_stream(stream);
 
     Ok((StatusCode::OK, headers, body))
 }
@@ -497,13 +458,7 @@ async fn delete_file(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::DeleteFiles)
         .await?;
 
-    // Soft delete by setting deleted_at timestamp
-    let updates = UpdateDocumentFile {
-        deleted_at: Some(Some(jiff::Timestamp::now().into())),
-        ..Default::default()
-    };
-
-    conn.update_document_file(path_params.file_id, updates)
+    conn.delete_document_file(path_params.file_id)
         .await
         .map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
@@ -513,7 +468,6 @@ async fn delete_file(
         })?;
 
     tracing::info!(target: TRACING_TARGET, "File deleted");
-
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -526,7 +480,7 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Downloads multiple files as a zip archive.
+/// Deletes multiple files (soft delete).
 #[tracing::instrument(
     skip_all,
     fields(
@@ -534,104 +488,47 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
         workspace_id = %path_params.workspace_id,
     )
 )]
-async fn download_multiple_files(
+async fn delete_multiple_files(
     State(pg_client): State<PgClient>,
-    State(nats_client): State<NatsClient>,
-    State(archive): State<ArchiveService>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<DownloadMultipleFiles>,
-) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
-    tracing::debug!(target: TRACING_TARGET, "Downloading multiple files as archive");
+    ValidateJson(request): ValidateJson<DeleteFiles>,
+) -> Result<StatusCode> {
+    tracing::info!(target: TRACING_TARGET, file_count = request.file_ids.len(), "Deleting multiple files");
 
     let mut conn = pg_client.get_connection().await?;
 
     auth_claims
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::DownloadFiles,
-        )
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DeleteFiles)
         .await?;
 
-    let input_fs = nats_client.document_store::<InputFiles>().await?;
-
-    // Batch fetch all requested files that belong to this workspace
-    let files = conn.find_document_files_by_ids(&request.file_ids).await?;
-
-    // Create a map for quick lookup and verify all files belong to workspace
-    let files_map: HashMap<Uuid, DocumentFile> = files
-        .into_iter()
-        .filter(|f| f.workspace_id == path_params.workspace_id && f.deleted_at.is_none())
-        .map(|f| (f.id, f))
-        .collect();
-
-    // Verify all requested files were found
-    for file_id in &request.file_ids {
-        if !files_map.contains_key(file_id) {
-            tracing::warn!(target: TRACING_TARGET, %file_id, "File not found during batch download");
-            return Err(ErrorKind::NotFound.with_message("One or more requested files not found"));
-        }
-    }
-
-    // Fetch all file contents
-    let mut files_data = Vec::new();
-
-    for file_id in &request.file_ids {
-        let file = files_map.get(file_id).unwrap(); // Safe - we verified above
-
-        let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid file storage path")
-                .with_context(format!("Parse error: {}", err))
-        })?;
-
-        let content_data = input_fs.get(&object_key).await?.ok_or_else(|| {
-            tracing::error!(target: TRACING_TARGET, %file_id, "File content missing from storage");
-            ErrorKind::NotFound.with_message("File content not found")
-        })?;
-
-        files_data.push((
-            file.display_name.clone(),
-            content_data.into_bytes().to_vec(),
-        ));
-    }
-
-    // Create zip archive
-    let archive_bytes = archive
-        .create_archive(files_data, ArchiveFormat::Zip)
+    // Soft delete all files in a single query
+    let deleted_count = conn
+        .delete_document_files(path_params.workspace_id, &request.file_ids)
         .await?;
 
-    // Set up response headers
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "content-disposition",
-        format!(
-            "attachment; filename=\"workspace_{}_files.zip\"",
-            path_params.workspace_id
-        )
-        .parse()
-        .unwrap(),
-    );
-    headers.insert("content-type", "application/zip".parse().unwrap());
-    headers.insert(
-        "content-length",
-        archive_bytes.len().to_string().parse().unwrap(),
-    );
+    // Check if all requested files were deleted
+    if deleted_count != request.file_ids.len() {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            requested = request.file_ids.len(),
+            deleted = deleted_count,
+            "Some files were not found or already deleted"
+        );
+        return Err(ErrorKind::NotFound
+            .with_message("One or more files not found")
+            .with_resource("file"));
+    }
 
-    tracing::debug!(
-        target: TRACING_TARGET,
-        file_count = request.file_ids.len(),
-        "Multiple files downloaded as archive",
-    );
+    tracing::info!(target: TRACING_TARGET, file_count = deleted_count, "Files deleted");
 
-    Ok((StatusCode::OK, headers, archive_bytes))
+    Ok(StatusCode::NO_CONTENT)
 }
 
-fn download_multiple_files_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Download multiple files")
-        .description("Downloads multiple files as a zip archive. Provide a list of file IDs to include in the archive.")
-        .response::<200, ()>()
+fn delete_multiple_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete multiple files")
+        .description("Soft deletes multiple files by setting deleted timestamps. Files can be recovered within the retention period.")
+        .response::<204, ()>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -652,7 +549,7 @@ async fn download_archived_files(
     State(archive): State<ArchiveService>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
-    Json(request): Json<DownloadArchivedFiles>,
+    Json(request): Json<DownloadFiles>,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading archived files");
 
@@ -666,7 +563,17 @@ async fn download_archived_files(
         )
         .await?;
 
-    let input_fs = nats_client.document_store::<InputFiles>().await?;
+    let document_store = nats_client
+        .document_store(DocumentBucket::Files)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                "Failed to create document store"
+            );
+            ErrorKind::InternalServerError.with_message("Failed to initialize file storage")
+        })?;
 
     // Determine which files to download
     let files = if let Some(specific_ids) = request.file_ids {
@@ -697,17 +604,20 @@ async fn download_archived_files(
     let mut files_data = Vec::new();
 
     for file in &valid_files {
-        let object_key = ObjectKey::<InputFiles>::from_str(&file.storage_path).map_err(|err| {
+        let document_key = DocumentKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid file storage path")
                 .with_context(format!("Parse error: {}", err))
         })?;
 
-        if let Ok(Some(content_data)) = input_fs.get(&object_key).await {
-            files_data.push((
-                file.display_name.clone(),
-                content_data.into_bytes().to_vec(),
-            ));
+        if let Ok(Some(mut get_result)) = document_store.get(&document_key).await {
+            let mut buffer = Vec::with_capacity(get_result.size());
+            if tokio::io::AsyncReadExt::read_to_end(get_result.reader(), &mut buffer)
+                .await
+                .is_ok()
+            {
+                files_data.push((file.display_name.clone(), buffer));
+            }
         }
     }
 
@@ -760,34 +670,6 @@ fn download_archived_files_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Validates file name to prevent path traversal and other attacks.
-fn validate_filename(filename: &str) -> Result<String> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err(ErrorKind::BadRequest
-            .with_message("Invalid filename")
-            .with_context("Filename contains path traversal characters"));
-    }
-
-    if filename.starts_with('.') {
-        return Err(ErrorKind::BadRequest
-            .with_message("Invalid filename")
-            .with_context("Filename cannot start with a dot"));
-    }
-
-    let sanitized: String = filename
-        .chars()
-        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '))
-        .collect();
-
-    if sanitized.is_empty() {
-        return Err(ErrorKind::BadRequest
-            .with_message("Invalid filename")
-            .with_context("Filename contains no valid characters"));
-    }
-
-    Ok(sanitized)
-}
-
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -798,15 +680,14 @@ pub fn routes() -> ApiRouter<ServiceState> {
         // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspaceId}/files/",
-            get_with(list_files, list_files_docs).post_with(upload_file, upload_file_docs),
+            get_with(list_files, list_files_docs)
+                .post_with(upload_file, upload_file_docs)
+                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE)),
         )
         .api_route(
-            "/workspaces/{workspaceId}/files/download",
-            post_with(download_multiple_files, download_multiple_files_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceId}/files/archive",
-            post_with(download_archived_files, download_archived_files_docs),
+            "/workspaces/{workspaceId}/files/batch",
+            get_with(download_archived_files, download_archived_files_docs)
+                .delete_with(delete_multiple_files, delete_multiple_files_docs),
         )
         // File-specific routes (file ID is globally unique)
         .api_route(

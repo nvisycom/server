@@ -97,13 +97,13 @@ pub struct NewDocumentFile {
     /// Visual support
     pub visual_support: Option<bool>,
     /// File size in bytes
-    pub file_size_bytes: Option<i64>,
+    pub file_size_bytes: i64,
     /// SHA-256 hash
     pub file_hash_sha256: Vec<u8>,
     /// Storage path
     pub storage_path: String,
     /// Storage bucket
-    pub storage_bucket: Option<String>,
+    pub storage_bucket: String,
     /// Metadata
     pub metadata: Option<serde_json::Value>,
 }
@@ -116,6 +116,8 @@ pub struct UpdateDocumentFile {
     // Note: workspace_id is required and should not be updated after creation
     /// Document ID
     pub document_id: Option<Option<Uuid>>,
+    /// Storage path (for moving files between buckets)
+    pub storage_path: Option<String>,
     /// Display name
     pub display_name: Option<String>,
     /// Parent file ID
@@ -134,6 +136,10 @@ pub struct UpdateDocumentFile {
     pub content_segmentation: Option<ContentSegmentation>,
     /// Visual support
     pub visual_support: Option<bool>,
+    /// File size in bytes
+    pub file_size_bytes: Option<i64>,
+    /// SHA-256 hash
+    pub file_hash_sha256: Option<Vec<u8>>,
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Soft delete timestamp

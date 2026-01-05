@@ -60,40 +60,176 @@ pub struct DocumentDeletedEvent {
     pub timestamp: Timestamp,
 }
 
-/// File processed event (OCR, text extraction, etc.).
+/// Type of preprocessing operation completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PreprocessingType {
+    /// File metadata validation completed.
+    Validation,
+    /// OCR text extraction completed.
+    Ocr,
+    /// Embeddings generation completed.
+    Embeddings,
+    /// Thumbnail generation completed.
+    Thumbnails,
+    /// All preprocessing steps completed.
+    Complete,
+}
+
+/// File preprocessing completed event.
+///
+/// Emitted when a preprocessing step (validation, OCR, embeddings) completes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct FileProcessedEvent {
+pub struct FilePreprocessedEvent {
     pub file_id: Uuid,
     pub document_id: Uuid,
-    pub processing_type: String,
-    pub processed_by: Option<Uuid>,
+    pub preprocessing_type: PreprocessingType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
     pub timestamp: Timestamp,
 }
 
-/// File redacted event (sensitive content removed).
+/// Type of transformation applied to the file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum TransformationType {
+    /// Content was redacted.
+    Redaction,
+    /// Content was summarized.
+    Summary,
+    /// Content was translated.
+    Translation,
+    /// Information was extracted.
+    Extraction,
+    /// Information was inserted.
+    Insertion,
+    /// Content was reformatted.
+    Reformat,
+    /// Content was proofread.
+    Proofread,
+    /// Table of contents was generated.
+    TableOfContents,
+    /// File was split into multiple files.
+    Split,
+    /// Multiple files were merged.
+    Merge,
+    /// Custom VLM-based transformation.
+    Custom,
+}
+
+/// File transformed event.
+///
+/// Emitted when a document processing transformation completes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct FileRedactedEvent {
+pub struct FileTransformedEvent {
     pub file_id: Uuid,
     pub document_id: Uuid,
-    pub redaction_count: u32,
-    pub redacted_by: Uuid,
+    pub transformation_type: TransformationType,
+    /// For split operations, the resulting file IDs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_file_ids: Option<Vec<Uuid>>,
+    /// Human-readable summary of the transformation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    pub transformed_by: Uuid,
     pub timestamp: Timestamp,
 }
 
-/// File verified event (authenticity check, virus scan, etc.).
+/// Type of postprocessing operation completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PostprocessingType {
+    /// Format conversion completed.
+    Conversion,
+    /// Compression completed.
+    Compression,
+    /// Annotations flattened into document.
+    FlattenAnnotations,
+    /// All postprocessing steps completed.
+    Complete,
+}
+
+/// File postprocessed event.
+///
+/// Emitted when a postprocessing step (conversion, compression) completes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct FileVerifiedEvent {
+pub struct FilePostprocessedEvent {
     pub file_id: Uuid,
     pub document_id: Uuid,
-    pub verification_type: String,
-    pub verification_status: String,
-    pub verified_by: Option<Uuid>,
+    pub postprocessing_type: PostprocessingType,
+    /// The output format if conversion was performed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<String>,
+    pub timestamp: Timestamp,
+}
+
+/// Job processing stage for progress tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum JobStage {
+    Preprocessing,
+    Processing,
+    Postprocessing,
+}
+
+/// Job progress event.
+///
+/// Emitted periodically during long-running jobs to indicate progress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct JobProgressEvent {
+    pub job_id: Uuid,
+    pub file_id: Uuid,
+    pub document_id: Uuid,
+    pub stage: JobStage,
+    /// Progress percentage (0-100).
+    pub progress: u8,
+    /// Current operation being performed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_operation: Option<String>,
+    pub timestamp: Timestamp,
+}
+
+/// Job completed event.
+///
+/// Emitted when an entire document processing job completes successfully.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct JobCompletedEvent {
+    pub job_id: Uuid,
+    pub file_id: Uuid,
+    pub document_id: Uuid,
+    /// The final output file ID (may differ from input if transformations created new files).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_file_id: Option<Uuid>,
+    pub timestamp: Timestamp,
+}
+
+/// Job failed event.
+///
+/// Emitted when a document processing job fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct JobFailedEvent {
+    pub job_id: Uuid,
+    pub file_id: Uuid,
+    pub document_id: Uuid,
+    pub stage: JobStage,
+    pub error_code: String,
+    pub error_message: String,
     pub timestamp: Timestamp,
 }
 
@@ -184,14 +320,23 @@ pub enum WorkspaceWsMessage {
     /// Document deletion notification.
     DocumentDeleted(DocumentDeletedEvent),
 
-    /// File processing completion notification.
-    FileProcessed(FileProcessedEvent),
+    /// File preprocessing step completed (validation, OCR, embeddings).
+    FilePreprocessed(FilePreprocessedEvent),
 
-    /// File redaction completion notification.
-    FileRedacted(FileRedactedEvent),
+    /// File transformation completed (redaction, translation, etc.).
+    FileTransformed(FileTransformedEvent),
 
-    /// File verification completion notification.
-    FileVerified(FileVerifiedEvent),
+    /// File postprocessing step completed (conversion, compression).
+    FilePostprocessed(FilePostprocessedEvent),
+
+    /// Job progress update.
+    JobProgress(JobProgressEvent),
+
+    /// Job completed successfully.
+    JobCompleted(JobCompletedEvent),
+
+    /// Job failed.
+    JobFailed(JobFailedEvent),
 
     /// Member presence update.
     MemberPresence(MemberPresenceEvent),
@@ -245,9 +390,12 @@ impl WorkspaceWsMessage {
             Self::DocumentUpdate(e) => Some(e.updated_by),
             Self::DocumentCreated(e) => Some(e.created_by),
             Self::DocumentDeleted(e) => Some(e.deleted_by),
-            Self::FileProcessed(e) => e.processed_by,
-            Self::FileRedacted(e) => Some(e.redacted_by),
-            Self::FileVerified(e) => e.verified_by,
+            Self::FilePreprocessed(_) => None,
+            Self::FileTransformed(e) => Some(e.transformed_by),
+            Self::FilePostprocessed(_) => None,
+            Self::JobProgress(_) => None,
+            Self::JobCompleted(_) => None,
+            Self::JobFailed(_) => None,
             Self::MemberPresence(e) => Some(e.account_id),
             Self::MemberAdded(e) => Some(e.account_id),
             Self::MemberRemoved(e) => Some(e.account_id),
@@ -265,9 +413,12 @@ impl WorkspaceWsMessage {
             Self::DocumentUpdate(e) => Some(e.timestamp),
             Self::DocumentCreated(e) => Some(e.timestamp),
             Self::DocumentDeleted(e) => Some(e.timestamp),
-            Self::FileProcessed(e) => Some(e.timestamp),
-            Self::FileRedacted(e) => Some(e.timestamp),
-            Self::FileVerified(e) => Some(e.timestamp),
+            Self::FilePreprocessed(e) => Some(e.timestamp),
+            Self::FileTransformed(e) => Some(e.timestamp),
+            Self::FilePostprocessed(e) => Some(e.timestamp),
+            Self::JobProgress(e) => Some(e.timestamp),
+            Self::JobCompleted(e) => Some(e.timestamp),
+            Self::JobFailed(e) => Some(e.timestamp),
             Self::MemberPresence(e) => Some(e.timestamp),
             Self::MemberAdded(e) => Some(e.timestamp),
             Self::MemberRemoved(e) => Some(e.timestamp),
@@ -336,52 +487,100 @@ impl WorkspaceWsMessage {
         })
     }
 
-    /// Create a file processed event.
-    pub fn file_processed(
+    /// Create a file preprocessed event.
+    pub fn file_preprocessed(
         file_id: Uuid,
         document_id: Uuid,
-        processing_type: impl Into<String>,
-        processed_by: Option<Uuid>,
+        preprocessing_type: PreprocessingType,
     ) -> Self {
-        Self::FileProcessed(FileProcessedEvent {
+        Self::FilePreprocessed(FilePreprocessedEvent {
             file_id,
             document_id,
-            processing_type: processing_type.into(),
-            processed_by,
+            preprocessing_type,
+            details: None,
             timestamp: Timestamp::now(),
         })
     }
 
-    /// Create a file redacted event.
-    pub fn file_redacted(
+    /// Create a file transformed event.
+    pub fn file_transformed(
         file_id: Uuid,
         document_id: Uuid,
-        redaction_count: u32,
-        redacted_by: Uuid,
+        transformation_type: TransformationType,
+        transformed_by: Uuid,
     ) -> Self {
-        Self::FileRedacted(FileRedactedEvent {
+        Self::FileTransformed(FileTransformedEvent {
             file_id,
             document_id,
-            redaction_count,
-            redacted_by,
+            transformation_type,
+            result_file_ids: None,
+            summary: None,
+            transformed_by,
             timestamp: Timestamp::now(),
         })
     }
 
-    /// Create a file verified event.
-    pub fn file_verified(
+    /// Create a file postprocessed event.
+    pub fn file_postprocessed(
         file_id: Uuid,
         document_id: Uuid,
-        verification_type: impl Into<String>,
-        verification_status: impl Into<String>,
-        verified_by: Option<Uuid>,
+        postprocessing_type: PostprocessingType,
     ) -> Self {
-        Self::FileVerified(FileVerifiedEvent {
+        Self::FilePostprocessed(FilePostprocessedEvent {
             file_id,
             document_id,
-            verification_type: verification_type.into(),
-            verification_status: verification_status.into(),
-            verified_by,
+            postprocessing_type,
+            output_format: None,
+            timestamp: Timestamp::now(),
+        })
+    }
+
+    /// Create a job progress event.
+    pub fn job_progress(
+        job_id: Uuid,
+        file_id: Uuid,
+        document_id: Uuid,
+        stage: JobStage,
+        progress: u8,
+    ) -> Self {
+        Self::JobProgress(JobProgressEvent {
+            job_id,
+            file_id,
+            document_id,
+            stage,
+            progress: progress.min(100),
+            current_operation: None,
+            timestamp: Timestamp::now(),
+        })
+    }
+
+    /// Create a job completed event.
+    pub fn job_completed(job_id: Uuid, file_id: Uuid, document_id: Uuid) -> Self {
+        Self::JobCompleted(JobCompletedEvent {
+            job_id,
+            file_id,
+            document_id,
+            output_file_id: None,
+            timestamp: Timestamp::now(),
+        })
+    }
+
+    /// Create a job failed event.
+    pub fn job_failed(
+        job_id: Uuid,
+        file_id: Uuid,
+        document_id: Uuid,
+        stage: JobStage,
+        error_code: impl Into<String>,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self::JobFailed(JobFailedEvent {
+            job_id,
+            file_id,
+            document_id,
+            stage,
+            error_code: error_code.into(),
+            error_message: error_message.into(),
             timestamp: Timestamp::now(),
         })
     }

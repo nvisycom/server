@@ -113,11 +113,9 @@ CREATE TABLE account_api_tokens (
     CONSTRAINT account_api_tokens_name_length CHECK (length(name) <= 100),
 
     -- Security context
-    ip_address            INET        NOT NULL,
-    user_agent            TEXT        NOT NULL,
+    ip_address            INET        DEFAULT NULL,
+    user_agent            TEXT        DEFAULT NULL,
     is_remembered         BOOLEAN     NOT NULL DEFAULT FALSE,
-
-    CONSTRAINT account_api_tokens_user_agent_not_empty CHECK (trim(user_agent) <> ''),
 
     -- Lifecycle timestamps
     issued_at             TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -188,18 +186,9 @@ CREATE TABLE account_action_tokens (
     CONSTRAINT account_action_tokens_action_data_size CHECK (length(action_data::TEXT) BETWEEN 2 AND 4096),
 
     -- Security context
-    ip_address            INET        NOT NULL,
-    user_agent            TEXT        NOT NULL,
+    ip_address            INET        DEFAULT NULL,
+    user_agent            TEXT        DEFAULT NULL,
     device_id             TEXT        DEFAULT NULL,
-
-    CONSTRAINT account_action_tokens_user_agent_not_empty CHECK (trim(user_agent) <> ''),
-
-    -- Rate limiting and security
-    attempt_count         INTEGER     NOT NULL DEFAULT 0,
-    max_attempts          INTEGER     NOT NULL DEFAULT 3,
-
-    CONSTRAINT account_action_tokens_attempt_count_range CHECK (attempt_count BETWEEN 0 AND max_attempts),
-    CONSTRAINT account_action_tokens_max_attempts_range CHECK (max_attempts BETWEEN 1 AND 10),
 
     -- Token lifecycle
     issued_at             TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -220,10 +209,6 @@ CREATE INDEX account_action_tokens_cleanup_idx
     ON account_action_tokens (expired_at)
     WHERE used_at IS NULL;
 
-CREATE INDEX account_action_tokens_security_monitoring_idx
-    ON account_action_tokens (ip_address, attempt_count, issued_at)
-    WHERE attempt_count > 0;
-
 CREATE INDEX account_action_tokens_device_tracking_idx
     ON account_action_tokens (account_id, device_id, issued_at DESC)
     WHERE device_id IS NOT NULL;
@@ -239,8 +224,6 @@ COMMENT ON COLUMN account_action_tokens.action_data IS 'Additional context data 
 COMMENT ON COLUMN account_action_tokens.ip_address IS 'IP address where the token was generated';
 COMMENT ON COLUMN account_action_tokens.user_agent IS 'User agent of the client that generated the token';
 COMMENT ON COLUMN account_action_tokens.device_id IS 'Optional device identifier for additional security tracking';
-COMMENT ON COLUMN account_action_tokens.attempt_count IS 'Number of times this token has been attempted (for rate limiting)';
-COMMENT ON COLUMN account_action_tokens.max_attempts IS 'Maximum allowed attempts before token becomes invalid';
 COMMENT ON COLUMN account_action_tokens.issued_at IS 'Timestamp when the token was created';
 COMMENT ON COLUMN account_action_tokens.expired_at IS 'Timestamp after which the token becomes invalid';
 COMMENT ON COLUMN account_action_tokens.used_at IS 'Timestamp when the token was successfully used (NULL if unused)';

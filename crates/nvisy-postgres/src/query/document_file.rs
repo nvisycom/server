@@ -64,6 +64,15 @@ pub trait DocumentFileRepository {
     /// Soft deletes a file by setting the deletion timestamp.
     fn delete_document_file(&mut self, file_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
+    /// Soft deletes multiple files in a workspace by setting deletion timestamps.
+    ///
+    /// Returns the number of files deleted.
+    fn delete_document_files(
+        &mut self,
+        workspace_id: Uuid,
+        file_ids: &[Uuid],
+    ) -> impl Future<Output = PgResult<usize>> + Send;
+
     /// Lists all files in a workspace with sorting and filtering options.
     ///
     /// Supports filtering by file format and sorting by name, date, or size.
@@ -228,6 +237,28 @@ impl DocumentFileRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(())
+    }
+
+    async fn delete_document_files(
+        &mut self,
+        workspace_id: Uuid,
+        file_ids: &[Uuid],
+    ) -> PgResult<usize> {
+        use diesel::dsl::now;
+        use schema::document_files::{self, dsl};
+
+        let count = diesel::update(
+            document_files::table
+                .filter(dsl::id.eq_any(file_ids))
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(dsl::deleted_at.eq(now))
+        .execute(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(count)
     }
 
     async fn offset_list_workspace_files(
