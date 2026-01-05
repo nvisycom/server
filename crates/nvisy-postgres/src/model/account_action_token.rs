@@ -22,15 +22,11 @@ pub struct AccountActionToken {
     /// Additional context data for the token action (JSON, 2B-4KB).
     pub action_data: serde_json::Value,
     /// IP address where the token was generated.
-    pub ip_address: IpNet,
+    pub ip_address: Option<IpNet>,
     /// User agent of the client that generated the token.
-    pub user_agent: String,
+    pub user_agent: Option<String>,
     /// Optional device identifier for additional security tracking.
     pub device_id: Option<String>,
-    /// Number of times this token has been attempted.
-    pub attempt_count: i32,
-    /// Maximum allowed attempts before token becomes invalid.
-    pub max_attempts: i32,
     /// Timestamp when the token was created.
     pub issued_at: Timestamp,
     /// Timestamp when the token expires.
@@ -51,13 +47,11 @@ pub struct NewAccountActionToken {
     /// Additional context data for the token action.
     pub action_data: Option<serde_json::Value>,
     /// IP address where the token was generated.
-    pub ip_address: IpNet,
+    pub ip_address: Option<IpNet>,
     /// User agent of the client that generated the token.
-    pub user_agent: String,
+    pub user_agent: Option<String>,
     /// Optional device identifier for additional security tracking.
     pub device_id: Option<String>,
-    /// Maximum allowed attempts before token becomes invalid.
-    pub max_attempts: Option<i32>,
     /// Timestamp when the token expires.
     pub expired_at: Option<Timestamp>,
 }
@@ -67,16 +61,14 @@ pub struct NewAccountActionToken {
 #[diesel(table_name = account_action_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountActionToken {
-    /// Number of times this token has been attempted.
-    pub attempt_count: Option<i32>,
     /// Timestamp when the token was successfully used.
-    pub used_at: Option<Timestamp>,
+    pub used_at: Option<Option<Timestamp>>,
 }
 
 impl AccountActionToken {
     /// Returns whether the token is currently valid (not expired and not used).
     pub fn is_valid(&self) -> bool {
-        !self.is_expired() && !self.is_used() && !self.has_exceeded_attempts()
+        !self.is_expired() && !self.is_used()
     }
 
     /// Returns whether the token has expired.
@@ -87,21 +79,6 @@ impl AccountActionToken {
     /// Returns whether the token has been successfully used.
     pub fn is_used(&self) -> bool {
         self.used_at.is_some()
-    }
-
-    /// Returns whether the token has exceeded maximum attempts.
-    pub fn has_exceeded_attempts(&self) -> bool {
-        self.attempt_count >= self.max_attempts
-    }
-
-    /// Returns whether the token can be used for another attempt.
-    pub fn can_attempt(&self) -> bool {
-        self.is_valid() && !self.has_exceeded_attempts()
-    }
-
-    /// Returns whether the token has been attempted at least once.
-    pub fn has_been_attempted(&self) -> bool {
-        self.attempt_count > 0
     }
 
     /// Returns whether the token is for password reset.
@@ -119,11 +96,6 @@ impl AccountActionToken {
         matches!(self.action_type, ActionTokenType::LoginVerification)
     }
 
-    /// Returns the number of remaining attempts.
-    pub fn remaining_attempts(&self) -> i32 {
-        (self.max_attempts - self.attempt_count).max(0)
-    }
-
     /// Returns a shortened version of the token for logging purposes.
     pub fn action_token_short(&self) -> String {
         let token_str = self.action_token.to_string();
@@ -137,20 +109,6 @@ impl AccountActionToken {
     /// Returns whether the token has a device identifier.
     pub fn has_device_id(&self) -> bool {
         self.device_id.is_some()
-    }
-
-    /// Returns the token's usage rate (attempts/max_attempts).
-    pub fn usage_rate(&self) -> f64 {
-        if self.max_attempts > 0 {
-            self.attempt_count as f64 / self.max_attempts as f64
-        } else {
-            0.0
-        }
-    }
-
-    /// Returns whether the token is close to attempt limit.
-    pub fn is_near_attempt_limit(&self) -> bool {
-        self.usage_rate() >= 0.8 // 80% of attempts used
     }
 
     /// Returns whether the token requires immediate action.
@@ -189,12 +147,6 @@ impl AccountActionToken {
                     .ok()
     }
 
-    /// Returns whether the token is from a suspicious source.
-    pub fn is_suspicious(&self) -> bool {
-        // Simple heuristics for suspicious tokens
-        self.attempt_count > (self.max_attempts / 2) && !self.is_used()
-    }
-
     /// Returns whether the token has the specified action type.
     pub fn has_action_type(&self, action_type: ActionTokenType) -> bool {
         self.action_type == action_type
@@ -202,7 +154,7 @@ impl AccountActionToken {
 
     /// Returns whether the token can be refreshed/extended.
     pub fn can_be_refreshed(&self) -> bool {
-        self.is_valid() && !self.is_suspicious()
+        self.is_valid()
     }
 }
 
@@ -213,17 +165,17 @@ impl HasCreatedAt for AccountActionToken {
 }
 
 impl HasExpiresAt for AccountActionToken {
-    fn expires_at(&self) -> jiff::Timestamp {
-        self.expired_at.into()
+    fn expires_at(&self) -> Option<jiff::Timestamp> {
+        Some(self.expired_at.into())
     }
 }
 
 impl HasSecurityContext for AccountActionToken {
     fn ip_address(&self) -> Option<IpNet> {
-        Some(self.ip_address)
+        self.ip_address
     }
 
     fn user_agent(&self) -> Option<&str> {
-        Some(&self.user_agent)
+        self.user_agent.as_deref()
     }
 }

@@ -1,6 +1,8 @@
-//! Project member request types.
+//! Workspace member request types.
 
-use nvisy_postgres::types::ProjectRole;
+use nvisy_postgres::types::{
+    MemberFilter, MemberSortBy, MemberSortField, SortOrder, WorkspaceRole,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -9,17 +11,52 @@ use validator::Validate;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateMemberRole {
+pub struct UpdateMember {
     /// New role for the member.
-    pub role: ProjectRole,
+    pub role: WorkspaceRole,
 }
 
-impl UpdateMemberRole {
-    /// Converts to database model.
-    pub fn into_model(self) -> nvisy_postgres::model::UpdateProjectMember {
-        nvisy_postgres::model::UpdateProjectMember {
+impl UpdateMember {
+    pub fn into_model(self) -> nvisy_postgres::model::UpdateWorkspaceMember {
+        nvisy_postgres::model::UpdateWorkspaceMember {
             member_role: Some(self.role),
             ..Default::default()
         }
+    }
+}
+
+/// Query parameters for listing workspace members.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMembers {
+    /// Filter by workspace role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<WorkspaceRole>,
+    /// Filter by 2FA status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_2fa: Option<bool>,
+    /// Sort by field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<MemberSortField>,
+    /// Sort order (asc or desc).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<SortOrder>,
+}
+
+impl ListMembers {
+    /// Converts to filter model.
+    pub fn to_filter(&self) -> MemberFilter {
+        MemberFilter {
+            role: self.role,
+            has_2fa: self.has_2fa,
+        }
+    }
+
+    /// Converts to sort model.
+    pub fn to_sort(&self) -> MemberSortBy {
+        let order = self.order.unwrap_or_default();
+        let field = self.sort_by.unwrap_or_default();
+        MemberSortBy::new(field, order)
     }
 }

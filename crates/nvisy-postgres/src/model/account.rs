@@ -16,7 +16,6 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::accounts;
-use crate::types::constants::account;
 use crate::types::{HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt};
 
 /// Main account model representing a user account in the system.
@@ -40,18 +39,12 @@ pub struct Account {
     pub password_hash: String,
     /// Optional company affiliation for business accounts.
     pub company_name: Option<String>,
-    /// Optional phone number for 2FA or emergency contact.
-    pub phone_number: Option<String>,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier (e.g., "America/New_York", "UTC").
     pub timezone: String,
     /// Preferred locale code (ISO 639-1, e.g., "en", "es", "fr").
     pub locale: String,
-    /// Number of consecutive failed login attempts.
-    pub failed_login_attempts: i32,
-    /// Timestamp until which the account is locked due to failed attempts.
-    pub locked_until: Option<Timestamp>,
     /// Timestamp when password was last changed.
     pub password_changed_at: Option<Timestamp>,
     /// Timestamp when the account was created.
@@ -75,8 +68,6 @@ pub struct NewAccount {
     pub password_hash: String,
     /// Optional company affiliation for business accounts.
     pub company_name: Option<String>,
-    /// Optional phone number for 2FA or emergency contact.
-    pub phone_number: Option<String>,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -97,9 +88,7 @@ pub struct UpdateAccount {
     /// Securely hashed password.
     pub password_hash: Option<String>,
     /// Company affiliation for business accounts.
-    pub company_name: Option<String>,
-    /// Phone number for 2FA or emergency contact.
-    pub phone_number: Option<String>,
+    pub company_name: Option<Option<String>>,
     /// URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -112,10 +101,6 @@ pub struct UpdateAccount {
     pub is_verified: Option<bool>,
     /// Account suspension status.
     pub is_suspended: Option<bool>,
-    /// Number of consecutive failed login attempts.
-    pub failed_login_attempts: Option<i32>,
-    /// Timestamp until which the account is locked.
-    pub locked_until: Option<Timestamp>,
     /// Timestamp when password was last changed.
     pub password_changed_at: Option<Timestamp>,
 }
@@ -123,7 +108,7 @@ pub struct UpdateAccount {
 impl Account {
     /// Returns whether the account is active and can be used.
     pub fn is_active(&self) -> bool {
-        !self.is_suspended && !self.is_deleted() && !self.is_locked()
+        !self.is_suspended && !self.is_deleted()
     }
 
     /// Returns whether the account is suspended.
@@ -141,30 +126,14 @@ impl Account {
         self.is_admin
     }
 
-    /// Returns whether the account is currently locked due to failed login attempts.
-    pub fn is_locked(&self) -> bool {
-        if let Some(locked_until) = self.locked_until {
-            jiff::Timestamp::from(locked_until) > jiff::Timestamp::now()
-        } else {
-            false
-        }
-    }
-
     /// Returns whether the account can log in.
     pub fn can_login(&self) -> bool {
-        self.is_active() && self.is_verified() && !self.is_locked()
+        self.is_active() && self.is_verified()
     }
 
     /// Returns whether the account can perform admin actions.
     pub fn can_admin(&self) -> bool {
         self.is_active() && self.is_admin()
-    }
-
-    /// Returns whether the account has a phone number set.
-    pub fn has_phone_number(&self) -> bool {
-        self.phone_number
-            .as_deref()
-            .is_some_and(|phone_number| !phone_number.is_empty())
     }
 
     /// Returns whether the account has a company name set.
@@ -197,29 +166,6 @@ impl Account {
     /// Only suspended accounts that haven't been deleted can be unsuspended.
     pub fn can_be_unsuspended(&self) -> bool {
         self.is_suspended() && !self.is_deleted()
-    }
-
-    /// Returns whether the account has too many failed login attempts.
-    pub fn has_too_many_failed_attempts(&self) -> bool {
-        self.failed_login_attempts >= account::MAX_FAILED_LOGIN_ATTEMPTS
-    }
-
-    /// Returns the time remaining until the account lockout expires.
-    ///
-    /// When an account is temporarily locked due to failed login attempts,
-    /// this method calculates how much time remains before automatic unlock.
-    pub fn time_until_unlock(&self) -> Option<jiff::Span> {
-        if let Some(locked_until) = self.locked_until {
-            let now = jiff::Timestamp::now();
-            let locked_until = jiff::Timestamp::from(locked_until);
-            if locked_until > now {
-                Some(locked_until - now)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
     }
 }
 

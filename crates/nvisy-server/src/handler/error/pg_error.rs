@@ -2,7 +2,7 @@
 //!
 //! This module provides organized handlers for converting PostgreSQL constraint
 //! violations into appropriate HTTP error responses. Each submodule handles
-//! constraints for a specific domain (accounts, projects, documents, etc.).
+//! constraints for a specific domain (accounts, workspaces, documents, etc.).
 //!
 //! All conversions are implemented via the `From` trait for ergonomic usage.
 
@@ -21,19 +21,19 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::AccountNotification(c) => c.into(),
             ConstraintViolation::AccountApiToken(c) => c.into(),
             ConstraintViolation::AccountActionToken(c) => c.into(),
-            ConstraintViolation::Project(c) => c.into(),
-            ConstraintViolation::ProjectMember(c) => c.into(),
-            ConstraintViolation::ProjectInvite(c) => c.into(),
-            ConstraintViolation::ProjectActivityLog(c) => c.into(),
-            ConstraintViolation::ProjectIntegration(c) => c.into(),
-            ConstraintViolation::ProjectRun(c) => c.into(),
+            ConstraintViolation::Workspace(c) => c.into(),
+            ConstraintViolation::WorkspaceMember(c) => c.into(),
+            ConstraintViolation::WorkspaceInvite(c) => c.into(),
+            ConstraintViolation::WorkspaceActivityLog(c) => c.into(),
+            ConstraintViolation::WorkspaceIntegration(c) => c.into(),
+            ConstraintViolation::WorkspaceIntegrationRun(c) => c.into(),
             ConstraintViolation::Document(c) => c.into(),
             ConstraintViolation::DocumentChunk(c) => c.into(),
             ConstraintViolation::DocumentComment(c) => c.into(),
             ConstraintViolation::DocumentAnnotation(c) => c.into(),
             ConstraintViolation::DocumentFile(c) => c.into(),
             ConstraintViolation::DocumentVersion(c) => c.into(),
-            ConstraintViolation::ProjectWebhook(c) => c.into(),
+            ConstraintViolation::WorkspaceWebhook(c) => c.into(),
         }
     }
 }
@@ -112,5 +112,14 @@ impl From<PgError> for Error<'static> {
                 ErrorKind::InternalServerError.into_error()
             }
         }
+    }
+}
+
+// Used only for transactions.
+impl From<nvisy_postgres::DieselError> for Error<'static> {
+    fn from(error: nvisy_postgres::DieselError) -> Self {
+        // Convert DieselError -> PgError -> Error
+        let pg_error: PgError = error.into();
+        pg_error.into()
     }
 }

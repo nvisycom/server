@@ -1,4 +1,4 @@
-//! Invite status enumeration for project invitation tracking.
+//! Invite status enumeration for workspace invitation tracking.
 
 use diesel_derive_enum::DbEnum;
 #[cfg(feature = "schema")]
@@ -6,10 +6,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the current status of a project invitation.
+/// Defines the current status of a workspace invitation.
 ///
 /// This enumeration corresponds to the `INVITE_STATUS` PostgreSQL enum and is used
-/// to track the lifecycle of project invitations from creation to resolution.
+/// to track the lifecycle of workspace invitations from creation to resolution.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
@@ -21,7 +21,7 @@ pub enum InviteStatus {
     #[default]
     Pending,
 
-    /// Invitation has been accepted and the member has been added to the project
+    /// Invitation has been accepted and the member has been added to the workspace
     #[db_rename = "accepted"]
     #[serde(rename = "accepted")]
     Accepted,
@@ -41,7 +41,7 @@ pub enum InviteStatus {
     #[serde(rename = "expired")]
     Expired,
 
-    /// Invitation was revoked by a project administrator
+    /// Invitation was revoked by a workspace administrator
     #[db_rename = "revoked"]
     #[serde(rename = "revoked")]
     Revoked,

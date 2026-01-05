@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the operational status of a project integration.
+/// Defines the operational status of a workspace integration.
 ///
 /// This enumeration corresponds to the `INTEGRATION_STATUS` PostgreSQL enum and is used
 /// to manage integration states from initial setup through active execution and error handling.

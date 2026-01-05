@@ -62,6 +62,7 @@ jiff-diesel = { workspace = true, features = ["postgres"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
+base64 = { workspace = true, features = [] }
 
 # OpenAPI documentation (optional)
 schemars = { workspace = true, features = [], optional = true }

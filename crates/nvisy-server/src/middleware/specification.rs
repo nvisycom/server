@@ -18,7 +18,7 @@
 //! use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
 //!
 //! let app: Router<()> = ApiRouter::new()
-//!     .with_open_api(OpenApiConfig::default());
+//!     .with_open_api(&OpenApiConfig::default());
 //! ```
 //!
 //! [`aide`]: https://docs.rs/aide
@@ -92,7 +92,7 @@ pub trait RouterOpenApiExt<S> {
     /// use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
     ///
     /// let app: Router<()> = ApiRouter::new()
-    ///     .with_open_api(OpenApiConfig::default());
+    ///     .with_open_api(&OpenApiConfig::default());
     /// ```
     fn with_open_api(self, config: &OpenApiConfig) -> Router<S>;
 }
@@ -157,8 +157,8 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Projects".into(),
-            description: Some("Project creation and management".into()),
+            name: "Workspaces".into(),
+            description: Some("Workspace creation and management".into()),
             ..Default::default()
         })
         .tag(Tag {
@@ -178,27 +178,17 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         })
         .tag(Tag {
             name: "Members".into(),
-            description: Some("Project member management".into()),
+            description: Some("Workspace member management".into()),
             ..Default::default()
         })
         .tag(Tag {
             name: "Invites".into(),
-            description: Some("Project invitation handling".into()),
+            description: Some("Workspace invitation handling".into()),
             ..Default::default()
         })
         .tag(Tag {
             name: "Tokens".into(),
             description: Some("API token management".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
-            name: "Templates".into(),
-            description: Some("Document templates".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
-            name: "Pipelines".into(),
-            description: Some("Processing pipelines".into()),
             ..Default::default()
         })
         .tag(Tag {

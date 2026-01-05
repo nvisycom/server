@@ -6,8 +6,8 @@ use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::security::{AuthConfig, AuthKeys};
-use crate::service::{Error, Result};
+use crate::service::security::{SessionKeys, SessionKeysConfig};
+use crate::{Error, Result};
 
 /// App [`state`] configuration.
 ///
@@ -27,7 +27,7 @@ pub struct ServiceConfig {
 
     /// Authentication key paths configuration.
     #[cfg_attr(any(test, feature = "config"), command(flatten))]
-    pub auth_config: AuthConfig,
+    pub session_config: SessionKeysConfig,
 }
 
 impl ServiceConfig {
@@ -62,7 +62,7 @@ impl ServiceConfig {
     }
 
     /// Loads authentication keys from configured paths.
-    pub async fn load_auth_keys(&self) -> Result<AuthKeys> {
-        AuthKeys::from_config(&self.auth_config).await
+    pub async fn load_session_keys(&self) -> Result<SessionKeys> {
+        SessionKeys::from_config(&self.session_config).await
     }
 }

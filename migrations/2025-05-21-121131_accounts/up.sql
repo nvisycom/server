@@ -35,11 +35,9 @@ CREATE TABLE accounts (
 
     -- Optional profile information
     company_name          TEXT        DEFAULT NULL,
-    phone_number          TEXT        DEFAULT NULL,
     avatar_url            TEXT        DEFAULT NULL,
 
     CONSTRAINT accounts_company_name_length_max CHECK (company_name IS NULL OR length(company_name) <= 255),
-    CONSTRAINT accounts_phone_number_length_max CHECK (phone_number IS NULL OR length(phone_number) <= 50),
 
     -- Preferences and settings
     timezone              TEXT        NOT NULL DEFAULT 'UTC',
@@ -49,12 +47,7 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_locale_format CHECK (locale ~ '^[a-z]{2}-[A-Z]{2}$'),
 
     -- Security tracking
-    failed_login_attempts INTEGER     NOT NULL DEFAULT 0,
-    locked_until          TIMESTAMPTZ DEFAULT NULL,
     password_changed_at   TIMESTAMPTZ DEFAULT NULL,
-
-    CONSTRAINT accounts_failed_login_attempts_range CHECK (failed_login_attempts BETWEEN 0 AND 10),
-    CONSTRAINT accounts_locked_until_future CHECK (locked_until IS NULL OR locked_until > current_timestamp),
 
     -- Lifecycle timestamps
     created_at            TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -82,9 +75,7 @@ CREATE INDEX accounts_admin_users_idx
     ON accounts (id, display_name)
     WHERE is_admin = TRUE AND deleted_at IS NULL;
 
-CREATE INDEX accounts_security_tracking_idx
-    ON accounts (failed_login_attempts, locked_until)
-    WHERE deleted_at IS NULL AND (failed_login_attempts > 0 OR locked_until IS NOT NULL);
+
 
 -- Add table and column comments
 COMMENT ON TABLE accounts IS
@@ -98,114 +89,69 @@ COMMENT ON COLUMN accounts.display_name IS 'Human-readable name for UI and commu
 COMMENT ON COLUMN accounts.email_address IS 'Primary email for authentication and communications (validated format)';
 COMMENT ON COLUMN accounts.password_hash IS 'Securely hashed password (bcrypt recommended, minimum 60 characters)';
 COMMENT ON COLUMN accounts.company_name IS 'Optional company affiliation for business accounts';
-COMMENT ON COLUMN accounts.phone_number IS 'Optional phone number for 2FA or emergency contact';
 COMMENT ON COLUMN accounts.avatar_url IS 'URL to user profile image or avatar';
 COMMENT ON COLUMN accounts.timezone IS 'User timezone for date/time display preferences';
 COMMENT ON COLUMN accounts.locale IS 'User locale for language and regional formatting';
-COMMENT ON COLUMN accounts.failed_login_attempts IS 'Counter for consecutive failed login attempts (0-10)';
-COMMENT ON COLUMN accounts.locked_until IS 'Temporary account lock expiration after too many failed logins';
 COMMENT ON COLUMN accounts.password_changed_at IS 'Timestamp of last password change for security tracking';
 COMMENT ON COLUMN accounts.created_at IS 'Timestamp when the account was created';
 COMMENT ON COLUMN accounts.updated_at IS 'Timestamp when the account was last modified (auto-updated by trigger)';
 COMMENT ON COLUMN accounts.deleted_at IS 'Timestamp when the account was soft-deleted (NULL if active)';
 
--- Create enhanced account API tokens table
+-- Create account API tokens table
 CREATE TABLE account_api_tokens (
-    -- Session identifiers
-    access_seq            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    refresh_seq           UUID        NOT NULL DEFAULT gen_random_uuid(),
+    -- Primary identifier
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Account reference
     account_id            UUID        NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Token metadata
     name                  TEXT        NOT NULL,
-    description           TEXT        DEFAULT NULL,
+    session_type          API_TOKEN_TYPE NOT NULL DEFAULT 'web',
 
     CONSTRAINT account_api_tokens_name_not_empty CHECK (trim(name) <> ''),
     CONSTRAINT account_api_tokens_name_length CHECK (length(name) <= 100),
-    CONSTRAINT account_api_tokens_description_length CHECK (description IS NULL OR length(description) <= 500),
-
-    -- Geographic and device tracking
-    region_code           CHAR(2)     NOT NULL DEFAULT 'XX',
-    country_code          CHAR(2)     DEFAULT NULL,
-    city_name             TEXT        DEFAULT NULL,
-
-    CONSTRAINT account_api_tokens_region_code_valid CHECK (region_code ~ '^[A-Z0-9]{2}$'),
-    CONSTRAINT account_api_tokens_country_code_valid CHECK (country_code IS NULL OR country_code ~ '^[A-Z]{2}$'),
 
     -- Security context
-    ip_address            INET        NOT NULL,
-    user_agent            TEXT        NOT NULL,
-    device_id             TEXT        DEFAULT NULL,
-    session_type          API_TOKEN_TYPE NOT NULL DEFAULT 'web',
-
-    CONSTRAINT account_api_tokens_user_agent_not_empty CHECK (trim(user_agent) <> ''),
-
-    -- Security flags
-    is_suspicious         BOOLEAN     NOT NULL DEFAULT FALSE,
+    ip_address            INET        DEFAULT NULL,
+    user_agent            TEXT        DEFAULT NULL,
     is_remembered         BOOLEAN     NOT NULL DEFAULT FALSE,
 
-    -- Session lifecycle
+    -- Lifecycle timestamps
     issued_at             TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    expired_at            TIMESTAMPTZ NOT NULL DEFAULT current_timestamp + INTERVAL '7 days',
+    expired_at            TIMESTAMPTZ DEFAULT NULL,
     last_used_at          TIMESTAMPTZ DEFAULT NULL,
     deleted_at            TIMESTAMPTZ DEFAULT NULL,
 
-    CONSTRAINT account_api_tokens_expired_after_issued CHECK (expired_at > issued_at),
+    CONSTRAINT account_api_tokens_expired_after_issued CHECK (expired_at IS NULL OR expired_at > issued_at),
     CONSTRAINT account_api_tokens_deleted_after_issued CHECK (deleted_at IS NULL OR deleted_at >= issued_at),
     CONSTRAINT account_api_tokens_last_used_after_issued CHECK (last_used_at IS NULL OR last_used_at >= issued_at)
 );
 
 -- Create indexes for API token management
-CREATE UNIQUE INDEX account_api_tokens_access_seq_unique_idx
-    ON account_api_tokens (access_seq);
-
-CREATE UNIQUE INDEX account_api_tokens_refresh_seq_unique_idx
-    ON account_api_tokens (refresh_seq);
-
 CREATE INDEX account_api_tokens_account_active_idx
-    ON account_api_tokens (account_id, access_seq, expired_at)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX account_api_tokens_account_refresh_idx
-    ON account_api_tokens (account_id, refresh_seq, expired_at)
+    ON account_api_tokens (account_id, expired_at)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX account_api_tokens_cleanup_idx
     ON account_api_tokens (expired_at)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX account_api_tokens_device_tracking_idx
-    ON account_api_tokens (account_id, device_id, issued_at DESC)
-    WHERE device_id IS NOT NULL AND deleted_at IS NULL;
-
-CREATE INDEX account_api_tokens_geographic_idx
-    ON account_api_tokens (country_code, region_code, issued_at DESC)
-    WHERE country_code IS NOT NULL AND deleted_at IS NULL;
-
 -- Add table and column comments
 COMMENT ON TABLE account_api_tokens IS
-    'User authentication sessions with enhanced security tracking and geographic information.';
+    'API tokens for user authentication sessions.';
 
-COMMENT ON COLUMN account_api_tokens.access_seq IS 'Unique session identifier used for authentication (UUID)';
-COMMENT ON COLUMN account_api_tokens.refresh_seq IS 'Unique refresh token for extending session without re-authentication (UUID)';
-COMMENT ON COLUMN account_api_tokens.account_id IS 'Reference to the account this session belongs to';
-COMMENT ON COLUMN account_api_tokens.name IS 'Human-readable name for the API token (max 100 characters)';
-COMMENT ON COLUMN account_api_tokens.description IS 'Optional description for the API token (max 500 characters)';
-COMMENT ON COLUMN account_api_tokens.region_code IS 'Two-character region/state code where session originated';
-COMMENT ON COLUMN account_api_tokens.country_code IS 'ISO 3166-1 alpha-2 country code where session originated';
-COMMENT ON COLUMN account_api_tokens.city_name IS 'City name where session originated (if available from IP geolocation)';
-COMMENT ON COLUMN account_api_tokens.ip_address IS 'IP address from which the session was initiated';
-COMMENT ON COLUMN account_api_tokens.user_agent IS 'Browser/client user agent string for device identification';
-COMMENT ON COLUMN account_api_tokens.device_id IS 'Optional persistent device identifier for trusted device tracking';
+COMMENT ON COLUMN account_api_tokens.id IS 'Unique token identifier (UUID primary key)';
+COMMENT ON COLUMN account_api_tokens.account_id IS 'Reference to the account this token belongs to';
+COMMENT ON COLUMN account_api_tokens.name IS 'Human-readable name for the token (max 100 characters)';
 COMMENT ON COLUMN account_api_tokens.session_type IS 'Type of client that created the session (web, mobile, api, desktop)';
-COMMENT ON COLUMN account_api_tokens.is_suspicious IS 'Flag indicating potentially suspicious session activity';
-COMMENT ON COLUMN account_api_tokens.is_remembered IS 'Flag indicating if this is a "remember me" extended session';
-COMMENT ON COLUMN account_api_tokens.issued_at IS 'Timestamp when the session was created';
-COMMENT ON COLUMN account_api_tokens.expired_at IS 'Timestamp when the session expires and becomes invalid';
-COMMENT ON COLUMN account_api_tokens.last_used_at IS 'Timestamp of most recent session activity';
-COMMENT ON COLUMN account_api_tokens.deleted_at IS 'Timestamp when the session was soft-deleted (NULL if active)';
+COMMENT ON COLUMN account_api_tokens.ip_address IS 'IP address where the session was created';
+COMMENT ON COLUMN account_api_tokens.user_agent IS 'User agent of the client that created the session';
+COMMENT ON COLUMN account_api_tokens.is_remembered IS 'Whether the session uses extended expiration (remember me)';
+COMMENT ON COLUMN account_api_tokens.issued_at IS 'Timestamp when the token was created';
+COMMENT ON COLUMN account_api_tokens.expired_at IS 'Timestamp when the token expires';
+COMMENT ON COLUMN account_api_tokens.last_used_at IS 'Timestamp of most recent token usage';
+COMMENT ON COLUMN account_api_tokens.deleted_at IS 'Timestamp when the token was revoked (NULL if active)';
 
 -- Create comprehensive action token type enum
 CREATE TYPE ACTION_TOKEN_TYPE AS ENUM (
@@ -240,18 +186,9 @@ CREATE TABLE account_action_tokens (
     CONSTRAINT account_action_tokens_action_data_size CHECK (length(action_data::TEXT) BETWEEN 2 AND 4096),
 
     -- Security context
-    ip_address            INET        NOT NULL,
-    user_agent            TEXT        NOT NULL,
+    ip_address            INET        DEFAULT NULL,
+    user_agent            TEXT        DEFAULT NULL,
     device_id             TEXT        DEFAULT NULL,
-
-    CONSTRAINT account_action_tokens_user_agent_not_empty CHECK (trim(user_agent) <> ''),
-
-    -- Rate limiting and security
-    attempt_count         INTEGER     NOT NULL DEFAULT 0,
-    max_attempts          INTEGER     NOT NULL DEFAULT 3,
-
-    CONSTRAINT account_action_tokens_attempt_count_range CHECK (attempt_count BETWEEN 0 AND max_attempts),
-    CONSTRAINT account_action_tokens_max_attempts_range CHECK (max_attempts BETWEEN 1 AND 10),
 
     -- Token lifecycle
     issued_at             TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -272,10 +209,6 @@ CREATE INDEX account_action_tokens_cleanup_idx
     ON account_action_tokens (expired_at)
     WHERE used_at IS NULL;
 
-CREATE INDEX account_action_tokens_security_monitoring_idx
-    ON account_action_tokens (ip_address, attempt_count, issued_at)
-    WHERE attempt_count > 0;
-
 CREATE INDEX account_action_tokens_device_tracking_idx
     ON account_action_tokens (account_id, device_id, issued_at DESC)
     WHERE device_id IS NOT NULL;
@@ -291,25 +224,36 @@ COMMENT ON COLUMN account_action_tokens.action_data IS 'Additional context data 
 COMMENT ON COLUMN account_action_tokens.ip_address IS 'IP address where the token was generated';
 COMMENT ON COLUMN account_action_tokens.user_agent IS 'User agent of the client that generated the token';
 COMMENT ON COLUMN account_action_tokens.device_id IS 'Optional device identifier for additional security tracking';
-COMMENT ON COLUMN account_action_tokens.attempt_count IS 'Number of times this token has been attempted (for rate limiting)';
-COMMENT ON COLUMN account_action_tokens.max_attempts IS 'Maximum allowed attempts before token becomes invalid';
 COMMENT ON COLUMN account_action_tokens.issued_at IS 'Timestamp when the token was created';
 COMMENT ON COLUMN account_action_tokens.expired_at IS 'Timestamp after which the token becomes invalid';
 COMMENT ON COLUMN account_action_tokens.used_at IS 'Timestamp when the token was successfully used (NULL if unused)';
 
--- Create notification type enum
-CREATE TYPE NOTIFICATION_TYPE AS ENUM (
-    'comment_mention',      -- User was mentioned in a comment
-    'comment_reply',        -- Someone replied to user's comment
-    'document_upload',      -- Document was uploaded
-    'document_download',    -- Document was downloaded
-    'document_verify',      -- Document verification completed
-    'project_invite',       -- User was invited to a project
-    'system_announcement'   -- System-wide announcement
+-- Create notification event enum
+CREATE TYPE NOTIFICATION_EVENT AS ENUM (
+    -- Comment events
+    'comment:mention',        -- User was mentioned in a comment
+    'comment:reply',          -- Someone replied to user's comment
+
+    -- Document events
+    'document:uploaded',      -- Document was uploaded
+    'document:downloaded',    -- Document was downloaded
+    'document:verified',      -- Document verification completed
+
+    -- Member events
+    'member:invited',         -- User was invited to a workspace
+    'member:joined',          -- A new member joined a workspace
+
+    -- Integration events
+    'integration:synced',     -- Integration sync completed
+    'integration:desynced',   -- Integration sync failed or disconnected
+
+    -- System events
+    'system:announcement',    -- System-wide announcement
+    'system:report'           -- System report generated
 );
 
-COMMENT ON TYPE NOTIFICATION_TYPE IS
-    'Types of notifications that can be sent to users.';
+COMMENT ON TYPE NOTIFICATION_EVENT IS
+    'Types of notification events that can be sent to users.';
 
 -- Create account notifications table
 CREATE TABLE account_notifications (
@@ -320,7 +264,7 @@ CREATE TABLE account_notifications (
     account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Notification details
-    notify_type     NOTIFICATION_TYPE NOT NULL,
+    notify_type     NOTIFICATION_EVENT NOT NULL,
     title           TEXT             NOT NULL,
     message         TEXT             NOT NULL,
 
@@ -396,18 +340,17 @@ COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration times
 -- Create a view for active user sessions
 CREATE VIEW active_user_sessions AS
 SELECT
-    t.access_seq,
+    t.id,
     t.account_id,
     a.email_address,
     a.display_name,
     t.ip_address,
-    t.country_code,
-    t.region_code,
+    t.user_agent,
     t.session_type,
+    t.is_remembered,
     t.issued_at,
     t.expired_at,
-    t.last_used_at,
-    t.is_suspicious
+    t.last_used_at
 FROM account_api_tokens t
     JOIN accounts a ON t.account_id = a.id
 WHERE t.deleted_at IS NULL

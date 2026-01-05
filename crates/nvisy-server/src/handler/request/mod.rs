@@ -1,6 +1,7 @@
 //! Request types for HTTP handlers.
 
 mod accounts;
+mod annotations;
 mod authentications;
 mod comments;
 mod documents;
@@ -11,14 +12,13 @@ mod members;
 mod monitors;
 mod paginations;
 mod paths;
-mod pipelines;
-mod projects;
-mod templates;
 mod tokens;
 mod validations;
 mod webhooks;
+mod workspaces;
 
 pub use accounts::*;
+pub use annotations::*;
 pub use authentications::*;
 pub use comments::*;
 pub use documents::*;
@@ -29,9 +29,7 @@ pub use members::*;
 pub use monitors::*;
 pub use paginations::*;
 pub use paths::*;
-pub use pipelines::*;
-pub use projects::*;
-pub use templates::*;
 pub use tokens::*;
 pub use validations::*;
 pub use webhooks::*;
+pub use workspaces::*;

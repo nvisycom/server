@@ -52,7 +52,7 @@ mod recovery;
 mod security;
 mod specification;
 
-pub use authentication::{RouterAuthExt, refresh_token_middleware, require_authentication};
+pub use authentication::{RouterAuthExt, require_authentication, validate_token_middleware};
 pub use authorization::require_admin;
 pub use observability::RouterObservabilityExt;
 pub use recovery::{RecoveryConfig, RouterRecoveryExt};

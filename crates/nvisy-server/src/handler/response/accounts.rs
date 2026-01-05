@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 /// Represents an account.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     /// Unique identifier of the account.
@@ -26,8 +26,6 @@ pub struct Account {
     pub email_address: String,
     /// Company name (optional).
     pub company_name: Option<String>,
-    /// Phone number (optional).
-    pub phone_number: Option<String>,
 
     /// Timestamp when the account was created.
     pub created_at: Timestamp,
@@ -36,7 +34,6 @@ pub struct Account {
 }
 
 impl Account {
-    /// Creates a new instance of [`Account`].
     pub fn from_model(account: model::Account) -> Self {
         Self {
             account_id: account.id,
@@ -47,7 +44,6 @@ impl Account {
             display_name: account.display_name,
             email_address: account.email_address,
             company_name: account.company_name,
-            phone_number: account.phone_number,
 
             created_at: account.created_at.into(),
             updated_at: account.updated_at.into(),

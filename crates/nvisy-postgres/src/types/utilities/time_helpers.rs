@@ -105,12 +105,16 @@ pub trait HasDeletedAt {
 
 /// Trait for models that have expiration timestamps.
 pub trait HasExpiresAt {
-    /// Returns the expiration timestamp.
-    fn expires_at(&self) -> Timestamp;
+    /// Returns the expiration timestamp, or None if the entity never expires.
+    fn expires_at(&self) -> Option<Timestamp>;
 
     /// Returns whether the entity has expired.
+    /// Returns false if the entity never expires.
     fn is_expired(&self) -> bool {
-        Timestamp::now() > self.expires_at()
+        match self.expires_at() {
+            Some(expires_at) => Timestamp::now() > expires_at,
+            None => false,
+        }
     }
 
     /// Returns whether the entity is still valid (not expired).
@@ -119,16 +123,19 @@ pub trait HasExpiresAt {
     }
 
     /// Returns the time remaining until expiration.
+    /// Returns None if the entity never expires or has already expired.
     fn time_until_expiry(&self) -> Option<Span> {
+        let expires_at = self.expires_at()?;
         let now = Timestamp::now();
-        if self.expires_at() > now {
-            self.expires_at().since(now).ok()
+        if expires_at > now {
+            expires_at.since(now).ok()
         } else {
             None
         }
     }
 
     /// Returns whether the entity is expiring soon (within specified duration).
+    /// Returns false if the entity never expires.
     fn is_expiring_soon(&self, threshold: Span) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
             remaining.total(Unit::Second).ok() <= threshold.total(Unit::Second).ok()

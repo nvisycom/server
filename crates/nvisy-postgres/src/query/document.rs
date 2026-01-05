@@ -4,17 +4,15 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
 use uuid::Uuid;
 
-use super::Pagination;
 use crate::model::{Document, NewDocument, UpdateDocument};
-use crate::types::DocumentStatus;
+use crate::types::{CursorPage, CursorPagination, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document database operations.
 ///
-/// Handles document lifecycle management including creation, updates, status tracking,
+/// Handles document lifecycle management including creation, updates,
 /// and search functionality.
 pub trait DocumentRepository {
     /// Creates a new document with the provided metadata.
@@ -29,19 +27,33 @@ pub trait DocumentRepository {
         document_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Document>>> + Send;
 
-    /// Finds documents associated with a specific project.
-    fn find_documents_by_project(
+    /// Lists documents associated with a specific workspace with offset pagination.
+    fn offset_list_workspace_documents(
         &mut self,
-        project_id: Uuid,
-        pagination: Pagination,
+        workspace_id: Uuid,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
-    /// Finds documents created by a specific account.
-    fn find_documents_by_account(
+    /// Lists documents associated with a specific workspace with cursor pagination.
+    fn cursor_list_workspace_documents(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination,
+    ) -> impl Future<Output = PgResult<CursorPage<Document>>> + Send;
+
+    /// Lists documents created by a specific account with offset pagination.
+    fn offset_list_account_documents(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
+
+    /// Lists documents created by a specific account with cursor pagination.
+    fn cursor_list_account_documents(
+        &mut self,
+        account_id: Uuid,
+        pagination: CursorPagination,
+    ) -> impl Future<Output = PgResult<CursorPage<Document>>> + Send;
 
     /// Updates a document with new information and metadata.
     fn update_document(
@@ -53,25 +65,18 @@ pub trait DocumentRepository {
     /// Soft deletes a document by setting the deletion timestamp.
     fn delete_document(&mut self, document_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Lists documents with pagination support.
-    fn list_documents(
+    /// Lists all documents with offset pagination.
+    fn offset_list_documents(
         &mut self,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 
-    /// Searches documents by name or description with optional project filtering.
+    /// Searches documents by name or description with optional workspace filtering.
     fn search_documents(
         &mut self,
         search_query: &str,
-        project_id: Option<Uuid>,
-        pagination: Pagination,
-    ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
-
-    /// Finds documents filtered by their current status.
-    fn find_documents_by_status(
-        &mut self,
-        status: DocumentStatus,
-        pagination: Pagination,
+        workspace_id: Option<Uuid>,
+        pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Document>>> + Send;
 }
 
@@ -104,15 +109,15 @@ impl DocumentRepository for PgConnection {
         Ok(document)
     }
 
-    async fn find_documents_by_project(
+    async fn offset_list_workspace_documents(
         &mut self,
-        project_id: Uuid,
-        pagination: Pagination,
+        workspace_id: Uuid,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
         let documents = documents::table
-            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::updated_at.desc())
             .limit(pagination.limit)
@@ -125,10 +130,66 @@ impl DocumentRepository for PgConnection {
         Ok(documents)
     }
 
-    async fn find_documents_by_account(
+    async fn cursor_list_workspace_documents(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination,
+    ) -> PgResult<CursorPage<Document>> {
+        use diesel::dsl::count_star;
+        use schema::documents::{self, dsl};
+
+        let base_filter = dsl::workspace_id
+            .eq(workspace_id)
+            .and(dsl::deleted_at.is_null());
+
+        let total = if pagination.include_count {
+            Some(
+                documents::table
+                    .filter(base_filter)
+                    .select(count_star())
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        let items = if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            documents::table
+                .filter(base_filter)
+                .filter(
+                    dsl::updated_at
+                        .lt(cursor_ts)
+                        .or(dsl::updated_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
+                )
+                .order((dsl::updated_at.desc(), dsl::id.desc()))
+                .limit(pagination.fetch_limit())
+                .select(Document::as_select())
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            documents::table
+                .filter(base_filter)
+                .order((dsl::updated_at.desc(), dsl::id.desc()))
+                .limit(pagination.fetch_limit())
+                .select(Document::as_select())
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
+
+        Ok(CursorPage::new(items, total, pagination.limit, |d| {
+            (d.updated_at.into(), d.id)
+        }))
+    }
+
+    async fn offset_list_account_documents(
         &mut self,
         account_id: Uuid,
-        pagination: Pagination,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
@@ -144,6 +205,62 @@ impl DocumentRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(documents)
+    }
+
+    async fn cursor_list_account_documents(
+        &mut self,
+        account_id: Uuid,
+        pagination: CursorPagination,
+    ) -> PgResult<CursorPage<Document>> {
+        use diesel::dsl::count_star;
+        use schema::documents::{self, dsl};
+
+        let base_filter = dsl::account_id
+            .eq(account_id)
+            .and(dsl::deleted_at.is_null());
+
+        let total = if pagination.include_count {
+            Some(
+                documents::table
+                    .filter(base_filter)
+                    .select(count_star())
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        let items = if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            documents::table
+                .filter(base_filter)
+                .filter(
+                    dsl::updated_at
+                        .lt(cursor_ts)
+                        .or(dsl::updated_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
+                )
+                .order((dsl::updated_at.desc(), dsl::id.desc()))
+                .limit(pagination.fetch_limit())
+                .select(Document::as_select())
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            documents::table
+                .filter(base_filter)
+                .order((dsl::updated_at.desc(), dsl::id.desc()))
+                .limit(pagination.fetch_limit())
+                .select(Document::as_select())
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
+
+        Ok(CursorPage::new(items, total, pagination.limit, |d| {
+            (d.updated_at.into(), d.id)
+        }))
     }
 
     async fn update_document(
@@ -164,10 +281,11 @@ impl DocumentRepository for PgConnection {
     }
 
     async fn delete_document(&mut self, document_id: Uuid) -> PgResult<()> {
+        use diesel::dsl::now;
         use schema::documents::{self, dsl};
 
         diesel::update(documents::table.filter(dsl::id.eq(document_id)))
-            .set(dsl::deleted_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))))
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
             .map_err(PgError::from)?;
@@ -175,7 +293,10 @@ impl DocumentRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_documents(&mut self, pagination: Pagination) -> PgResult<Vec<Document>> {
+    async fn offset_list_documents(
+        &mut self,
+        pagination: OffsetPagination,
+    ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
         let documents = documents::table
@@ -194,8 +315,8 @@ impl DocumentRepository for PgConnection {
     async fn search_documents(
         &mut self,
         search_query: &str,
-        project_id: Option<Uuid>,
-        pagination: Pagination,
+        workspace_id: Option<Uuid>,
+        pagination: OffsetPagination,
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
@@ -213,32 +334,11 @@ impl DocumentRepository for PgConnection {
             .select(Document::as_select())
             .into_boxed();
 
-        if let Some(proj_id) = project_id {
-            query = query.filter(dsl::project_id.eq(proj_id));
+        if let Some(ws_id) = workspace_id {
+            query = query.filter(dsl::workspace_id.eq(ws_id));
         }
 
         let documents = query.load(self).await.map_err(PgError::from)?;
-        Ok(documents)
-    }
-
-    async fn find_documents_by_status(
-        &mut self,
-        status: DocumentStatus,
-        pagination: Pagination,
-    ) -> PgResult<Vec<Document>> {
-        use schema::documents::{self, dsl};
-
-        let documents = documents::table
-            .filter(dsl::status.eq(status))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::updated_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(Document::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
         Ok(documents)
     }
 }

@@ -13,15 +13,13 @@ pub mod document_chunk;
 pub mod document_comment;
 pub mod document_file;
 
-pub mod project;
-pub mod project_activity;
-pub mod project_integration;
-pub mod project_invite;
-pub mod project_member;
-pub mod project_pipeline;
-pub mod project_run;
-pub mod project_template;
-pub mod project_webhook;
+pub mod workspace;
+pub mod workspace_activity;
+pub mod workspace_integration;
+pub mod workspace_integration_run;
+pub mod workspace_invite;
+pub mod workspace_member;
+pub mod workspace_webhook;
 
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
@@ -37,18 +35,20 @@ pub use document::{Document, NewDocument, UpdateDocument};
 pub use document_annotation::{
     DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation,
 };
-pub use document_chunk::{DocumentChunk, NewDocumentChunk, UpdateDocumentChunk};
+pub use document_chunk::{
+    DocumentChunk, NewDocumentChunk, UpdateDocumentChunk,
+};
 pub use document_comment::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
 pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
-// Project models
-pub use project::{NewProject, Project, UpdateProject};
-pub use project_activity::{NewProjectActivity, ProjectActivity};
-pub use project_integration::{
-    NewProjectIntegration, ProjectIntegration, UpdateProjectIntegration,
+// Workspace models
+pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};
+pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
+pub use workspace_integration::{
+    NewWorkspaceIntegration, UpdateWorkspaceIntegration, WorkspaceIntegration,
 };
-pub use project_invite::{NewProjectInvite, ProjectInvite, UpdateProjectInvite};
-pub use project_member::{NewProjectMember, ProjectMember, UpdateProjectMember};
-pub use project_pipeline::{NewProjectPipeline, ProjectPipeline, UpdateProjectPipeline};
-pub use project_run::{NewProjectRun, ProjectRun, UpdateProjectRun};
-pub use project_template::{NewProjectTemplate, ProjectTemplate, UpdateProjectTemplate};
-pub use project_webhook::{NewProjectWebhook, ProjectWebhook, UpdateProjectWebhook};
+pub use workspace_integration_run::{
+    NewWorkspaceIntegrationRun, UpdateWorkspaceIntegrationRun, WorkspaceIntegrationRun,
+};
+pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
+pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
+pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

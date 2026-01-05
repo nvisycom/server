@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
 use axum::http::header::{self, HeaderValue};
 #[cfg(feature = "config")]
@@ -18,8 +19,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
-/// Default maximum request body size: 16MB.
-pub const DEFAULT_MAX_BODY_SIZE: usize = 16 * 1024 * 1024;
+use crate::utility::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_FILE_BODY_SIZE};
 
 /// Extension trait for `axum::`[`Router`] to apply security middleware.
 ///
@@ -60,7 +60,8 @@ where
             .max_age(cors.max_age());
 
         let mut router = self
-            .layer(RequestBodyLimitLayer::new(DEFAULT_MAX_BODY_SIZE))
+            .layer(DefaultBodyLimit::max(DEFAULT_MAX_BODY_SIZE))
+            .layer(RequestBodyLimitLayer::new(DEFAULT_MAX_FILE_BODY_SIZE))
             .layer(CompressionLayer::new())
             .layer(cors_layer)
             .layer(SetResponseHeaderLayer::overriding(

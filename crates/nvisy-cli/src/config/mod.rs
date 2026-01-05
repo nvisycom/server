@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! Cli
-//! ├── service: ServiceConfig      # Database, NATS, auth keys
+//! ├── service: ServiceConfig      # Database, NATS, auth keys, workers
 //! ├── middleware: MiddlewareConfig # CORS, OpenAPI, recovery/timeouts
 //! ├── server: ServerConfig         # Host, port, TLS, shutdown
 //! └── ollama: OllamaConfig         # Ollama embeddings/VLM/OCR
@@ -32,8 +32,9 @@ use std::process;
 use anyhow::Context;
 use clap::Parser;
 pub use middleware::MiddlewareConfig;
+use nvisy_ollama::OllamaConfig;
 use nvisy_server::service::ServiceConfig;
-pub use provider::create_services;
+pub use provider::{create_inference_service, create_webhook_service};
 use serde::{Deserialize, Serialize};
 pub use server::ServerConfig;
 use tracing_subscriber::EnvFilter;
@@ -45,11 +46,10 @@ use crate::{TRACING_TARGET_CONFIG, TRACING_TARGET_SERVER_STARTUP};
 /// Complete CLI configuration.
 ///
 /// Combines all configuration groups for the nvisy server:
-/// - [`ServiceConfig`]: External service connections (Postgres, NATS)
+/// - [`ServiceConfig`]: External service connections (Postgres, NATS, workers)
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
 /// - `OllamaConfig`: Ollama AI services configuration (feature-gated)
-/// - `MockConfig`: Testing AI services configuration (feature-gated)
 #[derive(Debug, Clone, Parser, Serialize, Deserialize)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy document processing server")]
@@ -68,14 +68,8 @@ pub struct Cli {
     pub service: ServiceConfig,
 
     /// Ollama configuration for embeddings, VLM, and OCR.
-    #[cfg(feature = "ollama")]
     #[clap(flatten)]
-    pub ollama: nvisy_ollama::OllamaConfig,
-
-    /// Mock configuration for embeddings, VLM, and OCR.
-    #[cfg(feature = "mock")]
-    #[clap(flatten)]
-    pub mock: nvisy_core::MockConfig,
+    pub ollama: OllamaConfig,
 }
 
 impl Cli {
@@ -140,25 +134,8 @@ impl Cli {
     /// Logs configuration at debug level (no sensitive information).
     pub fn log(&self) {
         Self::log_build_info();
-
-        tracing::info!(
-            target: TRACING_TARGET_CONFIG,
-            host = %self.server.host,
-            port = self.server.port,
-            tls = self.server.is_tls_enabled(),
-            shutdown_timeout_secs = self.server.shutdown_timeout,
-            "Server configuration"
-        );
-
-        tracing::info!(
-            target: TRACING_TARGET_CONFIG,
-            cors_origins = ?self.middleware.cors.allowed_origins,
-            cors_credentials = self.middleware.cors.allow_credentials,
-            openapi_path = %self.middleware.openapi.open_api_json,
-            scalar_path = %self.middleware.openapi.scalar_ui,
-            request_timeout_secs = self.middleware.recovery.request_timeout_secs,
-            "Middleware configuration"
-        );
+        self.server.log();
+        self.middleware.log();
 
         tracing::info!(
             target: TRACING_TARGET_CONFIG,
@@ -175,8 +152,6 @@ impl Cli {
             cfg!(feature = "tls").then_some("tls"),
             cfg!(feature = "otel").then_some("otel"),
             cfg!(feature = "dotenv").then_some("dotenv"),
-            cfg!(feature = "mock").then_some("mock"),
-            cfg!(feature = "ollama").then_some("ollama"),
         ]
         .into_iter()
         .flatten()

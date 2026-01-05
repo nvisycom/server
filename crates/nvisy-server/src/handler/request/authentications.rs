@@ -13,11 +13,9 @@ pub struct Login {
     #[validate(email)]
     #[validate(length(min = 5, max = 254))]
     pub email_address: String,
-
     /// Password of the account.
     #[validate(length(min = 1, max = 1000))]
     pub password: String,
-
     /// Whether to remember this device for extended session.
     pub remember_me: bool,
 }

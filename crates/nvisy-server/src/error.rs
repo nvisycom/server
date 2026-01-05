@@ -91,7 +91,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Creates a new [`ServiceError`].
+    /// Creates a new [`Error`].
     #[inline]
     fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -165,6 +165,12 @@ impl Error {
         let msg = message.into();
         let full_message = format!("{}: {}", service_name, msg);
         Self::new(ErrorKind::Internal, full_message)
+    }
+}
+
+impl From<nvisy_nats::Error> for Error {
+    fn from(err: nvisy_nats::Error) -> Self {
+        Error::external("nats", err.to_string()).with_source(err)
     }
 }
 

@@ -1,13 +1,4 @@
-//! Commonly used items from nvisy-core.
-//!
-//! This prelude module exports the most commonly used traits and the main
-//! service container to simplify imports in consuming code.
+//! Convenient re-exports for common use.
 
-pub use crate::AiServices;
-pub use crate::emb::EmbeddingProvider;
-pub use crate::error::{Error, ErrorKind, Result};
-pub use crate::ocr::OcrProvider;
-pub use crate::vlm::VlmProvider;
-#[cfg(feature = "test-utils")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
-pub use crate::{MockConfig, MockProvider};
+pub use crate::error::{BoxedError, Error, ErrorKind, Result};
+pub use crate::types::{ServiceHealth, ServiceStatus, Timing};

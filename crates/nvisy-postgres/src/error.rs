@@ -72,6 +72,9 @@ pub enum PgError {
     Jiff(#[from] jiff::Error),
 }
 
+/// Re-export diesel's error type for use in transactions.
+pub use diesel::result::Error as DieselError;
+
 impl PgError {
     /// Extracts the constraint name from a constraint violation error.
     ///

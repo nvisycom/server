@@ -4,6 +4,8 @@
 //! [`Handler`]: axum::handler::Handler
 
 mod accounts;
+mod activities;
+mod annotations;
 mod authentication;
 mod comments;
 mod documents;
@@ -13,15 +15,15 @@ mod integrations;
 mod invites;
 mod members;
 mod monitors;
-mod pipelines;
-mod projects;
+mod notifications;
 pub mod request;
 pub mod response;
-mod templates;
+mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
 mod websocket;
+mod workspaces;
 
 use aide::axum::ApiRouter;
 use axum::middleware::from_fn_with_state;
@@ -29,7 +31,7 @@ use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
 pub use utility::{CustomRoutes, RouterMapFn};
 
-use crate::middleware::{refresh_token_middleware, require_authentication};
+use crate::middleware::{require_authentication, validate_token_middleware};
 use crate::service::ServiceState;
 
 #[inline]
@@ -45,17 +47,19 @@ fn private_routes(
     let mut router = ApiRouter::new()
         .merge(accounts::routes(service_state.clone()))
         .merge(tokens::routes())
-        .merge(projects::routes())
+        .merge(workspaces::routes())
         .merge(integrations::routes())
+        .merge(runs::routes())
         .merge(invites::routes())
         .merge(members::routes())
-        .merge(pipelines::routes())
-        .merge(templates::routes())
         .merge(webhooks::routes())
         .merge(websocket::routes())
         .merge(files::routes())
         .merge(documents::routes())
-        .merge(comments::routes());
+        .merge(comments::routes())
+        .merge(annotations::routes())
+        .merge(activities::routes())
+        .merge(notifications::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);
@@ -88,14 +92,14 @@ fn public_routes(
 /// Returns an [`ApiRouter`] with all routes.
 pub fn routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
-    let refresh_token_middleware = from_fn_with_state(state.clone(), refresh_token_middleware);
+    let validate_token_middleware = from_fn_with_state(state.clone(), validate_token_middleware);
 
     // Private routes.
     let mut private_router = private_routes(routes.private_routes.take(), state.clone());
     private_router = routes.map_private_before_middleware(private_router);
     private_router = private_router
         .route_layer(require_authentication)
-        .route_layer(refresh_token_middleware);
+        .route_layer(validate_token_middleware);
     private_router = routes.map_private_after_middleware(private_router);
 
     // Public routes.
@@ -118,6 +122,7 @@ mod test {
     use aide::axum::ApiRouter;
     use axum::Router;
     use axum_test::TestServer;
+    use nvisy_reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
     use crate::service::{ServiceConfig, ServiceState};
@@ -127,8 +132,8 @@ mod test {
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
-        let mock_services = nvisy_core::MockConfig::default().into_services();
-        let state = ServiceState::new(config, mock_services).await?;
+        let webhook_service = ReqwestClient::with_defaults()?.into_service();
+        let state = ServiceState::from_config(config, webhook_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }

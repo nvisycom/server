@@ -9,17 +9,19 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
+use jiff::{Span, Timestamp};
 use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use nvisy_postgres::types::ApiTokenType;
+use nvisy_postgres::types::{ApiTokenType, HasDeletedAt};
+use nvisy_postgres::{JiffTimestamp, PgClient};
 
 use super::request::{Login, Signup};
 use super::response::{AuthToken, ErrorResponse};
-use crate::extract::{
-    AuthClaims, AuthHeader, AuthState, ClientIp, Json, PgPool, TypedHeader, ValidateJson,
-};
+use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{AuthKeys, PasswordHasher, PasswordStrength, ServiceState};
+use crate::service::{
+    PasswordHasher, PasswordStrength, ServiceState, SessionKeys, UserAgentParser,
+};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -36,7 +38,7 @@ fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str)
 
 /// Creates a new authentication header.
 fn create_auth_header(
-    auth_secret_keys: AuthKeys,
+    auth_secret_keys: SessionKeys,
     account_model: &Account,
     account_api_token: &AccountApiToken,
 ) -> Result<AuthHeader> {
@@ -48,15 +50,16 @@ fn create_auth_header(
 /// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
-    State(auth_keys): State<AuthKeys>,
-    ClientIp(ip_address): ClientIp,
+    State(auth_keys): State<SessionKeys>,
+    State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
-) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
-    tracing::debug!(target: TRACING_TARGET, "Logging in");
+) -> Result<(StatusCode, Json<AuthToken>)> {
+    tracing::debug!(target: TRACING_TARGET, "Login attempt");
 
+    let mut conn = pg_client.get_connection().await?;
     let account = conn.find_account_by_email(&request.email_address).await?;
 
     // Always perform password hashing to prevent timing attacks
@@ -71,61 +74,58 @@ async fn login(
         }
     };
 
-    // Check if login should succeed
-    let login_successful = matches!(&account, Some(acc) if password_valid && acc.can_login());
-
-    if !login_successful {
-        // Record failed login attempt for existing accounts
-        if let Some(ref acc) = account
-            && let Err(e) = conn.record_failed_login(acc.id).await
-        {
-            tracing::error!(
-                target: TRACING_TARGET,
-                account_id = %acc.id,
-                error = %e,
-                "Failed to record failed login attempt"
-            );
+    // Check for login failures and return appropriate errors
+    match &account {
+        None => {
+            tracing::warn!(target: TRACING_TARGET, reason = "account_not_found", "Login failed");
+            return Err(ErrorKind::Unauthorized
+                .with_resource("credentials")
+                .with_message("Invalid email or password"));
         }
-
-        tracing::warn!(target: TRACING_TARGET, "Login failed");
-
-        return Err(ErrorKind::NotFound.into_error());
+        Some(_) if !password_valid => {
+            tracing::warn!(target: TRACING_TARGET, reason = "invalid_password", "Login failed");
+            return Err(ErrorKind::Unauthorized
+                .with_resource("credentials")
+                .with_message("Invalid email or password"));
+        }
+        Some(acc) if acc.is_suspended() => {
+            tracing::warn!(target: TRACING_TARGET, reason = "account_suspended", "Login failed");
+            return Err(ErrorKind::Forbidden
+                .with_resource("account")
+                .with_message("Account is suspended"));
+        }
+        Some(acc) if acc.is_deleted() => {
+            tracing::warn!(target: TRACING_TARGET, reason = "account_deleted", "Login failed");
+            return Err(ErrorKind::Forbidden
+                .with_resource("account")
+                .with_message("Account has been deleted"));
+        }
+        _ => {}
     }
 
     let account = account.unwrap(); // Safe because we verified above
-
-    // Record successful login
-    if let Err(e) = conn
-        .record_successful_login(account.id, ip_address.into())
-        .await
-    {
-        tracing::error!(
-            target: TRACING_TARGET,
-            account_id = %account.id,
-            error = %e,
-            "Failed to record successful login"
-        );
-    }
-
+    let expired_at = Timestamp::now() + Span::new().hours(90 * 24);
     let new_token = NewAccountApiToken {
         account_id: account.id,
-        ip_address: ip_address.into(),
-        user_agent: user_agent.to_string(),
+        name: ua_parser.parse(user_agent.as_str()),
+        ip_address: None,
+        user_agent: Some(user_agent.to_string()),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
-        ..Default::default()
+        expired_at: Some(expired_at.into()),
     };
 
-    let account_api_token = conn.create_token(new_token).await?;
+    let account_api_token = conn.create_account_api_token(new_token).await?;
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
+    let api_token = auth_header.into_string()?;
     let response = AuthToken {
+        api_token,
         account_id: auth_claims.account_id,
-        display_name: account.display_name.clone(),
-        email_address: account.email_address.clone(),
-        issued_at: auth_claims.issued_at,
-        expires_at: auth_claims.expires_at,
+        token_id: auth_claims.token_id,
+        issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
+        expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };
 
     tracing::info!(
@@ -135,7 +135,7 @@ async fn login(
         "Login successful",
     );
 
-    Ok((StatusCode::CREATED, auth_header, Json(response)))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 fn login_docs(op: TransformOperation) -> TransformOperation {
@@ -143,27 +143,29 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
         .description("Authenticates a user and returns an access token.")
         .response::<201, Json<AuthToken>>()
         .response::<400, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_arguments)]
 async fn signup(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,
     State(password_strength): State<PasswordStrength>,
-    State(auth_keys): State<AuthKeys>,
-    ClientIp(ip_address): ClientIp,
+    State(auth_keys): State<SessionKeys>,
+    State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
-) -> Result<(StatusCode, AuthHeader, Json<AuthToken>)> {
+) -> Result<(StatusCode, Json<AuthToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Signing up");
 
     // Validate password strength and hash
     let user_inputs = build_password_user_inputs(&request.display_name, &request.email_address);
     password_strength.validate_password(&request.password, &user_inputs)?;
     let password_hash = auth_hasher.hash_password(&request.password)?;
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Check if email already exists
     if conn.email_exists(&request.email_address).await? {
@@ -186,29 +188,33 @@ async fn signup(
         "Account created",
     );
 
+    let expired_at = Timestamp::now()
+        .checked_add(Span::new().hours(90 * 24))
+        .ok()
+        .map(JiffTimestamp::from);
+
+    let user_agent_str = user_agent.to_string();
     let new_token = NewAccountApiToken {
         account_id: account.id,
-        ip_address: ip_address.into(),
-        user_agent: user_agent.to_string(),
+        name: ua_parser.parse(&user_agent_str),
+        ip_address: None,
+        user_agent: Some(user_agent_str),
         is_remembered: Some(request.remember_me),
         session_type: Some(ApiTokenType::Web),
-        ..Default::default()
+        expired_at,
     };
-    let account_api_token = conn.create_token(new_token).await?;
-
-    // Extract values before moving account
-    let display_name = account.display_name.clone();
-    let email_address = account.email_address.clone();
+    let account_api_token = conn.create_account_api_token(new_token).await?;
 
     let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
 
     let auth_claims = auth_header.as_auth_claims();
+    let api_token = auth_header.into_string()?;
     let response = AuthToken {
+        api_token,
         account_id: auth_claims.account_id,
-        display_name,
-        email_address,
-        issued_at: auth_claims.issued_at,
-        expires_at: auth_claims.expires_at,
+        token_id: auth_claims.token_id,
+        issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
+        expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };
 
     tracing::info!(
@@ -218,7 +224,7 @@ async fn signup(
         "Signup successful",
     );
 
-    Ok((StatusCode::CREATED, auth_header, Json(response)))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 fn signup_docs(op: TransformOperation) -> TransformOperation {
@@ -237,12 +243,17 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
         token_id = %auth_claims.token_id,
     )
 )]
-async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> Result<StatusCode> {
+async fn logout(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_claims): AuthState,
+) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Logging out");
+
+    let mut conn = pg_client.get_connection().await?;
 
     // Verify API token exists before attempting to delete
     let token_exists = conn
-        .find_token_by_access_token(auth_claims.token_id)
+        .find_account_api_token_by_id(auth_claims.token_id)
         .await?
         .is_some();
 
@@ -252,7 +263,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
     }
 
     // Delete the API token
-    let deleted = conn.delete_token(auth_claims.token_id).await?;
+    let deleted = conn.delete_account_api_token(auth_claims.token_id).await?;
 
     if deleted {
         tracing::info!(target: TRACING_TARGET, "Logout successful");
@@ -262,7 +273,7 @@ async fn logout(PgPool(mut conn): PgPool, AuthState(auth_claims): AuthState) -> 
 
     // Opportunistically clean up expired sessions for this account (fire and forget)
     tokio::spawn(async move {
-        if let Err(e) = conn.cleanup_expired_tokens().await {
+        if let Err(e) = conn.cleanup_expired_account_api_tokens().await {
             tracing::debug!(
                 target: TRACING_TARGET_CLEANUP,
                 error = %e,

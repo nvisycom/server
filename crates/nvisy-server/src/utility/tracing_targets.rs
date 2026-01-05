@@ -31,6 +31,3 @@ pub const SESSION_KEYS: &str = "nvisy_server::session_keys";
 
 /// Health check caching and service availability monitoring.
 pub const HEALTH_CACHE: &str = "nvisy_server::health_cache";
-
-/// Database constraint violations and query errors.
-pub const DATABASE_CONSTRAINTS: &str = "nvisy_server::database_constraints";

@@ -15,23 +15,23 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::RequireMode"]
 pub enum RequireMode {
-    /// No special processing required, content is ready for use
+    /// No special processing required.
     #[db_rename = "none"]
     #[serde(rename = "none")]
     #[default]
     None,
 
-    /// Requires Optical Character Recognition (OCR) to extract text from images
+    /// Requires Optical Character Recognition (OCR).
     #[db_rename = "optical"]
     #[serde(rename = "optical")]
     Optical,
 
-    /// Requires Vision Language Model (VLM) for advanced content understanding
+    /// Requires Vision Language Model (VLM).
     #[db_rename = "language"]
     #[serde(rename = "language")]
     Language,
 
-    /// Requires both OCR and VLM processing
+    /// Requires both OCR and VLM processing.
     #[db_rename = "both"]
     #[serde(rename = "both")]
     Both,

@@ -3,18 +3,21 @@
 mod cache;
 mod compression;
 mod config;
+mod integration;
 mod security;
 
-use nvisy_core::AiServices;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
+use nvisy_webhook::WebhookService;
 
+use crate::Result;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
-pub use crate::service::security::{AuthConfig, AuthKeys, PasswordHasher, PasswordStrength};
-// Re-export error types from crate root for convenience
-pub use crate::{Error, Result};
+pub use crate::service::integration::IntegrationProvider;
+pub use crate::service::security::{
+    PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
+};
 
 /// Application state.
 ///
@@ -25,33 +28,40 @@ pub use crate::{Error, Result};
 #[derive(Clone)]
 pub struct ServiceState {
     // External services:
-    pub pg_client: PgClient,
-    pub nats_client: NatsClient,
-    pub ai_services: AiServices,
+    pub postgres: PgClient,
+    pub nats: NatsClient,
+    pub webhook: WebhookService,
 
     // Internal services:
-    pub auth_hasher: PasswordHasher,
-    pub password_strength: PasswordStrength,
-    pub auth_keys: AuthKeys,
     pub health_cache: HealthCache,
-    pub archive: ArchiveService,
+    pub archive_service: ArchiveService,
+    pub integration_provider: IntegrationProvider,
+    pub password_hasher: PasswordHasher,
+    pub password_strength: PasswordStrength,
+    pub session_keys: SessionKeys,
+    pub user_agent_parser: UserAgentParser,
 }
 
 impl ServiceState {
     /// Initializes application state from configuration.
     ///
     /// Connects to all external services and loads required resources.
-    pub async fn new(service_config: ServiceConfig, ai_services: AiServices) -> Result<Self> {
+    pub async fn from_config(
+        service_config: ServiceConfig,
+        webhook_service: WebhookService,
+    ) -> Result<Self> {
         let service_state = Self {
-            pg_client: service_config.connect_postgres().await?,
-            nats_client: service_config.connect_nats().await?,
-            ai_services,
+            postgres: service_config.connect_postgres().await?,
+            nats: service_config.connect_nats().await?,
+            webhook: webhook_service,
 
-            auth_hasher: PasswordHasher::new(),
-            password_strength: PasswordStrength::new(),
-            auth_keys: service_config.load_auth_keys().await?,
             health_cache: HealthCache::new(),
-            archive: ArchiveService::new(),
+            archive_service: ArchiveService::new(),
+            integration_provider: IntegrationProvider::new(),
+            password_hasher: PasswordHasher::new(),
+            password_strength: PasswordStrength::new(),
+            session_keys: service_config.load_session_keys().await?,
+            user_agent_parser: UserAgentParser::new(),
         };
 
         Ok(service_state)
@@ -69,13 +79,15 @@ macro_rules! impl_di {
 }
 
 // External services:
-impl_di!(pg_client: PgClient);
-impl_di!(nats_client: NatsClient);
-impl_di!(ai_services: AiServices);
+impl_di!(postgres: PgClient);
+impl_di!(nats: NatsClient);
+impl_di!(webhook: WebhookService);
 
 // Internal services:
-impl_di!(auth_hasher: PasswordHasher);
-impl_di!(password_strength: PasswordStrength);
-impl_di!(auth_keys: AuthKeys);
 impl_di!(health_cache: HealthCache);
-impl_di!(archive: ArchiveService);
+impl_di!(archive_service: ArchiveService);
+impl_di!(integration_provider: IntegrationProvider);
+impl_di!(password_hasher: PasswordHasher);
+impl_di!(password_strength: PasswordStrength);
+impl_di!(session_keys: SessionKeys);
+impl_di!(user_agent_parser: UserAgentParser);

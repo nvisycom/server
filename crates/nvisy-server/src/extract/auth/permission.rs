@@ -5,130 +5,131 @@
 
 use std::borrow::Cow;
 
-use nvisy_postgres::model::ProjectMember;
-use nvisy_postgres::types::ProjectRole;
+use nvisy_postgres::model::WorkspaceMember;
+use nvisy_postgres::types::WorkspaceRole;
 use strum::{EnumIter, EnumString, IntoEnumIterator};
 
 use crate::handler::{ErrorKind, Result};
 
-/// Granular project permissions for authorization checks.
+/// Granular workspace permissions for authorization checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(EnumIter, EnumString)]
 pub enum Permission {
-    // Project-level permissions
-    /// Can view project basic information.
-    ViewProject,
-    /// Can update project settings and metadata.
-    UpdateProject,
-    /// Can delete the entire project.
-    DeleteProject,
+    // Workspace-level permissions
+    /// Can view workspace basic information.
+    ViewWorkspace,
+    /// Can update workspace settings and metadata.
+    UpdateWorkspace,
+    /// Can delete the entire workspace.
+    DeleteWorkspace,
 
     // Document permissions
-    /// Can view and read documents in the project.
+    /// Can view and read documents in the workspace.
     ViewDocuments,
-    /// Can create new documents in the project.
+    /// Can create new documents in the workspace.
     CreateDocuments,
     /// Can edit existing documents.
     UpdateDocuments,
-    /// Can delete documents from the project.
+    /// Can delete documents from the workspace.
     DeleteDocuments,
 
     // File and asset permissions
     /// Can view and download files.
     ViewFiles,
-    /// Can upload new files to the project.
+    /// Can upload new files to the workspace.
     UploadFiles,
     /// Can update file metadata and properties.
     UpdateFiles,
-    /// Can download files from the project.
+    /// Can download files from the workspace.
     DownloadFiles,
-    /// Can delete files from the project.
+    /// Can delete files from the workspace.
     DeleteFiles,
 
     // Member management permissions
-    /// Can view project members and their roles.
+    /// Can view workspace members and their roles.
     ViewMembers,
-    /// Can invite new members to the project.
+    /// Can invite new members to the workspace.
     InviteMembers,
-    /// Can remove members from the project.
+    /// Can remove members from the workspace.
     RemoveMembers,
     /// Can change member roles and permissions.
     ManageRoles,
 
     // Integration permissions
-    /// Can view project integrations.
+    /// Can view workspace integrations.
     ViewIntegrations,
-    /// Can create, modify, and manage project integrations.
+    /// Can create, modify, and manage workspace integrations.
     ManageIntegrations,
 
-    // Pipeline permissions
-    /// Can view project pipelines.
-    ViewPipelines,
-    /// Can create, modify, and manage project pipelines.
-    ManagePipelines,
+    // Webhook permissions
+    /// Can view workspace webhooks.
+    ViewWebhooks,
+    /// Can create new webhooks in the workspace.
+    CreateWebhooks,
+    /// Can update existing webhooks.
+    UpdateWebhooks,
+    /// Can delete webhooks from the workspace.
+    DeleteWebhooks,
+    /// Can test webhooks by sending test payloads.
+    TestWebhooks,
 
-    // Template permissions
-    /// Can view project templates.
-    ViewTemplates,
-    /// Can create, modify, and manage project templates.
-    ManageTemplates,
-
-    // Project settings and configuration
-    /// Can view project settings.
+    // Workspace settings and configuration
+    /// Can view workspace settings.
     ViewSettings,
-    /// Can modify project settings and configuration.
+    /// Can modify workspace settings and configuration.
     ManageSettings,
 }
 
 impl Permission {
-    /// Checks if the given project role satisfies this permission requirement.
+    /// Checks if the given workspace role satisfies this permission requirement.
     ///
     /// This method leverages the role hierarchy to determine if the given role
     /// has sufficient permissions. A role is permitted if it has equal or higher
     /// permission level than the minimum required role for this permission.
-    pub const fn is_permitted_by_role(self, role: ProjectRole) -> bool {
+    pub const fn is_permitted_by_role(self, role: WorkspaceRole) -> bool {
         role.has_permission_level_of(self.minimum_required_role())
     }
 
     /// Returns the minimum role required for this permission.
     #[must_use]
-    pub const fn minimum_required_role(self) -> ProjectRole {
+    pub const fn minimum_required_role(self) -> WorkspaceRole {
         match self {
-            // Viewer-level permissions
-            Self::ViewProject
+            // Guest-level permissions
+            Self::ViewWorkspace
             | Self::ViewDocuments
             | Self::ViewFiles
             | Self::ViewMembers
             | Self::ViewIntegrations
-            | Self::ViewPipelines
-            | Self::ViewTemplates
-            | Self::ViewSettings => ProjectRole::Viewer,
+            | Self::ViewWebhooks
+            | Self::ViewSettings => WorkspaceRole::Guest,
 
-            // Editor-level permissions
+            // Member-level permissions
             Self::CreateDocuments
             | Self::UpdateDocuments
             | Self::DeleteDocuments
             | Self::UploadFiles
             | Self::UpdateFiles
             | Self::DownloadFiles
-            | Self::DeleteFiles => ProjectRole::Editor,
+            | Self::DeleteFiles => WorkspaceRole::Member,
 
             // Admin-level permissions
-            Self::UpdateProject
+            Self::UpdateWorkspace
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageIntegrations
-            | Self::ManagePipelines
-            | Self::ManageTemplates
-            | Self::ManageSettings => ProjectRole::Admin,
+            | Self::CreateWebhooks
+            | Self::UpdateWebhooks
+            | Self::DeleteWebhooks
+            | Self::TestWebhooks
+            | Self::ManageSettings => WorkspaceRole::Admin,
 
-            // Admin-only permissions (highest level)
-            Self::DeleteProject | Self::ManageRoles => ProjectRole::Admin,
+            // Owner-only permissions (highest level)
+            Self::DeleteWorkspace | Self::ManageRoles => WorkspaceRole::Owner,
         }
     }
 
     /// Returns all permissions available to the given role.
-    pub fn permissions_for_role(role: ProjectRole) -> Vec<Self> {
+    pub fn permissions_for_role(role: WorkspaceRole) -> Vec<Self> {
         Self::iter()
             .filter(|perm| perm.is_permitted_by_role(role))
             .collect()
@@ -139,7 +140,7 @@ impl Permission {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthResult {
     pub granted: bool,
-    pub member: Option<ProjectMember>,
+    pub member: Option<WorkspaceMember>,
     pub reason: Option<Cow<'static, str>>,
 }
 
@@ -154,7 +155,7 @@ impl AuthResult {
     }
 
     /// Creates a granted authorization result with member information.
-    pub const fn granted_with_member(member: ProjectMember) -> Self {
+    pub const fn granted_with_member(member: WorkspaceMember) -> Self {
         Self {
             granted: true,
             member: Some(member),
@@ -183,7 +184,7 @@ impl AuthResult {
     /// let result = AuthResult::denied("Access denied");
     /// assert!(result.into_result().is_err());
     /// ```
-    pub fn into_result(self) -> Result<Option<ProjectMember>> {
+    pub fn into_result(self) -> Result<Option<WorkspaceMember>> {
         if self.granted {
             Ok(self.member)
         } else {

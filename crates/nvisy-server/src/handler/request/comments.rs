@@ -9,19 +9,17 @@ use validator::Validate;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateDocumentComment {
+pub struct CreateComment {
     /// Comment text content.
     #[validate(length(min = 1, max = 10000))]
     pub content: String,
     /// Parent comment ID for threaded replies.
-    #[serde(default)]
     pub parent_comment_id: Option<Uuid>,
     /// Account being replied to (@mention).
-    #[serde(default)]
     pub reply_to_account_id: Option<Uuid>,
 }
 
-impl CreateDocumentComment {
+impl CreateComment {
     /// Converts to database model.
     pub fn into_model(
         self,
@@ -43,14 +41,13 @@ impl CreateDocumentComment {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateDocumentComment {
+pub struct UpdateComment {
     /// Updated comment content.
     #[validate(length(min = 1, max = 10000))]
     pub content: Option<String>,
 }
 
-impl UpdateDocumentComment {
-    /// Converts to database model.
+impl UpdateComment {
     pub fn into_model(self) -> nvisy_postgres::model::UpdateDocumentComment {
         nvisy_postgres::model::UpdateDocumentComment {
             content: self.content,

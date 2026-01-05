@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::schema::account_notifications;
 use crate::types::constants::notification;
-use crate::types::{HasCreatedAt, HasExpiresAt, NotificationType};
+use crate::types::{HasCreatedAt, HasExpiresAt, NotificationEvent};
 
 /// Account notification model representing a notification sent to a user.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,7 +18,7 @@ pub struct AccountNotification {
     /// Account receiving the notification.
     pub account_id: Uuid,
     /// Type of notification.
-    pub notify_type: NotificationType,
+    pub notify_type: NotificationEvent,
     /// Notification title.
     pub title: String,
     /// Notification message.
@@ -47,7 +47,7 @@ pub struct NewAccountNotification {
     /// Account ID.
     pub account_id: Uuid,
     /// Notification type.
-    pub notify_type: NotificationType,
+    pub notify_type: NotificationEvent,
     /// Notification title.
     pub title: String,
     /// Notification message.
@@ -70,7 +70,7 @@ pub struct UpdateAccountNotification {
     /// Mark as read/unread.
     pub is_read: Option<bool>,
     /// Read timestamp.
-    pub read_at: Option<Timestamp>,
+    pub read_at: Option<Option<Timestamp>>,
 }
 
 impl AccountNotification {
@@ -130,17 +130,12 @@ impl AccountNotification {
 
     /// Returns whether this is a system notification.
     pub fn is_system_notification(&self) -> bool {
-        matches!(self.notify_type, NotificationType::SystemAnnouncement)
+        self.notify_type.is_system_event()
     }
 
     /// Returns whether this is a user activity notification.
     pub fn is_user_activity(&self) -> bool {
-        matches!(
-            self.notify_type,
-            NotificationType::CommentMention
-                | NotificationType::CommentReply
-                | NotificationType::ProjectInvite
-        )
+        self.notify_type.is_comment_event() || self.notify_type.is_member_event()
     }
 
     /// Returns whether the notification can be dismissed.
@@ -162,7 +157,9 @@ impl AccountNotification {
     pub fn requires_action(&self) -> bool {
         matches!(
             self.notify_type,
-            NotificationType::ProjectInvite | NotificationType::SystemAnnouncement
+            NotificationEvent::MemberInvited
+                | NotificationEvent::SystemAnnouncement
+                | NotificationEvent::SystemReport
         )
     }
 
@@ -185,10 +182,15 @@ impl HasCreatedAt for AccountNotification {
 }
 
 impl HasExpiresAt for AccountNotification {
-    fn expires_at(&self) -> jiff::Timestamp {
-        self.expires_at.map(Into::into).unwrap_or(
-            jiff::Timestamp::now()
-                + jiff::Span::new().days(notification::DEFAULT_RETENTION_DAYS as i64),
+    fn expires_at(&self) -> Option<jiff::Timestamp> {
+        Some(
+            self.expires_at.map(Into::into).unwrap_or(
+                jiff::Timestamp::now()
+                    .checked_add(
+                        jiff::Span::new().hours(notification::DEFAULT_RETENTION_DAYS as i64 * 24),
+                    )
+                    .expect("valid notification expiry"),
+            ),
         )
     }
 }

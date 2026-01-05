@@ -1306,7 +1306,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1746,6 +1746,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-rustls"
+version = "0.27.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
+dependencies = [
+ "http",
+ "hyper",
+ "hyper-util",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
+]
+
+[[package]]
 name = "hyper-tls"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1780,9 +1796,11 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "socket2",
+ "system-configuration",
  "tokio",
  "tower-service",
  "tracing",
+ "windows-registry",
 ]
 
 [[package]]
@@ -1999,7 +2017,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2410,11 +2428,14 @@ dependencies = [
  "axum-server",
  "clap",
  "dotenvy",
- "nvisy-core",
+ "nvisy-inference",
  "nvisy-nats",
  "nvisy-ollama",
  "nvisy-postgres",
+ "nvisy-reqwest",
  "nvisy-server",
+ "nvisy-webhook",
+ "nvisy-worker",
  "serde",
  "thiserror 2.0.17",
  "tokio",
@@ -2426,6 +2447,18 @@ dependencies = [
 name = "nvisy-core"
 version = "0.1.0"
 dependencies = [
+ "jiff",
+ "schemars 0.9.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+]
+
+[[package]]
+name = "nvisy-inference"
+version = "0.1.0"
+dependencies = [
  "async-trait",
  "base64",
  "bytes",
@@ -2433,12 +2466,14 @@ dependencies = [
  "derive_more",
  "futures-util",
  "jiff",
+ "nvisy-core",
  "schemars 0.9.0",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -2448,16 +2483,19 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "async-stream",
+ "base64",
  "bytes",
  "clap",
  "derive_more",
  "futures",
  "hex",
  "jiff",
+ "pin-project-lite",
  "schemars 0.9.0",
  "serde",
  "serde_json",
  "sha2",
+ "strum",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -2476,7 +2514,7 @@ dependencies = [
  "derive_builder",
  "futures",
  "jiff",
- "nvisy-core",
+ "nvisy-inference",
  "ollama-rs",
  "serde",
  "serde_json",
@@ -2490,6 +2528,7 @@ dependencies = [
 name = "nvisy-postgres"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bigdecimal",
  "clap",
  "deadpool",
@@ -2507,6 +2546,25 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "nvisy-reqwest"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "hmac",
+ "jiff",
+ "nvisy-webhook",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -2535,9 +2593,10 @@ dependencies = [
  "ipnet",
  "jiff",
  "jsonwebtoken",
- "nvisy-core",
  "nvisy-nats",
  "nvisy-postgres",
+ "nvisy-reqwest",
+ "nvisy-webhook",
  "rand 0.10.0-rc.5",
  "regex",
  "schemars 0.9.0",
@@ -2549,6 +2608,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",
@@ -2556,8 +2616,41 @@ dependencies = [
  "url",
  "uuid",
  "validator",
+ "woothee",
  "zip",
  "zxcvbn",
+]
+
+[[package]]
+name = "nvisy-webhook"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "jiff",
+ "nvisy-core",
+ "schemars 0.9.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "nvisy-worker"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "futures-util",
+ "nvisy-inference",
+ "nvisy-nats",
+ "nvisy-postgres",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3095,15 +3188,19 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64",
  "bytes",
+ "encoding_rs",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
+ "hyper-rustls",
  "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
+ "mime",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -3186,7 +3283,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3726,6 +3823,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "system-configuration"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
+dependencies = [
+ "bitflags",
+ "core-foundation",
+ "system-configuration-sys",
+]
+
+[[package]]
+name = "system-configuration-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "tar"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3746,7 +3864,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4538,6 +4656,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
+name = "windows-registry"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
+dependencies = [
+ "windows-link",
+ "windows-result",
+ "windows-strings",
+]
+
+[[package]]
 name = "windows-result"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4722,6 +4851,16 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "woothee"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "896174c6a4779d4d7d4523dd27aef7d46609eda2497e370f6c998325c6bf6971"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
 
 [[package]]
 name = "writeable"

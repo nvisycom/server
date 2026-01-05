@@ -30,11 +30,9 @@ pub struct DocumentChunk {
     /// Number of tokens in the chunk.
     pub token_count: i32,
     /// Vector embedding for semantic search (1536 dimensions for OpenAI ada-002).
-    pub embedding: Option<Vector>,
+    pub embedding: Vector,
     /// Model used to generate the embedding.
-    pub embedding_model: Option<String>,
-    /// Timestamp when the embedding was generated.
-    pub embedded_at: Option<Timestamp>,
+    pub embedding_model: String,
     /// Additional metadata (JSON).
     pub metadata: serde_json::Value,
     /// Timestamp when the chunk was created.
@@ -44,7 +42,7 @@ pub struct DocumentChunk {
 }
 
 /// Data for creating a new document chunk.
-#[derive(Debug, Default, Clone, Insertable)]
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = document_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentChunk {
@@ -59,11 +57,9 @@ pub struct NewDocumentChunk {
     /// Token count.
     pub token_count: Option<i32>,
     /// Vector embedding.
-    pub embedding: Option<Vector>,
+    pub embedding: Vector,
     /// Embedding model name.
     pub embedding_model: Option<String>,
-    /// Embedding generation timestamp.
-    pub embedded_at: Option<Timestamp>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
 }
@@ -76,29 +72,22 @@ pub struct UpdateDocumentChunk {
     /// Token count.
     pub token_count: Option<i32>,
     /// Vector embedding.
-    pub embedding: Option<Option<Vector>>,
+    pub embedding: Option<Vector>,
     /// Embedding model name.
-    pub embedding_model: Option<Option<String>>,
-    /// Embedding generation timestamp.
-    pub embedded_at: Option<Option<Timestamp>>,
+    pub embedding_model: Option<String>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
 }
 
 impl DocumentChunk {
-    /// Returns whether this chunk has an embedding.
-    pub fn has_embedding(&self) -> bool {
-        self.embedding.is_some()
-    }
-
     /// Returns whether the chunk has custom metadata.
     pub fn has_metadata(&self) -> bool {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
-    /// Returns the embedding dimensions if present.
-    pub fn embedding_dimensions(&self) -> Option<usize> {
-        self.embedding.as_ref().map(|v| v.as_slice().len())
+    /// Returns the embedding dimensions.
+    pub fn embedding_dimensions(&self) -> usize {
+        self.embedding.as_slice().len()
     }
 }
 

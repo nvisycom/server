@@ -43,7 +43,7 @@ pub struct ErrorResponse<'a> {
     pub suggestion: Option<Cow<'a, str>>,
     /// Validation error details for field-specific errors
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation_errors: Option<Vec<ValidationErrorDetail>>,
+    pub validation: Option<Vec<ValidationErrorDetail>>,
 
     /// Error correlation ID for tracking
     #[serde(skip)]
@@ -57,7 +57,6 @@ pub struct ErrorResponse<'a> {
 }
 
 impl<'a> ErrorResponse<'a> {
-    // 4xx Client Errors
     pub const BAD_REQUEST: Self = Self::new(
         "bad_request",
         "Invalid request data.",
@@ -65,19 +64,21 @@ impl<'a> ErrorResponse<'a> {
     );
     pub const CONFLICT: Self =
         Self::new("conflict", "Resource state conflict.", StatusCode::CONFLICT);
-    pub const FORBIDDEN: Self = Self::new("forbidden", "Access denied.", StatusCode::FORBIDDEN);
+    pub const FORBIDDEN: Self = Self::new(
+        "forbidden",
+        "Resource access denied.",
+        StatusCode::FORBIDDEN,
+    );
     pub const GATEWAY_TIMEOUT: Self = Self::new(
         "gateway_timeout",
         "Request timed out.",
         StatusCode::GATEWAY_TIMEOUT,
     );
-    // 5xx Server Errors
     pub const INTERNAL_SERVER_ERROR: Self = Self::new(
         "internal_server_error",
         "Internal server error.",
         StatusCode::INTERNAL_SERVER_ERROR,
     );
-    // Authentication Errors
     pub const MALFORMED_AUTH_TOKEN: Self = Self::new(
         "malformed_auth_token",
         "Malformed auth token.",
@@ -142,7 +143,7 @@ impl<'a> ErrorResponse<'a> {
             resource: None,
             context: None,
             suggestion: None,
-            validation_errors: None,
+            validation: None,
             correlation_id: None,
             status,
         }
@@ -192,7 +193,7 @@ impl<'a> ErrorResponse<'a> {
 
     /// Adds validation errors to the error response.
     pub fn with_validation_errors(mut self, errors: Vec<ValidationErrorDetail>) -> Self {
-        self.validation_errors = Some(errors);
+        self.validation = Some(errors);
         self
     }
 
@@ -248,8 +249,15 @@ impl From<ValidationErrors> for ErrorResponse<'_> {
 }
 
 impl IntoResponse for ErrorResponse<'_> {
-    #[inline]
     fn into_response(self) -> Response {
+        tracing::warn!(
+            status = %self.status,
+            name = %self.name,
+            message = %self.message,
+            resource = ?self.resource,
+            context = ?self.context,
+            "HTTP error response"
+        );
         (self.status, Json(self)).into_response()
     }
 }
@@ -261,10 +269,10 @@ mod tests {
     #[test]
     fn error_response_merging_resource() {
         let response = ErrorResponse::NOT_FOUND
-            .with_resource("project")
+            .with_resource("workspace")
             .with_resource("document");
 
-        assert_eq!(response.resource.as_deref(), Some("project/document"));
+        assert_eq!(response.resource.as_deref(), Some("workspace/document"));
     }
 
     #[test]

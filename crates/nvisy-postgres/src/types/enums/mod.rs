@@ -7,38 +7,34 @@
 // Account-related enumerations
 pub mod action_token_type;
 pub mod api_token_type;
-pub mod notification_type;
+pub mod notification_event;
 
-// Project-related enumerations
+// Workspace-related enumerations
 pub mod activity_type;
 pub mod integration_status;
 pub mod integration_type;
 pub mod invite_status;
-pub mod project_role;
-pub mod project_status;
-pub mod project_visibility;
+pub mod webhook_event;
 pub mod webhook_status;
+pub mod workspace_role;
 
 // Document-related enumerations
+pub mod annotation_type;
 pub mod content_segmentation;
-pub mod document_status;
 pub mod processing_status;
 pub mod require_mode;
-pub mod virus_scan_status;
 
 pub use action_token_type::ActionTokenType;
 pub use activity_type::{ActivityCategory, ActivityType};
+pub use annotation_type::AnnotationType;
 pub use api_token_type::ApiTokenType;
 pub use content_segmentation::ContentSegmentation;
-pub use document_status::DocumentStatus;
 pub use integration_status::IntegrationStatus;
 pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;
-pub use notification_type::NotificationType;
+pub use notification_event::NotificationEvent;
 pub use processing_status::ProcessingStatus;
-pub use project_role::ProjectRole;
-pub use project_status::ProjectStatus;
-pub use project_visibility::ProjectVisibility;
 pub use require_mode::RequireMode;
-pub use virus_scan_status::VirusScanStatus;
+pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
+pub use workspace_role::WorkspaceRole;

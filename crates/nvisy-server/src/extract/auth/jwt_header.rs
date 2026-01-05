@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AuthClaims;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::AuthKeys;
+use crate::service::SessionKeys;
 
 /// JWT authentication header extractor and response generator.
 ///
@@ -44,7 +44,7 @@ use crate::service::AuthKeys;
 #[derive(Debug, Clone)]
 pub struct AuthHeader<T = ()> {
     auth_claims: AuthClaims<T>,
-    auth_secret_keys: AuthKeys,
+    auth_secret_keys: SessionKeys,
 }
 
 impl<T> AuthHeader<T> {
@@ -55,7 +55,7 @@ impl<T> AuthHeader<T> {
     /// * `claims` - The JWT claims to include in the token
     /// * `keys` - The cryptographic keys for signing the token
     #[inline]
-    pub const fn new(claims: AuthClaims<T>, keys: AuthKeys) -> Self {
+    pub const fn new(claims: AuthClaims<T>, keys: SessionKeys) -> Self {
         Self {
             auth_claims: claims,
             auth_secret_keys: keys,
@@ -73,6 +73,19 @@ impl<T> AuthHeader<T> {
     pub fn into_auth_claims(self) -> AuthClaims<T> {
         self.auth_claims
     }
+
+    /// Returns the encoded JWT token string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if JWT encoding fails.
+    pub fn into_string(&self) -> Result<String>
+    where
+        T: Clone + Serialize,
+    {
+        let encoding_key = self.auth_secret_keys.encoding_key();
+        self.auth_claims.clone().into_string(encoding_key)
+    }
 }
 
 impl<T> AuthHeader<T>
@@ -88,7 +101,7 @@ where
     /// Returns an error if the token is invalid, expired, or malformed.
     fn from_header(
         authorization_header: TypedHeader<Authorization<Bearer>>,
-        auth_secret_keys: AuthKeys,
+        auth_secret_keys: SessionKeys,
     ) -> Result<Self> {
         let decoding_key = auth_secret_keys.decoding_key();
         let auth_claims = AuthClaims::from_header(authorization_header, decoding_key)?;
@@ -117,7 +130,7 @@ impl<T, S> FromRequestParts<S> for AuthHeader<T>
 where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send,
-    AuthKeys: FromRef<S>,
+    SessionKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -129,7 +142,7 @@ where
 
         // Extract Bearer token from Authorization header
         type AuthBearerHeader = TypedHeader<Authorization<Bearer>>;
-        let auth_keys = AuthKeys::from_ref(state);
+        let auth_keys = SessionKeys::from_ref(state);
 
         match AuthBearerHeader::from_request_parts(parts, state).await {
             Ok(bearer_header) => {
@@ -226,8 +239,3 @@ impl From<JwtError> for Error<'static> {
         error.with_resource("authentication")
     }
 }
-
-// Aide OpenAPI support - AuthHeader generates a response header
-// Note: For now, we don't implement OperationOutput for AuthHeader since it's only used
-// in responses where the Authorization header is added manually via TypedHeader.
-// If needed in the future, we can implement this using aide's header support.

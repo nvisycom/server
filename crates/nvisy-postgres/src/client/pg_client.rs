@@ -261,7 +261,7 @@ impl std::fmt::Debug for PgClient {
 /// A wrapper around a pooled database connection.
 ///
 /// `PgConn` owns a connection obtained from the connection pool and implements
-/// all repository traits (e.g., [`AccountRepository`], [`ProjectRepository`])
+/// all repository traits (e.g., [`AccountRepository`], [`WorkspaceRepository`])
 /// via [`Deref`] to the underlying [`AsyncPgConnection`].
 /// When dropped, the connection is automatically returned to the pool.
 ///
@@ -276,7 +276,7 @@ impl std::fmt::Debug for PgClient {
 /// ```
 ///
 /// [`AccountRepository`]: crate::query::AccountRepository
-/// [`ProjectRepository`]: crate::query::ProjectRepository
+/// [`WorkspaceRepository`]: crate::query::WorkspaceRepository
 /// [`PgClient::get_connection`]: crate::PgClient::get_connection
 /// [`AsyncPgConnection`]: crate::PgConnection
 #[derive(Deref, DerefMut)]

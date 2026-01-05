@@ -12,13 +12,18 @@ use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::{
     RouterObservabilityExt, RouterOpenApiExt, RouterRecoveryExt, RouterSecurityExt,
 };
-use nvisy_server::service::{ServiceConfig, ServiceState};
+use nvisy_server::service::ServiceState;
+use nvisy_worker::{WorkerHandles, WorkerState};
 
-use crate::config::{Cli, MiddlewareConfig, create_services};
+use crate::config::{Cli, MiddlewareConfig, create_inference_service, create_webhook_service};
 
-// Tracing target constants
+/// Tracing target for server startup events.
 pub const TRACING_TARGET_SERVER_STARTUP: &str = "nvisy_cli::server::startup";
+
+/// Tracing target for server shutdown events.
 pub const TRACING_TARGET_SERVER_SHUTDOWN: &str = "nvisy_cli::server::shutdown";
+
+/// Tracing target for configuration events.
 pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 
 #[tokio::main]
@@ -48,22 +53,36 @@ async fn run() -> anyhow::Result<()> {
     cli.validate()?;
     cli.log();
 
-    let services = create_services(&cli)?;
-    let state = create_service_state(&cli.service, services).await?;
+    // Create services
+    let inference = create_inference_service(&cli)?;
+    let webhook = create_webhook_service()?;
+
+    // Initialize application state
+    let state = ServiceState::from_config(cli.service.clone(), webhook).await?;
+
+    // Create worker state and spawn background workers
+    let worker_state = WorkerState::new(state.postgres.clone(), state.nats.clone(), inference);
+    let workers = WorkerHandles::spawn(&worker_state);
+    tracing::info!(
+        target: TRACING_TARGET_SERVER_STARTUP,
+        "Document processing workers started"
+    );
+
+    // Build router
     let router = create_router(state, &cli.middleware);
 
-    server::serve(router, cli.server).await?;
+    // Run the HTTP server
+    let result = server::serve(router, cli.server).await;
 
+    // Shutdown workers
+    tracing::info!(
+        target: TRACING_TARGET_SERVER_SHUTDOWN,
+        "Stopping document processing workers"
+    );
+    workers.shutdown();
+
+    result?;
     Ok(())
-}
-
-/// Creates the service state from configuration.
-async fn create_service_state(
-    config: &ServiceConfig,
-    ai_services: nvisy_core::AiServices,
-) -> anyhow::Result<ServiceState> {
-    let state = ServiceState::new(config.clone(), ai_services).await?;
-    Ok(state)
 }
 
 /// Creates the router with all middleware layers applied.

@@ -5,10 +5,14 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
+    "./crates/nvisy-inference",
     "./crates/nvisy-nats",
     "./crates/nvisy-ollama",
     "./crates/nvisy-postgres",
+    "./crates/nvisy-reqwest",
     "./crates/nvisy-server",
+    "./crates/nvisy-webhook",
+    "./crates/nvisy-worker",
 ]
 
 [workspace.package]
@@ -30,23 +34,31 @@ documentation = "https://docs.rs/nvisy-server"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # External dependencies
+nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
+nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-reqwest = { path = "./crates/nvisy-reqwest", version = "0.1.0" }
 
 # Internal crates
-nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
+nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
+nvisy-worker = { path = "./crates/nvisy-worker", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }
 
 # Async runtime
 tokio = { version = "1.48", features = [] }
+tokio-util = { version = "0.7", features = ["io"] }
 futures = { version = "0.3", features = [] }
 futures-util = { version = "0.3", features = [] }
 async-stream = { version = "0.3", features = [] }
 async-trait = { version = "0.1", features = [] }
+
+# HTTP client
+reqwest = { version = "0.12", features = [] }
 
 # HTTP server
 axum = { version = "0.8", features = [] }
@@ -67,6 +79,7 @@ argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
 base64 = { version = "0.22", features = [] }
 rand = { version = "0.10.0-rc.5", features = ["serde"] }
 sha2 = { version = "0.10", features = [] }
+hmac = { version = "0.12", features = [] }
 hex = { version = "0.4", features = [] }
 zxcvbn = { version = "3.1", features = ["serde"] }
 
@@ -100,6 +113,7 @@ strum = { version = "0.27", features = ["derive"] }
 derive_more = { version = "2.0", features = [] }
 derive_builder = { version = "0.20", features = [] }
 anyhow = { version = "1.0", features = [] }
+pin-project-lite = { version = "0.2", features = [] }
 
 # Data types
 jiff = { version = "0.2", features = ["serde"] }
@@ -112,6 +126,7 @@ url = { version = "2.5", features = [] }
 
 # Text processing
 regex = { version = "1.0", features = [] }
+woothee = { version = "0.13", features = [] }
 
 # Archive/Compression
 tar = { version = "0.4", features = [] }

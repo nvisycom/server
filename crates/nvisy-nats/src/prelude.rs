@@ -16,6 +16,9 @@
 //! ```
 
 // Client types
+// Re-export ObjectInfo for convenience
+pub use async_nats::jetstream::object_store::ObjectInfo;
+
 pub use crate::client::{NatsClient, NatsConfig, NatsConnection};
 // Key-Value store types
 pub use crate::kv::{
@@ -24,13 +27,13 @@ pub use crate::kv::{
 };
 // Object store types
 pub use crate::object::{
-    ContentData, ContentSource, DocumentFileStore, ObjectHeaders, ObjectKey, ObjectKeyData,
-    ObjectMetadata, ObjectStore, ObjectStoreStats,
+    DocumentBucket, DocumentKey, DocumentStore, Files, GetResult, Intermediates, ObjectStore,
+    PutResult,
 };
 // Stream types
 pub use crate::stream::{
-    DocumentJob, DocumentJobPublisher, DocumentJobSubscriber, EventStatus, ProcessingStatus,
-    ProjectEvent, ProjectEventPublisher, ProjectEventSubscriber, StreamPublisher, StreamSubscriber,
+    DocumentJob, DocumentJobPublisher, DocumentJobSubscriber, EventPriority, StreamPublisher,
+    StreamSubscriber, WorkspaceEvent, WorkspaceEventPublisher, WorkspaceEventSubscriber,
 };
 // Error types
 pub use crate::{Error, Result};

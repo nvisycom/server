@@ -44,7 +44,10 @@ serde_json = { workspace = true, features = [] }
 
 # Error handling
 thiserror = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into"] }
+
+# Derive macros & utilities
+derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into", "display"] }
+strum = { workspace = true, features = [] }
 
 # Data types
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
@@ -55,8 +58,12 @@ bytes = { workspace = true, features = [] }
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
 
+# Utilities
+pin-project-lite = { workspace = true, features = [] }
+
 # Optional: JSON schema generation
 schemars = { workspace = true, features = [], optional = true }
 
 # CLI (optional)
 clap = { workspace = true, features = ["derive", "env"], optional = true }
+base64.workspace = true

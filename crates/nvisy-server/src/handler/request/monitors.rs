@@ -17,7 +17,6 @@ pub struct CheckHealth {
     /// Timeout in milliseconds for health checks.
     #[validate(range(min = 100, max = 30000))]
     pub timeout: Option<u32>,
-
     /// Whether to return cached results if available.
     pub use_cache: Option<bool>,
 }
@@ -26,7 +25,7 @@ impl CheckHealth {
     /// Returns the timeout duration for health checks.
     ///
     /// Uses the configured timeout or falls back to the default of 5 seconds.
-    pub fn timeout_duration(&self) -> Duration {
+    pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout.unwrap_or(DEFAULT_TIMEOUT_MS) as u64)
     }
 }

@@ -1,13 +1,13 @@
 //! Monitor response types.
 
 use jiff::Timestamp;
-use nvisy_core::ServiceStatus;
+use nvisy_webhook::ServiceStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// System monitoring status response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorStatus {
     /// Timestamp when this status was generated.

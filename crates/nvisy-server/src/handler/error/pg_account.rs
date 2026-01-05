@@ -30,19 +30,12 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::CompanyNameLengthMax => {
                 ErrorKind::BadRequest.with_message("Company name is too long")
             }
-            AccountConstraints::PhoneNumberLengthMax => {
-                ErrorKind::BadRequest.with_message("Phone number is too long")
-            }
             AccountConstraints::TimezoneFormat => {
                 ErrorKind::BadRequest.with_message("Invalid timezone format")
             }
             AccountConstraints::LocaleFormat => {
                 ErrorKind::BadRequest.with_message("Invalid locale format")
             }
-            AccountConstraints::FailedLoginAttemptsRange => {
-                ErrorKind::BadRequest.with_message("Invalid number of failed login attempts")
-            }
-            AccountConstraints::LockedUntilFuture => ErrorKind::InternalServerError.into_error(),
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
             | AccountConstraints::DeletedAfterUpdated
@@ -79,9 +72,6 @@ impl From<AccountApiTokenConstraints> for Error<'static> {
             AccountApiTokenConstraints::CountryCodeValid => {
                 ErrorKind::BadRequest.with_message("Invalid country code")
             }
-            AccountApiTokenConstraints::UserAgentNotEmpty => {
-                ErrorKind::BadRequest.with_message("User agent cannot be empty")
-            }
             AccountApiTokenConstraints::ExpiredAfterIssued
             | AccountApiTokenConstraints::DeletedAfterIssued
             | AccountApiTokenConstraints::LastUsedAfterIssued => {
@@ -107,15 +97,6 @@ impl From<AccountActionTokenConstraints> for Error<'static> {
             }
             AccountActionTokenConstraints::ActionDataSize => {
                 ErrorKind::BadRequest.with_message("Action data size is invalid")
-            }
-            AccountActionTokenConstraints::UserAgentNotEmpty => {
-                ErrorKind::BadRequest.with_message("User agent cannot be empty")
-            }
-            AccountActionTokenConstraints::AttemptCountRange => {
-                ErrorKind::BadRequest.with_message("Invalid attempt count")
-            }
-            AccountActionTokenConstraints::MaxAttemptsRange => {
-                ErrorKind::InternalServerError.into_error()
             }
             AccountActionTokenConstraints::ExpiredAfterIssued
             | AccountActionTokenConstraints::UsedAfterIssued

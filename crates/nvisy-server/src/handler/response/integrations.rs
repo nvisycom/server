@@ -1,4 +1,4 @@
-//! Project integration response types.
+//! Workspace integration response types.
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
@@ -7,16 +7,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Project integration response.
+use super::Page;
+
+/// Workspace integration response.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Integration {
     /// Unique integration identifier.
     pub integration_id: Uuid,
 
-    /// Reference to the project this integration belongs to.
-    pub project_id: Uuid,
+    /// Reference to the workspace this integration belongs to.
+    pub workspace_id: Uuid,
 
     /// Human-readable name for the integration.
     pub integration_name: String,
@@ -26,9 +28,6 @@ pub struct Integration {
 
     /// Type of third-party service this integration connects to.
     pub integration_type: IntegrationType,
-
-    /// Structured configuration and service-specific metadata.
-    pub metadata: serde_json::Value,
 
     /// Whether the integration is currently active and enabled.
     pub is_active: bool,
@@ -50,15 +49,13 @@ pub struct Integration {
 }
 
 impl Integration {
-    /// Creates a new instance of [`Integration`] from database model.
-    pub fn new(integration: model::ProjectIntegration) -> Self {
+    pub fn from_model(integration: model::WorkspaceIntegration) -> Self {
         Self {
             integration_id: integration.id,
-            project_id: integration.project_id,
+            workspace_id: integration.workspace_id,
             integration_name: integration.integration_name,
             description: integration.description,
             integration_type: integration.integration_type,
-            metadata: integration.metadata,
             is_active: integration.is_active,
             last_sync_at: integration.last_sync_at.map(Into::into),
             sync_status: integration.sync_status,
@@ -69,12 +66,5 @@ impl Integration {
     }
 }
 
-impl From<model::ProjectIntegration> for Integration {
-    #[inline]
-    fn from(integration: model::ProjectIntegration) -> Self {
-        Self::new(integration)
-    }
-}
-
-/// Response for listing project integrations.
-pub type Integrations = Vec<Integration>;
+/// Paginated response for workspace integrations.
+pub type IntegrationsPage = Page<Integration>;

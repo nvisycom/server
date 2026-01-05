@@ -1,14 +1,11 @@
 //! Ollama client implementation.
 //!
 //! This module provides the main client interface for Ollama API operations.
-//! It wraps the `ollama-rs` crate and provides integration with nvisy-core.
+//! It wraps the `ollama-rs` crate and provides integration with nvisy-service.
 
 use std::sync::Arc;
 
-use nvisy_core::AiServices;
-use nvisy_core::emb::EmbeddingService;
-use nvisy_core::ocr::OcrService;
-use nvisy_core::vlm::VlmService;
+use nvisy_inference::InferenceService;
 use ollama_rs::Ollama;
 
 use super::OllamaConfig;
@@ -30,8 +27,8 @@ impl std::fmt::Debug for OllamaClientInner {
 
 /// Ollama client for interacting with Ollama API services.
 ///
-/// This client wraps the `ollama-rs` crate and implements both
-/// `EmbeddingProvider` and `VlmProvider` traits from nvisy-core.
+/// This client wraps the `ollama-rs` crate and implements the
+/// `InferenceProvider` trait from nvisy-service.
 ///
 /// # Examples
 ///
@@ -130,10 +127,9 @@ impl OllamaClient {
             .expect("vlm_model must be configured")
     }
 
-    /// Convert this client into a complete set of AI services.
+    /// Convert this client into an [`InferenceService`].
     ///
-    /// Creates embedding, OCR, and VLM services all backed by this Ollama client.
-    /// The client is cloned for each service (cheap Arc clone).
+    /// Creates an inference service backed by this Ollama client.
     ///
     /// # Example
     ///
@@ -144,13 +140,9 @@ impl OllamaClient {
     ///     .with_embedding_model("nomic-embed-text")
     ///     .with_vlm_model("llava");
     /// let client = OllamaClient::new(config)?;
-    /// let services = client.into_services();
+    /// let service = client.into_service();
     /// ```
-    pub fn into_services(self) -> AiServices {
-        AiServices::new(
-            EmbeddingService::new(self.clone()),
-            OcrService::new(self.clone()),
-            VlmService::new(self),
-        )
+    pub fn into_service(self) -> InferenceService {
+        InferenceService::from_provider(self)
     }
 }

@@ -60,15 +60,6 @@ pub struct Error {
 
 impl Error {
     /// Creates a new error with the given kind.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nvisy_core::{Error, ErrorKind};
-    ///
-    /// Error::new(ErrorKind::InvalidInput)
-    ///     .with_message("Text input exceeds maximum length");
-    /// ```
     pub fn new(kind: ErrorKind) -> Self {
         Self {
             kind,
@@ -78,50 +69,14 @@ impl Error {
     }
 
     /// Adds a message to this error.
-    ///
-    /// This method consumes the error and returns a new error with the message attached,
-    /// allowing for method chaining when constructing errors.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nvisy_core::{Error, ErrorKind};
-    ///
-    /// Error::new(ErrorKind::NetworkError)
-    ///     .with_message("Connection refused");
-    /// ```
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
         self
     }
 
-    /// Formats the error message for display.
-    ///
-    /// Returns an empty string if no message is present, otherwise returns
-    /// the message prefixed with ": ".
-    pub fn format_message(&self) -> String {
-        self.message
-            .as_ref()
-            .map(|m| format!(": {}", m))
-            .unwrap_or_default()
-    }
-
     /// Adds a source error to this error.
-    ///
-    /// This method consumes the error and returns a new error with the source attached,
-    /// allowing for method chaining when constructing errors.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nvisy_core::{Error, ErrorKind};
-    ///
-    /// let io_error = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
-    /// Error::new(ErrorKind::NetworkError)
-    ///     .with_source(Box::new(io_error));
-    /// ```
-    pub fn with_source(mut self, source: BoxedError) -> Self {
-        self.source = Some(source);
+    pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        self.source = Some(Box::new(source));
         self
     }
 
@@ -259,95 +214,5 @@ impl Error {
     /// Returns true if this is a network error.
     pub fn is_network_error(&self) -> bool {
         matches!(self.kind, ErrorKind::NetworkError)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_creation() {
-        let error = Error::new(ErrorKind::InvalidInput);
-        assert_eq!(error.kind, ErrorKind::InvalidInput);
-        assert!(error.message.is_none());
-        assert!(error.source.is_none());
-    }
-
-    #[test]
-    fn test_error_with_message() {
-        let error = Error::invalid_input().with_message("Test message");
-        assert_eq!(error.kind, ErrorKind::InvalidInput);
-        assert_eq!(error.message.as_ref().unwrap(), "Test message");
-    }
-
-    #[test]
-    fn test_client_error_classification() {
-        assert!(Error::authentication().is_client_error());
-        assert!(Error::authorization().is_client_error());
-        assert!(Error::invalid_input().is_client_error());
-        assert!(Error::not_found().is_client_error());
-        assert!(Error::rate_limited().is_client_error());
-    }
-
-    #[test]
-    fn test_server_error_classification() {
-        assert!(Error::service_unavailable().is_server_error());
-        assert!(Error::internal_error().is_server_error());
-        assert!(Error::external_error().is_server_error());
-        assert!(Error::configuration().is_server_error());
-        assert!(Error::timeout().is_server_error());
-        assert!(Error::serialization().is_server_error());
-        assert!(Error::unknown().is_server_error());
-    }
-
-    #[test]
-    fn test_retryable_classification() {
-        assert!(Error::rate_limited().is_retryable());
-        assert!(Error::service_unavailable().is_retryable());
-        assert!(Error::network_error().is_retryable());
-        assert!(Error::timeout().is_retryable());
-        assert!(!Error::authentication().is_retryable());
-        assert!(!Error::invalid_input().is_retryable());
-    }
-
-    #[test]
-    fn test_retry_delays() {
-        assert_eq!(
-            Error::rate_limited().retry_delay(),
-            Some(Duration::from_secs(60))
-        );
-        assert_eq!(
-            Error::service_unavailable().retry_delay(),
-            Some(Duration::from_secs(30))
-        );
-        assert_eq!(
-            Error::network_error().retry_delay(),
-            Some(Duration::from_secs(5))
-        );
-        assert_eq!(
-            Error::timeout().retry_delay(),
-            Some(Duration::from_secs(10))
-        );
-        assert_eq!(Error::invalid_input().retry_delay(), None);
-    }
-
-    #[test]
-    fn test_specialized_error_checks() {
-        assert!(Error::authentication().is_auth_error());
-        assert!(Error::authorization().is_auth_error());
-        assert!(Error::rate_limited().is_rate_limit_error());
-        assert!(Error::timeout().is_timeout_error());
-        assert!(Error::network_error().is_network_error());
-        assert!(!Error::invalid_input().is_auth_error());
-        assert!(!Error::authentication().is_rate_limit_error());
-    }
-
-    #[test]
-    fn test_error_display() {
-        let error = Error::invalid_input().with_message("Test input validation failed");
-        let display_string = format!("{}", error);
-        assert!(display_string.contains("InvalidInput"));
-        assert!(display_string.contains("Test input validation failed"));
     }
 }

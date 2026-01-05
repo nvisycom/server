@@ -1,6 +1,10 @@
 -- This migration provides core utility functions for database management and common operations
 -- Foundation functions required by all subsequent migrations
 
+-- Enable pgcrypto extension for cryptographic functions
+-- Required for secure token generation (gen_random_bytes)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Enable pgvector extension for vector similarity search
 -- Required for embedding storage and semantic search capabilities
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -10,6 +14,12 @@ CREATE OR REPLACE FUNCTION trigger_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
+    -- Handle soft deletes: sync updated_at with deleted_at to satisfy constraints
+    IF (NEW.deleted_at IS DISTINCT FROM OLD.deleted_at AND NEW.deleted_at IS NOT NULL) THEN
+        NEW.updated_at := NEW.deleted_at;
+        RETURN NEW;
+    END IF;
+
     -- Only update if the row has actually changed (excluding updated_at itself)
     IF (NEW IS DISTINCT FROM OLD AND NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at) THEN
         NEW.updated_at := CURRENT_TIMESTAMP;
@@ -22,7 +32,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION trigger_updated_at() IS
-    'Automatically updates the updated_at timestamp when a row is modified, but only if the row has actually changed.';
+    'Automatically updates the updated_at timestamp when a row is modified. For soft deletes, syncs updated_at with deleted_at.';
 
 -- Trigger setup helper function
 CREATE OR REPLACE FUNCTION setup_updated_at(_tbl REGCLASS)
@@ -146,13 +156,18 @@ $$;
 COMMENT ON FUNCTION cleanup_expired_records(_tbl REGCLASS, _expired_column TEXT) IS
     'Soft deletes expired records based on the specified expiration column. Returns the number of records cleaned up.';
 
--- Security token generation function
+-- Security token generation function (URL-safe base64)
 CREATE OR REPLACE FUNCTION generate_secure_token(_length INTEGER DEFAULT 32)
 RETURNS TEXT
 LANGUAGE plpgsql AS $$
 BEGIN
-    -- Generate a cryptographically secure random token
-    RETURN ENCODE(gen_random_bytes(_length), 'base64');
+    -- Generate a cryptographically secure random token using URL-safe base64
+    -- Replace + with -, / with _, and remove padding =
+    RETURN TRANSLATE(
+        REPLACE(ENCODE(gen_random_bytes(_length), 'base64'), '=', ''),
+        '+/',
+        '-_'
+    );
 EXCEPTION
     WHEN OTHERS THEN
         RAISE EXCEPTION 'Error generating secure token: %', SQLERRM;
@@ -160,7 +175,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION generate_secure_token(_length INTEGER) IS
-    'Generates a cryptographically secure random token of the specified byte length, base64 encoded.';
+    'Generates a cryptographically secure random token of the specified byte length, URL-safe base64 encoded.';
 
 -- Email validation function
 CREATE OR REPLACE FUNCTION is_valid_email(_email TEXT)

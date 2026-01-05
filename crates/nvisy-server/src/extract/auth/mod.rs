@@ -25,6 +25,6 @@ impl<T> AuthProvider for AuthClaims<T> {
     }
 
     fn is_admin(&self) -> bool {
-        self.is_administrator
+        self.is_admin
     }
 }

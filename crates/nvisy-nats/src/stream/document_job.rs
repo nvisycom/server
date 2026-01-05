@@ -1,296 +1,470 @@
-//! Document job types and shared structures.
-
-use std::time::Duration;
+//! Document job types for file processing pipeline.
 
 use jiff::Timestamp;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::event::{EventPriority, EventStatus};
+use super::document_task::PredefinedTask;
+use super::event::EventPriority;
 
-/// Default maximum number of retries for a job
-const DEFAULT_MAX_RETRIES: u32 = 3;
+/// Stream name for document jobs.
+pub const STREAM_NAME: &str = "DOCUMENT_JOBS";
 
-/// Default timeout for job processing in seconds
-const DEFAULT_TIMEOUT_SECS: u64 = 300;
-
-/// Document processing stages
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessingStage {
-    /// Initial document preprocessing
-    Preprocessing,
-    /// Main document/file processing
-    #[default]
-    Processing,
-    /// Final document postprocessing
-    Postprocessing,
+/// Marker trait for document processing stages.
+///
+/// Each stage represents a distinct phase in the document processing pipeline,
+/// with its own stream subject for NATS routing.
+pub trait Stage: Serialize + DeserializeOwned + Clone + Send + Sync + 'static {
+    /// Stage name for logging and debugging.
+    const NAME: &'static str;
+    /// NATS stream subject suffix for this stage.
+    const SUBJECT: &'static str;
 }
 
-/// Document processing type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessingType {
-    /// OCR processing
-    Ocr,
-    /// Text extraction
-    TextExtraction,
-    /// Format conversion
-    FormatConversion,
-    /// Content analysis
-    ContentAnalysis,
-}
-
-/// Document processing options
+/// Preprocessing stage data.
+///
+/// Runs when a user uploads a file. Prepares the file for future processing:
+/// - Format detection and validation
+/// - File integrity checks
+/// - Metadata extraction and fixes
+/// - Thumbnail generation
+/// - OCR for scanned documents
+/// - Embedding generation for knowledge base / semantic search
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct ProcessingOptions {
-    /// Quality settings
-    pub quality: Option<String>,
-    /// Language settings
-    pub language: Option<String>,
-    /// Custom parameters
+pub struct PreprocessingData {
+    /// Whether to validate and fix file metadata. Defaults to true.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub validate_metadata: bool,
+    /// Whether to run OCR on the document. Defaults to true.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub run_ocr: bool,
+    /// Whether to generate embeddings for semantic search. Defaults to true.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub generate_embeddings: bool,
+    /// Whether to generate thumbnails for UI previews.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate_thumbnails: Option<bool>,
+}
+
+impl Default for PreprocessingData {
+    fn default() -> Self {
+        Self {
+            validate_metadata: true,
+            run_ocr: true,
+            generate_embeddings: true,
+            generate_thumbnails: None,
+        }
+    }
+}
+
+impl Stage for PreprocessingData {
+    const NAME: &'static str = "preprocessing";
+    const SUBJECT: &'static str = "preprocessing";
+}
+
+/// Processing stage data.
+///
+/// Runs when a user requests changes to the document. Changes are typically
+/// a collection of annotations (notes, highlights, comments) that need to be
+/// applied using VLM pipelines.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ProcessingData {
+    /// The main VLM prompt/instruction for processing.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prompt: String,
+    /// Additional context for the VLM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// Annotation IDs to process. None means process all annotations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation_ids: Option<Vec<Uuid>>,
+    /// Other files to use as context (e.g., "make this look like that").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_file_ids: Option<Vec<Uuid>>,
+    /// Predefined processing tasks to apply.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<PredefinedTask>,
+    /// Processing quality level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<ProcessingQuality>,
+    /// Whether to process in chunks for large files. Defaults to false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub chunk_processing: bool,
+    /// Custom processing parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_params: Option<serde_json::Value>,
 }
 
-/// Document job payload containing processing details
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+impl Stage for ProcessingData {
+    const NAME: &'static str = "processing";
+    const SUBJECT: &'static str = "processing";
+}
+
+/// Postprocessing stage data.
+///
+/// Runs when a user downloads the file. Prepares the final output:
+/// - Format conversion to requested format
+/// - Compression settings
+/// - Cleanup of temporary artifacts
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct DocumentJobPayload {
-    pub document_id: Uuid,
-    pub account_id: Uuid,
-    pub stage: ProcessingStage,
-
-    // File processing fields
-    pub file_id: Option<Uuid>,
-    pub storage_path: Option<String>,
-    pub file_extension: Option<String>,
-    pub file_size_bytes: Option<i64>,
-
-    // Preprocessing fields
-    pub source_format: Option<String>,
+pub struct PostprocessingData {
+    /// Target format for the output file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_format: Option<String>,
-    pub validation_rules: Option<Vec<String>>,
-
-    // Processing fields
-    pub processing_type: Option<ProcessingType>,
-    pub options: Option<ProcessingOptions>,
-
-    // Postprocessing fields
+    /// Compression level for output file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression_level: Option<CompressionLevel>,
+    /// Whether to burn annotations into the document vs keeping as metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flatten_annotations: Option<bool>,
+    /// Cleanup tasks to perform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cleanup_tasks: Option<Vec<String>>,
-    pub finalization_steps: Option<Vec<String>>,
 }
 
-impl DocumentJobPayload {
-    /// Create a new document job payload with minimal fields
-    pub fn new(document_id: Uuid, account_id: Uuid, stage: ProcessingStage) -> Self {
-        Self {
-            document_id,
-            account_id,
-            stage,
-            file_id: None,
-            storage_path: None,
-            file_extension: None,
-            file_size_bytes: None,
-            source_format: None,
-            target_format: None,
-            validation_rules: None,
-            processing_type: None,
-            options: None,
-            cleanup_tasks: None,
-            finalization_steps: None,
-        }
-    }
+impl Stage for PostprocessingData {
+    const NAME: &'static str = "postprocessing";
+    const SUBJECT: &'static str = "postprocessing";
 }
 
-/// Document processing job
+/// Processing quality level.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub enum ProcessingQuality {
+    /// Fast processing with lower quality.
+    Fast,
+    /// Balanced speed and quality.
+    Balanced,
+    /// High quality, slower processing.
+    High,
+}
+
+/// Compression level for output files.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub enum CompressionLevel {
+    /// No compression.
+    None,
+    /// Medium compression, balanced.
+    Normal,
+    /// High compression, slower but smaller files.
+    High,
+}
+
+/// Document processing job.
+///
+/// Represents a unit of work in the document processing pipeline.
+/// Each job targets a specific file and is typed by its processing stage.
+///
+/// The generic parameter `S` determines the stage (preprocessing, processing,
+/// or postprocessing), enabling compile-time type safety and stage-specific
+/// stream routing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct DocumentJob {
+#[serde(bound = "")]
+pub struct DocumentJob<S: Stage> {
+    /// Unique job identifier (UUID v7 for time-ordering).
     pub id: Uuid,
-    pub payload: DocumentJobPayload,
+    /// Database file ID to process.
+    pub file_id: Uuid,
+    /// Storage path in NATS object store (DocumentKey encoded).
+    pub object_key: String,
+    /// File extension for format detection.
+    pub file_extension: String,
+    /// Stage-specific data.
+    pub data: S,
+    /// Job priority.
     pub priority: EventPriority,
-    pub max_retries: u32,
-    pub retry_count: u32,
-    pub timeout: Duration,
+    /// When the job was created.
     pub created_at: Timestamp,
-    pub scheduled_for: Option<Timestamp>,
-    pub status: EventStatus,
+    /// NATS subject to publish result to (for internal job chaining).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_subject: Option<String>,
+    /// Idempotency key to prevent duplicate job processing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
 }
 
-impl DocumentJob {
-    /// Create a new file processing job
-    pub fn new_file_processing(
-        file_id: Uuid,
-        document_id: Uuid,
-        account_id: Uuid,
-        storage_path: String,
-        file_extension: String,
-        file_size_bytes: i64,
-    ) -> Self {
+impl<S: Stage> DocumentJob<S> {
+    /// Creates a new document job with the given stage data.
+    pub fn new(file_id: Uuid, storage_path: String, file_extension: String, data: S) -> Self {
         Self {
             id: Uuid::now_v7(),
-            payload: DocumentJobPayload {
-                document_id,
-                account_id,
-                stage: ProcessingStage::Processing,
-                file_id: Some(file_id),
-                storage_path: Some(storage_path),
-                file_extension: Some(file_extension),
-                file_size_bytes: Some(file_size_bytes),
-                source_format: None,
-                target_format: None,
-                validation_rules: None,
-                processing_type: None,
-                options: None,
-                cleanup_tasks: None,
-                finalization_steps: None,
-            },
+            file_id,
+            object_key: storage_path,
+            file_extension,
+            data,
             priority: EventPriority::Normal,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_count: 0,
-            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             created_at: Timestamp::now(),
-            scheduled_for: None,
-            status: EventStatus::Pending,
+            callback_subject: None,
+            idempotency_key: None,
         }
     }
 
-    /// Create a new preprocessing job
-    pub fn new_preprocessing(
-        document_id: Uuid,
-        account_id: Uuid,
-        source_format: String,
-        target_format: Option<String>,
-        validation_rules: Vec<String>,
-    ) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            payload: DocumentJobPayload {
-                document_id,
-                account_id,
-                stage: ProcessingStage::Preprocessing,
-                file_id: None,
-                storage_path: None,
-                file_extension: None,
-                file_size_bytes: None,
-                source_format: Some(source_format),
-                target_format,
-                validation_rules: Some(validation_rules),
-                processing_type: None,
-                options: None,
-                cleanup_tasks: None,
-                finalization_steps: None,
-            },
-            priority: EventPriority::Normal,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_count: 0,
-            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
-            created_at: Timestamp::now(),
-            scheduled_for: None,
-            status: EventStatus::Pending,
-        }
-    }
-
-    /// Create a new postprocessing job
-    pub fn new_postprocessing(
-        document_id: Uuid,
-        account_id: Uuid,
-        cleanup_tasks: Vec<String>,
-        finalization_steps: Vec<String>,
-    ) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            payload: DocumentJobPayload {
-                document_id,
-                account_id,
-                stage: ProcessingStage::Postprocessing,
-                file_id: None,
-                storage_path: None,
-                file_extension: None,
-                file_size_bytes: None,
-                source_format: None,
-                target_format: None,
-                validation_rules: None,
-                processing_type: None,
-                options: None,
-                cleanup_tasks: Some(cleanup_tasks),
-                finalization_steps: Some(finalization_steps),
-            },
-            priority: EventPriority::Normal,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_count: 0,
-            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
-            created_at: Timestamp::now(),
-            scheduled_for: None,
-            status: EventStatus::Pending,
-        }
-    }
-
-    /// Set job priority
+    /// Sets the job priority.
     pub fn with_priority(mut self, priority: EventPriority) -> Self {
         self.priority = priority;
         self
     }
 
-    /// Set max retries
-    pub fn with_max_retries(mut self, max_retries: u32) -> Self {
-        self.max_retries = max_retries;
+    /// Sets a callback subject for job chaining.
+    pub fn with_callback(mut self, subject: impl Into<String>) -> Self {
+        self.callback_subject = Some(subject.into());
         self
     }
 
-    /// Set timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
+    /// Sets an idempotency key.
+    pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
+        self.idempotency_key = Some(key.into());
         self
     }
 
-    /// Schedule job for later execution
-    pub fn scheduled_for(mut self, when: Timestamp) -> Self {
-        self.scheduled_for = Some(when);
-        self
+    /// Returns the file ID.
+    #[inline]
+    pub fn file_id(&self) -> Uuid {
+        self.file_id
     }
 
-    /// Check if job can be retried
-    pub fn can_retry(&self) -> bool {
-        self.retry_count < self.max_retries && !self.status.is_terminal()
+    /// Returns the storage path.
+    #[inline]
+    pub fn storage_path(&self) -> &str {
+        &self.object_key
     }
 
-    /// Increment retry count
-    pub fn increment_retry(&mut self) {
-        self.retry_count += 1;
+    /// Returns the file extension.
+    #[inline]
+    pub fn file_extension(&self) -> &str {
+        &self.file_extension
     }
 
-    /// Get the file ID (if this is a file processing job)
-    pub fn file_id(&self) -> Option<Uuid> {
-        self.payload.file_id
+    /// Returns a reference to the stage data.
+    #[inline]
+    pub fn data(&self) -> &S {
+        &self.data
     }
 
-    /// Get the document ID
-    pub fn document_id(&self) -> Uuid {
-        self.payload.document_id
+    /// Returns the stage name.
+    #[inline]
+    pub fn stage_name(&self) -> &'static str {
+        S::NAME
     }
 
-    /// Get the account ID
-    pub fn account_id(&self) -> Uuid {
-        self.payload.account_id
+    /// Returns the stream subject for this job's stage.
+    #[inline]
+    pub fn subject(&self) -> &'static str {
+        S::SUBJECT
     }
 
-    /// Check if job is ready to execute
-    pub fn is_ready(&self) -> bool {
-        self.scheduled_for
-            .map(|scheduled| Timestamp::now() >= scheduled)
-            .unwrap_or(true)
-    }
-
-    /// Get job age
-    pub fn age(&self) -> Duration {
+    /// Returns job age since creation.
+    pub fn age(&self) -> std::time::Duration {
         let now = Timestamp::now();
         let signed_dur = now.duration_since(self.created_at);
-        Duration::from_secs(signed_dur.as_secs().max(0) as u64)
+        std::time::Duration::from_secs(signed_dur.as_secs().max(0) as u64)
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_preprocessing_job_new() {
+        let file_id = Uuid::now_v7();
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PreprocessingData::default(),
+        );
+
+        assert_eq!(job.file_id(), file_id);
+        assert_eq!(job.storage_path(), "storage/path");
+        assert_eq!(job.file_extension(), "pdf");
+        assert_eq!(job.stage_name(), "preprocessing");
+        assert_eq!(job.subject(), "preprocessing");
+    }
+
+    #[test]
+    fn test_preprocessing_defaults() {
+        let data = PreprocessingData::default();
+        assert!(data.validate_metadata);
+        assert!(data.run_ocr);
+        assert!(data.generate_embeddings);
+        assert!(data.generate_thumbnails.is_none());
+    }
+
+    #[test]
+    fn test_preprocessing_serialization_skips_defaults() {
+        let data = PreprocessingData::default();
+        let json = serde_json::to_string(&data).unwrap();
+        // Should be minimal since defaults are skipped
+        assert_eq!(json, "{}");
+
+        // Parsing empty object should give defaults
+        let parsed: PreprocessingData = serde_json::from_str("{}").unwrap();
+        assert!(parsed.validate_metadata);
+        assert!(parsed.run_ocr);
+        assert!(parsed.generate_embeddings);
+    }
+
+    #[test]
+    fn test_processing_job_with_prompt() {
+        let file_id = Uuid::now_v7();
+
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            ProcessingData {
+                prompt: "Apply the highlighted changes".to_string(),
+                context: Some("This is a legal document".to_string()),
+                annotation_ids: None, // Process all annotations
+                tasks: vec![PredefinedTask::Proofread],
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(job.stage_name(), "processing");
+        assert_eq!(job.data().prompt, "Apply the highlighted changes");
+        assert_eq!(
+            job.data().context,
+            Some("This is a legal document".to_string())
+        );
+        assert!(job.data().annotation_ids.is_none());
+        assert_eq!(job.data().tasks.len(), 1);
+    }
+
+    #[test]
+    fn test_predefined_task_redact() {
+        let task = PredefinedTask::Redact {
+            patterns: vec!["email".to_string(), "phone".to_string()],
+        };
+
+        let json = serde_json::to_string(&task).unwrap();
+        let parsed: PredefinedTask = serde_json::from_str(&json).unwrap();
+        assert_eq!(task, parsed);
+    }
+
+    #[test]
+    fn test_predefined_task_translate() {
+        let task = PredefinedTask::Translate {
+            target_language: "es".to_string(),
+        };
+
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("translate"));
+        assert!(json.contains("es"));
+    }
+
+    #[test]
+    fn test_postprocessing_job() {
+        let file_id = Uuid::now_v7();
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PostprocessingData {
+                target_format: Some("docx".to_string()),
+                compression_level: Some(CompressionLevel::Normal),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(job.stage_name(), "postprocessing");
+        assert_eq!(job.data().target_format, Some("docx".to_string()));
+        assert_eq!(job.data().compression_level, Some(CompressionLevel::Normal));
+    }
+
+    #[test]
+    fn test_job_with_callback_and_idempotency() {
+        let file_id = Uuid::now_v7();
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PreprocessingData::default(),
+        )
+        .with_callback("results.preprocessing")
+        .with_idempotency_key("upload-123");
+
+        assert_eq!(
+            job.callback_subject,
+            Some("results.preprocessing".to_string())
+        );
+        assert_eq!(job.idempotency_key, Some("upload-123".to_string()));
+    }
+
+    #[test]
+    fn test_job_serialization_roundtrip() {
+        let file_id = Uuid::now_v7();
+        let job = DocumentJob::new(
+            file_id,
+            "storage/path".to_string(),
+            "pdf".to_string(),
+            PreprocessingData {
+                validate_metadata: true,
+                run_ocr: true,
+                generate_embeddings: true,
+                generate_thumbnails: Some(true),
+            },
+        );
+
+        let json = serde_json::to_string(&job).unwrap();
+        let parsed: DocumentJob<PreprocessingData> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(job.file_id, parsed.file_id);
+        assert_eq!(job.data, parsed.data);
+    }
+
+    #[test]
+    fn test_compression_level_serialization() {
+        let level = CompressionLevel::High;
+        let json = serde_json::to_string(&level).unwrap();
+        assert_eq!(json, "\"high\"");
+
+        let parsed: CompressionLevel = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, CompressionLevel::High);
+    }
+
+    #[test]
+    fn test_processing_quality_serialization() {
+        let quality = ProcessingQuality::Fast;
+        let json = serde_json::to_string(&quality).unwrap();
+        assert_eq!(json, "\"fast\"");
+
+        let parsed: ProcessingQuality = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, ProcessingQuality::Fast);
+    }
+
+    #[test]
+    fn test_stage_constants() {
+        assert_eq!(PreprocessingData::NAME, "preprocessing");
+        assert_eq!(PreprocessingData::SUBJECT, "preprocessing");
+
+        assert_eq!(ProcessingData::NAME, "processing");
+        assert_eq!(ProcessingData::SUBJECT, "processing");
+
+        assert_eq!(PostprocessingData::NAME, "postprocessing");
+        assert_eq!(PostprocessingData::SUBJECT, "postprocessing");
     }
 }

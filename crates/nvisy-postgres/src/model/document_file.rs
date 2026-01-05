@@ -8,7 +8,6 @@ use crate::schema::document_files;
 use crate::types::constants::file;
 use crate::types::{
     ContentSegmentation, HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus, RequireMode,
-    VirusScanStatus,
 };
 
 /// Document file model representing a file attached to a document.
@@ -18,16 +17,14 @@ use crate::types::{
 pub struct DocumentFile {
     /// Unique file identifier.
     pub id: Uuid,
-    /// Reference to the project this file belongs to (required).
-    pub project_id: Uuid,
+    /// Reference to the workspace this file belongs to (required).
+    pub workspace_id: Uuid,
     /// Reference to the document this file belongs to (optional).
     pub document_id: Option<Uuid>,
     /// Reference to the account that owns this file.
     pub account_id: Uuid,
     /// Parent file reference for hierarchical relationships.
     pub parent_id: Option<Uuid>,
-    /// Whether file content has been indexed for search.
-    pub is_indexed: bool,
     /// Human-readable file name for display.
     pub display_name: String,
     /// Original filename when uploaded.
@@ -42,8 +39,8 @@ pub struct DocumentFile {
     pub processing_priority: i32,
     /// Current processing status.
     pub processing_status: ProcessingStatus,
-    /// Virus scan status.
-    pub virus_scan_status: VirusScanStatus,
+    /// Whether file content has been indexed for search.
+    pub is_indexed: bool,
     /// Content segmentation strategy.
     pub content_segmentation: ContentSegmentation,
     /// Whether to enable visual content processing.
@@ -58,10 +55,6 @@ pub struct DocumentFile {
     pub storage_bucket: String,
     /// File metadata (JSON).
     pub metadata: serde_json::Value,
-    /// Keep file for this many seconds (NULL for indefinite retention).
-    pub keep_for_sec: Option<i32>,
-    /// Auto delete timestamp.
-    pub auto_delete_at: Option<Timestamp>,
     /// Timestamp when the file was uploaded.
     pub created_at: Timestamp,
     /// Timestamp when the file was last updated.
@@ -75,16 +68,14 @@ pub struct DocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewDocumentFile {
-    /// Project ID (required).
-    pub project_id: Uuid,
+    /// Workspace ID (required).
+    pub workspace_id: Uuid,
     /// Document ID (optional).
     pub document_id: Option<Uuid>,
     /// Account ID.
     pub account_id: Uuid,
     /// Parent file ID.
     pub parent_id: Option<Uuid>,
-    /// Is indexed flag.
-    pub is_indexed: Option<bool>,
     /// Display name.
     pub display_name: Option<String>,
     /// Original filename.
@@ -99,26 +90,22 @@ pub struct NewDocumentFile {
     pub processing_priority: Option<i32>,
     /// Processing status
     pub processing_status: Option<ProcessingStatus>,
-    /// Virus scan status
-    pub virus_scan_status: Option<VirusScanStatus>,
+    /// Is indexed flag.
+    pub is_indexed: Option<bool>,
     /// Content segmentation
     pub content_segmentation: Option<ContentSegmentation>,
     /// Visual support
     pub visual_support: Option<bool>,
     /// File size in bytes
-    pub file_size_bytes: Option<i64>,
+    pub file_size_bytes: i64,
     /// SHA-256 hash
     pub file_hash_sha256: Vec<u8>,
     /// Storage path
     pub storage_path: String,
     /// Storage bucket
-    pub storage_bucket: Option<String>,
+    pub storage_bucket: String,
     /// Metadata
     pub metadata: Option<serde_json::Value>,
-    /// Keep for seconds
-    pub keep_for_sec: Option<i32>,
-    /// Auto delete at
-    pub auto_delete_at: Option<Timestamp>,
 }
 
 /// Data for updating a document file.
@@ -126,15 +113,15 @@ pub struct NewDocumentFile {
 #[diesel(table_name = document_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateDocumentFile {
-    // Note: project_id is required and should not be updated after creation
+    // Note: workspace_id is required and should not be updated after creation
     /// Document ID
     pub document_id: Option<Option<Uuid>>,
+    /// Storage path (for moving files between buckets)
+    pub storage_path: Option<String>,
     /// Display name
     pub display_name: Option<String>,
     /// Parent file ID
     pub parent_id: Option<Option<Uuid>>,
-    /// Is indexed flag
-    pub is_indexed: Option<bool>,
     /// Tags
     pub tags: Option<Vec<Option<String>>>,
     /// Require mode
@@ -143,12 +130,16 @@ pub struct UpdateDocumentFile {
     pub processing_priority: Option<i32>,
     /// Processing status
     pub processing_status: Option<ProcessingStatus>,
-    /// Virus scan status
-    pub virus_scan_status: Option<VirusScanStatus>,
+    /// Is indexed flag
+    pub is_indexed: Option<bool>,
     /// Content segmentation
     pub content_segmentation: Option<ContentSegmentation>,
     /// Visual support
     pub visual_support: Option<bool>,
+    /// File size in bytes
+    pub file_size_bytes: Option<i64>,
+    /// SHA-256 hash
+    pub file_hash_sha256: Option<Vec<u8>>,
     /// Metadata
     pub metadata: Option<serde_json::Value>,
     /// Soft delete timestamp
@@ -168,17 +159,7 @@ impl DocumentFile {
 
     /// Returns whether the file is ready for use.
     pub fn is_ready(&self) -> bool {
-        self.processing_status.is_successful() && self.virus_scan_status.is_safe()
-    }
-
-    /// Returns whether the file is safe (passed virus scan).
-    pub fn is_safe(&self) -> bool {
-        matches!(self.virus_scan_status, VirusScanStatus::Clean)
-    }
-
-    /// Returns whether the file has failed virus scanning.
-    pub fn has_virus(&self) -> bool {
-        matches!(self.virus_scan_status, VirusScanStatus::Infected)
+        self.processing_status.is_successful()
     }
 
     /// Returns whether the file is currently being processed.
@@ -194,20 +175,6 @@ impl DocumentFile {
     /// Returns whether the file processing has failed.
     pub fn has_processing_error(&self) -> bool {
         self.processing_status.is_failed()
-    }
-
-    /// Returns whether the file is scheduled for auto-deletion.
-    pub fn is_scheduled_for_deletion(&self) -> bool {
-        self.auto_delete_at.is_some()
-    }
-
-    /// Returns whether the file should be auto-deleted now.
-    pub fn should_be_deleted(&self) -> bool {
-        if let Some(delete_at) = self.auto_delete_at {
-            jiff::Timestamp::now() >= jiff::Timestamp::from(delete_at)
-        } else {
-            false
-        }
     }
 
     /// Returns the file size in a human-readable format.
@@ -244,21 +211,6 @@ impl DocumentFile {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
-    /// Returns the time remaining until auto-deletion.
-    pub fn time_until_deletion(&self) -> Option<jiff::Span> {
-        if let Some(delete_at) = self.auto_delete_at {
-            let now = jiff::Timestamp::now();
-            let delete_at = jiff::Timestamp::from(delete_at);
-            if delete_at > now {
-                Some(delete_at - now)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
     /// Returns whether the file is a specific type by extension.
     pub fn is_file_type(&self, extension: &str) -> bool {
         self.file_extension.eq_ignore_ascii_case(extension)
@@ -291,10 +243,10 @@ impl DocumentFile {
     /// Returns the processing priority level description.
     pub fn priority_description(&self) -> &'static str {
         match self.processing_priority {
-            p if p >= 90 => "Critical",
-            p if p >= 70 => "High",
-            p if p >= 50 => "Medium",
-            p if p >= 30 => "Low",
+            p if p >= 9 => "Critical",
+            p if p >= 7 => "High",
+            p if p >= 5 => "Medium",
+            p if p >= 3 => "Low",
             _ => "Minimal",
         }
     }

@@ -1,21 +1,22 @@
 //! Document management handlers for document CRUD operations.
 //!
-//! This module provides comprehensive document management functionality within projects,
+//! This module provides comprehensive document management functionality within workspaces,
 //! including creation, reading, updating, and deletion of documents. All operations
-//! are secured with proper authorization and follow project-based access control.
+//! are secured with proper authorization and follow workspace-based access control.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::query::DocumentRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, PgPool, ValidateJson};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    CreateDocument, DocumentPathParams, Pagination, ProjectPathParams, UpdateDocument,
+    CreateDocument, CursorPagination, DocumentPathParams, UpdateDocument, WorkspacePathParams,
 };
-use crate::handler::response::{Document, Documents, ErrorResponse};
+use crate::handler::response::{Document, DocumentsPage, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -27,26 +28,28 @@ const TRACING_TARGET: &str = "nvisy_server::handler::documents";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn create_document(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
+    Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating document");
 
+    let mut conn = pg_client.get_connection().await?;
+
     auth_state
-        .authorize_project(
+        .authorize_workspace(
             &mut conn,
-            path_params.project_id,
+            path_params.workspace_id,
             Permission::CreateDocuments,
         )
         .await?;
 
-    let new_document = request.into_model(path_params.project_id, auth_state.account_id);
+    let new_document = request.into_model(path_params.workspace_id, auth_state.account_id);
     let document = conn.create_document(new_document).await?;
 
     tracing::info!(
@@ -55,7 +58,7 @@ async fn create_document(
         "Document created",
     );
 
-    Ok((StatusCode::CREATED, Json(document.into())))
+    Ok((StatusCode::CREATED, Json(Document::from_model(document))))
 }
 
 fn create_document_docs(op: TransformOperation) -> TransformOperation {
@@ -67,35 +70,41 @@ fn create_document_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Returns all documents for a project.
+/// Returns all documents for a workspace.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        project_id = %path_params.project_id,
+        workspace_id = %path_params.workspace_id,
     )
 )]
 async fn get_all_documents(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<ProjectPathParams>,
-    Json(pagination): Json<Pagination>,
-) -> Result<(StatusCode, Json<Documents>)> {
+    Path(path_params): Path<WorkspacePathParams>,
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<DocumentsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
+    let mut conn = pg_client.get_connection().await?;
+
     auth_state
-        .authorize_project(&mut conn, path_params.project_id, Permission::ViewDocuments)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewDocuments,
+        )
         .await?;
 
-    let documents = conn
-        .find_documents_by_project(path_params.project_id, pagination.into())
+    let page = conn
+        .cursor_list_workspace_documents(path_params.workspace_id, pagination.into())
         .await?;
 
-    let response: Documents = documents.into_iter().map(Document::from).collect();
+    let response = DocumentsPage::from_cursor_page(page, Document::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        document_count = response.len(),
+        document_count = response.items.len(),
         "Documents listed",
     );
 
@@ -104,8 +113,8 @@ async fn get_all_documents(
 
 fn get_all_documents_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List documents")
-        .description("Lists all documents in a project with pagination.")
-        .response::<200, Json<Documents>>()
+        .description("Lists all documents in a workspace with pagination.")
+        .response::<200, Json<DocumentsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -119,11 +128,13 @@ fn get_all_documents_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_document(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<(StatusCode, Json<Document>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading document");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_document(
@@ -137,7 +148,7 @@ async fn get_document(
 
     tracing::info!(target: TRACING_TARGET, "Document read");
 
-    Ok((StatusCode::OK, Json(document.into())))
+    Ok((StatusCode::OK, Json(Document::from_model(document))))
 }
 
 fn get_document_docs(op: TransformOperation) -> TransformOperation {
@@ -158,12 +169,14 @@ fn get_document_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_document(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
     ValidateJson(request): ValidateJson<UpdateDocument>,
 ) -> Result<(StatusCode, Json<Document>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating document");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_document(
@@ -183,7 +196,7 @@ async fn update_document(
 
     tracing::info!(target: TRACING_TARGET, "Document updated");
 
-    Ok((StatusCode::OK, Json(document.into())))
+    Ok((StatusCode::OK, Json(Document::from_model(document))))
 }
 
 fn update_document_docs(op: TransformOperation) -> TransformOperation {
@@ -205,12 +218,14 @@ fn update_document_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_document(
-    PgPool(mut conn): PgPool,
+    State(pg_client): State<PgClient>,
     State(_nats_client): State<NatsClient>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<DocumentPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting document");
+
+    let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_document(
@@ -259,12 +274,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/projects/{project_id}/documents",
+            "/workspaces/{workspaceId}/documents",
             post_with(create_document, create_document_docs)
                 .get_with(get_all_documents, get_all_documents_docs),
         )
         .api_route(
-            "/documents/{document_id}",
+            "/documents/{documentId}",
             get_with(get_document, get_document_docs)
                 .patch_with(update_document, update_document_docs)
                 .delete_with(delete_document, delete_document_docs),
