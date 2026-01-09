@@ -7,12 +7,20 @@ use std::fmt;
 use std::sync::Arc;
 
 use jiff::Timestamp;
+use nvisy_core::Result;
+use nvisy_core::types::ServiceHealth;
 
-use super::{
-    Context, EmbeddingBatchRequest, EmbeddingBatchResponse, EmbeddingRequest, EmbeddingResponse,
-    InferenceProvider, OcrBatchRequest, OcrBatchResponse, OcrRequest, OcrResponse, Result,
-    ServiceHealth, SharedContext, TRACING_TARGET, VlmBatchRequest, VlmBatchResponse, VlmRequest,
-    VlmResponse,
+use super::{Context, InferenceProvider};
+use crate::TRACING_TARGET;
+use crate::embedding::{
+    EmbeddingBatchRequest, EmbeddingBatchResponse, EmbeddingProviderExt, EmbeddingRequest,
+    EmbeddingResponse,
+};
+use crate::language::{
+    LanguageProviderExt, VlmBatchRequest, VlmBatchResponse, VlmRequest, VlmResponse,
+};
+use crate::optical::{
+    OcrBatchRequest, OcrBatchResponse, OcrRequest, OcrResponse, OpticalProviderExt,
 };
 
 /// Unified inference service with observability.
@@ -22,59 +30,29 @@ use super::{
 #[derive(Clone)]
 pub struct InferenceService {
     provider: Arc<dyn InferenceProvider>,
-    context: SharedContext,
 }
 
 impl fmt::Debug for InferenceService {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InferenceService")
-            .field("context", &self.context)
-            .finish_non_exhaustive()
+        f.debug_struct("InferenceService").finish_non_exhaustive()
     }
 }
 
 impl InferenceService {
     /// Create a new inference service from a provider.
-    pub fn from_provider<P>(provider: P) -> Self
+    pub fn new<P>(provider: P) -> Self
     where
         P: InferenceProvider + 'static,
     {
         Self {
             provider: Arc::new(provider),
-            context: SharedContext::new(),
         }
-    }
-
-    /// Create a new inference service from a provider with shared context.
-    pub fn from_provider_with_context<P>(provider: P, context: SharedContext) -> Self
-    where
-        P: InferenceProvider + 'static,
-    {
-        Self {
-            provider: Arc::new(provider),
-            context,
-        }
-    }
-
-    /// Get a reference to the shared context.
-    pub fn context(&self) -> &SharedContext {
-        &self.context
-    }
-
-    /// Replace the context.
-    pub fn set_context(&mut self, context: SharedContext) {
-        self.context = context;
-    }
-
-    /// Create a new service with a specific context.
-    pub fn with_context(mut self, context: Context) -> Self {
-        self.context = SharedContext::from_context(context);
-        self
     }
 
     /// Generate an embedding for the provided input.
     pub async fn generate_embedding(
         &self,
+        context: &Context,
         request: &EmbeddingRequest,
     ) -> Result<EmbeddingResponse> {
         let started_at = Timestamp::now();
@@ -82,13 +60,11 @@ impl InferenceService {
         tracing::debug!(
             target: TRACING_TARGET,
             request_id = %request.request_id,
+            workspace_id = %context.workspace_id,
             "Processing embedding request"
         );
 
-        let result = self
-            .provider
-            .generate_embedding(&self.context, request)
-            .await;
+        let result = self.provider.generate_embedding(context, request).await;
         let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
@@ -119,6 +95,7 @@ impl InferenceService {
     /// Generate embeddings for a batch of inputs.
     pub async fn generate_embedding_batch(
         &self,
+        context: &Context,
         request: &EmbeddingBatchRequest,
     ) -> Result<EmbeddingBatchResponse> {
         let started_at = Timestamp::now();
@@ -126,12 +103,13 @@ impl InferenceService {
         tracing::debug!(
             target: TRACING_TARGET,
             batch_size = request.len(),
+            workspace_id = %context.workspace_id,
             "Processing batch embedding request"
         );
 
         let result = self
             .provider
-            .generate_embedding_batch(&self.context, request)
+            .generate_embedding_batch(context, request)
             .await;
         let elapsed = Timestamp::now().duration_since(started_at);
 
@@ -159,17 +137,22 @@ impl InferenceService {
     }
 
     /// Process an image or document with OCR.
-    pub async fn process_ocr(&self, request: &OcrRequest) -> Result<OcrResponse> {
+    pub async fn process_ocr(
+        &self,
+        context: &Context,
+        request: &OcrRequest,
+    ) -> Result<OcrResponse> {
         let started_at = Timestamp::now();
 
         tracing::debug!(
             target: TRACING_TARGET,
             request_id = %request.request_id,
             document_size = request.document_size(),
+            workspace_id = %context.workspace_id,
             "Processing OCR request"
         );
 
-        let result = self.provider.process_ocr(&self.context, request).await;
+        let result = self.provider.process_ocr(context, request).await;
         let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
@@ -198,19 +181,21 @@ impl InferenceService {
     }
 
     /// Process a batch of OCR requests.
-    pub async fn process_ocr_batch(&self, request: &OcrBatchRequest) -> Result<OcrBatchResponse> {
+    pub async fn process_ocr_batch(
+        &self,
+        context: &Context,
+        request: &OcrBatchRequest,
+    ) -> Result<OcrBatchResponse> {
         let started_at = Timestamp::now();
 
         tracing::debug!(
             target: TRACING_TARGET,
             batch_size = request.len(),
+            workspace_id = %context.workspace_id,
             "Processing batch OCR request"
         );
 
-        let result = self
-            .provider
-            .process_ocr_batch(&self.context, request)
-            .await;
+        let result = self.provider.process_ocr_batch(context, request).await;
         let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
@@ -237,7 +222,11 @@ impl InferenceService {
     }
 
     /// Process a vision-language request.
-    pub async fn process_vlm(&self, request: &VlmRequest) -> Result<VlmResponse> {
+    pub async fn process_vlm(
+        &self,
+        context: &Context,
+        request: &VlmRequest,
+    ) -> Result<VlmResponse> {
         let started_at = Timestamp::now();
 
         tracing::debug!(
@@ -245,10 +234,11 @@ impl InferenceService {
             request_id = %request.request_id,
             document_count = request.document_count(),
             prompt_length = request.prompt_length(),
+            workspace_id = %context.workspace_id,
             "Processing VLM request"
         );
 
-        let result = self.provider.process_vlm(&self.context, request).await;
+        let result = self.provider.process_vlm(context, request).await;
         let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {
@@ -277,20 +267,22 @@ impl InferenceService {
     }
 
     /// Process a batch of VLM requests.
-    pub async fn process_vlm_batch(&self, request: &VlmBatchRequest) -> Result<VlmBatchResponse> {
+    pub async fn process_vlm_batch(
+        &self,
+        context: &Context,
+        request: &VlmBatchRequest,
+    ) -> Result<VlmBatchResponse> {
         let started_at = Timestamp::now();
 
         tracing::debug!(
             target: TRACING_TARGET,
             batch_size = request.len(),
             total_documents = request.total_documents(),
+            workspace_id = %context.workspace_id,
             "Processing batch VLM request"
         );
 
-        let result = self
-            .provider
-            .process_vlm_batch(&self.context, request)
-            .await;
+        let result = self.provider.process_vlm_batch(context, request).await;
         let elapsed = Timestamp::now().duration_since(started_at);
 
         match &result {

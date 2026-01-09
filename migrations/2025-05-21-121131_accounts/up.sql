@@ -3,9 +3,8 @@
 -- Create api_token_type enum
 CREATE TYPE API_TOKEN_TYPE AS ENUM (
     'web',      -- Web browser sessions
-    'mobile',   -- Mobile app sessions
     'api',      -- API client sessions
-    'desktop'   -- Desktop application sessions
+    'cli'       -- CLI tool sessions
 );
 
 COMMENT ON TYPE API_TOKEN_TYPE IS

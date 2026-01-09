@@ -11,14 +11,13 @@ For an HTTP-based client implementation, see the `nvisy-reqwest` crate.
 
 ## Usage
 
-```rust
-use nvisy_webhook::{WebhookPayload, WebhookProvider, WebhookService};
+```rust,ignore
+use nvisy_webhook::{WebhookRequest, WebhookProvider, WebhookService};
 
 // Create a service from any WebhookProvider implementation
 let service = WebhookService::new(my_provider);
 
-// Create and send a webhook
-let payload = WebhookPayload::test(webhook_id);
-let request = payload.into_request("https://example.com/webhook");
+// Create and send a webhook request
+let request = WebhookRequest::new(url, event, payload, webhook_id, workspace_id);
 let response = service.deliver(&request).await?;
 ```

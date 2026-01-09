@@ -7,7 +7,8 @@
 //! ├── service: ServiceConfig      # Database, NATS, auth keys, workers
 //! ├── middleware: MiddlewareConfig # CORS, OpenAPI, recovery/timeouts
 //! ├── server: ServerConfig         # Host, port, TLS, shutdown
-//! └── ollama: OllamaConfig         # Ollama embeddings/VLM/OCR
+//! ├── ollama: OllamaConfig         # Ollama embeddings/VLM/OCR
+//! └── reqwest: ReqwestConfig       # HTTP client for webhooks
 //! ```
 //!
 //! All configuration can be provided via CLI arguments or environment variables.
@@ -24,23 +25,23 @@
 //! ```
 
 mod middleware;
-mod provider;
 mod server;
 
 use std::process;
 
-use anyhow::Context;
 use clap::Parser;
-pub use middleware::MiddlewareConfig;
-use nvisy_ollama::OllamaConfig;
+use nvisy_inference::InferenceService;
+use nvisy_ollama::{OllamaClient, OllamaConfig};
+use nvisy_reqwest::{ReqwestClient, ReqwestConfig};
 use nvisy_server::service::ServiceConfig;
-pub use provider::{create_inference_service, create_webhook_service};
+use nvisy_webhook::WebhookService;
 use serde::{Deserialize, Serialize};
-pub use server::ServerConfig;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+pub use self::middleware::MiddlewareConfig;
+pub use self::server::ServerConfig;
 use crate::{TRACING_TARGET_CONFIG, TRACING_TARGET_SERVER_STARTUP};
 
 /// Complete CLI configuration.
@@ -50,6 +51,7 @@ use crate::{TRACING_TARGET_CONFIG, TRACING_TARGET_SERVER_STARTUP};
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
 /// - `OllamaConfig`: Ollama AI services configuration (feature-gated)
+/// - `ReqwestConfig`: HTTP client configuration for webhooks
 #[derive(Debug, Clone, Parser, Serialize, Deserialize)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy document processing server")]
@@ -70,6 +72,10 @@ pub struct Cli {
     /// Ollama configuration for embeddings, VLM, and OCR.
     #[clap(flatten)]
     pub ollama: OllamaConfig,
+
+    /// HTTP client configuration for webhook delivery.
+    #[clap(flatten)]
+    pub reqwest: ReqwestConfig,
 }
 
 impl Cli {
@@ -123,14 +129,6 @@ impl Cli {
         );
     }
 
-    /// Validates all configuration values.
-    pub fn validate(&self) -> anyhow::Result<()> {
-        self.server
-            .validate()
-            .context("invalid server configuration")?;
-        Ok(())
-    }
-
     /// Logs configuration at debug level (no sensitive information).
     pub fn log(&self) {
         Self::log_build_info();
@@ -156,5 +154,15 @@ impl Cli {
         .into_iter()
         .flatten()
         .collect()
+    }
+
+    /// Creates inference service from CLI configuration.
+    pub fn inference_service(&self) -> InferenceService {
+        OllamaClient::new(self.ollama.clone()).into_service()
+    }
+
+    /// Creates webhook service from CLI configuration.
+    pub fn webhook_service(&self) -> WebhookService {
+        ReqwestClient::new(self.reqwest.clone()).into_service()
     }
 }

@@ -105,7 +105,7 @@ fn handle_error(err: tower::BoxError) -> ResponseFut {
 
     let error = if let Some(_elapsed) = err.downcast_ref::<Elapsed>() {
         tracing::error!(
-            target: tracing_targets::RECOVERY_ERROR,
+            target: tracing_targets::TRACING_TARGET_RECOVERY_ERROR,
             error = %err,
             "request timeout exceeded"
         );
@@ -115,7 +115,7 @@ fn handle_error(err: tower::BoxError) -> ResponseFut {
             .with_context("The request took too long to process and was terminated")
     } else if let Some(_ip_rejection) = err.downcast_ref::<IpRejection>() {
         tracing::error!(
-            target: tracing_targets::RECOVERY_ERROR,
+            target: tracing_targets::TRACING_TARGET_RECOVERY_ERROR,
             error = %err,
             "failed to extract client IP address"
         );
@@ -125,7 +125,7 @@ fn handle_error(err: tower::BoxError) -> ResponseFut {
             .with_context("Could not determine client IP address")
     } else {
         tracing::error!(
-            target: tracing_targets::RECOVERY_ERROR,
+            target: tracing_targets::TRACING_TARGET_RECOVERY_ERROR,
             error = %err,
             "unknown middleware error"
         );
@@ -142,7 +142,7 @@ fn catch_panic(err: Panic) -> Response {
     // If the panic is an Error, return it directly.
     if let Some(error) = err.downcast_ref::<Error>() {
         tracing::error!(
-            target: tracing_targets::RECOVERY_PANIC,
+            target: tracing_targets::TRACING_TARGET_RECOVERY_PANIC,
             error = %error,
             "service panic"
         );
@@ -156,7 +156,7 @@ fn catch_panic(err: Panic) -> Response {
         .unwrap_or("unknown panic type");
 
     tracing::error!(
-        target: tracing_targets::RECOVERY_PANIC,
+        target: tracing_targets::TRACING_TARGET_RECOVERY_PANIC,
         message = %message,
         "service panic"
     );

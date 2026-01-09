@@ -9,34 +9,28 @@ High-performance backend server for the Nvisy document processing platform.
 ## Features
 
 - **High-Performance** - Async HTTP server with Axum and Tokio
-- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
 - **LLM Annotations** - AI-driven document edits via structured annotations
+- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
 - **Real-Time Updates** - Live collaboration via NATS pub/sub and WebSocket
 - **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
-
-## Optional Features
-
-| Feature | Description |
-|---------|-------------|
-| **tls** | HTTPS support with rustls |
-| **otel** | OpenTelemetry log filtering |
-| **dotenv** | Load config from `.env` files |
-| **ollama** | Ollama AI backend |
-| **mock** | Mock AI services for testing |
 
 ## Architecture
 
 ```
 server/
 ├── crates/
-│   ├── nvisy-cli/       # Server binary with CLI
-│   ├── nvisy-core/      # Shared types and AI service traits
-│   ├── nvisy-nats/      # NATS client (streams, KV, queues)
-│   ├── nvisy-ollama/    # Ollama client (embeddings, OCR, VLM)
-│   ├── nvisy-postgres/  # PostgreSQL database layer
-│   └── nvisy-server/    # HTTP handlers and middleware
-├── migrations/          # PostgreSQL database migrations
-└── Cargo.toml           # Workspace configuration
+│   ├── nvisy-cli/         # Server binary with CLI and configuration
+│   ├── nvisy-core/        # Shared types, errors, and utilities
+│   ├── nvisy-inference/   # AI inference abstractions (embeddings, OCR, VLM)
+│   ├── nvisy-nats/        # NATS client (streams, KV, object storage, jobs)
+│   ├── nvisy-ollama/      # Ollama provider implementation
+│   ├── nvisy-postgres/    # PostgreSQL database layer with Diesel ORM
+│   ├── nvisy-reqwest/     # HTTP client for external services
+│   ├── nvisy-server/      # HTTP handlers, middleware, and OpenAPI
+│   ├── nvisy-webhook/     # Webhook delivery types and traits
+│   └── nvisy-worker/      # Background workers for document processing
+├── migrations/            # PostgreSQL database migrations
+└── Cargo.toml             # Workspace configuration
 ```
 
 ## Quick Start
@@ -50,7 +44,7 @@ make generate-keys
 make generate-migrations
 
 # Start the server
-cargo run --features ollama,dotenv
+cargo run --features dotenv
 ```
 
 ## Configuration

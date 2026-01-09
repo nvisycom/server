@@ -1,32 +1,39 @@
 //! OCR request types.
 
-use std::collections::HashSet;
-
+use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::response::OcrResponse;
-use crate::Document;
+use crate::types::Document;
 
 /// Request for a single OCR operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "OcrRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "OcrRequestError")
+)]
 pub struct OcrRequest {
     /// Unique identifier for this request.
+    #[builder(default = "Uuid::now_v7()")]
     pub request_id: Uuid,
-    /// Account identifier associated with this request.
-    pub account_id: Option<Uuid>,
     /// The document to process for text extraction.
     pub document: Document,
-    /// Optional custom prompt for OCR processing.
-    pub prompt: Option<String>,
-    /// Language hint for OCR processing (ISO 639-1 code).
-    pub language: Option<String>,
-    /// Custom tags for categorization and filtering.
-    pub tags: HashSet<String>,
     /// Whether to preserve layout information in the output.
+    #[builder(default = "true")]
     pub preserve_layout: bool,
-    /// Minimum confidence threshold for text extraction.
-    pub confidence_threshold: Option<f32>,
+}
+
+/// Error type for OcrRequest builder.
+pub type OcrRequestError = derive_builder::UninitializedFieldError;
+
+impl OcrRequestBuilder {
+    /// Build the request.
+    pub fn build(self) -> Result<OcrRequest, OcrRequestError> {
+        self.build_inner()
+    }
 }
 
 impl OcrRequest {
@@ -34,13 +41,8 @@ impl OcrRequest {
     pub fn new(document: Document) -> Self {
         Self {
             request_id: Uuid::now_v7(),
-            account_id: None,
             document,
-            prompt: None,
-            language: None,
-            tags: HashSet::new(),
             preserve_layout: true,
-            confidence_threshold: None,
         }
     }
 
@@ -49,57 +51,9 @@ impl OcrRequest {
         Self::new(document)
     }
 
-    /// Create a new OCR request with a specific request ID.
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = request_id;
-        self
-    }
-
-    /// Set the account ID for this request.
-    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
-        self.account_id = Some(account_id);
-        self
-    }
-
-    /// Set a custom prompt for OCR processing.
-    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
-        self
-    }
-
-    /// Set the language hint for OCR processing.
-    pub fn with_language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(language.into());
-        self
-    }
-
-    /// Add a tag to this request.
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.insert(tag.into());
-        self
-    }
-
-    /// Set tags for this request.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(|t| t.into()).collect();
-        self
-    }
-
-    /// Set whether to preserve layout information.
-    pub fn with_preserve_layout(mut self, preserve: bool) -> Self {
-        self.preserve_layout = preserve;
-        self
-    }
-
-    /// Set the confidence threshold for text extraction.
-    pub fn with_confidence_threshold(mut self, threshold: f32) -> Self {
-        self.confidence_threshold = Some(threshold);
-        self
-    }
-
-    /// Check if the request has a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.contains(tag)
+    /// Create a builder for this request.
+    pub fn builder() -> OcrRequestBuilder {
+        OcrRequestBuilder::default()
     }
 
     /// Get the document's content type.
@@ -129,24 +83,39 @@ impl OcrRequest {
 }
 
 /// Batch request for multiple OCR operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "OcrBatchRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "OcrBatchRequestError")
+)]
 pub struct OcrBatchRequest {
     /// Unique identifier for this batch request.
+    #[builder(default = "Uuid::now_v7()")]
     pub batch_id: Uuid,
-    /// Account identifier associated with this batch.
-    pub account_id: Option<Uuid>,
     /// The documents to process.
+    #[builder(default)]
     pub documents: Vec<Document>,
-    /// Optional custom prompt for OCR processing.
-    pub prompt: Option<String>,
-    /// Language hint for OCR processing (ISO 639-1 code).
-    pub language: Option<String>,
-    /// Custom tags for categorization and filtering.
-    pub tags: HashSet<String>,
     /// Whether to preserve layout information.
+    #[builder(default = "true")]
     pub preserve_layout: bool,
-    /// Minimum confidence threshold for text extraction.
-    pub confidence_threshold: Option<f32>,
+}
+
+/// Error type for OcrBatchRequest builder.
+pub type OcrBatchRequestError = derive_builder::UninitializedFieldError;
+
+impl OcrBatchRequestBuilder {
+    /// Build the request.
+    pub fn build(self) -> Result<OcrBatchRequest, OcrBatchRequestError> {
+        self.build_inner()
+    }
+
+    /// Add a document to the batch.
+    pub fn add_document(mut self, document: Document) -> Self {
+        self.documents.get_or_insert_with(Vec::new).push(document);
+        self
+    }
 }
 
 impl OcrBatchRequest {
@@ -154,13 +123,8 @@ impl OcrBatchRequest {
     pub fn new() -> Self {
         Self {
             batch_id: Uuid::now_v7(),
-            account_id: None,
             documents: Vec::new(),
-            prompt: None,
-            language: None,
-            tags: HashSet::new(),
             preserve_layout: true,
-            confidence_threshold: None,
         }
     }
 
@@ -168,67 +132,14 @@ impl OcrBatchRequest {
     pub fn from_documents(documents: Vec<Document>) -> Self {
         Self {
             batch_id: Uuid::now_v7(),
-            account_id: None,
             documents,
-            prompt: None,
-            language: None,
-            tags: HashSet::new(),
             preserve_layout: true,
-            confidence_threshold: None,
         }
     }
 
-    /// Set the account ID for this batch.
-    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
-        self.account_id = Some(account_id);
-        self
-    }
-
-    /// Add a document to the batch.
-    pub fn with_document(mut self, document: Document) -> Self {
-        self.documents.push(document);
-        self
-    }
-
-    /// Set a custom prompt for OCR processing.
-    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
-        self
-    }
-
-    /// Set the language hint for OCR processing.
-    pub fn with_language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(language.into());
-        self
-    }
-
-    /// Add a tag to this batch request.
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.insert(tag.into());
-        self
-    }
-
-    /// Set tags for this batch request.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(|t| t.into()).collect();
-        self
-    }
-
-    /// Set whether to preserve layout information.
-    pub fn with_preserve_layout(mut self, preserve: bool) -> Self {
-        self.preserve_layout = preserve;
-        self
-    }
-
-    /// Set the confidence threshold for text extraction.
-    pub fn with_confidence_threshold(mut self, threshold: f32) -> Self {
-        self.confidence_threshold = Some(threshold);
-        self
-    }
-
-    /// Check if the batch request has a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.contains(tag)
+    /// Create a builder for this request.
+    pub fn builder() -> OcrBatchRequestBuilder {
+        OcrBatchRequestBuilder::default()
     }
 
     /// Returns the number of documents in this batch.
@@ -247,13 +158,8 @@ impl OcrBatchRequest {
             .into_iter()
             .map(|document| OcrRequest {
                 request_id: Uuid::now_v7(),
-                account_id: self.account_id,
                 document,
-                prompt: self.prompt.clone(),
-                language: self.language.clone(),
-                tags: self.tags.clone(),
                 preserve_layout: self.preserve_layout,
-                confidence_threshold: self.confidence_threshold,
             })
             .collect()
     }
@@ -265,13 +171,8 @@ impl OcrBatchRequest {
             .cloned()
             .map(|document| OcrRequest {
                 request_id: Uuid::now_v7(),
-                account_id: self.account_id,
                 document,
-                prompt: self.prompt.clone(),
-                language: self.language.clone(),
-                tags: self.tags.clone(),
                 preserve_layout: self.preserve_layout,
-                confidence_threshold: self.confidence_threshold,
             })
             .collect()
     }
@@ -299,19 +200,30 @@ mod tests {
         let document = Document::new(Bytes::from("test image data")).with_content_type("image/png");
         let request = OcrRequest::from_document(document);
         assert!(!request.request_id.is_nil());
-        assert!(request.account_id.is_none());
-        assert!(request.tags.is_empty());
         assert!(request.preserve_layout);
         assert_eq!(request.content_type(), Some("image/png"));
+    }
+
+    #[test]
+    fn test_ocr_request_builder() {
+        let document = Document::new(Bytes::from("test")).with_content_type("image/png");
+        let request = OcrRequest::builder()
+            .with_document(document)
+            .with_preserve_layout(false)
+            .build()
+            .unwrap();
+        assert!(!request.preserve_layout);
     }
 
     #[test]
     fn test_ocr_batch_request() {
         let doc1 = Document::new(Bytes::from("doc1")).with_content_type("image/png");
         let doc2 = Document::new(Bytes::from("doc2")).with_content_type("image/jpeg");
-        let batch = OcrBatchRequest::new()
-            .with_document(doc1)
-            .with_document(doc2);
+        let batch = OcrBatchRequest::builder()
+            .add_document(doc1)
+            .add_document(doc2)
+            .build()
+            .unwrap();
         assert_eq!(batch.len(), 2);
         assert!(!batch.is_empty());
     }

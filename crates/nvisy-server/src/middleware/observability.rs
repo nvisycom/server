@@ -82,7 +82,7 @@ pub async fn track_categorized_metrics(
         .unwrap_or(0);
 
     tracing::trace!(
-        target: tracing_targets::METRICS,
+        target: tracing_targets::TRACING_TARGET_METRICS,
         method = %method,
         uri = %uri,
         category = category.as_str(),
@@ -102,7 +102,7 @@ pub async fn track_categorized_metrics(
         .unwrap_or(0);
 
     tracing::trace!(
-        target: tracing_targets::METRICS,
+        target: tracing_targets::TRACING_TARGET_METRICS,
         method = %method,
         uri = %uri,
         category = category.as_str(),

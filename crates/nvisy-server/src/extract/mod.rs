@@ -14,7 +14,6 @@ mod version;
 
 pub use crate::extract::auth::{
     AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
-    TRACING_TARGET_AUTHENTICATION, TRACING_TARGET_AUTHORIZATION,
 };
 pub use crate::extract::connection_info::{AppConnectInfo, ClientIp};
 pub use crate::extract::pg_connection::PgPool;

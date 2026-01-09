@@ -14,9 +14,9 @@ pub const TRACING_TARGET: &str = "nvisy_ollama";
 /// Tracing target for client operations.
 pub const TRACING_TARGET_CLIENT: &str = "nvisy_ollama::client";
 
-mod client;
+mod connect;
 mod error;
-mod provider;
+mod service;
 
-pub use crate::client::{OllamaClient, OllamaConfig};
+pub use crate::connect::{OllamaClient, OllamaConfig};
 pub use crate::error::{Error, Result};

@@ -19,7 +19,7 @@ use super::{Chat, Document};
 ///
 /// Creating text content:
 /// ```rust
-/// use nvisy_inference::Content;
+/// use nvisy_inference::types::Content;
 ///
 /// let content = Content::text("Hello, world!");
 /// assert!(content.is_text());
@@ -27,7 +27,7 @@ use super::{Chat, Document};
 ///
 /// Creating document content:
 /// ```rust
-/// use nvisy_inference::{Content, Document};
+/// use nvisy_inference::types::{Content, Document};
 /// use bytes::Bytes;
 ///
 /// let doc = Document::new(Bytes::from("PDF content"));
@@ -63,7 +63,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::Content;
+    /// use nvisy_inference::types::Content;
     ///
     /// let content = Content::text("Hello, world!");
     /// ```
@@ -80,7 +80,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Document};
+    /// use nvisy_inference::types::{Content, Document};
     /// use bytes::Bytes;
     ///
     /// let doc = Document::new(Bytes::from("content"));
@@ -99,7 +99,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Chat};
+    /// use nvisy_inference::types::{Content, Chat};
     ///
     /// let chat = Chat::new();
     /// let content = Content::chat(chat);
@@ -113,7 +113,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::Content;
+    /// use nvisy_inference::types::Content;
     ///
     /// let content = Content::text("hello");
     /// assert!(content.is_text());
@@ -127,7 +127,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Document};
+    /// use nvisy_inference::types::{Content, Document};
     /// use bytes::Bytes;
     ///
     /// let doc = Document::new(Bytes::from("content"));
@@ -143,7 +143,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Chat};
+    /// use nvisy_inference::types::{Content, Chat};
     ///
     /// let chat = Chat::new();
     /// let content = Content::chat(chat);
@@ -158,7 +158,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::Content;
+    /// use nvisy_inference::types::Content;
     ///
     /// let content = Content::text("hello");
     /// assert_eq!(content.as_text(), Some("hello"));
@@ -175,7 +175,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Document};
+    /// use nvisy_inference::types::{Content, Document};
     /// use bytes::Bytes;
     ///
     /// let doc = Document::new(Bytes::from("content"));
@@ -194,7 +194,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Chat};
+    /// use nvisy_inference::types::{Content, Chat};
     ///
     /// let chat = Chat::new();
     /// let content = Content::chat(chat.clone());
@@ -212,7 +212,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::Content;
+    /// use nvisy_inference::types::Content;
     ///
     /// let content = Content::text("hello");
     /// assert_eq!(content.into_text(), Some("hello".to_string()));
@@ -229,7 +229,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Document};
+    /// use nvisy_inference::types::{Content, Document};
     /// use bytes::Bytes;
     ///
     /// let doc = Document::new(Bytes::from("content"));
@@ -248,7 +248,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::{Content, Chat};
+    /// use nvisy_inference::types::{Content, Chat};
     ///
     /// let chat = Chat::new();
     /// let content = Content::chat(chat.clone());
@@ -270,7 +270,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::Content;
+    /// use nvisy_inference::types::Content;
     ///
     /// let content = Content::text("hello");
     /// assert!(content.estimated_size() > 0);
@@ -291,7 +291,7 @@ impl Content {
     /// # Example
     ///
     /// ```rust
-    /// use nvisy_inference::Content;
+    /// use nvisy_inference::types::Content;
     ///
     /// let content = Content::text("hello world");
     /// let display = content.display_summary();

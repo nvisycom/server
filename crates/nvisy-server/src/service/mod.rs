@@ -6,6 +6,7 @@ mod config;
 mod integration;
 mod security;
 
+use nvisy_inference::InferenceService;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_webhook::WebhookService;
@@ -31,6 +32,7 @@ pub struct ServiceState {
     pub postgres: PgClient,
     pub nats: NatsClient,
     pub webhook: WebhookService,
+    pub inference: InferenceService,
 
     // Internal services:
     pub health_cache: HealthCache,
@@ -49,11 +51,13 @@ impl ServiceState {
     pub async fn from_config(
         service_config: ServiceConfig,
         webhook_service: WebhookService,
+        inference_service: InferenceService,
     ) -> Result<Self> {
         let service_state = Self {
             postgres: service_config.connect_postgres().await?,
             nats: service_config.connect_nats().await?,
             webhook: webhook_service,
+            inference: inference_service,
 
             health_cache: HealthCache::new(),
             archive_service: ArchiveService::new(),
@@ -82,6 +86,7 @@ macro_rules! impl_di {
 impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
+impl_di!(inference: InferenceService);
 
 // Internal services:
 impl_di!(health_cache: HealthCache);

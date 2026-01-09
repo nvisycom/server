@@ -8,7 +8,6 @@ use std::io;
 use std::time::Instant;
 
 use crate::config::ServerConfig;
-use crate::server::{ServerError, ServerResult};
 use crate::{TRACING_TARGET_SERVER_SHUTDOWN, TRACING_TARGET_SERVER_STARTUP};
 
 /// Serves with lifecycle management and graceful shutdown.
@@ -24,32 +23,18 @@ use crate::{TRACING_TARGET_SERVER_SHUTDOWN, TRACING_TARGET_SERVER_STARTUP};
 pub async fn serve_with_shutdown<F>(
     server_config: &ServerConfig,
     serve_fn: impl FnOnce() -> F,
-) -> ServerResult<()>
+) -> io::Result<()>
 where
     F: Future<Output = io::Result<()>>,
 {
     let start_time = Instant::now();
 
-    validate_config(server_config)?;
     log_security_warnings(server_config);
     log_config_details(server_config);
 
     let result = serve_fn().await;
 
     handle_result(result, start_time)
-}
-
-/// Validates server configuration.
-fn validate_config(config: &ServerConfig) -> ServerResult<()> {
-    if let Err(e) = config.validate() {
-        tracing::error!(
-            target: TRACING_TARGET_SERVER_STARTUP,
-            error = %e,
-            "Configuration validation failed"
-        );
-        return Err(ServerError::invalid_config(&e));
-    }
-    Ok(())
 }
 
 /// Logs security warnings for potentially unsafe configurations.
@@ -75,7 +60,7 @@ fn log_config_details(config: &ServerConfig) {
 }
 
 /// Handles the server result and logs appropriate messages.
-fn handle_result(result: io::Result<()>, start_time: Instant) -> ServerResult<()> {
+fn handle_result(result: io::Result<()>, start_time: Instant) -> io::Result<()> {
     let uptime = start_time.elapsed();
 
     match result {
@@ -88,17 +73,15 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> ServerResult<()
             Ok(())
         }
         Err(err) => {
-            let server_error = ServerError::Runtime(err);
-
             tracing::error!(
                 target: TRACING_TARGET_SERVER_SHUTDOWN,
-                error = %server_error,
+                error = %err,
+                kind = ?err.kind(),
                 uptime_secs = uptime.as_secs(),
-                recoverable = server_error.is_recoverable(),
                 "Fatal error"
             );
 
-            if let Some(suggestion) = server_error.suggestion() {
+            if let Some(suggestion) = error_suggestion(&err) {
                 tracing::info!(
                     target: TRACING_TARGET_SERVER_SHUTDOWN,
                     suggestion = suggestion,
@@ -106,22 +89,28 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> ServerResult<()
                 );
             }
 
-            log_error_context(&server_error);
-
-            Err(server_error)
+            Err(err)
         }
     }
 }
 
-/// Logs error context for debugging.
-fn log_error_context(error: &ServerError) {
-    for (key, value) in error.context() {
-        tracing::debug!(
-            target: TRACING_TARGET_SERVER_SHUTDOWN,
-            key = key,
-            value = value,
-            "Error context"
-        );
+/// Provides a human-readable suggestion for resolving an IO error.
+fn error_suggestion(err: &io::Error) -> Option<&'static str> {
+    match err.kind() {
+        io::ErrorKind::PermissionDenied => {
+            Some("Try using a port above 1024 or run with appropriate privileges")
+        }
+        io::ErrorKind::AddrInUse => {
+            Some("The port is already in use. Try a different port or stop the conflicting service")
+        }
+        io::ErrorKind::AddrNotAvailable => {
+            Some("The address is not available. Check network interface configuration")
+        }
+        io::ErrorKind::NotFound => Some("Check that the required files exist"),
+        io::ErrorKind::InvalidData => {
+            Some("Check that certificate files are in correct PEM format")
+        }
+        _ => None,
     }
 }
 
@@ -142,17 +131,6 @@ mod tests {
         let result =
             serve_with_shutdown(&config, || async { Err(io::Error::other("test error")) }).await;
 
-        assert!(matches!(result, Err(ServerError::Runtime(_))));
-    }
-
-    #[tokio::test]
-    async fn serve_with_shutdown_validates_config() {
-        let config = ServerConfig {
-            port: 80, // Invalid for non-root
-            ..Default::default()
-        };
-
-        let result = serve_with_shutdown(&config, || async { Ok(()) }).await;
-        assert!(matches!(result, Err(ServerError::InvalidConfig(_))));
+        assert!(result.is_err());
     }
 }

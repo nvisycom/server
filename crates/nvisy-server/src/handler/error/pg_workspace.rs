@@ -132,18 +132,10 @@ impl From<WorkspaceIntegrationConstraints> for Error<'static> {
 impl From<WorkspaceIntegrationRunConstraints> for Error<'static> {
     fn from(c: WorkspaceIntegrationRunConstraints) -> Self {
         let error = match c {
-            WorkspaceIntegrationRunConstraints::RunNameLength => {
-                ErrorKind::BadRequest.with_message("Run name length is invalid")
-            }
-            WorkspaceIntegrationRunConstraints::RunTypeFormat => {
-                ErrorKind::BadRequest.with_message("Run type format is invalid")
-            }
             WorkspaceIntegrationRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Run metadata size is invalid")
             }
-            WorkspaceIntegrationRunConstraints::CompletedAfterStarted
-            | WorkspaceIntegrationRunConstraints::UpdatedAfterCreated
-            | WorkspaceIntegrationRunConstraints::StartedAfterCreated => {
+            WorkspaceIntegrationRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }
         };

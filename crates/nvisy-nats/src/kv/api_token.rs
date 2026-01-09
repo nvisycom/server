@@ -13,10 +13,10 @@ pub enum ApiTokenType {
     /// Web browser token
     #[default]
     Web,
-    /// Mobile application token
-    Mobile,
     /// API/service token
     Api,
+    /// CLI tool token
+    Cli,
 }
 
 /// Token store statistics.
@@ -34,10 +34,10 @@ pub struct TokenStoreStats {
     pub suspicious_tokens: u32,
     /// Number of web tokens
     pub web_tokens: u32,
-    /// Number of mobile tokens
-    pub mobile_tokens: u32,
     /// Number of API tokens
     pub api_tokens: u32,
+    /// Number of CLI tokens
+    pub cli_tokens: u32,
 }
 
 impl TokenStoreStats {
@@ -276,8 +276,8 @@ mod tests {
             deleted_tokens: 10,
             suspicious_tokens: 5,
             web_tokens: 60,
-            mobile_tokens: 30,
-            api_tokens: 10,
+            api_tokens: 30,
+            cli_tokens: 10,
         };
 
         let summary = stats.summary();
@@ -294,12 +294,12 @@ mod tests {
         let serialized = serde_json::to_string(&web).unwrap();
         assert_eq!(serialized, "\"web\"");
 
-        let mobile = ApiTokenType::Mobile;
-        let serialized = serde_json::to_string(&mobile).unwrap();
-        assert_eq!(serialized, "\"mobile\"");
-
         let api = ApiTokenType::Api;
         let serialized = serde_json::to_string(&api).unwrap();
         assert_eq!(serialized, "\"api\"");
+
+        let cli = ApiTokenType::Cli;
+        let serialized = serde_json::to_string(&cli).unwrap();
+        assert_eq!(serialized, "\"cli\"");
     }
 }

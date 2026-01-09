@@ -8,8 +8,8 @@
 //! - `HOST` - Server host address (default: 127.0.0.1)
 //! - `PORT` - Server port (default: 3000)
 //! - `SHUTDOWN_TIMEOUT` - Graceful shutdown timeout in seconds (default: 30)
-//! - `TLS_CERT_PATH` - Path to TLS certificate (optional, requires `tls` feature)
-//! - `TLS_KEY_PATH` - Path to TLS private key (optional, requires `tls` feature)
+//! - `TLS_CERT_PATH` - Path to TLS certificate (required when `tls` feature enabled)
+//! - `TLS_KEY_PATH` - Path to TLS private key (required when `tls` feature enabled)
 //!
 //! # Example
 //!
@@ -26,7 +26,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Result as AnyhowResult, anyhow};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
@@ -66,12 +65,12 @@ pub struct ServerConfig {
     /// Path to TLS certificate file (PEM format).
     #[cfg(feature = "tls")]
     #[arg(long, env = "TLS_CERT_PATH")]
-    pub tls_cert_path: Option<PathBuf>,
+    pub tls_cert_path: PathBuf,
 
     /// Path to TLS private key file (PEM format).
     #[cfg(feature = "tls")]
     #[arg(long, env = "TLS_KEY_PATH")]
-    pub tls_key_path: Option<PathBuf>,
+    pub tls_key_path: PathBuf,
 }
 
 const fn default_host() -> IpAddr {
@@ -79,44 +78,6 @@ const fn default_host() -> IpAddr {
 }
 
 impl ServerConfig {
-    /// Validates configuration values.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Port is below 1024
-    /// - Shutdown timeout is 0 or exceeds 300 seconds
-    /// - Only one of TLS cert/key paths is provided (when TLS enabled)
-    pub fn validate(&self) -> AnyhowResult<()> {
-        if self.port < 1024 {
-            return Err(anyhow!(
-                "Port {} is below 1024. Use ports 1024-65535 to avoid requiring root privileges.",
-                self.port
-            ));
-        }
-
-        if self.shutdown_timeout == 0 || self.shutdown_timeout > 300 {
-            return Err(anyhow!(
-                "Shutdown timeout {} seconds is invalid. Must be between 1 and 300 seconds.",
-                self.shutdown_timeout
-            ));
-        }
-
-        #[cfg(feature = "tls")]
-        {
-            match (&self.tls_cert_path, &self.tls_key_path) {
-                (Some(_), None) | (None, Some(_)) => {
-                    return Err(anyhow!(
-                        "Both TLS certificate and key paths must be provided together"
-                    ));
-                }
-                _ => {}
-            }
-        }
-
-        Ok(())
-    }
-
     /// Returns the socket address for server binding.
     #[must_use]
     pub const fn socket_addr(&self) -> SocketAddr {
@@ -141,14 +102,7 @@ impl ServerConfig {
     /// Returns whether TLS is configured.
     #[must_use]
     pub const fn is_tls_enabled(&self) -> bool {
-        #[cfg(feature = "tls")]
-        {
-            self.tls_cert_path.is_some() && self.tls_key_path.is_some()
-        }
-        #[cfg(not(feature = "tls"))]
-        {
-            false
-        }
+        cfg!(feature = "tls")
     }
 
     /// Logs server configuration at info level.
@@ -171,9 +125,9 @@ impl Default for ServerConfig {
             port: 8080,
             shutdown_timeout: 30,
             #[cfg(feature = "tls")]
-            tls_cert_path: None,
+            tls_cert_path: PathBuf::from("cert.pem"),
             #[cfg(feature = "tls")]
-            tls_key_path: None,
+            tls_key_path: PathBuf::from("key.pem"),
         }
     }
 }
@@ -183,9 +137,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_default_config() {
+    fn default_config() {
         let config = ServerConfig::default();
-        assert!(config.validate().is_ok());
         assert!(config.binds_to_all_interfaces());
         assert_eq!(config.port, 8080);
         assert_eq!(config.shutdown_timeout, 30);

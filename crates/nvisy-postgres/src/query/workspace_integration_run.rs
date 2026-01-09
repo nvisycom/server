@@ -125,7 +125,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
 
         let runs = workspace_integration_runs::table
             .filter(dsl::workspace_id.eq(workspace_id))
-            .order(dsl::created_at.desc())
+            .order(dsl::started_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(WorkspaceIntegrationRun::as_select())
@@ -164,11 +164,11 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
             workspace_integration_runs::table
                 .filter(base_filter)
                 .filter(
-                    dsl::created_at
+                    dsl::started_at
                         .lt(cursor_ts)
-                        .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
+                        .or(dsl::started_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
                 )
-                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .order((dsl::started_at.desc(), dsl::id.desc()))
                 .limit(pagination.fetch_limit())
                 .select(WorkspaceIntegrationRun::as_select())
                 .load(self)
@@ -177,7 +177,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
         } else {
             workspace_integration_runs::table
                 .filter(base_filter)
-                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .order((dsl::started_at.desc(), dsl::id.desc()))
                 .limit(pagination.fetch_limit())
                 .select(WorkspaceIntegrationRun::as_select())
                 .load(self)
@@ -186,7 +186,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
         };
 
         Ok(CursorPage::new(items, total, pagination.limit, |r| {
-            (r.created_at.into(), r.id)
+            (r.started_at.into(), r.id)
         }))
     }
 
@@ -199,7 +199,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
 
         let runs = workspace_integration_runs::table
             .filter(dsl::integration_id.eq(integration_id))
-            .order(dsl::created_at.desc())
+            .order(dsl::started_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
             .select(WorkspaceIntegrationRun::as_select())
@@ -238,11 +238,11 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
             workspace_integration_runs::table
                 .filter(base_filter)
                 .filter(
-                    dsl::created_at
+                    dsl::started_at
                         .lt(cursor_ts)
-                        .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
+                        .or(dsl::started_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
                 )
-                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .order((dsl::started_at.desc(), dsl::id.desc()))
                 .limit(pagination.fetch_limit())
                 .select(WorkspaceIntegrationRun::as_select())
                 .load(self)
@@ -251,7 +251,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
         } else {
             workspace_integration_runs::table
                 .filter(base_filter)
-                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .order((dsl::started_at.desc(), dsl::id.desc()))
                 .limit(pagination.fetch_limit())
                 .select(WorkspaceIntegrationRun::as_select())
                 .load(self)
@@ -260,7 +260,7 @@ impl WorkspaceIntegrationRunRepository for PgConnection {
         };
 
         Ok(CursorPage::new(items, total, pagination.limit, |r| {
-            (r.created_at.into(), r.id)
+            (r.started_at.into(), r.id)
         }))
     }
 }

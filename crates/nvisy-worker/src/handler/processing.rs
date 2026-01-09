@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use nvisy_nats::stream::{DocumentJob, DocumentJobSubscriber, ProcessingData};
+use nvisy_nats::stream::{DocumentJob, DocumentJobSubscriber, ProcessingData, TypedMessage};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -85,7 +85,6 @@ impl ProcessingWorker {
         let mut stream = subscriber.subscribe().await?;
 
         loop {
-            // Check for shutdown signal
             tokio::select! {
                 biased;
 
@@ -98,88 +97,100 @@ impl ProcessingWorker {
                 }
 
                 result = stream.next() => {
-                    let msg = match result {
-                        Ok(Some(msg)) => msg,
-                        Ok(None) => {
-                            tracing::trace!(target: TRACING_TARGET, "No messages available");
-                            continue;
-                        }
-                        Err(err) => {
-                            tracing::error!(
-                                target: TRACING_TARGET,
-                                error = %err,
-                                "Failed to receive message"
-                            );
-                            continue;
-                        }
-                    };
-
-                    // Acquire semaphore permit for concurrency control
-                    let permit = match self.semaphore.clone().acquire_owned().await {
-                        Ok(permit) => permit,
-                        Err(_) => {
-                            tracing::error!(
-                                target: TRACING_TARGET,
-                                "Semaphore closed, stopping worker"
-                            );
-                            break;
-                        }
-                    };
-
-                    let state = self.state.clone();
-                    let job = msg.payload().clone();
-                    let job_id = job.id;
-                    let file_id = job.file_id;
-
-                    let mut msg = msg;
-                    if let Err(err) = msg.ack().await {
-                        tracing::error!(
-                            target: TRACING_TARGET,
-                            job_id = %job_id,
-                            error = %err,
-                            "Failed to ack message"
-                        );
+                    if !self.handle_stream_result(result).await {
+                        break;
                     }
-
-                    tokio::spawn(async move {
-                        // Hold permit until job completes
-                        let _permit = permit;
-
-                        tracing::info!(
-                            target: TRACING_TARGET,
-                            job_id = %job_id,
-                            file_id = %file_id,
-                            stage = job.stage_name(),
-                            task_count = job.data().tasks.len(),
-                            "Processing document job"
-                        );
-
-                        match handle_job(&state, &job).await {
-                            Ok(()) => {
-                                tracing::info!(
-                                    target: TRACING_TARGET,
-                                    job_id = %job_id,
-                                    file_id = %file_id,
-                                    "Processing job completed"
-                                );
-                            }
-                            Err(err) => {
-                                tracing::error!(
-                                    target: TRACING_TARGET,
-                                    job_id = %job_id,
-                                    file_id = %file_id,
-                                    error = %err,
-                                    "Processing job failed"
-                                );
-                                // TODO: Implement retry logic or dead letter queue
-                            }
-                        }
-                    });
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Handles a stream result, returning false if the worker should stop.
+    async fn handle_stream_result(
+        &self,
+        result: nvisy_nats::Result<Option<TypedMessage<DocumentJob<ProcessingData>>>>,
+    ) -> bool {
+        let msg = match result {
+            Ok(Some(msg)) => msg,
+            Ok(None) => {
+                tracing::trace!(target: TRACING_TARGET, "No messages available");
+                return true;
+            }
+            Err(err) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    "Failed to receive message"
+                );
+                return true;
+            }
+        };
+
+        // Acquire semaphore permit for concurrency control
+        let permit = match self.semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    "Semaphore closed, stopping worker"
+                );
+                return false;
+            }
+        };
+
+        let state = self.state.clone();
+        let job = msg.payload().clone();
+        let job_id = job.id;
+        let file_id = job.file_id;
+
+        let mut msg = msg;
+        if let Err(err) = msg.ack().await {
+            tracing::error!(
+                target: TRACING_TARGET,
+                job_id = %job_id,
+                error = %err,
+                "Failed to ack message"
+            );
+        }
+
+        tokio::spawn(async move {
+            // Hold permit until job completes
+            let _permit = permit;
+
+            tracing::info!(
+                target: TRACING_TARGET,
+                job_id = %job_id,
+                file_id = %file_id,
+                stage = job.stage_name(),
+                task_count = job.data().tasks.len(),
+                "Processing document job"
+            );
+
+            match handle_job(&state, &job).await {
+                Ok(()) => {
+                    tracing::info!(
+                        target: TRACING_TARGET,
+                        job_id = %job_id,
+                        file_id = %file_id,
+                        "Processing job completed"
+                    );
+                }
+                Err(err) => {
+                    tracing::error!(
+                        target: TRACING_TARGET,
+                        job_id = %job_id,
+                        file_id = %file_id,
+                        error = %err,
+                        "Processing job failed"
+                    );
+                    // TODO: Implement retry logic or dead letter queue
+                }
+            }
+        });
+
+        true
     }
 }
 

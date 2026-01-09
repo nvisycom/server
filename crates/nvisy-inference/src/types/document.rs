@@ -55,7 +55,7 @@ impl fmt::Display for DocumentId {
 /// Creating a simple text document:
 ///
 /// ```rust
-/// use nvisy_inference::Document;
+/// use nvisy_inference::types::Document;
 /// use bytes::Bytes;
 ///
 /// let content = "Hello, world!";
@@ -67,7 +67,7 @@ impl fmt::Display for DocumentId {
 /// Creating a document from binary data:
 ///
 /// ```rust
-/// use nvisy_inference::Document;
+/// use nvisy_inference::types::Document;
 /// use bytes::Bytes;
 ///
 /// let binary_data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
@@ -137,7 +137,7 @@ impl Document {
     ///
     /// ```rust
     /// use bytes::Bytes;
-    /// use nvisy_inference::Document;
+    /// use nvisy_inference::types::Document;
     ///
     /// let content = Bytes::from("Hello, world!");
     /// let doc = Document::new(content);

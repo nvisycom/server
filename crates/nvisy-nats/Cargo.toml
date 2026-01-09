@@ -19,7 +19,9 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
+
 schema = ["dep:schemars"]
 
 # CLI configuration support: enables clap derives for config types

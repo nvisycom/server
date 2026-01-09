@@ -14,9 +14,10 @@ use nvisy_postgres::model::Account;
 use nvisy_postgres::query::AccountRepository;
 use serde::Deserialize;
 
-use super::{AuthClaims, AuthHeader, TRACING_TARGET_AUTHENTICATION};
+use super::{AuthClaims, AuthHeader};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
+use crate::utility::tracing_targets::TRACING_TARGET_AUTHENTICATION;
 
 /// Authenticated user state with comprehensive database verification.
 ///

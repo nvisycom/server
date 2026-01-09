@@ -20,7 +20,7 @@ pub use constraint::{
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, AnnotationType, ApiTokenType,
     ContentSegmentation, IntegrationStatus, IntegrationType, InviteStatus, NotificationEvent,
-    ProcessingStatus, RequireMode, WebhookEvent, WebhookStatus, WorkspaceRole,
+    ProcessingStatus, RequireMode, RunType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{FileFilter, FileFormat, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};

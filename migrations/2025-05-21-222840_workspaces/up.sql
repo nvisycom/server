@@ -329,8 +329,8 @@ COMMENT ON COLUMN workspace_activities.created_at IS 'Timestamp when the activit
 -- Enum types for workspace_integrations table
 CREATE TYPE INTEGRATION_STATUS AS ENUM (
     'pending',      -- Integration is being set up
-    'executing',    -- Integration is actively running
-    'failed'        -- Integration has failed
+    'running',      -- Integration is actively running
+    'cancelled'     -- Integration has been cancelled
 );
 
 COMMENT ON TYPE INTEGRATION_STATUS IS
@@ -412,7 +412,7 @@ COMMENT ON COLUMN workspace_integrations.metadata IS 'Integration configuration 
 COMMENT ON COLUMN workspace_integrations.credentials IS 'Encrypted credentials (JSON, 2B-4KB)';
 COMMENT ON COLUMN workspace_integrations.is_active IS 'Integration active status';
 COMMENT ON COLUMN workspace_integrations.last_sync_at IS 'Timestamp of last synchronization';
-COMMENT ON COLUMN workspace_integrations.sync_status IS 'Current integration status (pending, executing, failure)';
+COMMENT ON COLUMN workspace_integrations.sync_status IS 'Current integration status (pending, running, cancelled)';
 COMMENT ON COLUMN workspace_integrations.created_by IS 'Account that created the integration';
 COMMENT ON COLUMN workspace_integrations.created_at IS 'Timestamp when integration was created';
 COMMENT ON COLUMN workspace_integrations.updated_at IS 'Timestamp when integration was last modified';
@@ -526,6 +526,16 @@ COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was c
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
 COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft deletion timestamp';
 
+-- Run type enum
+CREATE TYPE RUN_TYPE AS ENUM (
+    'manual',       -- Run triggered manually by a user
+    'scheduled',    -- Run triggered by a schedule
+    'triggered'     -- Run triggered by an external event or webhook
+);
+
+COMMENT ON TYPE RUN_TYPE IS
+    'Defines how an integration run was triggered.';
+
 -- Workspace integration runs table definition
 CREATE TABLE workspace_integration_runs (
     -- Primary identifier
@@ -536,12 +546,8 @@ CREATE TABLE workspace_integration_runs (
     integration_id      UUID             DEFAULT NULL REFERENCES workspace_integrations (id) ON DELETE SET NULL,
     account_id          UUID             DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
 
-    -- Run identity
-    run_name            TEXT             NOT NULL DEFAULT 'Untitled Run',
-    run_type            TEXT             NOT NULL DEFAULT 'manual',
-
-    CONSTRAINT workspace_integration_runs_run_name_length CHECK (length(trim(run_name)) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_integration_runs_run_type_format CHECK (run_type ~ '^[a-z_]+$'),
+    -- Run classification
+    run_type            RUN_TYPE         NOT NULL DEFAULT 'manual',
 
     -- Run status and metadata
     run_status          INTEGRATION_STATUS NOT NULL DEFAULT 'pending',
@@ -550,35 +556,25 @@ CREATE TABLE workspace_integration_runs (
     CONSTRAINT workspace_integration_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
 
     -- Run timing
-    started_at          TIMESTAMPTZ      DEFAULT NULL,
+    started_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     completed_at        TIMESTAMPTZ      DEFAULT NULL,
 
-    CONSTRAINT workspace_integration_runs_completed_after_started CHECK (completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at),
-
-    -- Lifecycle timestamps
-    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-
-    CONSTRAINT workspace_integration_runs_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_integration_runs_started_after_created CHECK (started_at IS NULL OR started_at >= created_at)
+    CONSTRAINT workspace_integration_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
-
--- Triggers for workspace_integration_runs table
-SELECT setup_updated_at('workspace_integration_runs');
 
 -- Indexes for workspace_integration_runs table
 CREATE INDEX workspace_integration_runs_workspace_recent_idx
-    ON workspace_integration_runs (workspace_id, created_at DESC);
+    ON workspace_integration_runs (workspace_id, started_at DESC);
 
 CREATE INDEX workspace_integration_runs_integration_idx
-    ON workspace_integration_runs (integration_id, run_status, created_at DESC)
+    ON workspace_integration_runs (integration_id, run_status, started_at DESC)
     WHERE integration_id IS NOT NULL;
 
 CREATE INDEX workspace_integration_runs_status_idx
-    ON workspace_integration_runs (run_status, workspace_id, created_at DESC);
+    ON workspace_integration_runs (run_status, workspace_id, started_at DESC);
 
 CREATE INDEX workspace_integration_runs_account_idx
-    ON workspace_integration_runs (account_id, created_at DESC)
+    ON workspace_integration_runs (account_id, started_at DESC)
     WHERE account_id IS NOT NULL;
 
 -- Comments for workspace_integration_runs table
@@ -589,14 +585,11 @@ COMMENT ON COLUMN workspace_integration_runs.id IS 'Unique run identifier';
 COMMENT ON COLUMN workspace_integration_runs.workspace_id IS 'Reference to the workspace';
 COMMENT ON COLUMN workspace_integration_runs.integration_id IS 'Reference to the integration (NULL for manual runs)';
 COMMENT ON COLUMN workspace_integration_runs.account_id IS 'Account that triggered the run (NULL for automated runs)';
-COMMENT ON COLUMN workspace_integration_runs.run_name IS 'Human-readable run name (1-255 chars)';
-COMMENT ON COLUMN workspace_integration_runs.run_type IS 'Type of run (manual, scheduled, triggered, etc.)';
-COMMENT ON COLUMN workspace_integration_runs.run_status IS 'Current run status (pending, executing, failure)';
+COMMENT ON COLUMN workspace_integration_runs.run_type IS 'Type of run (manual, scheduled, triggered)';
+COMMENT ON COLUMN workspace_integration_runs.run_status IS 'Current run status (pending, running, cancelled)';
 COMMENT ON COLUMN workspace_integration_runs.metadata IS 'Run metadata, results, and error details (JSON, 2B-16KB)';
-COMMENT ON COLUMN workspace_integration_runs.started_at IS 'Timestamp when run execution started';
-COMMENT ON COLUMN workspace_integration_runs.completed_at IS 'Timestamp when run execution completed';
-COMMENT ON COLUMN workspace_integration_runs.created_at IS 'Timestamp when run was created';
-COMMENT ON COLUMN workspace_integration_runs.updated_at IS 'Timestamp when run was last modified';
+COMMENT ON COLUMN workspace_integration_runs.started_at IS 'Timestamp when run was started';
+COMMENT ON COLUMN workspace_integration_runs.completed_at IS 'Timestamp when run was completed';
 
 -- Create workspace member summary view
 CREATE VIEW workspace_member_summary AS

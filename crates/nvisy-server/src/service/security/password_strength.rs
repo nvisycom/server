@@ -10,7 +10,7 @@ use zxcvbn::time_estimates::CrackTimeSeconds;
 use zxcvbn::zxcvbn;
 
 use crate::handler::{ErrorKind, Result};
-use crate::utility::tracing_targets::PASSWORD_STRENGTH as TRACING_TARGET;
+use crate::utility::tracing_targets::TRACING_TARGET_PASSWORD_STRENGTH as TRACING_TARGET;
 
 /// Password strength evaluator using the zxcvbn algorithm.
 #[derive(Debug, Clone)]

@@ -3,38 +3,60 @@
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
+use derive_builder::Builder;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::Timing;
-
-/// Format for returned embeddings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum EmbeddingFormat {
-    /// Return embeddings as floating point numbers.
-    #[default]
-    Float,
-    /// Return embeddings as base64-encoded strings.
-    Base64,
-}
+use crate::service::UsageStats;
+use crate::types::Timing;
 
 /// Response from a single embedding operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "EmbeddingResponseBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "EmbeddingResponseError")
+)]
 pub struct EmbeddingResponse {
     /// Unique identifier for this response.
+    #[builder(default = "Uuid::now_v7()")]
     pub response_id: Uuid,
     /// Request ID this response corresponds to.
     pub request_id: Uuid,
     /// Generated embedding vector.
     pub embedding: Vec<f32>,
     /// Tokens processed for this request.
+    #[builder(default)]
     pub tokens: Option<NonZeroU32>,
     /// Timing information for the operation.
+    #[builder(default)]
     pub timing: Option<Timing>,
     /// Additional metadata about the processing.
+    #[builder(default)]
     pub metadata: HashMap<String, serde_json::Value>,
+    /// Usage statistics for this operation.
+    #[builder(default)]
+    pub usage: Option<UsageStats>,
+}
+
+/// Error type for EmbeddingResponse builder.
+pub type EmbeddingResponseError = derive_builder::UninitializedFieldError;
+
+impl EmbeddingResponseBuilder {
+    /// Build the response.
+    pub fn build(self) -> Result<EmbeddingResponse, EmbeddingResponseError> {
+        self.build_inner()
+    }
+
+    /// Add metadata to this response.
+    pub fn add_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata
+            .get_or_insert_with(HashMap::new)
+            .insert(key.into(), value);
+        self
+    }
 }
 
 impl EmbeddingResponse {
@@ -47,7 +69,13 @@ impl EmbeddingResponse {
             tokens: None,
             timing: None,
             metadata: HashMap::new(),
+            usage: None,
         }
+    }
+
+    /// Create a builder for this response.
+    pub fn builder() -> EmbeddingResponseBuilder {
+        EmbeddingResponseBuilder::default()
     }
 
     /// Set timing information.
@@ -68,12 +96,6 @@ impl EmbeddingResponse {
         self
     }
 
-    /// Add metadata to this response.
-    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.metadata.insert(key.into(), value);
-        self
-    }
-
     /// Get the processing time as a signed duration.
     pub fn processing_time(&self) -> Option<SignedDuration> {
         self.timing.map(|t| t.duration())
@@ -86,12 +108,36 @@ impl EmbeddingResponse {
 }
 
 /// Batch response containing multiple embedding results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "EmbeddingBatchResponseBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "EmbeddingBatchResponseError")
+)]
 pub struct EmbeddingBatchResponse {
     /// Unique identifier for this batch response.
+    #[builder(default = "Uuid::now_v7()")]
     pub batch_id: Uuid,
     /// Individual responses in the batch.
+    #[builder(default)]
     pub responses: Vec<EmbeddingResponse>,
+}
+
+/// Error type for EmbeddingBatchResponse builder.
+pub type EmbeddingBatchResponseError = derive_builder::UninitializedFieldError;
+
+impl EmbeddingBatchResponseBuilder {
+    /// Build the response.
+    pub fn build(self) -> Result<EmbeddingBatchResponse, EmbeddingBatchResponseError> {
+        self.build_inner()
+    }
+
+    /// Add a response to the batch.
+    pub fn add_response(mut self, response: EmbeddingResponse) -> Self {
+        self.responses.get_or_insert_with(Vec::new).push(response);
+        self
+    }
 }
 
 impl EmbeddingBatchResponse {
@@ -110,6 +156,11 @@ impl EmbeddingBatchResponse {
             .map(|embedding| EmbeddingResponse::new(Uuid::now_v7(), embedding))
             .collect();
         Self::new(responses)
+    }
+
+    /// Create a builder for this response.
+    pub fn builder() -> EmbeddingBatchResponseBuilder {
+        EmbeddingBatchResponseBuilder::default()
     }
 
     /// Get the earliest start time from all responses.
@@ -178,6 +229,18 @@ mod tests {
         assert_eq!(response.request_id, request_id);
         assert_eq!(response.dimensions(), 3);
         assert!(response.timing.is_none());
+    }
+
+    #[test]
+    fn test_embedding_response_builder() {
+        let request_id = Uuid::new_v4();
+        let response = EmbeddingResponse::builder()
+            .with_request_id(request_id)
+            .with_embedding(vec![0.1, 0.2, 0.3])
+            .build()
+            .unwrap();
+        assert_eq!(response.request_id, request_id);
+        assert_eq!(response.dimensions(), 3);
     }
 
     #[test]

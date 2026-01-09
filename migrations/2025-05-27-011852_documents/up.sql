@@ -72,10 +72,8 @@ COMMENT ON COLUMN documents.deleted_at IS 'Soft deletion timestamp';
 CREATE TYPE PROCESSING_STATUS AS ENUM (
     'pending',      -- File is queued for processing
     'processing',   -- File is currently being processed
-    'completed',    -- Processing completed successfully
-    'failed',       -- Processing failed
-    'canceled',     -- Processing was canceled
-    'skipped'       -- Processing was skipped
+    'ready',        -- Processing completed, file is ready for use
+    'canceled'      -- Processing was canceled
 );
 
 COMMENT ON TYPE PROCESSING_STATUS IS

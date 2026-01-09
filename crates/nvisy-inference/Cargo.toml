@@ -22,7 +22,9 @@ default = []
 # CLI configuration support: enables clap derives for config types
 config = ["dep:clap"]
 
-# JSON Schema support for API documentation
+# JSON Schema support: enables JsonSchema derives on Postgres types
+# This allows Postgres types to be used directly in API documentation without
+# manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars", "nvisy-core/schema"]
 
 [dependencies]
@@ -37,6 +39,7 @@ async-trait = { workspace = true }
 # Macros and utilities
 thiserror = { workspace = true }
 derive_more = { workspace = true, features = ["from", "into"] }
+derive_builder = { workspace = true }
 
 # Observability
 tracing = { workspace = true }

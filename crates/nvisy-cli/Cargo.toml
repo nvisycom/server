@@ -32,7 +32,6 @@ otel = ["tracing-subscriber/env-filter"]
 # This allows configuration via .env files in addition to CLI args
 dotenv = ["dep:dotenvy"]
 
-
 [dependencies]
 # Internal and core services.
 nvisy-nats = { workspace = true, features = ["config"] }
@@ -42,7 +41,7 @@ nvisy-webhook = { workspace = true, features = [] }
 
 # Service implementations.
 nvisy-ollama = { workspace = true, features = ["config"] }
-nvisy-reqwest = { workspace = true, features = [] }
+nvisy-reqwest = { workspace = true, features = ["config"] }
 nvisy-server = { workspace = true, features = ["config"] }
 nvisy-worker = { workspace = true, features = ["config"] }
 

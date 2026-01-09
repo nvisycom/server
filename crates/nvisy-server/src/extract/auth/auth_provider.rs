@@ -9,8 +9,9 @@ use nvisy_postgres::query::{DocumentRepository, WorkspaceMemberRepository};
 use nvisy_postgres::{PgConn, PgError};
 use uuid::Uuid;
 
-use super::{AuthResult, Permission, TRACING_TARGET_AUTHORIZATION};
+use super::{AuthResult, Permission};
 use crate::handler::Result;
+use crate::utility::tracing_targets::TRACING_TARGET_AUTHORIZATION;
 
 /// Authorization provider for authenticated users.
 ///

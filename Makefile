@@ -1,12 +1,9 @@
-# Makefile for api.nvisy.com
+# Makefile for the on-premise version of api.nvisy.com
 
 ifneq (,$(wildcard ./.env))
 	include .env
 	export
 endif
-
-# Environment variables.
-EXPOSED_PORT ?= 3000
 
 # PostgreSQL connection URL for diesel CLI.
 POSTGRES_URL ?= postgresql://postgres:postgres@localhost:5432/postgres
@@ -53,9 +50,15 @@ install-all: install-tools # Installs all dependencies.
 	@chmod +x scripts/*.sh
 	$(call make-log,Scripts made executable!)
 
+.PHONY: generate-env
+generate-env: ## Copies .env.example to .env.
+	$(call make-log,Copying .env.example to .env...)
+	@cp ./.env.example ./.env
+	$(call make-log,.env file created successfully.)
+
 .PHONY: generate-keys
 generate-keys: ## Generates a private and public auth key pair.
-	$(call make-log,Deleting a generated keys...)
+	$(call make-log,Deleting previously generated keys...)
 	@rm -f $(PRIVATE_KEY_FILE) $(PUBLIC_KEY_FILE)
 	$(call make-log,Previously generated keys deleted.)
 
@@ -102,5 +105,8 @@ clear-migrations: ## Reverts all database migrations.
 	done
 	$(call make-log,All migrations reverted successfully.)
 
-.PHONY: generate
-generate: generate-keys generate-migrations
+.PHONY: generate-all
+generate-all: generate-env generate-keys generate-migrations
+
+.PHONY: all
+all: install-all generate-all

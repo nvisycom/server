@@ -2,53 +2,57 @@
 
 use std::collections::HashMap;
 
+use derive_builder::Builder;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::Timing;
-
-/// Usage statistics for VLM operations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct VlmUsage {
-    /// Number of tokens in the prompt.
-    pub prompt_tokens: u32,
-    /// Number of tokens in the completion.
-    pub completion_tokens: u32,
-    /// Total number of tokens used.
-    pub total_tokens: u32,
-}
-
-impl VlmUsage {
-    /// Create a new usage record.
-    pub fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
-        Self {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens: prompt_tokens + completion_tokens,
-        }
-    }
-}
+use crate::types::Timing;
+use crate::service::UsageStats;
 
 /// Response from a single VLM operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "VlmResponseBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "VlmResponseError")
+)]
 pub struct VlmResponse {
     /// Unique identifier for this response.
+    #[builder(default = "Uuid::now_v7()")]
     pub response_id: Uuid,
     /// Request ID this response corresponds to.
     pub request_id: Uuid,
     /// The generated content.
     pub content: String,
-    /// Token usage information.
-    pub usage: Option<VlmUsage>,
-    /// Reason why generation finished.
-    pub finish_reason: Option<String>,
-    /// Confidence score for the response (0.0 to 1.0).
-    pub confidence: Option<f64>,
     /// Timing information for the operation.
+    #[builder(default)]
     pub timing: Option<Timing>,
     /// Additional metadata about the processing.
+    #[builder(default)]
     pub metadata: HashMap<String, serde_json::Value>,
+    /// Usage statistics for this operation.
+    #[builder(default)]
+    pub usage: Option<UsageStats>,
+}
+
+/// Error type for VlmResponse builder.
+pub type VlmResponseError = derive_builder::UninitializedFieldError;
+
+impl VlmResponseBuilder {
+    /// Build the response.
+    pub fn build(self) -> Result<VlmResponse, VlmResponseError> {
+        self.build_inner()
+    }
+
+    /// Add metadata to this response.
+    pub fn add_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata
+            .get_or_insert_with(HashMap::new)
+            .insert(key.into(), value);
+        self
+    }
 }
 
 impl VlmResponse {
@@ -58,49 +62,20 @@ impl VlmResponse {
             response_id: Uuid::now_v7(),
             request_id,
             content: content.into(),
-            usage: None,
-            finish_reason: None,
-            confidence: None,
             timing: None,
             metadata: HashMap::new(),
+            usage: None,
         }
     }
 
-    /// Create a new VLM response with content and usage.
-    pub fn with_usage(request_id: Uuid, content: impl Into<String>, usage: VlmUsage) -> Self {
-        Self {
-            response_id: Uuid::now_v7(),
-            request_id,
-            content: content.into(),
-            usage: Some(usage),
-            finish_reason: None,
-            confidence: None,
-            timing: None,
-            metadata: HashMap::new(),
-        }
+    /// Create a builder for this response.
+    pub fn builder() -> VlmResponseBuilder {
+        VlmResponseBuilder::default()
     }
 
     /// Set timing information.
     pub fn with_timing(mut self, started_at: Timestamp, ended_at: Timestamp) -> Self {
         self.timing = Some(Timing::new(started_at, ended_at));
-        self
-    }
-
-    /// Set the finish reason.
-    pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
-        self.finish_reason = Some(reason.into());
-        self
-    }
-
-    /// Set the confidence score.
-    pub fn with_confidence(mut self, confidence: f64) -> Self {
-        self.confidence = Some(confidence.clamp(0.0, 1.0));
-        self
-    }
-
-    /// Add metadata to this response.
-    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.metadata.insert(key.into(), value);
         self
     }
 
@@ -124,30 +99,6 @@ impl VlmResponse {
         self.content.is_empty()
     }
 
-    /// Check if the response generation completed normally.
-    pub fn is_complete(&self) -> bool {
-        matches!(
-            self.finish_reason.as_deref(),
-            Some("complete") | Some("stop") | Some("end_turn") | None
-        )
-    }
-
-    /// Check if the response was truncated due to length limits.
-    pub fn is_truncated(&self) -> bool {
-        matches!(
-            self.finish_reason.as_deref(),
-            Some("length") | Some("max_tokens")
-        )
-    }
-
-    /// Check if the response was stopped due to content filtering.
-    pub fn is_filtered(&self) -> bool {
-        matches!(
-            self.finish_reason.as_deref(),
-            Some("content_filter") | Some("safety")
-        )
-    }
-
     /// Get total tokens used.
     pub fn total_tokens(&self) -> Option<u32> {
         self.usage.as_ref().map(|u| u.total_tokens)
@@ -155,12 +106,36 @@ impl VlmResponse {
 }
 
 /// Batch response containing multiple VLM results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "VlmBatchResponseBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "VlmBatchResponseError")
+)]
 pub struct VlmBatchResponse {
     /// Unique identifier for this batch response.
+    #[builder(default = "Uuid::now_v7()")]
     pub batch_id: Uuid,
     /// Individual responses in the batch.
+    #[builder(default)]
     pub responses: Vec<VlmResponse>,
+}
+
+/// Error type for VlmBatchResponse builder.
+pub type VlmBatchResponseError = derive_builder::UninitializedFieldError;
+
+impl VlmBatchResponseBuilder {
+    /// Build the response.
+    pub fn build(self) -> Result<VlmBatchResponse, VlmBatchResponseError> {
+        self.build_inner()
+    }
+
+    /// Add a response to the batch.
+    pub fn add_response(mut self, response: VlmResponse) -> Self {
+        self.responses.get_or_insert_with(Vec::new).push(response);
+        self
+    }
 }
 
 impl VlmBatchResponse {
@@ -170,6 +145,11 @@ impl VlmBatchResponse {
             batch_id: Uuid::now_v7(),
             responses,
         }
+    }
+
+    /// Create a builder for this response.
+    pub fn builder() -> VlmBatchResponseBuilder {
+        VlmBatchResponseBuilder::default()
     }
 
     /// Get the earliest start time from all responses.
@@ -242,26 +222,14 @@ mod tests {
     }
 
     #[test]
-    fn test_vlm_usage() {
-        let usage = VlmUsage::new(25, 75);
-        assert_eq!(usage.prompt_tokens, 25);
-        assert_eq!(usage.completion_tokens, 75);
-        assert_eq!(usage.total_tokens, 100);
-    }
-
-    #[test]
-    fn test_vlm_response_status_methods() {
-        let complete = VlmResponse::new(Uuid::new_v4(), "test").with_finish_reason("stop");
-        assert!(complete.is_complete());
-        assert!(!complete.is_truncated());
-        assert!(!complete.is_filtered());
-
-        let truncated = VlmResponse::new(Uuid::new_v4(), "test").with_finish_reason("length");
-        assert!(!truncated.is_complete());
-        assert!(truncated.is_truncated());
-
-        let filtered =
-            VlmResponse::new(Uuid::new_v4(), "test").with_finish_reason("content_filter");
-        assert!(filtered.is_filtered());
+    fn test_vlm_response_builder() {
+        let request_id = Uuid::new_v4();
+        let response = VlmResponse::builder()
+            .with_request_id(request_id)
+            .with_content("Hello")
+            .build()
+            .unwrap();
+        assert_eq!(response.request_id, request_id);
+        assert_eq!(response.content(), "Hello");
     }
 }

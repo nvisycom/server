@@ -22,7 +22,7 @@ pub async fn require_admin(
 ) -> Response {
     if !auth_claims.is_admin {
         tracing::warn!(
-            target: tracing_targets::AUTHORIZATION,
+            target: tracing_targets::TRACING_TARGET_AUTHORIZATION,
             account_id = %auth_claims.account_id,
             "unauthorized admin access attempt"
         );

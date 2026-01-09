@@ -15,7 +15,7 @@ use nvisy_server::middleware::{
 use nvisy_server::service::ServiceState;
 use nvisy_worker::{WorkerHandles, WorkerState};
 
-use crate::config::{Cli, MiddlewareConfig, create_inference_service, create_webhook_service};
+use crate::config::{Cli, MiddlewareConfig};
 
 /// Tracing target for server startup events.
 pub const TRACING_TARGET_SERVER_STARTUP: &str = "nvisy_cli::server::startup";
@@ -50,15 +50,14 @@ async fn run() -> anyhow::Result<()> {
     let cli = Cli::init();
     Cli::init_tracing();
 
-    cli.validate()?;
     cli.log();
 
     // Create services
-    let inference = create_inference_service(&cli)?;
-    let webhook = create_webhook_service()?;
+    let inference = cli.inference_service();
+    let webhook = cli.webhook_service();
 
     // Initialize application state
-    let state = ServiceState::from_config(cli.service.clone(), webhook).await?;
+    let state = ServiceState::from_config(cli.service.clone(), webhook, inference.clone()).await?;
 
     // Create worker state and spawn background workers
     let worker_state = WorkerState::new(state.postgres.clone(), state.nats.clone(), inference);

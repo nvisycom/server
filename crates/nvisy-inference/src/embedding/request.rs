@@ -1,26 +1,39 @@
 //! Embedding request types.
 
-use std::collections::HashSet;
-
+use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::response::EmbeddingResponse;
-use crate::{Chat, Content, Document};
+use crate::types::{Chat, Content, Document};
 
 /// Request for a single embedding operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "EmbeddingRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "EmbeddingRequestError")
+)]
 pub struct EmbeddingRequest {
     /// Unique identifier for this request.
+    #[builder(default = "Uuid::now_v7()")]
     pub request_id: Uuid,
-    /// Account identifier associated with this request.
-    pub account_id: Option<Uuid>,
     /// The content to generate an embedding for.
     pub content: Content,
-    /// Custom tags for categorization and filtering.
-    pub tags: HashSet<String>,
     /// Whether to normalize the resulting embedding to unit length.
+    #[builder(default)]
     pub normalize: bool,
+}
+
+/// Error type for EmbeddingRequest builder.
+pub type EmbeddingRequestError = derive_builder::UninitializedFieldError;
+
+impl EmbeddingRequestBuilder {
+    /// Build the request.
+    pub fn build(self) -> Result<EmbeddingRequest, EmbeddingRequestError> {
+        self.build_inner()
+    }
 }
 
 impl EmbeddingRequest {
@@ -28,9 +41,7 @@ impl EmbeddingRequest {
     pub fn new(content: Content) -> Self {
         Self {
             request_id: Uuid::now_v7(),
-            account_id: None,
             content,
-            tags: HashSet::new(),
             normalize: false,
         }
     }
@@ -50,39 +61,9 @@ impl EmbeddingRequest {
         Self::new(Content::chat(chat))
     }
 
-    /// Create a new embedding request with a specific request ID.
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = request_id;
-        self
-    }
-
-    /// Set the account ID for this request.
-    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
-        self.account_id = Some(account_id);
-        self
-    }
-
-    /// Add a tag to this request.
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.insert(tag.into());
-        self
-    }
-
-    /// Set tags for this request.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(|t| t.into()).collect();
-        self
-    }
-
-    /// Enable normalization of the embedding to unit length.
-    pub fn with_normalize(mut self, normalize: bool) -> Self {
-        self.normalize = normalize;
-        self
-    }
-
-    /// Check if the request has a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.contains(tag)
+    /// Create a builder for this request.
+    pub fn builder() -> EmbeddingRequestBuilder {
+        EmbeddingRequestBuilder::default()
     }
 
     /// Get the text content if this is a text request.
@@ -97,18 +78,54 @@ impl EmbeddingRequest {
 }
 
 /// Batch request for multiple embedding operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "EmbeddingBatchRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "EmbeddingBatchRequestError")
+)]
 pub struct EmbeddingBatchRequest {
     /// Unique identifier for this batch request.
+    #[builder(default = "Uuid::now_v7()")]
     pub batch_id: Uuid,
-    /// Account identifier associated with this batch.
-    pub account_id: Option<Uuid>,
     /// The contents to generate embeddings for.
+    #[builder(default)]
     pub contents: Vec<Content>,
-    /// Custom tags for categorization and filtering.
-    pub tags: HashSet<String>,
     /// Whether to normalize the resulting embeddings to unit length.
+    #[builder(default)]
     pub normalize: bool,
+}
+
+/// Error type for EmbeddingBatchRequest builder.
+pub type EmbeddingBatchRequestError = derive_builder::UninitializedFieldError;
+
+impl EmbeddingBatchRequestBuilder {
+    /// Build the request.
+    pub fn build(self) -> Result<EmbeddingBatchRequest, EmbeddingBatchRequestError> {
+        self.build_inner()
+    }
+
+    /// Add a content item to the batch.
+    pub fn add_content(mut self, content: Content) -> Self {
+        self.contents.get_or_insert_with(Vec::new).push(content);
+        self
+    }
+
+    /// Add a text input to the batch.
+    pub fn add_text(self, text: impl Into<String>) -> Self {
+        self.add_content(Content::text(text))
+    }
+
+    /// Add a document input to the batch.
+    pub fn add_document(self, document: Document) -> Self {
+        self.add_content(Content::document(document))
+    }
+
+    /// Add a chat input to the batch.
+    pub fn add_chat(self, chat: Chat) -> Self {
+        self.add_content(Content::chat(chat))
+    }
 }
 
 impl EmbeddingBatchRequest {
@@ -116,9 +133,7 @@ impl EmbeddingBatchRequest {
     pub fn new() -> Self {
         Self {
             batch_id: Uuid::now_v7(),
-            account_id: None,
             contents: Vec::new(),
-            tags: HashSet::new(),
             normalize: false,
         }
     }
@@ -127,64 +142,14 @@ impl EmbeddingBatchRequest {
     pub fn from_contents(contents: Vec<Content>) -> Self {
         Self {
             batch_id: Uuid::now_v7(),
-            account_id: None,
             contents,
-            tags: HashSet::new(),
             normalize: false,
         }
     }
 
-    /// Set the account ID for this batch.
-    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
-        self.account_id = Some(account_id);
-        self
-    }
-
-    /// Add a content item to the batch.
-    pub fn with_content(mut self, content: Content) -> Self {
-        self.contents.push(content);
-        self
-    }
-
-    /// Add a text input to the batch.
-    pub fn with_text(mut self, text: impl Into<String>) -> Self {
-        self.contents.push(Content::text(text));
-        self
-    }
-
-    /// Add a document input to the batch.
-    pub fn with_document(mut self, document: Document) -> Self {
-        self.contents.push(Content::document(document));
-        self
-    }
-
-    /// Add a chat input to the batch.
-    pub fn with_chat(mut self, chat: Chat) -> Self {
-        self.contents.push(Content::chat(chat));
-        self
-    }
-
-    /// Add a tag to this batch request.
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.insert(tag.into());
-        self
-    }
-
-    /// Set tags for this batch request.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(|t| t.into()).collect();
-        self
-    }
-
-    /// Enable normalization of embeddings to unit length.
-    pub fn with_normalize(mut self, normalize: bool) -> Self {
-        self.normalize = normalize;
-        self
-    }
-
-    /// Check if the batch request has a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.contains(tag)
+    /// Create a builder for this request.
+    pub fn builder() -> EmbeddingBatchRequestBuilder {
+        EmbeddingBatchRequestBuilder::default()
     }
 
     /// Returns the number of contents in this batch.
@@ -203,9 +168,7 @@ impl EmbeddingBatchRequest {
             .into_iter()
             .map(|content| EmbeddingRequest {
                 request_id: Uuid::now_v7(),
-                account_id: self.account_id,
                 content,
-                tags: self.tags.clone(),
                 normalize: self.normalize,
             })
             .collect()
@@ -218,9 +181,7 @@ impl EmbeddingBatchRequest {
             .cloned()
             .map(|content| EmbeddingRequest {
                 request_id: Uuid::now_v7(),
-                account_id: self.account_id,
                 content,
-                tags: self.tags.clone(),
                 normalize: self.normalize,
             })
             .collect()
@@ -251,18 +212,29 @@ mod tests {
     fn test_embedding_request_creation() {
         let request = EmbeddingRequest::from_text("Hello, world!");
         assert!(!request.request_id.is_nil());
-        assert!(request.account_id.is_none());
-        assert!(request.tags.is_empty());
         assert!(!request.normalize);
         assert_eq!(request.as_text(), Some("Hello, world!"));
     }
 
     #[test]
+    fn test_embedding_request_builder() {
+        let request = EmbeddingRequest::builder()
+            .with_content(Content::text("Hello"))
+            .with_normalize(true)
+            .build()
+            .unwrap();
+        assert!(request.normalize);
+        assert_eq!(request.as_text(), Some("Hello"));
+    }
+
+    #[test]
     fn test_embedding_batch_request() {
         let document = Document::new(Bytes::from("Hello, world!")).with_content_type("text/plain");
-        let batch = EmbeddingBatchRequest::new()
-            .with_text("Test text")
-            .with_document(document);
+        let batch = EmbeddingBatchRequest::builder()
+            .add_text("Test text")
+            .add_document(document)
+            .build()
+            .unwrap();
         assert_eq!(batch.len(), 2);
         assert!(!batch.is_empty());
     }

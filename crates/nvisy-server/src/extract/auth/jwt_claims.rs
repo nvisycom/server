@@ -15,8 +15,8 @@ use nvisy_postgres::model::{Account, AccountApiToken};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::extract::auth::TRACING_TARGET_AUTHENTICATION;
 use crate::handler::{ErrorKind, Result};
+use crate::utility::tracing_targets::TRACING_TARGET_AUTHENTICATION;
 
 /// Far-future timestamp for tokens that never expire (100 years from now).
 const NEVER_EXPIRES_SECONDS: i64 = 100 * 365 * 24 * 60 * 60;

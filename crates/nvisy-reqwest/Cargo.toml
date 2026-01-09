@@ -26,6 +26,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
+# CLI configuration support: enables clap derives for config types
+# This allows config types to be used with command-line argument parsing
+config = ["dep:clap"]
+
 [dependencies]
 # Internal crates
 nvisy-webhook = { workspace = true }
@@ -55,6 +59,9 @@ tracing = { workspace = true, features = [] }
 # Data types
 uuid = { workspace = true, features = [] }
 jiff = { workspace = true, features = [] }
+
+# CLI (optional)
+clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

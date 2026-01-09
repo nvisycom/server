@@ -72,7 +72,7 @@ pub async fn validate_token_middleware(
 ) -> Result<Response> {
     if auth_claims.is_expired() {
         tracing::warn!(
-            target: tracing_targets::AUTHENTICATION,
+            target: tracing_targets::TRACING_TARGET_AUTHENTICATION,
             account_id = %auth_claims.account_id,
             token_id = %auth_claims.token_id,
             "expired token used in request"
@@ -88,7 +88,7 @@ pub async fn validate_token_middleware(
 
     if token.is_err() {
         tracing::warn!(
-            target: tracing_targets::AUTHENTICATION,
+            target: tracing_targets::TRACING_TARGET_AUTHENTICATION,
             account_id = %auth_claims.account_id,
             token_id = %auth_claims.token_id,
             "token not found in database"

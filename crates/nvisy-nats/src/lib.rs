@@ -31,8 +31,6 @@ mod client;
 mod error;
 pub mod kv;
 pub mod object;
-#[doc(hidden)]
-pub mod prelude;
 pub mod stream;
 
 pub use client::{NatsClient, NatsConfig, NatsConnection};

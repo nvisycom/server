@@ -9,7 +9,7 @@ use nvisy_inference::InferenceService;
 use ollama_rs::Ollama;
 
 use super::OllamaConfig;
-use crate::{Error, Result, TRACING_TARGET_CLIENT};
+use crate::{Result, TRACING_TARGET_CLIENT};
 
 /// Inner client that holds the actual ollama-rs client.
 struct OllamaClientInner {
@@ -47,22 +47,16 @@ pub struct OllamaClient {
 
 impl OllamaClient {
     /// Create a new Ollama client with the given configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the configuration is invalid.
-    pub fn new(config: OllamaConfig) -> Result<Self> {
+    pub fn new(config: OllamaConfig) -> Self {
         tracing::debug!(
             target: TRACING_TARGET_CLIENT,
-            host = %config.host,
-            port = config.port,
+            host = %config.ollama_host,
+            port = config.ollama_port,
             "Creating Ollama client"
         );
 
-        config.validate().map_err(Error::invalid_config)?;
-
-        let host_with_scheme = format!("http://{}", config.host);
-        let ollama = Ollama::new(host_with_scheme, config.port);
+        let host_with_scheme = format!("http://{}", config.ollama_host);
+        let ollama = Ollama::new(host_with_scheme, config.ollama_port);
 
         let inner = OllamaClientInner { ollama, config };
         let client = Self {
@@ -74,12 +68,7 @@ impl OllamaClient {
             "Ollama client created successfully"
         );
 
-        Ok(client)
-    }
-
-    /// Create a new Ollama client with default configuration (localhost:11434).
-    pub fn with_defaults() -> Result<Self> {
-        Self::new(OllamaConfig::default())
+        client
     }
 
     /// Perform a health check against the Ollama service.
@@ -139,10 +128,16 @@ impl OllamaClient {
     /// let config = OllamaConfig::default()
     ///     .with_embedding_model("nomic-embed-text")
     ///     .with_vlm_model("llava");
-    /// let client = OllamaClient::new(config)?;
+    /// let client = OllamaClient::new(config);
     /// let service = client.into_service();
     /// ```
     pub fn into_service(self) -> InferenceService {
-        InferenceService::from_provider(self)
+        InferenceService::new(self)
+    }
+}
+
+impl Default for OllamaClient {
+    fn default() -> Self {
+        Self::new(OllamaConfig::default())
     }
 }

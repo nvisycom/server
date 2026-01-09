@@ -46,6 +46,10 @@ pub mod sql_types {
     pub struct RequireMode;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "run_type"))]
+    pub struct RunType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
     pub struct WebhookEvent;
 
@@ -270,20 +274,18 @@ diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
     use super::sql_types::IntegrationStatus;
+    use super::sql_types::RunType;
 
     workspace_integration_runs (id) {
         id -> Uuid,
         workspace_id -> Uuid,
         integration_id -> Nullable<Uuid>,
         account_id -> Nullable<Uuid>,
-        run_name -> Text,
-        run_type -> Text,
+        run_type -> RunType,
         run_status -> IntegrationStatus,
         metadata -> Jsonb,
-        started_at -> Nullable<Timestamptz>,
+        started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
     }
 }
 

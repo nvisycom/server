@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::handler::utility::{serialize_headers, serialize_headers_opt};
+use crate::handler::utility::serialize_headers_opt;
 
 /// Request payload for creating a new workspace webhook.
 #[must_use]
@@ -33,7 +33,7 @@ pub struct CreateWebhook {
     /// List of event types this webhook should receive.
     pub events: Vec<WebhookEvent>,
     /// Optional custom headers to include in webhook requests.
-    pub headers: HashMap<String, String>,
+    pub headers: Option<HashMap<String, String>>,
     /// Initial status of the webhook (active or paused).
     pub status: Option<WebhookStatus>,
 }
@@ -48,7 +48,7 @@ impl CreateWebhook {
     #[inline]
     pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewWorkspaceWebhook {
         let events = self.events.into_iter().map(Some).collect();
-        let headers = serialize_headers(self.headers);
+        let headers = serialize_headers_opt(self.headers);
         // Treat Disabled as Paused since users cannot set Disabled status
         let status = self.status.map(|s| match s {
             WebhookStatus::Disabled => WebhookStatus::Paused,

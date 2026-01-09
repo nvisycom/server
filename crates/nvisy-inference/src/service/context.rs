@@ -1,120 +1,76 @@
 //! Context and usage tracking for inference operations.
 
 use std::ops::{Add, AddAssign};
-use std::sync::Arc;
 
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
-/// Context information for provider operations.
+/// Context information for a single inference request.
+///
+/// Each request should have its own context instance containing
+/// the account and workspace identifiers for billing and isolation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
-    /// Unique identifier for this context session.
+    /// Unique identifier for this context/request.
     pub context_id: Uuid,
     /// Context creation timestamp.
     pub created_at: Timestamp,
-    /// Usage statistics for this context.
-    pub usage: UsageStats,
+    /// Account identifier (optional, for anonymous requests).
+    pub account_id: Option<Uuid>,
+    /// Workspace identifier (required for all requests).
+    pub workspace_id: Uuid,
 }
 
 impl Context {
-    /// Create a new context.
-    pub fn new() -> Self {
+    /// Create a new context with the required workspace ID.
+    pub fn new(workspace_id: Uuid) -> Self {
         Self {
             context_id: Uuid::now_v7(),
             created_at: Timestamp::now(),
-            usage: UsageStats::default(),
+            account_id: None,
+            workspace_id,
         }
     }
 
-    /// Record usage statistics by adding the provided stats to the current stats.
-    pub fn record(&mut self, stats: UsageStats) {
-        self.usage += stats;
-    }
-}
-
-impl Default for Context {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Thread-safe shared context for provider operations.
-///
-/// This wrapper provides convenient async access to a shared context
-/// that can be passed to providers and used across async boundaries.
-#[derive(Clone)]
-pub struct SharedContext {
-    inner: Arc<RwLock<Context>>,
-}
-
-impl SharedContext {
-    /// Create a new shared context.
-    pub fn new() -> Self {
+    /// Create a new context with account and workspace IDs.
+    pub fn with_account(account_id: Uuid, workspace_id: Uuid) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(Context::new())),
+            context_id: Uuid::now_v7(),
+            created_at: Timestamp::now(),
+            account_id: Some(account_id),
+            workspace_id,
         }
     }
 
-    /// Create a shared context from an existing context.
-    pub fn from_context(context: Context) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(context)),
-        }
-    }
-
-    /// Get read access to the context.
-    pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, Context> {
-        self.inner.read().await
-    }
-
-    /// Get write access to the context.
-    pub async fn write(&self) -> tokio::sync::RwLockWriteGuard<'_, Context> {
-        self.inner.write().await
+    /// Set the account ID.
+    pub fn set_account_id(&mut self, account_id: Uuid) {
+        self.account_id = Some(account_id);
     }
 
     /// Get the context ID.
-    pub async fn context_id(&self) -> Uuid {
-        self.inner.read().await.context_id
+    pub fn context_id(&self) -> Uuid {
+        self.context_id
+    }
+
+    /// Get the account ID if set.
+    pub fn account_id(&self) -> Option<Uuid> {
+        self.account_id
+    }
+
+    /// Get the workspace ID.
+    pub fn workspace_id(&self) -> Uuid {
+        self.workspace_id
     }
 
     /// Get the context creation timestamp.
-    pub async fn created_at(&self) -> Timestamp {
-        self.inner.read().await.created_at
+    pub fn created_at(&self) -> Timestamp {
+        self.created_at
     }
 
-    /// Get a clone of the usage statistics.
-    pub async fn usage(&self) -> UsageStats {
-        self.inner.read().await.usage.clone()
-    }
-
-    /// Record usage statistics by adding the provided stats to the current stats.
-    pub async fn record(&self, stats: UsageStats) {
-        self.inner.write().await.record(stats);
-    }
-
-    /// Replace the inner context.
-    pub async fn set_context(&self, context: Context) {
-        *self.inner.write().await = context;
-    }
-
-    /// Get a clone of the inner context.
-    pub async fn get_context(&self) -> Context {
-        self.inner.read().await.clone()
-    }
-}
-
-impl Default for SharedContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Debug for SharedContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SharedContext").finish_non_exhaustive()
+    /// Calculate elapsed time since context creation.
+    pub fn elapsed(&self) -> SignedDuration {
+        Timestamp::now().duration_since(self.created_at)
     }
 }
 

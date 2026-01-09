@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceIntegrationRun;
-use nvisy_postgres::types::IntegrationStatus;
+use nvisy_postgres::types::{IntegrationStatus, RunType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -23,22 +23,17 @@ pub struct IntegrationRun {
     /// Account that triggered the run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<Uuid>,
-    /// Run name.
-    pub run_name: String,
     /// Run type.
-    pub run_type: String,
+    pub run_type: RunType,
     /// Current status.
     pub status: IntegrationStatus,
     /// Run metadata, results, and error details.
     pub metadata: serde_json::Value,
     /// When the run started.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<Timestamp>,
+    pub started_at: Timestamp,
     /// When the run completed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<Timestamp>,
-    /// When the run was created.
-    pub created_at: Timestamp,
 }
 
 /// Paginated response for integration runs.
@@ -51,13 +46,11 @@ impl IntegrationRun {
             workspace_id: run.workspace_id,
             integration_id: run.integration_id,
             account_id: run.account_id,
-            run_name: run.run_name,
             run_type: run.run_type,
             status: run.run_status,
             metadata: run.metadata,
-            started_at: run.started_at.map(Into::into),
+            started_at: run.started_at.into(),
             completed_at: run.completed_at.map(Into::into),
-            created_at: run.created_at.into(),
         }
     }
 }

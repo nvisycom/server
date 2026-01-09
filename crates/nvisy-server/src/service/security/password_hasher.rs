@@ -9,7 +9,7 @@ use argon2::password_hash::{Error as ArgonError, PasswordHasher as _, PasswordVe
 use argon2::{Argon2, PasswordHash};
 
 use crate::handler::{ErrorKind, Result};
-use crate::utility::tracing_targets::PASSWORD_HASHER as TRACING_TARGET;
+use crate::utility::tracing_targets::TRACING_TARGET_PASSWORD_HASHER as TRACING_TARGET;
 
 /// Secure password hashing and verification service using Argon2id.
 ///

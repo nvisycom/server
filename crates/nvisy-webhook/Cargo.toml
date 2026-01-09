@@ -17,9 +17,12 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
 
-# JSON Schema support for API documentation
+# JSON Schema support: enables JsonSchema derives on Postgres types
+# This allows Postgres types to be used directly in API documentation without
+# manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars", "nvisy-core/schema"]
 
 [dependencies]

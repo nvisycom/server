@@ -19,6 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Default feature set (none for minimal dependencies)
 default = []
 
 # CLI configuration support: enables clap derives for config types
@@ -31,6 +32,7 @@ config = [
 
 [dependencies]
 # Internal crates
+nvisy-inference = { workspace = true, features = [] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
@@ -99,6 +101,7 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 [dev-dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = ["config"] }
+nvisy-ollama = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
 nvisy-reqwest = { workspace = true, features = [] }
 

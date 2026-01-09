@@ -1,5 +1,6 @@
 //! HTTPS server implementation using enhanced lifecycle management.
 
+use std::io;
 use std::path::Path;
 
 use axum::Router;
@@ -9,19 +10,14 @@ use nvisy_server::extract::AppConnectInfo;
 use crate::TRACING_TARGET_SERVER_STARTUP;
 use crate::config::ServerConfig;
 use crate::server::lifecycle::serve_with_shutdown;
-use crate::server::{ServerError, ServerResult, shutdown_signal};
+use crate::server::shutdown_signal;
 
 /// Starts an HTTPS server with enhanced lifecycle management.
-pub async fn serve_https(
-    app: Router,
-    server_config: ServerConfig,
-    cert_path: impl AsRef<Path>,
-    key_path: impl AsRef<Path>,
-) -> ServerResult<()> {
+pub async fn serve_https(app: Router, server_config: ServerConfig) -> io::Result<()> {
     let server_addr = server_config.socket_addr();
     let shutdown_timeout = server_config.shutdown_timeout();
-    let cert_path = cert_path.as_ref();
-    let key_path = key_path.as_ref();
+    let cert_path = &server_config.tls_cert_path;
+    let key_path = &server_config.tls_key_path;
 
     // Pre-validate TLS files before starting lifecycle
     validate_tls_files(cert_path, key_path)?;
@@ -30,8 +26,8 @@ pub async fn serve_https(
         let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
             .await
             .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
                     format!("Failed to load TLS certificates: {e}"),
                 )
             })?;
@@ -66,39 +62,29 @@ pub async fn serve_https(
     .await
 }
 
-fn validate_tls_files(cert_path: &Path, key_path: &Path) -> ServerResult<()> {
-    let validate_file = |path: &Path, file_type: &str| -> ServerResult<()> {
+fn validate_tls_files(cert_path: &Path, key_path: &Path) -> io::Result<()> {
+    let validate_file = |path: &Path, file_type: &str| -> io::Result<()> {
         if !path.exists() {
-            return Err(ServerError::TlsCertificate(format!(
-                "{} file does not exist: {}",
-                file_type,
-                path.display()
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{} file does not exist: {}", file_type, path.display()),
+            ));
         }
 
         if !path.is_file() {
-            return Err(ServerError::TlsCertificate(format!(
-                "{} path is not a file: {}",
-                file_type,
-                path.display()
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} path is not a file: {}", file_type, path.display()),
+            ));
         }
 
-        let metadata = std::fs::metadata(path).map_err(|err| {
-            ServerError::TlsCertificate(format!(
-                "Cannot read {} file {}: {}",
-                file_type,
-                path.display(),
-                err
-            ))
-        })?;
+        let metadata = std::fs::metadata(path)?;
 
         if metadata.len() == 0 {
-            return Err(ServerError::TlsCertificate(format!(
-                "{} file is empty: {}",
-                file_type,
-                path.display()
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} file is empty: {}", file_type, path.display()),
+            ));
         }
 
         Ok(())
@@ -119,6 +105,8 @@ fn validate_tls_files(cert_path: &Path, key_path: &Path) -> ServerResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -129,10 +117,8 @@ mod tests {
         let result = validate_tls_files(cert_path, key_path);
         assert!(result.is_err());
 
-        if let Err(ServerError::TlsCertificate(msg)) = result {
-            assert!(msg.contains("Certificate file does not exist"));
-        } else {
-            panic!("Expected TlsCertificate error");
-        }
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("Certificate file does not exist"));
     }
 }

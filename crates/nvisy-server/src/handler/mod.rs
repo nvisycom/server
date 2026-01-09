@@ -122,6 +122,7 @@ mod test {
     use aide::axum::ApiRouter;
     use axum::Router;
     use axum_test::TestServer;
+    use nvisy_ollama::OllamaClient;
     use nvisy_reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
@@ -132,8 +133,9 @@ mod test {
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
-        let webhook_service = ReqwestClient::with_defaults()?.into_service();
-        let state = ServiceState::from_config(config, webhook_service).await?;
+        let webhook_service = ReqwestClient::default().into_service();
+        let inference_service = OllamaClient::default().into_service();
+        let state = ServiceState::from_config(config, webhook_service, inference_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }
@@ -155,6 +157,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = "requires database and key files"]
     async fn handlers() -> anyhow::Result<()> {
         let server = create_test_server().await?;
         assert!(server.is_running());

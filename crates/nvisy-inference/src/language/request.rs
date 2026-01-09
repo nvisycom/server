@@ -1,34 +1,77 @@
 //! VLM request types.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
+use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::response::VlmResponse;
-use crate::{Document, Message};
+use crate::types::{Document, Message};
 
 /// Request for a single VLM operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "VlmRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "VlmRequestError")
+)]
 pub struct VlmRequest {
     /// Unique identifier for this request.
+    #[builder(default = "Uuid::now_v7()")]
     pub request_id: Uuid,
-    /// Account identifier associated with this request.
-    pub account_id: Option<Uuid>,
     /// Text prompt for the VLM.
     pub prompt: String,
     /// Documents to analyze (images, PDFs, etc.).
+    #[builder(default)]
     pub documents: Vec<Document>,
     /// Optional conversation history.
+    #[builder(default)]
     pub messages: Vec<Message>,
-    /// Custom tags for categorization and filtering.
-    pub tags: HashSet<String>,
     /// Maximum number of tokens to generate.
+    #[builder(default = "Some(1024)")]
     pub max_tokens: Option<u32>,
     /// Temperature for response generation (0.0 to 1.0).
+    #[builder(default = "Some(0.7)")]
     pub temperature: Option<f32>,
     /// Custom parameters for specific VLM engines.
+    #[builder(default)]
     pub custom_parameters: HashMap<String, serde_json::Value>,
+}
+
+/// Error type for VlmRequest builder.
+pub type VlmRequestError = derive_builder::UninitializedFieldError;
+
+impl VlmRequestBuilder {
+    /// Build the request.
+    pub fn build(self) -> Result<VlmRequest, VlmRequestError> {
+        self.build_inner()
+    }
+
+    /// Add a document to analyze.
+    pub fn add_document(mut self, document: Document) -> Self {
+        self.documents.get_or_insert_with(Vec::new).push(document);
+        self
+    }
+
+    /// Add a message to the conversation history.
+    pub fn add_message(mut self, message: Message) -> Self {
+        self.messages.get_or_insert_with(Vec::new).push(message);
+        self
+    }
+
+    /// Add a custom parameter.
+    pub fn add_custom_parameter(
+        mut self,
+        key: impl Into<String>,
+        value: serde_json::Value,
+    ) -> Self {
+        self.custom_parameters
+            .get_or_insert_with(HashMap::new)
+            .insert(key.into(), value);
+        self
+    }
 }
 
 impl VlmRequest {
@@ -36,11 +79,9 @@ impl VlmRequest {
     pub fn new(prompt: impl Into<String>) -> Self {
         Self {
             request_id: Uuid::now_v7(),
-            account_id: None,
             prompt: prompt.into(),
             documents: Vec::new(),
             messages: Vec::new(),
-            tags: HashSet::new(),
             max_tokens: Some(1024),
             temperature: Some(0.7),
             custom_parameters: HashMap::new(),
@@ -51,90 +92,18 @@ impl VlmRequest {
     pub fn with_document(prompt: impl Into<String>, document: Document) -> Self {
         Self {
             request_id: Uuid::now_v7(),
-            account_id: None,
             prompt: prompt.into(),
             documents: vec![document],
             messages: Vec::new(),
-            tags: HashSet::new(),
             max_tokens: Some(1024),
             temperature: Some(0.7),
             custom_parameters: HashMap::new(),
         }
     }
 
-    /// Create a new VLM request with a specific request ID.
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = request_id;
-        self
-    }
-
-    /// Set the account ID for this request.
-    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
-        self.account_id = Some(account_id);
-        self
-    }
-
-    /// Add a document to this request.
-    pub fn add_document(mut self, document: Document) -> Self {
-        self.documents.push(document);
-        self
-    }
-
-    /// Add multiple documents to this request.
-    pub fn with_documents(mut self, documents: Vec<Document>) -> Self {
-        self.documents = documents;
-        self
-    }
-
-    /// Add a message to the conversation history.
-    pub fn add_message(mut self, message: Message) -> Self {
-        self.messages.push(message);
-        self
-    }
-
-    /// Set the conversation history.
-    pub fn with_messages(mut self, messages: Vec<Message>) -> Self {
-        self.messages = messages;
-        self
-    }
-
-    /// Add a tag to this request.
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.insert(tag.into());
-        self
-    }
-
-    /// Set tags for this request.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(|t| t.into()).collect();
-        self
-    }
-
-    /// Set maximum tokens to generate.
-    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
-        self.max_tokens = Some(max_tokens);
-        self
-    }
-
-    /// Set temperature for response generation.
-    pub fn with_temperature(mut self, temperature: f32) -> Self {
-        self.temperature = Some(temperature.clamp(0.0, 1.0));
-        self
-    }
-
-    /// Add a custom parameter.
-    pub fn with_custom_parameter(
-        mut self,
-        key: impl Into<String>,
-        value: serde_json::Value,
-    ) -> Self {
-        self.custom_parameters.insert(key.into(), value);
-        self
-    }
-
-    /// Check if the request has a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.contains(tag)
+    /// Create a builder for this request.
+    pub fn builder() -> VlmRequestBuilder {
+        VlmRequestBuilder::default()
     }
 
     /// Check if this request has documents.
@@ -179,16 +148,46 @@ impl VlmRequest {
 }
 
 /// Batch request for multiple VLM operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
+#[builder(
+    name = "VlmBatchRequestBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(private, name = "build_inner", error = "VlmBatchRequestError")
+)]
 pub struct VlmBatchRequest {
     /// Unique identifier for this batch request.
+    #[builder(default = "Uuid::now_v7()")]
     pub batch_id: Uuid,
-    /// Account identifier associated with this batch.
-    pub account_id: Option<Uuid>,
     /// Individual requests in the batch.
+    #[builder(default)]
     requests: Vec<VlmRequest>,
-    /// Custom tags for the entire batch.
-    pub tags: HashSet<String>,
+}
+
+/// Error type for VlmBatchRequest builder.
+pub type VlmBatchRequestError = derive_builder::UninitializedFieldError;
+
+impl VlmBatchRequestBuilder {
+    /// Build the request.
+    pub fn build(self) -> Result<VlmBatchRequest, VlmBatchRequestError> {
+        self.build_inner()
+    }
+
+    /// Add a request to the batch.
+    pub fn add_request(mut self, request: VlmRequest) -> Self {
+        self.requests.get_or_insert_with(Vec::new).push(request);
+        self
+    }
+
+    /// Add a simple prompt request to the batch.
+    pub fn add_prompt(self, prompt: impl Into<String>) -> Self {
+        self.add_request(VlmRequest::new(prompt))
+    }
+
+    /// Add a request with prompt and document to the batch.
+    pub fn add_prompt_and_document(self, prompt: impl Into<String>, document: Document) -> Self {
+        self.add_request(VlmRequest::with_document(prompt, document))
+    }
 }
 
 impl VlmBatchRequest {
@@ -196,9 +195,7 @@ impl VlmBatchRequest {
     pub fn new() -> Self {
         Self {
             batch_id: Uuid::now_v7(),
-            account_id: None,
             requests: Vec::new(),
-            tags: HashSet::new(),
         }
     }
 
@@ -206,56 +203,13 @@ impl VlmBatchRequest {
     pub fn from_requests(requests: Vec<VlmRequest>) -> Self {
         Self {
             batch_id: Uuid::now_v7(),
-            account_id: None,
             requests,
-            tags: HashSet::new(),
         }
     }
 
-    /// Set the account ID for this batch.
-    pub fn with_account_id(mut self, account_id: Uuid) -> Self {
-        self.account_id = Some(account_id);
-        self
-    }
-
-    /// Add a request to the batch.
-    pub fn with_request(mut self, request: VlmRequest) -> Self {
-        self.requests.push(request);
-        self
-    }
-
-    /// Add a simple prompt request to the batch.
-    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.requests.push(VlmRequest::new(prompt));
-        self
-    }
-
-    /// Add a request with prompt and document to the batch.
-    pub fn with_prompt_and_document(
-        mut self,
-        prompt: impl Into<String>,
-        document: Document,
-    ) -> Self {
-        self.requests
-            .push(VlmRequest::with_document(prompt, document));
-        self
-    }
-
-    /// Add a tag to this batch request.
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.insert(tag.into());
-        self
-    }
-
-    /// Set tags for this batch request.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(|t| t.into()).collect();
-        self
-    }
-
-    /// Check if the batch request has a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.contains(tag)
+    /// Create a builder for this request.
+    pub fn builder() -> VlmBatchRequestBuilder {
+        VlmBatchRequestBuilder::default()
     }
 
     /// Returns the number of requests in this batch.
@@ -300,16 +254,27 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::MessageRole;
+    use crate::types::MessageRole;
 
     #[test]
     fn test_vlm_request_creation() {
         let request = VlmRequest::new("Describe this image");
         assert!(!request.request_id.is_nil());
-        assert!(request.account_id.is_none());
-        assert!(request.tags.is_empty());
         assert_eq!(request.prompt, "Describe this image");
         assert!(request.is_text_only());
+    }
+
+    #[test]
+    fn test_vlm_request_builder() {
+        let document = Document::new(Bytes::from("image data")).with_content_type("image/png");
+        let request = VlmRequest::builder()
+            .with_prompt("Describe this")
+            .add_document(document)
+            .with_max_tokens(2048u32)
+            .build()
+            .unwrap();
+        assert!(request.has_documents());
+        assert_eq!(request.max_tokens, Some(2048));
     }
 
     #[test]
@@ -325,18 +290,23 @@ mod tests {
     fn test_vlm_request_with_messages() {
         let message1 = Message::new(MessageRole::User, "Previous question");
         let message2 = Message::new(MessageRole::Assistant, "Previous response");
-        let request = VlmRequest::new("Continue")
+        let request = VlmRequest::builder()
+            .with_prompt("Continue")
             .add_message(message1)
-            .add_message(message2);
+            .add_message(message2)
+            .build()
+            .unwrap();
         assert!(request.has_messages());
         assert_eq!(request.message_count(), 2);
     }
 
     #[test]
     fn test_vlm_batch_request() {
-        let batch = VlmBatchRequest::new()
-            .with_prompt("First prompt")
-            .with_prompt("Second prompt");
+        let batch = VlmBatchRequest::builder()
+            .add_prompt("First prompt")
+            .add_prompt("Second prompt")
+            .build()
+            .unwrap();
         assert_eq!(batch.len(), 2);
         assert!(!batch.is_empty());
     }

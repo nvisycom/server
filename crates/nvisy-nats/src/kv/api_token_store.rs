@@ -368,8 +368,8 @@ impl ApiTokenStore {
 
                 match token.token_type {
                     ApiTokenType::Web => stats.web_tokens += 1,
-                    ApiTokenType::Mobile => stats.mobile_tokens += 1,
                     ApiTokenType::Api => stats.api_tokens += 1,
+                    ApiTokenType::Cli => stats.cli_tokens += 1,
                 }
             }
         }

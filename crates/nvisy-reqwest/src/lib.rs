@@ -6,11 +6,11 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use nvisy_reqwest::{ReqwestClient, ReqwestClientConfig};
+//! use nvisy_reqwest::{ReqwestClient, ReqwestConfig};
 //! use nvisy_webhook::{WebhookRequest, WebhookService};
 //!
 //! // Create a client with default configuration
-//! let client = ReqwestClient::with_defaults()?;
+//! let client = ReqwestClient::default();
 //!
 //! // Convert to a service for dependency injection
 //! let service: WebhookService = client.into_service();
@@ -24,10 +24,9 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod client;
-mod config;
+mod connect;
 mod error;
+mod service;
 
-pub use client::{ReqwestClient, TRACING_TARGET};
-pub use config::ReqwestClientConfig;
-pub use error::{Error, Result};
+pub use crate::connect::{ReqwestClient, ReqwestConfig, TRACING_TARGET};
+pub use crate::error::{Error, Result};

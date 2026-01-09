@@ -117,9 +117,9 @@ pub struct UpdateWorkspaceIntegration {
 }
 
 impl WorkspaceIntegration {
-    /// Returns whether the integration is currently in an error state.
-    pub fn has_error(&self) -> bool {
-        matches!(self.sync_status, Some(IntegrationStatus::Failed))
+    /// Returns whether the integration has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.sync_status, Some(IntegrationStatus::Cancelled))
     }
 
     /// Returns whether the integration is waiting for initial setup completion.
@@ -134,12 +134,12 @@ impl WorkspaceIntegration {
 
     /// Returns whether the integration is fully operational and processing.
     pub fn is_operational(&self) -> bool {
-        self.is_active && matches!(self.sync_status, Some(IntegrationStatus::Executing))
+        self.is_active && matches!(self.sync_status, Some(IntegrationStatus::Running))
     }
 
     /// Returns whether the integration requires administrator attention.
     pub fn needs_attention(&self) -> bool {
-        self.has_error() || !self.is_active
+        self.is_cancelled() || !self.is_active
     }
 
     /// Returns whether the integration has completed at least one sync operation.
@@ -176,10 +176,10 @@ impl WorkspaceIntegration {
 
     /// Returns whether the integration is operating in a healthy state.
     ///
-    /// A healthy integration is active, properly configured, free of errors,
+    /// A healthy integration is active, properly configured, not cancelled,
     /// and has synced recently.
     pub fn is_healthy(&self) -> bool {
-        self.is_active && !self.has_error() && self.is_configured() && !self.is_sync_overdue()
+        self.is_active && !self.is_cancelled() && self.is_configured() && !self.is_sync_overdue()
     }
 }
 
