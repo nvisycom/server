@@ -17,6 +17,7 @@ pub mod invite_status;
 pub mod run_type;
 pub mod webhook_event;
 pub mod webhook_status;
+pub mod webhook_type;
 pub mod workspace_role;
 
 // Document-related enumerations
@@ -39,4 +40,5 @@ pub use require_mode::RequireMode;
 pub use run_type::RunType;
 pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
+pub use webhook_type::WebhookType;
 pub use workspace_role::WorkspaceRole;

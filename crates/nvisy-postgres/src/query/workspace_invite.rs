@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 use crate::types::{
-    Cursor, CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField,
-    InviteStatus, OffsetPagination, SortOrder,
+    CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField, InviteStatus,
+    OffsetPagination, SortOrder,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -81,6 +81,7 @@ pub trait WorkspaceInviteRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
+        sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> impl Future<Output = PgResult<CursorPage<WorkspaceInvite>>> + Send;
 
@@ -243,12 +244,12 @@ impl WorkspaceInviteRepository for PgConnection {
 
         // Apply sorting
         let query = match (sort_by.field, sort_by.order) {
-            (InviteSortField::Email, SortOrder::Asc) => {
-                query.order(workspace_invites::invitee_email.asc().nulls_last())
-            }
-            (InviteSortField::Email, SortOrder::Desc) => {
-                query.order(workspace_invites::invitee_email.desc().nulls_last())
-            }
+            (InviteSortField::Email, SortOrder::Asc) => query
+                .filter(workspace_invites::invitee_email.is_not_null())
+                .order(workspace_invites::invitee_email.asc()),
+            (InviteSortField::Email, SortOrder::Desc) => query
+                .filter(workspace_invites::invitee_email.is_not_null())
+                .order(workspace_invites::invitee_email.desc()),
             (InviteSortField::Date, SortOrder::Asc) => {
                 query.order(workspace_invites::created_at.asc())
             }
@@ -272,42 +273,29 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
+        sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> PgResult<CursorPage<WorkspaceInvite>> {
+        use diesel::dsl::count_star;
         use schema::workspace_invites::{self, dsl};
 
-        // Get total count only if requested
-        let total = if pagination.include_count {
-            let mut count_query = workspace_invites::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::invite_status.ne(InviteStatus::Canceled))
-                .into_boxed();
+        let sort_by_email = matches!(sort_by.field, InviteSortField::Email);
 
-            if let Some(role) = filter.role {
-                count_query = count_query.filter(dsl::invited_role.eq(role));
-            }
+        let base_filter = dsl::workspace_id
+            .eq(workspace_id)
+            .and(dsl::invite_status.ne(InviteStatus::Canceled));
 
-            Some(
-                count_query
-                    .count()
-                    .get_result(self)
-                    .await
-                    .map_err(PgError::from)?,
-            )
-        } else {
-            None
-        };
-
-        // Build query with cursor
+        // Build filtered query
         let mut query = workspace_invites::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::invite_status.ne(InviteStatus::Canceled))
+            .filter(base_filter.clone())
             .into_boxed();
 
         if let Some(role) = filter.role {
             query = query.filter(dsl::invited_role.eq(role));
         }
-
+        if sort_by_email {
+            query = query.filter(dsl::invitee_email.is_not_null());
+        }
         if let Some(cursor) = &pagination.after {
             let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
             query = query.filter(
@@ -317,37 +305,50 @@ impl WorkspaceInviteRepository for PgConnection {
             );
         }
 
-        let fetch_limit = pagination.fetch_limit();
-        let mut items: Vec<WorkspaceInvite> = query
-            .select(WorkspaceInvite::as_select())
-            .order((dsl::created_at.desc(), dsl::id.desc()))
-            .limit(fetch_limit)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        let has_more = items.len() as i64 > pagination.limit;
-        if has_more {
-            items.pop();
-        }
-
-        let next_cursor = if has_more {
-            items.last().map(|i| {
-                Cursor {
-                    timestamp: i.created_at.into(),
-                    id: i.id,
-                }
-                .encode()
-            })
+        // Get total count
+        let total = if pagination.include_count {
+            let mut count_query = workspace_invites::table.filter(base_filter).into_boxed();
+            if let Some(role) = filter.role {
+                count_query = count_query.filter(dsl::invited_role.eq(role));
+            }
+            if sort_by_email {
+                count_query = count_query.filter(dsl::invitee_email.is_not_null());
+            }
+            Some(
+                count_query
+                    .select(count_star())
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
         } else {
             None
         };
 
-        Ok(CursorPage {
-            items,
-            total,
-            next_cursor,
-        })
+        // Execute with sort
+        let items = match (sort_by.field, sort_by.order) {
+            (InviteSortField::Email, SortOrder::Asc) => {
+                query.order((dsl::invitee_email.asc(), dsl::id.asc()))
+            }
+            (InviteSortField::Email, SortOrder::Desc) => {
+                query.order((dsl::invitee_email.desc(), dsl::id.desc()))
+            }
+            (InviteSortField::Date, SortOrder::Asc) => {
+                query.order((dsl::created_at.asc(), dsl::id.asc()))
+            }
+            (InviteSortField::Date, SortOrder::Desc) => {
+                query.order((dsl::created_at.desc(), dsl::id.desc()))
+            }
+        }
+        .select(WorkspaceInvite::as_select())
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(CursorPage::new(items, total, pagination.limit, |i| {
+            (i.created_at.into(), i.id)
+        }))
     }
 
     async fn cleanup_expired_workspace_invites(&mut self) -> PgResult<usize> {

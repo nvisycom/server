@@ -3,7 +3,9 @@
 use std::future::Future;
 
 use bigdecimal::BigDecimal;
+use diesel::dsl::sql;
 use diesel::prelude::*;
+use diesel::sql_types::{Bool, Text};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
@@ -312,17 +314,24 @@ impl DocumentFileRepository for PgConnection {
     ) -> PgResult<CursorPage<DocumentFile>> {
         use schema::document_files::{self, dsl};
 
+        // Precompute filter values
+        let search_term = filter.search_term().map(|s| s.to_string());
+        let extensions: Vec<String> = filter.extensions().iter().map(|s| s.to_string()).collect();
+
         // Build base query with filters
         let mut base_query = document_files::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
+        // Apply trigram search filter (pg_trgm)
+        if let Some(ref term) = search_term {
+            base_query = base_query.filter(sql::<Bool>("display_name % ").bind::<Text, _>(term));
+        }
+
         // Apply format filter using file extensions
-        if !filter.is_empty() {
-            let extensions: Vec<String> =
-                filter.extensions().iter().map(|s| s.to_string()).collect();
-            base_query = base_query.filter(dsl::file_extension.eq_any(extensions));
+        if !extensions.is_empty() {
+            base_query = base_query.filter(dsl::file_extension.eq_any(&extensions));
         }
 
         let total = if pagination.include_count {
@@ -343,10 +352,14 @@ impl DocumentFileRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        if !filter.is_empty() {
-            let extensions: Vec<String> =
-                filter.extensions().iter().map(|s| s.to_string()).collect();
-            query = query.filter(dsl::file_extension.eq_any(extensions));
+        // Apply trigram search filter (pg_trgm)
+        if let Some(ref term) = search_term {
+            query = query.filter(sql::<Bool>("display_name % ").bind::<Text, _>(term));
+        }
+
+        // Apply format filter using file extensions
+        if !extensions.is_empty() {
+            query = query.filter(dsl::file_extension.eq_any(&extensions));
         }
 
         let limit = pagination.limit + 1;

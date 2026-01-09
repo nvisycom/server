@@ -74,7 +74,13 @@ CREATE INDEX accounts_admin_users_idx
     ON accounts (id, display_name)
     WHERE is_admin = TRUE AND deleted_at IS NULL;
 
+CREATE INDEX accounts_display_name_trgm_idx
+    ON accounts USING gin (display_name gin_trgm_ops)
+    WHERE deleted_at IS NULL;
 
+CREATE INDEX accounts_email_address_trgm_idx
+    ON accounts USING gin (email_address gin_trgm_ops)
+    WHERE deleted_at IS NULL;
 
 -- Add table and column comments
 COMMENT ON TABLE accounts IS

@@ -15,38 +15,29 @@ use super::Page;
 pub struct ApiToken {
     /// Unique identifier for the token.
     pub id: Uuid,
-
     /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-
     /// Human-readable name for the API token.
     pub name: String,
-
-    /// Type of token (web, mobile, api, etc.).
+    /// Type of token (web, api, etc.).
     pub session_type: ApiTokenType,
-
-    /// Whether the token has expired.
-    pub is_expired: bool,
-
     /// Timestamp of token creation.
     pub issued_at: Timestamp,
-
     /// Timestamp when the token expires (None = never expires).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expired_at: Option<Timestamp>,
-
     /// Timestamp of most recent token activity.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<Timestamp>,
 }
 
 impl ApiToken {
     pub fn from_model(token: AccountApiToken) -> Self {
-        let is_expired = token.is_expired();
         Self {
             id: token.id,
             account_id: token.account_id,
             name: token.name,
             session_type: token.session_type,
-            is_expired,
             issued_at: token.issued_at.into(),
             expired_at: token.expired_at.map(Into::into),
             last_used_at: token.last_used_at.map(Into::into),
@@ -78,22 +69,16 @@ pub type ApiTokensPage = Page<ApiToken>;
 pub struct ApiTokenWithJWT {
     /// Unique identifier for the token.
     pub id: Uuid,
-
     /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-
     /// Human-readable name for the API token.
     pub name: String,
-
     /// Type of token (web, mobile, api, etc.).
     pub session_type: ApiTokenType,
-
     /// Timestamp of token creation.
     pub issued_at: Timestamp,
-
     /// Timestamp when the token expires (None = never expires).
     pub expired_at: Option<Timestamp>,
-
     /// The JWT token string (only shown once on creation).
     pub token: String,
 }

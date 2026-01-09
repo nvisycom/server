@@ -26,6 +26,8 @@ pub struct WorkspaceIntegrationRun {
     pub run_status: IntegrationStatus,
     /// Run metadata, results, and error details.
     pub metadata: serde_json::Value,
+    /// Run execution logs.
+    pub logs: serde_json::Value,
     /// Timestamp when run was started.
     pub started_at: Timestamp,
     /// Timestamp when run was completed.
@@ -49,6 +51,8 @@ pub struct NewWorkspaceIntegrationRun {
     pub run_status: Option<IntegrationStatus>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
+    /// Logs.
+    pub logs: Option<serde_json::Value>,
 }
 
 /// Data for updating a workspace run.
@@ -60,6 +64,8 @@ pub struct UpdateWorkspaceIntegrationRun {
     pub run_status: Option<IntegrationStatus>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
+    /// Logs.
+    pub logs: Option<serde_json::Value>,
     /// Completed at.
     pub completed_at: Option<Option<Timestamp>>,
 }

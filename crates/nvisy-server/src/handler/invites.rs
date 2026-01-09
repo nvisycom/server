@@ -138,6 +138,7 @@ async fn list_invites(
         .cursor_list_workspace_invites(
             path_params.workspace_id,
             pagination.into(),
+            query.to_sort(),
             query.to_filter(),
         )
         .await?;

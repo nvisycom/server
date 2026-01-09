@@ -13,6 +13,8 @@ pub enum WorkspaceIntegrationRunConstraints {
     // Run data constraints
     #[strum(serialize = "workspace_integration_runs_metadata_size")]
     MetadataSize,
+    #[strum(serialize = "workspace_integration_runs_logs_size")]
+    LogsSize,
 
     // Run timing constraints
     #[strum(serialize = "workspace_integration_runs_completed_after_started")]
@@ -28,7 +30,8 @@ impl WorkspaceIntegrationRunConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceIntegrationRunConstraints::MetadataSize => ConstraintCategory::Validation,
+            WorkspaceIntegrationRunConstraints::MetadataSize
+            | WorkspaceIntegrationRunConstraints::LogsSize => ConstraintCategory::Validation,
             WorkspaceIntegrationRunConstraints::CompletedAfterStarted => {
                 ConstraintCategory::Chronological
             }

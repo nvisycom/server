@@ -15,11 +15,11 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::AnnotationType"]
 pub enum AnnotationType {
-    /// General text note or annotation
-    #[db_rename = "note"]
-    #[serde(rename = "note")]
+    /// General text annotation
+    #[db_rename = "annotation"]
+    #[serde(rename = "annotation")]
     #[default]
-    Note,
+    Annotation,
 
     /// Highlighted text selection
     #[db_rename = "highlight"]
@@ -28,10 +28,10 @@ pub enum AnnotationType {
 }
 
 impl AnnotationType {
-    /// Returns whether this is a note annotation.
+    /// Returns whether this is a text annotation.
     #[inline]
-    pub fn is_note(self) -> bool {
-        matches!(self, AnnotationType::Note)
+    pub fn is_annotation(self) -> bool {
+        matches!(self, AnnotationType::Annotation)
     }
 
     /// Returns whether this is a highlight annotation.

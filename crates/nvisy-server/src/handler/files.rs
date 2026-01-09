@@ -713,9 +713,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
         // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspaceId}/files/",
-            get_with(list_files, list_files_docs)
-                .post_with(upload_file, upload_file_docs)
-                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE)),
+            post_with(upload_file, upload_file_docs)
+                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE))
+                .get_with(list_files, list_files_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/files/batch",

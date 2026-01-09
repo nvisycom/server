@@ -3,6 +3,8 @@
 //! This module provides models for managing webhooks connected to workspaces.
 //! Webhooks enable workspaces to send event notifications to external services.
 
+use std::collections::HashMap;
+
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
@@ -10,6 +12,7 @@ use uuid::Uuid;
 use crate::schema::workspace_webhooks;
 use crate::types::{
     HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, WebhookEvent, WebhookStatus,
+    WebhookType,
 };
 
 /// Workspace webhook model representing a webhook configuration for a workspace.
@@ -25,6 +28,10 @@ pub struct WorkspaceWebhook {
     pub id: Uuid,
     /// Reference to the workspace this webhook belongs to.
     pub workspace_id: Uuid,
+    /// Origin type of the webhook (provided or integration).
+    pub webhook_type: WebhookType,
+    /// Reference to integration (required for integration type).
+    pub integration_id: Option<Uuid>,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Description of the webhook's purpose.
@@ -56,6 +63,10 @@ pub struct WorkspaceWebhook {
 pub struct NewWorkspaceWebhook {
     /// Reference to the workspace this webhook will belong to.
     pub workspace_id: Uuid,
+    /// Origin type of the webhook (provided or integration).
+    pub webhook_type: Option<WebhookType>,
+    /// Reference to integration (required for integration type).
+    pub integration_id: Option<Uuid>,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Description of the webhook's purpose.
@@ -96,6 +107,16 @@ pub struct UpdateWorkspaceWebhook {
 }
 
 impl WorkspaceWebhook {
+    /// Returns whether the webhook was created manually by a user.
+    pub fn is_provided(&self) -> bool {
+        self.webhook_type.is_provided()
+    }
+
+    /// Returns whether the webhook was created by an integration.
+    pub fn is_integration(&self) -> bool {
+        self.webhook_type.is_integration()
+    }
+
     /// Returns whether the webhook is active and receiving events.
     pub fn is_active(&self) -> bool {
         self.status.is_active() && self.deleted_at.is_none()
@@ -119,6 +140,11 @@ impl WorkspaceWebhook {
     /// Returns the list of subscribed events.
     pub fn subscribed_events(&self) -> Vec<WebhookEvent> {
         self.events.iter().filter_map(|e| *e).collect()
+    }
+
+    /// Returns the custom headers as a `HashMap<String, String>`.
+    pub fn parsed_headers(&self) -> HashMap<String, String> {
+        serde_json::from_value(self.headers.clone()).unwrap_or_default()
     }
 
     /// Returns whether the webhook subscribes to a specific event type.
@@ -158,5 +184,27 @@ impl HasDeletedAt for WorkspaceWebhook {
 impl HasOwnership for WorkspaceWebhook {
     fn created_by(&self) -> Uuid {
         self.created_by
+    }
+}
+
+impl NewWorkspaceWebhook {
+    /// Converts a `HashMap<String, String>` to `Option<serde_json::Value>`.
+    ///
+    /// Returns `None` if the map is empty.
+    pub fn serialize_headers(headers: HashMap<String, String>) -> Option<serde_json::Value> {
+        if headers.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_value(&headers).unwrap_or_default())
+        }
+    }
+
+    /// Converts an `Option<HashMap<String, String>>` to `Option<serde_json::Value>`.
+    ///
+    /// Returns `None` if the input is `None` or the map is empty.
+    pub fn serialize_headers_opt(
+        headers: Option<HashMap<String, String>>,
+    ) -> Option<serde_json::Value> {
+        headers.and_then(Self::serialize_headers)
     }
 }

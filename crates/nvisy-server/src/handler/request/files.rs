@@ -79,6 +79,9 @@ pub struct DownloadFiles {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListFiles {
+    /// Search by file name (case-insensitive, partial match).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
     /// Filter by file formats.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formats: Option<Vec<FileFormat>>,
@@ -88,6 +91,7 @@ impl ListFiles {
     /// Converts to filter model.
     pub fn to_filter(&self) -> FileFilter {
         FileFilter {
+            search: self.search.clone(),
             formats: self.formats.clone(),
         }
     }

@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::handler::utility::serialize_headers_opt;
-
 /// Request payload for creating a new workspace webhook.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
@@ -48,7 +46,7 @@ impl CreateWebhook {
     #[inline]
     pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewWorkspaceWebhook {
         let events = self.events.into_iter().map(Some).collect();
-        let headers = serialize_headers_opt(self.headers);
+        let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
         // Treat Disabled as Paused since users cannot set Disabled status
         let status = self.status.map(|s| match s {
             WebhookStatus::Disabled => WebhookStatus::Paused,
@@ -57,6 +55,8 @@ impl CreateWebhook {
 
         NewWorkspaceWebhook {
             workspace_id,
+            webhook_type: None, // Defaults to 'provided'
+            integration_id: None,
             display_name: self.display_name,
             description: self.description,
             url: self.url,
@@ -98,7 +98,7 @@ impl UpdateWebhook {
     #[inline]
     pub fn into_model(self, current_status: WebhookStatus) -> UpdateWorkspaceWebhookModel {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
-        let headers = serialize_headers_opt(self.headers);
+        let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
         // Ignore status changes if webhook is disabled; treat Disabled as Paused
         let status = if current_status.is_disabled() {
             None
