@@ -21,14 +21,12 @@ server/
 ├── crates/
 │   ├── nvisy-cli/         # Server binary with CLI and configuration
 │   ├── nvisy-core/        # Shared types, errors, and utilities
-│   ├── nvisy-inference/   # AI inference abstractions (embeddings, OCR, VLM)
 │   ├── nvisy-nats/        # NATS client (streams, KV, object storage, jobs)
 │   ├── nvisy-ollama/      # Ollama provider implementation
 │   ├── nvisy-postgres/    # PostgreSQL database layer with Diesel ORM
-│   ├── nvisy-reqwest/     # HTTP client for external services
-│   ├── nvisy-server/      # HTTP handlers, middleware, and OpenAPI
-│   ├── nvisy-webhook/     # Webhook delivery types and traits
-│   └── nvisy-worker/      # Background workers for document processing
+│   ├── nvisy-rig/         # AI services (chat, RAG, embeddings)
+│   ├── nvisy-server/      # HTTP handlers, middleware, pipeline, and OpenAPI
+│   └── nvisy-webhook/     # Webhook delivery with HTTP client
 ├── migrations/            # PostgreSQL database migrations
 └── Cargo.toml             # Workspace configuration
 ```
