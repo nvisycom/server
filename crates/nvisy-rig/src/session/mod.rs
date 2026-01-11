@@ -2,18 +2,13 @@
 //!
 //! Sessions are ephemeral and stored in NATS KV with TTL.
 //! They track conversation history, pending edits, and auto-apply policies.
-//!
-//! ## Submodules
-//!
-//! - [`agent`] - Agent execution within sessions
 
-pub mod agent;
 mod message;
 mod policy;
 mod store;
 
-use chrono::{DateTime, Utc};
-pub use message::{Message, MessageRole};
+use jiff::Timestamp;
+pub use message::Message;
 pub use policy::{ApplyPolicy, ApprovalHistory, AutoApplyContext};
 use serde::{Deserialize, Serialize};
 pub use store::SessionStore;
@@ -120,16 +115,16 @@ pub struct Session {
     approval_history: ApprovalHistory,
 
     /// When the session was created.
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 
     /// Last activity time.
-    last_activity_at: DateTime<Utc>,
+    last_activity_at: Timestamp,
 }
 
 impl Session {
     /// Creates a new session from a request.
     pub fn new(request: CreateSession) -> Self {
-        let now = Utc::now();
+        let now = Timestamp::now();
         Self {
             id: Uuid::now_v7(),
             document_id: request.document_id,
@@ -200,37 +195,37 @@ impl Session {
     }
 
     /// Returns the creation time.
-    pub fn created_at(&self) -> DateTime<Utc> {
+    pub fn created_at(&self) -> Timestamp {
         self.created_at
     }
 
     /// Returns the last activity time.
-    pub fn last_activity_at(&self) -> DateTime<Utc> {
+    pub fn last_activity_at(&self) -> Timestamp {
         self.last_activity_at
     }
 
     /// Adds a user message.
     pub fn add_user_message(&mut self, content: impl Into<String>) {
         self.messages.push(Message::user(content));
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
     }
 
     /// Adds an assistant message.
     pub fn add_assistant_message(&mut self, content: impl Into<String>) {
         self.messages.push(Message::assistant(content));
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
     }
 
     /// Adds a tool result message.
     pub fn add_tool_message(&mut self, tool_call_id: Uuid, content: impl Into<String>) {
         self.messages.push(Message::tool(tool_call_id, content));
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
     }
 
     /// Adds a proposed edit.
     pub fn add_proposed_edit(&mut self, edit: ProposedEdit) {
         self.pending_edits.push(edit);
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
     }
 
     /// Checks if an edit should be auto-applied.
@@ -273,7 +268,7 @@ impl Session {
             }
         }
 
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
 
         Ok(ApplyResult {
             applied,
@@ -290,18 +285,19 @@ impl Session {
                 self.rejected_edits.push(*id);
             }
         }
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
     }
 
     /// Touches the session to update last activity time.
     pub fn touch(&mut self) {
-        self.last_activity_at = Utc::now();
+        self.last_activity_at = Timestamp::now();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::message::MessageRole;
 
     fn test_request() -> CreateSession {
         CreateSession::new(Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7())

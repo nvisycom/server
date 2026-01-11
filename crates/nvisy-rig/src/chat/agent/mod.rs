@@ -18,11 +18,11 @@ use futures::stream::BoxStream;
 pub use prompt::PromptBuilder;
 use uuid::Uuid;
 
-use super::Session;
+use super::ChatEvent;
 use crate::Result;
+use crate::provider::{ModelRef, ProviderRegistry};
 use crate::rag::RetrievedChunk;
-use crate::service::ChatEvent;
-use crate::service::provider::{ModelRef, ProviderRegistry};
+use crate::session::Session;
 use crate::tool::ToolRegistry;
 use crate::tool::edit::ProposedEdit;
 

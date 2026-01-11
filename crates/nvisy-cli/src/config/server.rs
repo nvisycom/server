@@ -29,7 +29,7 @@ use std::time::Duration;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
-use crate::TRACING_TARGET_CONFIG;
+use super::TRACING_TARGET_CONFIG;
 
 /// HTTP server network and lifecycle configuration.
 ///

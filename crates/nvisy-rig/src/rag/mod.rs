@@ -41,7 +41,7 @@ pub use self::searcher::{ChunkMetadata, RetrievedChunk, SearchScope, Searcher};
 use self::splitter::Splitter;
 pub use self::splitter::estimate_tokens;
 use crate::Result;
-use crate::service::provider::EmbeddingProvider;
+use crate::provider::EmbeddingProvider;
 
 /// High-level RAG service for document indexing and semantic search.
 ///
@@ -60,16 +60,11 @@ struct RagServiceInner {
 
 impl RagService {
     /// Creates a new RAG service.
-    pub async fn new(provider: EmbeddingProvider, db: PgClient, nats: NatsClient) -> Result<Self> {
-        Self::with_config(provider, db, nats, RagConfig::default()).await
-    }
-
-    /// Creates a new RAG service with custom configuration.
-    pub async fn with_config(
+    pub async fn new(
+        config: RagConfig,
         provider: EmbeddingProvider,
         db: PgClient,
         nats: NatsClient,
-        config: RagConfig,
     ) -> Result<Self> {
         let files = nats
             .document_store::<Files>()

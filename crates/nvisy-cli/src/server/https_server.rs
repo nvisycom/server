@@ -7,7 +7,7 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use nvisy_server::extract::AppConnectInfo;
 
-use crate::TRACING_TARGET_SERVER_STARTUP;
+use super::TRACING_TARGET_STARTUP;
 use crate::config::ServerConfig;
 use crate::server::lifecycle::serve_with_shutdown;
 use crate::server::shutdown_signal;
@@ -33,14 +33,14 @@ pub async fn serve_https(app: Router, server_config: ServerConfig) -> io::Result
             })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_SERVER_STARTUP,
+            target: TRACING_TARGET_STARTUP,
             cert_path = %cert_path.display(),
             key_path = %key_path.display(),
             "TLS certificates loaded"
         );
 
         tracing::info!(
-            target: TRACING_TARGET_SERVER_STARTUP,
+            target: TRACING_TARGET_STARTUP,
             addr = %server_addr,
             tls = true,
             "Server listening"
@@ -94,7 +94,7 @@ fn validate_tls_files(cert_path: &Path, key_path: &Path) -> io::Result<()> {
     validate_file(key_path, "Private key")?;
 
     tracing::debug!(
-        target: TRACING_TARGET_SERVER_STARTUP,
+        target: TRACING_TARGET_STARTUP,
         cert_path = %cert_path.display(),
         key_path = %key_path.display(),
         "TLS files validated"

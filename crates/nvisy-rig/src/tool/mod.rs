@@ -31,9 +31,8 @@ mod types;
 
 // Re-export rig-core tool types
 // Our extensions
-pub use definition::{ToolBuilder, ToolDefinition};
+pub use definition::ToolDefinition;
 pub use registry::ToolRegistry;
-pub use rig::completion::ToolDefinition as RigToolDefinition;
 pub use rig::tool::{Tool, ToolDyn, ToolError};
 use serde::{Deserialize, Serialize};
 pub use types::{ToolInput, ToolOutput};

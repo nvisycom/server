@@ -1,4 +1,4 @@
-//! Streaming utilities and usage statistics.
+//! Token usage statistics.
 
 use serde::{Deserialize, Serialize};
 

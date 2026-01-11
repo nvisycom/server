@@ -10,7 +10,6 @@ members = [
     "./crates/nvisy-rig",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
-    "./crates/nvisy-worker",
 ]
 
 [workspace.package]
@@ -38,7 +37,6 @@ nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
-nvisy-worker = { path = "./crates/nvisy-worker", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }

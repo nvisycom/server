@@ -690,7 +690,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2539,7 +2538,6 @@ dependencies = [
  "nvisy-postgres",
  "nvisy-server",
  "nvisy-webhook",
- "nvisy-worker",
  "serde",
  "thiserror 2.0.17",
  "tokio",
@@ -2619,11 +2617,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
- "chrono",
  "clap",
  "derive_builder",
  "derive_more",
  "futures",
+ "jiff",
  "nvisy-nats",
  "nvisy-postgres",
  "rig-core",
@@ -2661,6 +2659,7 @@ dependencies = [
  "jsonwebtoken",
  "nvisy-nats",
  "nvisy-postgres",
+ "nvisy-rig",
  "nvisy-webhook",
  "rand 0.10.0-rc.5",
  "regex",
@@ -2705,24 +2704,6 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
- "uuid",
-]
-
-[[package]]
-name = "nvisy-worker"
-version = "0.1.0"
-dependencies = [
- "clap",
- "futures",
- "futures-util",
- "nvisy-nats",
- "nvisy-postgres",
- "serde",
- "text-splitter",
- "thiserror 2.0.17",
- "tokio",
- "tokio-util",
- "tracing",
  "uuid",
 ]
 

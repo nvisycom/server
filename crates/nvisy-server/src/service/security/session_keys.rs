@@ -12,8 +12,10 @@ use clap::Args;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::utility::tracing_targets::TRACING_TARGET_SESSION_KEYS as TRACING_TARGET;
 use crate::{Error, Result};
+
+/// Tracing target for session key operations.
+const TRACING_TARGET: &str = "nvisy_server::session_keys";
 
 /// Authentication key file paths configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]

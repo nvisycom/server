@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
-use crate::utility::tracing_targets::TRACING_TARGET_AUTHENTICATION;
+
+/// Tracing target for authentication operations.
+const TRACING_TARGET: &str = "nvisy_server::authentication";
 
 /// Far-future timestamp for tokens that never expire (100 years from now).
 const NEVER_EXPIRES_SECONDS: i64 = 100 * 365 * 24 * 60 * 60;
@@ -180,7 +182,7 @@ where
         let header = Header::new(Algorithm::EdDSA);
         encode(&header, &self, encoding_key).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 error = %e,
                 account_id = %self.account_id,
                 "Failed to encode JWT token"
@@ -213,7 +215,7 @@ where
         let header = Header::new(Algorithm::EdDSA);
         let jwt_token = encode(&header, &self, encoding_key).map_err(|e| {
             tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 error = %e,
                 account_id = %self.account_id,
                 "Failed to encode JWT token"
@@ -227,7 +229,7 @@ where
 
         let bearer_auth = Authorization::bearer(&jwt_token).map_err(|_| {
             tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id,
                 "Generated JWT token has invalid format for Authorization header"
             );
@@ -282,7 +284,7 @@ where
         validation.set_required_spec_claims(&["iss", "aud", "jti", "sub", "iat", "exp", "adm"]);
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
+            target: TRACING_TARGET,
             audience = Self::JWT_AUDIENCE,
             issuer = Self::JWT_ISSUER,
             "Validating JWT token with strict security settings"
@@ -290,7 +292,7 @@ where
 
         let token_data = decode::<Self>(auth_token, decoding_key, &validation).map_err(|e| {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 error = %e,
                 error_kind = ?e.kind(),
                 "JWT token decode failed"
@@ -302,7 +304,7 @@ where
         // Double-check expiration for security
         if claims.is_expired() {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 token_id = %claims.token_id,
                 account_id = %claims.account_id,
                 expired_at = %claims.expires_at,
@@ -316,7 +318,7 @@ where
         }
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
+            target: TRACING_TARGET,
             token_id = %claims.token_id,
             account_id = %claims.account_id,
             is_admin = claims.is_admin,

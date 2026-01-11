@@ -1,7 +1,7 @@
 //! Prompt building for the agent.
 
-use super::super::{Message, Session};
 use crate::rag::RetrievedChunk;
+use crate::session::{Message, Session};
 use crate::tool::ToolDefinition;
 
 /// Builder for constructing agent prompts.

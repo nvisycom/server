@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 pub use self::retrieved::{ChunkMetadata, RetrievedChunk};
 pub use self::scope::SearchScope;
-use crate::service::provider::EmbeddingProvider;
+use crate::provider::EmbeddingProvider;
 use crate::{Error, Result};
 
 /// Semantic search service for document chunks.

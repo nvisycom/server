@@ -31,8 +31,8 @@ use crate::handler::request::{
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
+use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
-use crate::utility::DEFAULT_MAX_FILE_BODY_SIZE;
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";

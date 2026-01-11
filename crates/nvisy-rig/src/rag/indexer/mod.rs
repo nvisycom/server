@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 pub use self::indexed::IndexedChunk;
 use super::splitter::{OwnedSplitChunk, Splitter, estimate_tokens};
-use crate::service::provider::EmbeddingProvider;
+use crate::provider::EmbeddingProvider;
 use crate::{Error, Result};
 
 /// Indexer for batch-embedding and storing document chunks.

@@ -7,8 +7,8 @@ use std::future::Future;
 use std::io;
 use std::time::Instant;
 
+use super::{TRACING_TARGET_SHUTDOWN, TRACING_TARGET_STARTUP};
 use crate::config::ServerConfig;
-use crate::{TRACING_TARGET_SERVER_SHUTDOWN, TRACING_TARGET_SERVER_STARTUP};
 
 /// Serves with lifecycle management and graceful shutdown.
 ///
@@ -41,7 +41,7 @@ where
 fn log_security_warnings(config: &ServerConfig) {
     if config.binds_to_all_interfaces() {
         tracing::warn!(
-            target: TRACING_TARGET_SERVER_STARTUP,
+            target: TRACING_TARGET_STARTUP,
             "Server bound to all interfaces (0.0.0.0) - ensure firewall is configured"
         );
     }
@@ -50,7 +50,7 @@ fn log_security_warnings(config: &ServerConfig) {
 /// Logs configuration details.
 fn log_config_details(config: &ServerConfig) {
     tracing::debug!(
-        target: TRACING_TARGET_SERVER_STARTUP,
+        target: TRACING_TARGET_STARTUP,
         host = %config.host,
         port = config.port,
         shutdown_timeout = config.shutdown_timeout,
@@ -66,7 +66,7 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> io::Result<()> 
     match result {
         Ok(()) => {
             tracing::info!(
-                target: TRACING_TARGET_SERVER_SHUTDOWN,
+                target: TRACING_TARGET_SHUTDOWN,
                 uptime_secs = uptime.as_secs(),
                 "Shutdown completed"
             );
@@ -74,7 +74,7 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> io::Result<()> 
         }
         Err(err) => {
             tracing::error!(
-                target: TRACING_TARGET_SERVER_SHUTDOWN,
+                target: TRACING_TARGET_SHUTDOWN,
                 error = %err,
                 kind = ?err.kind(),
                 uptime_secs = uptime.as_secs(),
@@ -83,7 +83,7 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> io::Result<()> 
 
             if let Some(suggestion) = error_suggestion(&err) {
                 tracing::info!(
-                    target: TRACING_TARGET_SERVER_SHUTDOWN,
+                    target: TRACING_TARGET_SHUTDOWN,
                     suggestion = suggestion,
                     "Recovery suggestion"
                 );

@@ -52,7 +52,7 @@ tracing = { workspace = true }
 # Data types
 uuid = { workspace = true }
 bytes = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["std", "serde", "clock"] }
+jiff = { workspace = true, features = ["serde"] }
 
 # Text processing
 text-splitter = { workspace = true }

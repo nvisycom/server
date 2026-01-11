@@ -28,12 +28,14 @@ config = [
     "dep:clap",
     "nvisy-nats/config",
     "nvisy-postgres/config",
+    "nvisy-rig/config",
 ]
 
 [dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
+nvisy-rig = { workspace = true, features = [] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime

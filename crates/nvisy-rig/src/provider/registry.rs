@@ -69,6 +69,22 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
+    /// Creates an empty provider registry with placeholder defaults.
+    ///
+    /// This is useful for testing or when providers will be configured later.
+    /// Note: Attempting to resolve models will fail until providers are added.
+    pub fn empty() -> Self {
+        let placeholder = ModelRef::new("none", "none");
+        Self {
+            providers: HashMap::new(),
+            defaults: DefaultModels {
+                embedding: placeholder.clone(),
+                completion: placeholder.clone(),
+                vision: placeholder,
+            },
+        }
+    }
+
     /// Creates a new provider registry.
     pub fn new(providers: Vec<ProviderConfig>, defaults: DefaultModels) -> Result<Self> {
         let mut provider_map = HashMap::new();

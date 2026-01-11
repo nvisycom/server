@@ -1,6 +1,6 @@
 //! Proposed edit types.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ pub struct ProposedEdit {
     preview: Option<String>,
 
     /// When the edit was proposed.
-    proposed_at: DateTime<Utc>,
+    proposed_at: Timestamp,
 
     /// Current status.
     status: EditStatus,
@@ -57,7 +57,7 @@ impl ProposedEdit {
             replacement: None,
             reason: reason.into(),
             preview: None,
-            proposed_at: Utc::now(),
+            proposed_at: Timestamp::now(),
             status: EditStatus::Pending,
         }
     }
@@ -79,7 +79,7 @@ impl ProposedEdit {
             replacement: Some(replacement.into()),
             reason: reason.into(),
             preview: None,
-            proposed_at: Utc::now(),
+            proposed_at: Timestamp::now(),
             status: EditStatus::Pending,
         }
     }
@@ -100,7 +100,7 @@ impl ProposedEdit {
             replacement: Some(content.into()),
             reason: reason.into(),
             preview: None,
-            proposed_at: Utc::now(),
+            proposed_at: Timestamp::now(),
             status: EditStatus::Pending,
         }
     }
@@ -121,7 +121,7 @@ impl ProposedEdit {
             replacement: None,
             reason: reason.into(),
             preview: None,
-            proposed_at: Utc::now(),
+            proposed_at: Timestamp::now(),
             status: EditStatus::Pending,
         }
     }
@@ -142,7 +142,7 @@ impl ProposedEdit {
             replacement: Some("[REDACTED]".to_string()),
             reason: reason.into(),
             preview: None,
-            proposed_at: Utc::now(),
+            proposed_at: Timestamp::now(),
             status: EditStatus::Pending,
         }
     }
@@ -199,7 +199,7 @@ impl ProposedEdit {
     }
 
     /// Returns when the edit was proposed.
-    pub fn proposed_at(&self) -> DateTime<Utc> {
+    pub fn proposed_at(&self) -> Timestamp {
         self.proposed_at
     }
 

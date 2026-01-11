@@ -1,6 +1,6 @@
 //! Chat message types.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ pub struct Message {
     tool_call_id: Option<Uuid>,
 
     /// When the message was created.
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 }
 
 impl Message {
@@ -45,7 +45,7 @@ impl Message {
             role: MessageRole::System,
             content: content.into(),
             tool_call_id: None,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         }
     }
 
@@ -56,7 +56,7 @@ impl Message {
             role: MessageRole::User,
             content: content.into(),
             tool_call_id: None,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         }
     }
 
@@ -67,7 +67,7 @@ impl Message {
             role: MessageRole::Assistant,
             content: content.into(),
             tool_call_id: None,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         }
     }
 
@@ -78,7 +78,7 @@ impl Message {
             role: MessageRole::Tool,
             content: content.into(),
             tool_call_id: Some(tool_call_id),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         }
     }
 
@@ -103,7 +103,7 @@ impl Message {
     }
 
     /// Returns when the message was created.
-    pub fn created_at(&self) -> DateTime<Utc> {
+    pub fn created_at(&self) -> Timestamp {
         self.created_at
     }
 }

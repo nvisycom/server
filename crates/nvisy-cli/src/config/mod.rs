@@ -30,7 +30,8 @@ mod server;
 use std::process;
 
 use clap::Parser;
-use nvisy_server::service::ServiceConfig;
+use nvisy_server::pipeline::PipelineConfig;
+use nvisy_server::service::{ServiceConfig, ServiceState};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::reqwest::{ReqwestClient, ReqwestConfig};
 use serde::{Deserialize, Serialize};
@@ -40,7 +41,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 pub use self::middleware::MiddlewareConfig;
 pub use self::server::ServerConfig;
-use crate::{TRACING_TARGET_CONFIG, TRACING_TARGET_SERVER_STARTUP};
+use crate::server::TRACING_TARGET_STARTUP;
+
+/// Tracing target for configuration events.
+pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 
 /// Complete CLI configuration.
 ///
@@ -66,6 +70,10 @@ pub struct Cli {
     /// External service configuration (databases, message queues).
     #[clap(flatten)]
     pub service: ServiceConfig,
+
+    /// Pipeline configuration for document processing workers.
+    #[clap(flatten)]
+    pub pipeline: PipelineConfig,
 
     /// HTTP client configuration for webhook delivery.
     #[clap(flatten)]
@@ -113,7 +121,7 @@ impl Cli {
     /// Logs build information at debug level.
     fn log_build_info() {
         tracing::debug!(
-            target: TRACING_TARGET_SERVER_STARTUP,
+            target: TRACING_TARGET_STARTUP,
             version = env!("CARGO_PKG_VERSION"),
             pid = process::id(),
             arch = std::env::consts::ARCH,
@@ -153,5 +161,11 @@ impl Cli {
     /// Creates webhook service from CLI configuration.
     pub fn webhook_service(&self) -> WebhookService {
         ReqwestClient::new(self.reqwest.clone()).into_service()
+    }
+
+    /// Initializes application state from CLI configuration.
+    pub async fn service_state(&self) -> anyhow::Result<ServiceState> {
+        let webhook = self.webhook_service();
+        Ok(ServiceState::from_config(self.service.clone(), webhook).await?)
     }
 }

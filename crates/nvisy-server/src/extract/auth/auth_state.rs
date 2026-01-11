@@ -17,7 +17,9 @@ use serde::Deserialize;
 use super::{AuthClaims, AuthHeader};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
-use crate::utility::tracing_targets::TRACING_TARGET_AUTHENTICATION;
+
+/// Tracing target for authentication operations.
+const TRACING_TARGET: &str = "nvisy_server::authentication";
 
 /// Authenticated user state with comprehensive database verification.
 ///
@@ -126,7 +128,7 @@ where
         let auth_claims = auth_header.into_auth_claims();
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
+            target: TRACING_TARGET,
             token_id = %auth_claims.token_id,
             account_id = %auth_claims.account_id,
             expires_at = %auth_claims.expires_at,
@@ -136,7 +138,7 @@ where
 
         let mut conn = pg_client.get_connection().await.map_err(|db_error| {
             tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 error = %db_error,
                 "failed to acquire database connection for authentication verification"
             );
@@ -152,7 +154,7 @@ where
         Self::verify_privilege_consistency(&auth_claims, &account)?;
 
         tracing::info!(
-            target: TRACING_TARGET_AUTHENTICATION,
+            target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
             token_id = %auth_claims.token_id,
             is_admin = account.is_admin,
@@ -200,7 +202,7 @@ where
             .await
             .map_err(|db_error| {
                 tracing::error!(
-                    target: TRACING_TARGET_AUTHENTICATION,
+                    target: TRACING_TARGET,
                     error = %db_error,
                     account_id = %auth_claims.account_id,
                     token_id = %auth_claims.token_id,
@@ -214,7 +216,7 @@ where
             })?
             .ok_or_else(|| {
                 tracing::warn!(
-                    target: TRACING_TARGET_AUTHENTICATION,
+                    target: TRACING_TARGET,
                     account_id = %auth_claims.account_id,
                     token_id = %auth_claims.token_id,
                     "authentication failed: account referenced in token no longer exists"
@@ -227,7 +229,7 @@ where
             })?;
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
+            target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
             email = %account.email_address,
             is_admin = account.is_admin,
@@ -264,7 +266,7 @@ where
     fn verify_privilege_consistency(auth_claims: &AuthClaims<T>, account: &Account) -> Result<()> {
         if auth_claims.is_admin != account.is_admin {
             tracing::error!(
-                target: TRACING_TARGET_AUTHENTICATION,
+                target: TRACING_TARGET,
                 account_id = %auth_claims.account_id,
                 token_id = %auth_claims.token_id,
                 token_admin_claim = auth_claims.is_admin,
@@ -280,7 +282,7 @@ where
         }
 
         tracing::debug!(
-            target: TRACING_TARGET_AUTHENTICATION,
+            target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
             is_admin = account.is_admin,
             "privilege consistency verification successful"

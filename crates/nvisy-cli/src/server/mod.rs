@@ -4,6 +4,12 @@
 //! enhanced error handling and production-ready lifecycle management.
 //! It automatically handles protocol selection based on TLS configuration.
 
+/// Tracing target for server startup events.
+pub const TRACING_TARGET_STARTUP: &str = "nvisy_cli::server::startup";
+
+/// Tracing target for server shutdown events.
+pub const TRACING_TARGET_SHUTDOWN: &str = "nvisy_cli::server::shutdown";
+
 #[cfg(not(feature = "tls"))]
 mod http_server;
 #[cfg(feature = "tls")]

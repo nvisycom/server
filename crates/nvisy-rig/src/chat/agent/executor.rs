@@ -5,10 +5,9 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 
-use super::{AgentConfig, AgentContext};
+use super::{AgentConfig, AgentContext, ChatEvent};
 use crate::Result;
-use crate::service::ChatEvent;
-use crate::service::provider::{ModelRef, ProviderRegistry};
+use crate::provider::{ModelRef, ProviderRegistry};
 use crate::tool::ToolRegistry;
 
 /// Executor for running the agent loop.

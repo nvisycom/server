@@ -6,7 +6,7 @@ use axum::Router;
 use nvisy_server::extract::AppConnectInfo;
 use tokio::net::TcpListener;
 
-use crate::TRACING_TARGET_SERVER_STARTUP;
+use super::TRACING_TARGET_STARTUP;
 use crate::config::ServerConfig;
 use crate::server::lifecycle::serve_with_shutdown;
 use crate::server::shutdown_signal;
@@ -21,7 +21,7 @@ pub async fn serve_http(app: Router, server_config: ServerConfig) -> io::Result<
         let listener = TcpListener::bind(server_addr).await?;
 
         tracing::info!(
-            target: TRACING_TARGET_SERVER_STARTUP,
+            target: TRACING_TARGET_STARTUP,
             addr = %server_addr,
             "Server listening"
         );

@@ -47,15 +47,19 @@
 
 mod authentication;
 mod authorization;
+mod constants;
 mod observability;
 mod recovery;
+mod route_category;
 mod security;
 mod specification;
 
 pub use authentication::{RouterAuthExt, require_authentication, validate_token_middleware};
 pub use authorization::require_admin;
+pub use constants::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_FILE_BODY_SIZE};
 pub use observability::RouterObservabilityExt;
 pub use recovery::{RecoveryConfig, RouterRecoveryExt};
+pub use route_category::RouteCategory;
 pub use security::{
     CorsConfig, FrameOptions, ReferrerPolicy, RouterSecurityExt, SecurityHeadersConfig,
 };
