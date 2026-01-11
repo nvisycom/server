@@ -14,6 +14,8 @@
 //! // Convert to a service for dependency injection
 //! let service: WebhookService = client.into_service();
 //! ```
+//!
+//! [`WebhookProvider`]: crate::WebhookProvider
 
 mod client;
 mod config;

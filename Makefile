@@ -110,3 +110,31 @@ generate-all: generate-env generate-keys generate-migrations
 
 .PHONY: all
 all: install-all generate-all
+
+# CI Commands (mirror GitHub Actions)
+.PHONY: ci
+ci: ## Runs all CI checks locally (check, fmt, clippy, test, docs).
+	$(call make-log,Running cargo check...)
+	@cargo check --all-features --workspace
+	$(call make-log,Checking code formatting...)
+	@cargo +nightly fmt --all -- --check
+	$(call make-log,Running clippy...)
+	@cargo clippy --all-targets --all-features --workspace -- -D warnings
+	$(call make-log,Running tests...)
+	@cargo test --all-features --workspace
+	$(call make-log,Building documentation...)
+	@RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --workspace
+	$(call make-log,All CI checks passed!)
+
+.PHONY: fmt
+fmt: ## Fixes code formatting.
+	$(call make-log,Fixing code formatting...)
+	@cargo +nightly fmt --all
+	$(call make-log,Formatting fixed!)
+
+# Security Commands (mirror GitHub Actions)
+.PHONY: security
+security: ## Runs security checks locally (audit, deny).
+	$(call make-log,Running cargo deny...)
+	@cargo deny check all
+	$(call make-log,All security checks passed!)

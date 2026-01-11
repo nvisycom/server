@@ -196,10 +196,10 @@ impl CustomPolicy {
     /// Determines if an edit should be auto-applied.
     pub fn should_auto_apply(&self, context: &AutoApplyContext) -> bool {
         // Check max auto-apply limit
-        if let Some(max) = self.max_auto_apply {
-            if context.auto_applied_count >= max {
-                return false;
-            }
+        if let Some(max) = self.max_auto_apply
+            && context.auto_applied_count >= max
+        {
+            return false;
         }
 
         // Check if operation type is allowed (empty = all allowed)
@@ -215,10 +215,10 @@ impl CustomPolicy {
         }
 
         // Check learn threshold
-        if let Some(threshold) = self.learn_threshold {
-            if context.approval_count_for_type >= threshold {
-                return true;
-            }
+        if let Some(threshold) = self.learn_threshold
+            && context.approval_count_for_type >= threshold
+        {
+            return true;
         }
 
         false
