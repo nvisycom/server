@@ -93,7 +93,7 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install diesel CLI
-        run: cargo binstall diesel_cli --no-confirm --no-symlinks --features postgres
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
 
       - name: Start services
         run: docker compose -f docker/docker-compose.dev.yml up -d
