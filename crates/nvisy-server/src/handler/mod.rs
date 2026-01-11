@@ -4,7 +4,6 @@
 //! [`Handler`]: axum::handler::Handler
 
 mod accounts;
-mod activities;
 mod annotations;
 mod authentication;
 mod comments;
@@ -15,7 +14,6 @@ mod integrations;
 mod invites;
 mod members;
 mod monitors;
-mod notifications;
 pub mod request;
 pub mod response;
 mod runs;
@@ -57,9 +55,7 @@ fn private_routes(
         .merge(files::routes())
         .merge(documents::routes())
         .merge(comments::routes())
-        .merge(annotations::routes())
-        .merge(activities::routes())
-        .merge(notifications::routes());
+        .merge(annotations::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);
@@ -122,8 +118,7 @@ mod test {
     use aide::axum::ApiRouter;
     use axum::Router;
     use axum_test::TestServer;
-    use nvisy_ollama::OllamaClient;
-    use nvisy_reqwest::ReqwestClient;
+    use nvisy_webhook::reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
     use crate::service::{ServiceConfig, ServiceState};
@@ -134,8 +129,7 @@ mod test {
     ) -> anyhow::Result<TestServer> {
         let config = ServiceConfig::from_env()?;
         let webhook_service = ReqwestClient::default().into_service();
-        let inference_service = OllamaClient::default().into_service();
-        let state = ServiceState::from_config(config, webhook_service, inference_service).await?;
+        let state = ServiceState::from_config(config, webhook_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }

@@ -192,6 +192,28 @@ where
         }
     }
 
+    /// Touches a key to reset its TTL by re-putting the same value.
+    ///
+    /// Returns an error if the key doesn't exist.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
+    pub async fn touch(&self, key: &str) -> Result<KvEntry> {
+        let kv_value = self
+            .get(key)
+            .await?
+            .ok_or_else(|| Error::operation("kv_touch", format!("key not found: {key}")))?;
+
+        let entry = self.put(key, &kv_value.value).await?;
+
+        tracing::debug!(
+            target: TRACING_TARGET_KV,
+            key = %key,
+            revision = entry.revision,
+            "Touched key (TTL reset)"
+        );
+
+        Ok(entry)
+    }
+
     /// Get all keys in the bucket.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn keys(&self) -> Result<Vec<String>> {

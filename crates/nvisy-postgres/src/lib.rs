@@ -31,6 +31,7 @@ pub mod types;
 
 pub use diesel_async::AsyncPgConnection as PgConnection;
 pub use jiff_diesel::Timestamp as JiffTimestamp;
+pub use pgvector::Vector;
 
 pub(crate) use crate::client::PooledConnection;
 pub use crate::client::{

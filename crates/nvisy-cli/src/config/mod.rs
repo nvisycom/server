@@ -30,11 +30,9 @@ mod server;
 use std::process;
 
 use clap::Parser;
-use nvisy_inference::InferenceService;
-use nvisy_ollama::{OllamaClient, OllamaConfig};
-use nvisy_reqwest::{ReqwestClient, ReqwestConfig};
 use nvisy_server::service::ServiceConfig;
 use nvisy_webhook::WebhookService;
+use nvisy_webhook::reqwest::{ReqwestClient, ReqwestConfig};
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -68,10 +66,6 @@ pub struct Cli {
     /// External service configuration (databases, message queues).
     #[clap(flatten)]
     pub service: ServiceConfig,
-
-    /// Ollama configuration for embeddings, VLM, and OCR.
-    #[clap(flatten)]
-    pub ollama: OllamaConfig,
 
     /// HTTP client configuration for webhook delivery.
     #[clap(flatten)]
@@ -154,11 +148,6 @@ impl Cli {
         .into_iter()
         .flatten()
         .collect()
-    }
-
-    /// Creates inference service from CLI configuration.
-    pub fn inference_service(&self) -> InferenceService {
-        OllamaClient::new(self.ollama.clone()).into_service()
     }
 
     /// Creates webhook service from CLI configuration.

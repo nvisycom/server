@@ -1,7 +1,7 @@
 //! Agent context for a single request.
 
 use super::super::Session;
-use crate::rag::RetrievedChunk;
+use crate::rag::{RetrievedChunk, estimate_tokens};
 
 /// Context for an agent request.
 #[derive(Debug, Clone)]
@@ -50,7 +50,8 @@ impl AgentContext {
     pub fn context_tokens(&self) -> u32 {
         self.retrieved_chunks
             .iter()
-            .map(|c| c.estimated_tokens())
+            .filter_map(|c| c.content.as_deref())
+            .map(estimate_tokens)
             .sum()
     }
 }

@@ -19,41 +19,6 @@ pub enum ApiTokenType {
     Cli,
 }
 
-/// Token store statistics.
-#[derive(Debug, Clone, Default)]
-pub struct TokenStoreStats {
-    /// Total number of tokens in store
-    pub total_tokens: u32,
-    /// Number of valid, non-expired tokens
-    pub active_tokens: u32,
-    /// Number of expired tokens
-    pub expired_tokens: u32,
-    /// Number of soft-deleted tokens
-    pub deleted_tokens: u32,
-    /// Number of tokens marked as suspicious
-    pub suspicious_tokens: u32,
-    /// Number of web tokens
-    pub web_tokens: u32,
-    /// Number of API tokens
-    pub api_tokens: u32,
-    /// Number of CLI tokens
-    pub cli_tokens: u32,
-}
-
-impl TokenStoreStats {
-    /// Get a summary string of the statistics.
-    pub fn summary(&self) -> String {
-        format!(
-            "Tokens: {} total, {} active, {} expired, {} deleted, {} suspicious",
-            self.total_tokens,
-            self.active_tokens,
-            self.expired_tokens,
-            self.deleted_tokens,
-            self.suspicious_tokens
-        )
-    }
-}
-
 /// API authentication token data structure.
 ///
 /// Simplified token model for session management.
@@ -265,27 +230,6 @@ mod tests {
 
         assert!(token.is_expiring_soon(15)); // Within 15 minutes
         assert!(!token.is_expiring_soon(5)); // Not within 5 minutes
-    }
-
-    #[test]
-    fn test_token_stats_summary() {
-        let stats = TokenStoreStats {
-            total_tokens: 100,
-            active_tokens: 75,
-            expired_tokens: 15,
-            deleted_tokens: 10,
-            suspicious_tokens: 5,
-            web_tokens: 60,
-            api_tokens: 30,
-            cli_tokens: 10,
-        };
-
-        let summary = stats.summary();
-        assert!(summary.contains("100 total"));
-        assert!(summary.contains("75 active"));
-        assert!(summary.contains("15 expired"));
-        assert!(summary.contains("10 deleted"));
-        assert!(summary.contains("5 suspicious"));
     }
 
     #[test]

@@ -199,14 +199,14 @@ impl PreprocessingWorker {
 
 /// Handles a single preprocessing job.
 #[tracing::instrument(
-    skip(state, job),
+    skip(_state, job),
     fields(
         job_id = %job.id,
         file_id = %job.file_id,
     ),
     target = TRACING_TARGET
 )]
-async fn handle_job(state: &WorkerState, job: &DocumentJob<PreprocessingData>) -> Result<()> {
+async fn handle_job(_state: &WorkerState, job: &DocumentJob<PreprocessingData>) -> Result<()> {
     let data = job.data();
 
     // TODO: Update database status to "processing"
@@ -236,9 +236,8 @@ async fn handle_job(state: &WorkerState, job: &DocumentJob<PreprocessingData>) -
         tracing::debug!(target: TRACING_TARGET, "Generating embeddings");
         // TODO: Implement embedding generation
         // - Split document into chunks
-        // - Generate embeddings using inference service
+        // - Generate embeddings using nvisy-rig
         // - Store embeddings for semantic search
-        let _inference = &state.inference;
     }
 
     // Step 4: Generate thumbnails

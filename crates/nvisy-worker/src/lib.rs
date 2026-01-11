@@ -8,4 +8,4 @@ pub mod service;
 
 pub use error::{Result, WorkerError};
 pub use handler::{PostprocessingWorker, PreprocessingWorker, ProcessingWorker, WorkerHandles};
-pub use service::{WorkerConfig, WorkerState};
+pub use service::{TextSplitterConfig, TextSplitterService, WorkerConfig, WorkerState};

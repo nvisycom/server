@@ -1,16 +1,18 @@
-//! Workspace management handlers for CRUD operations.
+//! Workspace management handlers for CRUD and activity operations.
 //!
 //! This module provides comprehensive workspace management functionality including
-//! creating, reading, updating, and deleting workspaces. All operations are secured
-//! with role-based access control.
+//! creating, reading, updating, deleting workspaces, and viewing activity logs.
+//! All operations are secured with role-based access control.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
-use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
-use nvisy_postgres::{PgClient, PgError};
+use nvisy_postgres::query::{
+    WorkspaceActivityRepository, WorkspaceMemberRepository, WorkspaceRepository,
+};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -18,7 +20,7 @@ use crate::handler::request::{
     WorkspacePathParams,
 };
 use crate::handler::response::{
-    ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
+    ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -48,7 +50,9 @@ async fn create_workspace(
                 let workspace = conn.create_workspace(new_workspace).await?;
                 let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
                 let member = conn.add_workspace_member(new_member).await?;
-                Ok::<(WorkspaceModel, WorkspaceMember), PgError>((workspace, member))
+                Ok::<(WorkspaceModel, WorkspaceMember), nvisy_postgres::PgError>((
+                    workspace, member,
+                ))
             })
         })
         .await?;
@@ -338,6 +342,55 @@ fn update_notification_settings_docs(op: TransformOperation) -> TransformOperati
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Lists activities for a workspace.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
+    )
+)]
+async fn list_activities(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<WorkspacePathParams>,
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<ActivitiesPage>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewWorkspace,
+        )
+        .await?;
+
+    let page = conn
+        .cursor_list_workspace_activity(path_params.workspace_id, pagination.into())
+        .await?;
+
+    let response = ActivitiesPage::from_cursor_page(page, Activity::from_model);
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        activity_count = response.items.len(),
+        "Workspace activities listed"
+    );
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn list_activities_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List workspace activities")
+        .description("Returns all activity log entries for a workspace.")
+        .response::<200, Json<ActivitiesPage>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all workspace-related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -362,6 +415,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 update_notification_settings,
                 update_notification_settings_docs,
             ),
+        )
+        .api_route(
+            "/workspaces/{workspaceId}/activities/",
+            get_with(list_activities, list_activities_docs),
         )
         .with_path_items(|item| item.tag("Workspaces"))
 }

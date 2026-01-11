@@ -53,14 +53,13 @@ async fn run() -> anyhow::Result<()> {
     cli.log();
 
     // Create services
-    let inference = cli.inference_service();
     let webhook = cli.webhook_service();
 
     // Initialize application state
-    let state = ServiceState::from_config(cli.service.clone(), webhook, inference.clone()).await?;
+    let state = ServiceState::from_config(cli.service.clone(), webhook).await?;
 
     // Create worker state and spawn background workers
-    let worker_state = WorkerState::new(state.postgres.clone(), state.nats.clone(), inference);
+    let worker_state = WorkerState::new(state.postgres.clone(), state.nats.clone());
     let workers = WorkerHandles::spawn(&worker_state);
     tracing::info!(
         target: TRACING_TARGET_SERVER_STARTUP,

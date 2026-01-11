@@ -3,10 +3,9 @@
 use std::future::Future;
 
 use bigdecimal::BigDecimal;
-use diesel::dsl::sql;
 use diesel::prelude::*;
-use diesel::sql_types::{Bool, Text};
 use diesel_async::RunQueryDsl;
+use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
@@ -326,7 +325,7 @@ impl DocumentFileRepository for PgConnection {
 
         // Apply trigram search filter (pg_trgm)
         if let Some(ref term) = search_term {
-            base_query = base_query.filter(sql::<Bool>("display_name % ").bind::<Text, _>(term));
+            base_query = base_query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
         // Apply format filter using file extensions
@@ -354,7 +353,7 @@ impl DocumentFileRepository for PgConnection {
 
         // Apply trigram search filter (pg_trgm)
         if let Some(ref term) = search_term {
-            query = query.filter(sql::<Bool>("display_name % ").bind::<Text, _>(term));
+            query = query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
         // Apply format filter using file extensions

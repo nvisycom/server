@@ -36,12 +36,9 @@ dotenv = ["dep:dotenvy"]
 # Internal and core services.
 nvisy-nats = { workspace = true, features = ["config"] }
 nvisy-postgres = { workspace = true, features = ["config"] }
-nvisy-inference = { workspace = true, features = [] }
-nvisy-webhook = { workspace = true, features = [] }
+nvisy-webhook = { workspace = true, features = ["config"] }
 
 # Service implementations.
-nvisy-ollama = { workspace = true, features = ["config"] }
-nvisy-reqwest = { workspace = true, features = ["config"] }
 nvisy-server = { workspace = true, features = ["config"] }
 nvisy-worker = { workspace = true, features = ["config"] }
 

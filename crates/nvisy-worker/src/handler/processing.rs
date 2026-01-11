@@ -196,14 +196,14 @@ impl ProcessingWorker {
 
 /// Handles a single processing job.
 #[tracing::instrument(
-    skip(state, job),
+    skip(_state, job),
     fields(
         job_id = %job.id,
         file_id = %job.file_id,
     ),
     target = TRACING_TARGET
 )]
-async fn handle_job(state: &WorkerState, job: &DocumentJob<ProcessingData>) -> Result<()> {
+async fn handle_job(_state: &WorkerState, job: &DocumentJob<ProcessingData>) -> Result<()> {
     let data = job.data();
 
     // TODO: Update database status to "processing"
@@ -224,9 +224,8 @@ async fn handle_job(state: &WorkerState, job: &DocumentJob<ProcessingData>) -> R
             "Executing VLM prompt"
         );
         // TODO: Implement VLM processing
-        // - Send document + prompt to inference service
+        // - Send document + prompt to nvisy-rig
         // - Apply transformations based on VLM output
-        let _inference = &state.inference;
     }
 
     // Step 2: Process annotations if specified

@@ -26,22 +26,3 @@ impl From<DocumentChunk> for IndexedChunk {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn indexed_chunk_fields() {
-        let chunk = IndexedChunk {
-            id: Uuid::nil(),
-            chunk_index: 0,
-            content_size: 100,
-            token_count: 25,
-        };
-
-        assert_eq!(chunk.chunk_index, 0);
-        assert_eq!(chunk.content_size, 100);
-        assert_eq!(chunk.token_count, 25);
-    }
-}

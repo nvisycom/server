@@ -12,55 +12,68 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub use self::indexed::IndexedChunk;
-use super::OwnedSplitChunk;
-use crate::Result;
+use super::splitter::{OwnedSplitChunk, Splitter, estimate_tokens};
 use crate::service::provider::EmbeddingProvider;
+use crate::{Error, Result};
 
 /// Indexer for batch-embedding and storing document chunks.
 ///
-/// Uses batched embedding requests to the model provider for efficiency,
-/// then stores the chunks with their embeddings in PostgreSQL.
-///
-/// # Example
-///
-/// ```ignore
-/// let indexer = Indexer::new(provider, db, file_id);
-/// let indexed = indexer.index_chunks(chunks).await?;
-/// println!("Indexed {} chunks", indexed.len());
-/// ```
+/// Handles text splitting, embedding, and storage in PostgreSQL.
 pub struct Indexer {
     provider: EmbeddingProvider,
     db: PgClient,
+    splitter: Splitter,
     file_id: Uuid,
-    embedding_model_name: Option<String>,
 }
 
 impl Indexer {
     /// Creates a new indexer for the given file.
-    pub fn new(provider: EmbeddingProvider, db: PgClient, file_id: Uuid) -> Self {
+    pub(crate) fn new(
+        provider: EmbeddingProvider,
+        db: PgClient,
+        splitter: Splitter,
+        file_id: Uuid,
+    ) -> Self {
         Self {
             provider,
             db,
+            splitter,
             file_id,
-            embedding_model_name: None,
         }
     }
 
-    /// Sets the embedding model name to store in metadata.
-    pub fn with_model_name(mut self, name: impl Into<String>) -> Self {
-        self.embedding_model_name = Some(name.into());
-        self
+    /// Returns the file ID.
+    pub fn file_id(&self) -> Uuid {
+        self.file_id
     }
 
-    /// Indexes chunks by embedding and storing them in the database.
+    /// Indexes text by splitting, embedding, and storing chunks.
+    pub async fn index(&self, text: &str) -> Result<Vec<IndexedChunk>> {
+        let chunks = self.splitter.split_owned(text);
+        self.index_chunks(chunks).await
+    }
+
+    /// Indexes text with page awareness.
     ///
-    /// This method:
-    /// 1. Extracts text from all chunks
-    /// 2. Batch-embeds them using the provider's `embed_texts` method
-    /// 3. Creates database records with embeddings
-    ///
-    /// Returns the indexed chunk metadata.
-    pub async fn index_chunks(self, chunks: Vec<OwnedSplitChunk>) -> Result<Vec<IndexedChunk>> {
+    /// Page breaks should be indicated by form feed characters (`\x0c`).
+    pub async fn index_with_pages(&self, text: &str) -> Result<Vec<IndexedChunk>> {
+        let chunks = self.splitter.split_with_pages_owned(text);
+        self.index_chunks(chunks).await
+    }
+
+    /// Deletes all existing chunks for the file before indexing.
+    pub async fn reindex(&self, text: &str) -> Result<Vec<IndexedChunk>> {
+        let chunks = self.splitter.split_owned(text);
+        self.reindex_chunks(chunks).await
+    }
+
+    /// Deletes all existing chunks for the file before indexing with page awareness.
+    pub async fn reindex_with_pages(&self, text: &str) -> Result<Vec<IndexedChunk>> {
+        let chunks = self.splitter.split_with_pages_owned(text);
+        self.reindex_chunks(chunks).await
+    }
+
+    async fn index_chunks(&self, chunks: Vec<OwnedSplitChunk>) -> Result<Vec<IndexedChunk>> {
         if chunks.is_empty() {
             return Ok(vec![]);
         }
@@ -73,10 +86,10 @@ impl Indexer {
             .provider
             .embed_texts(texts)
             .await
-            .map_err(|e| crate::Error::embedding(format!("failed to embed chunks: {e}")))?;
+            .map_err(|e| Error::embedding(format!("failed to embed chunks: {e}")))?;
 
         if embeddings.len() != chunks.len() {
-            return Err(crate::Error::embedding(format!(
+            return Err(Error::embedding(format!(
                 "embedding count mismatch: expected {}, got {}",
                 chunks.len(),
                 embeddings.len()
@@ -84,9 +97,7 @@ impl Indexer {
         }
 
         // Prepare new chunk records
-        let model_name = self
-            .embedding_model_name
-            .unwrap_or_else(|| "unknown".to_string());
+        let model_name = self.provider.model_name();
 
         let new_chunks: Vec<NewDocumentChunk> = chunks
             .iter()
@@ -111,9 +122,9 @@ impl Indexer {
                     chunk_index: Some(idx as i32),
                     content_sha256,
                     content_size: Some(content_size),
-                    token_count: None, // Could be computed if needed
+                    token_count: Some(estimate_tokens(&chunk.text) as i32),
                     embedding: Vector::from(embedding_vec),
-                    embedding_model: Some(model_name.clone()),
+                    embedding_model: Some(model_name.to_owned()),
                     metadata: Some(metadata),
                 }
             })
@@ -124,46 +135,28 @@ impl Indexer {
             .db
             .get_connection()
             .await
-            .map_err(|e| crate::Error::retrieval(format!("failed to get connection: {e}")))?;
+            .map_err(|e| Error::retrieval(format!("failed to get connection: {e}")))?;
 
         let created = conn
             .create_document_chunks(new_chunks)
             .await
-            .map_err(|e| crate::Error::retrieval(format!("failed to create chunks: {e}")))?;
+            .map_err(|e| Error::retrieval(format!("failed to create chunks: {e}")))?;
 
-        // Return indexed chunk metadata
-        let indexed = created.into_iter().map(IndexedChunk::from).collect();
-
-        Ok(indexed)
+        Ok(created.into_iter().map(IndexedChunk::from).collect())
     }
 
-    /// Indexes a single text by splitting, embedding, and storing chunks.
-    ///
-    /// Convenience method that combines splitting and indexing.
-    pub async fn index_text(
-        self,
-        text: &str,
-        splitter: &super::TextSplitterService,
-    ) -> Result<Vec<IndexedChunk>> {
-        let chunks = splitter.split_owned(text);
-        self.index_chunks(chunks).await
-    }
-
-    /// Deletes all existing chunks for the file before indexing.
-    ///
-    /// Use this for re-indexing a file that may have changed.
-    pub async fn reindex_chunks(self, chunks: Vec<OwnedSplitChunk>) -> Result<Vec<IndexedChunk>> {
+    async fn reindex_chunks(&self, chunks: Vec<OwnedSplitChunk>) -> Result<Vec<IndexedChunk>> {
         // Delete existing chunks first
         let mut conn = self
             .db
             .get_connection()
             .await
-            .map_err(|e| crate::Error::retrieval(format!("failed to get connection: {e}")))?;
+            .map_err(|e| Error::retrieval(format!("failed to get connection: {e}")))?;
 
         let deleted = conn
             .delete_document_file_chunks(self.file_id)
             .await
-            .map_err(|e| crate::Error::retrieval(format!("failed to delete chunks: {e}")))?;
+            .map_err(|e| Error::retrieval(format!("failed to delete chunks: {e}")))?;
 
         if deleted > 0 {
             tracing::debug!(file_id = %self.file_id, deleted, "Deleted existing chunks");
@@ -171,7 +164,6 @@ impl Indexer {
 
         drop(conn);
 
-        // Now index the new chunks
         self.index_chunks(chunks).await
     }
 }

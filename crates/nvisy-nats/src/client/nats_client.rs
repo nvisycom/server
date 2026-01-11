@@ -37,7 +37,7 @@ use bytes::Bytes;
 use tokio::time::timeout;
 
 use super::nats_config::NatsConfig;
-use crate::kv::{ApiTokenStore, CacheStore};
+use crate::kv::{ApiTokenStore, CacheStore, ChatHistoryStore};
 use crate::object::{DocumentBucket, DocumentStore};
 use crate::stream::{
     DocumentJobPublisher, DocumentJobSubscriber, Stage, WorkspaceEventPublisher,
@@ -229,6 +229,18 @@ impl NatsClient {
         T: serde::Serialize + for<'de> serde::Deserialize<'de> + Clone + Send + Sync + 'static,
     {
         CacheStore::new(&self.inner.jetstream, namespace, ttl).await
+    }
+
+    /// Get or create a ChatHistoryStore for ephemeral sessions.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn chat_history_store<T>(&self, ttl: Option<Duration>) -> Result<ChatHistoryStore<T>>
+    where
+        T: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
+    {
+        match ttl {
+            Some(ttl) => ChatHistoryStore::with_ttl(&self.inner.jetstream, ttl).await,
+            None => ChatHistoryStore::new(&self.inner.jetstream).await,
+        }
     }
 }
 

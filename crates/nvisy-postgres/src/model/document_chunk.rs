@@ -102,3 +102,31 @@ impl HasUpdatedAt for DocumentChunk {
         self.updated_at.into()
     }
 }
+
+/// A document chunk with its similarity score.
+///
+/// Returned from similarity search queries.
+#[derive(Debug, Clone)]
+pub struct ScoredDocumentChunk {
+    /// The document chunk.
+    pub chunk: DocumentChunk,
+    /// Similarity score (0.0 to 1.0, higher is more similar).
+    pub score: f64,
+}
+
+impl ScoredDocumentChunk {
+    /// Returns a reference to the chunk.
+    pub fn chunk(&self) -> &DocumentChunk {
+        &self.chunk
+    }
+
+    /// Returns the similarity score.
+    pub fn score(&self) -> f64 {
+        self.score
+    }
+
+    /// Consumes self and returns the inner chunk.
+    pub fn into_chunk(self) -> DocumentChunk {
+        self.chunk
+    }
+}

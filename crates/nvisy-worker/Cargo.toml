@@ -26,17 +26,20 @@ config = ["dep:clap", "nvisy-postgres/config", "nvisy-nats/config"]
 
 [dependencies]
 # Internal crates
-nvisy-inference = { workspace = true }
 nvisy-nats = { workspace = true }
 nvisy-postgres = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["macros", "sync"] }
 tokio-util = { workspace = true }
+futures = { workspace = true }
 futures-util = { workspace = true }
 
 # Macros and utilities
 thiserror = { workspace = true }
+
+# Text processing
+text-splitter = { workspace = true }
 
 # Observability
 tracing = { workspace = true }

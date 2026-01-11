@@ -29,20 +29,4 @@ impl SplitMetadata {
             chunk_index,
         }
     }
-
-    /// Sets the page number.
-    pub fn with_page(mut self, page: u32) -> Self {
-        self.page = Some(page);
-        self
-    }
-
-    /// Returns the byte range for content extraction.
-    pub fn byte_range(&self) -> std::ops::Range<usize> {
-        self.start_offset as usize..self.end_offset as usize
-    }
-
-    /// Returns the content length in bytes.
-    pub fn content_len(&self) -> u32 {
-        self.end_offset.saturating_sub(self.start_offset)
-    }
 }

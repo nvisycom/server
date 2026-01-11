@@ -5,11 +5,9 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
-    "./crates/nvisy-inference",
     "./crates/nvisy-nats",
-    "./crates/nvisy-ollama",
     "./crates/nvisy-postgres",
-    "./crates/nvisy-reqwest",
+    "./crates/nvisy-rig",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
     "./crates/nvisy-worker",
@@ -33,15 +31,11 @@ documentation = "https://docs.rs/nvisy-server"
 #
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
-# External dependencies
-nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
-nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
-nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-ollama = { path = "./crates/nvisy-ollama", version = "0.1.0" }
-nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
-nvisy-reqwest = { path = "./crates/nvisy-reqwest", version = "0.1.0" }
-
 # Internal crates
+nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
+nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 nvisy-worker = { path = "./crates/nvisy-worker", version = "0.1.0" }
@@ -90,6 +84,7 @@ diesel-async = { version = "0.7", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
 pgvector = { version = "0.4", features = [] }
+pgtrgm = { version = "0.3", features = [] }
 
 # Messaging and object storage (NATS)
 async-nats = { version = "0.45", features = [] }
@@ -126,7 +121,11 @@ url = { version = "2.5", features = [] }
 
 # Text processing
 regex = { version = "1.0", features = [] }
+text-splitter = { version = "0.29", features = [] }
 woothee = { version = "0.13", features = [] }
+
+# AI/ML frameworks
+rig-core = { version = "0.12", features = [] }
 
 # Archive/Compression
 tar = { version = "0.4", features = [] }

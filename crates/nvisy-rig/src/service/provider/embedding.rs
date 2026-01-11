@@ -31,6 +31,13 @@ impl EmbeddingProvider {
         let client = ollama::Client::from_url(base_url);
         Self::Ollama(client.embedding_model_with_ndims(model, ndims))
     }
+
+    /// Returns the model name.
+    pub fn model_name(&self) -> &str {
+        match self {
+            Self::Ollama(model) => &model.model,
+        }
+    }
 }
 
 impl EmbeddingModel for EmbeddingProvider {

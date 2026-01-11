@@ -5,6 +5,7 @@ use std::future::Future;
 use diesel::dsl::now;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
@@ -151,14 +152,9 @@ impl WorkspaceRepository for PgConnection {
     ) -> PgResult<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
-        let search_pattern = format!("%{}%", search_query);
-
         let workspace_list = workspaces
             .filter(deleted_at.is_null())
-            .filter(diesel::BoolExpressionMethods::or(
-                display_name.ilike(&search_pattern),
-                description.ilike(&search_pattern),
-            ))
+            .filter(display_name.trgm_similar_to(search_query))
             .select(Workspace::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)
