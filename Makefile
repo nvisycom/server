@@ -45,7 +45,7 @@ install-tools: # Installs tools required for the repo.
 	fi
 
 .PHONY: install-all
-install-all: install-tools # Installs all dependencies.
+install-all: install-tools ## Installs all dependencies.
 	$(call make-log,Making scripts executable...)
 	@chmod +x scripts/*.sh
 	$(call make-log,Scripts made executable!)

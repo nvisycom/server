@@ -89,18 +89,14 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install diesel CLI
-        run: cargo install diesel_cli --no-default-features --features postgres --locked
+      - name: Install tools
+        run: make install-tools
 
       - name: Start services
         run: docker compose -f docker/docker-compose.dev.yml up -d
 
       - name: Wait for services
         run: |
-          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
           scripts/wait-for-postgres.sh 60
           scripts/wait-for-nats.sh 30
 
