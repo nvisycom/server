@@ -134,7 +134,7 @@ fmt: ## Fixes code formatting.
 
 # Security Commands (mirror GitHub Actions)
 .PHONY: security
-security: ## Runs security checks locally (audit, deny).
+security: ## Runs security checks locally (cargo deny).
 	$(call make-log,Running cargo deny...)
 	@cargo deny check all
 	$(call make-log,All security checks passed!)
