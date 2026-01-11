@@ -9,6 +9,10 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- Required for embedding storage and semantic search capabilities
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Enable pg_trgm extension for trigram-based text search
+-- Required for fuzzy filename matching
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- Timestamp management function
 CREATE OR REPLACE FUNCTION trigger_updated_at()
 RETURNS TRIGGER

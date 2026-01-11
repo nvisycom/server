@@ -9,8 +9,11 @@ use nvisy_postgres::query::{DocumentRepository, WorkspaceMemberRepository};
 use nvisy_postgres::{PgConn, PgError};
 use uuid::Uuid;
 
-use super::{AuthResult, Permission, TRACING_TARGET_AUTHORIZATION};
+use super::{AuthResult, Permission};
 use crate::handler::Result;
+
+/// Tracing target for authorization operations.
+const TRACING_TARGET: &str = "nvisy_server::authorization";
 
 /// Authorization provider for authenticated users.
 ///
@@ -61,7 +64,7 @@ pub trait AuthProvider {
         // Global administrators bypass workspace-level permissions
         if self.is_admin() {
             tracing::debug!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 workspace_id = %workspace_id,
                 permission = ?permission,
@@ -78,7 +81,7 @@ pub trait AuthProvider {
 
         let Some(member) = member else {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 workspace_id = %workspace_id,
                 permission = ?permission,
@@ -91,7 +94,7 @@ pub trait AuthProvider {
         // Check role permission
         if permission.is_permitted_by_role(member.member_role) {
             tracing::debug!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 workspace_id = %workspace_id,
                 permission = ?permission,
@@ -102,7 +105,7 @@ pub trait AuthProvider {
             Ok(AuthResult::granted_with_member(member))
         } else {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 workspace_id = %workspace_id,
                 permission = ?permission,
@@ -147,7 +150,7 @@ pub trait AuthProvider {
 
         let Some(document) = document else {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 document_id = %document_id,
                 "access denied: document not found"
@@ -188,7 +191,7 @@ pub trait AuthProvider {
 
         if is_self_access || is_admin {
             tracing::debug!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 target_account_id = %target_account_id,
                 is_admin = is_admin,
@@ -199,7 +202,7 @@ pub trait AuthProvider {
             Ok(AuthResult::granted())
         } else {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 target_account_id = %target_account_id,
                 "self-permission denied: insufficient privileges"
@@ -220,14 +223,14 @@ pub trait AuthProvider {
     fn check_admin_permission(&self) -> Result<AuthResult> {
         if self.is_admin() {
             tracing::debug!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 "global admin permission granted"
             );
             Ok(AuthResult::granted())
         } else {
             tracing::warn!(
-                target: TRACING_TARGET_AUTHORIZATION,
+                target: TRACING_TARGET,
                 account_id = %self.account_id(),
                 "global admin permission denied"
             );

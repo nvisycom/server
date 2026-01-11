@@ -13,7 +13,6 @@ on:
       - "Cargo.lock"
       - "diesel.toml"
       - "rustfmt.toml"
-      - "Makefile"
       - ".github/workflows/build.yml"
   pull_request:
     branches: [main, release]
@@ -25,65 +24,18 @@ on:
       - "Cargo.lock"
       - "diesel.toml"
       - "rustfmt.toml"
-      - "Makefile"
       - ".github/workflows/build.yml"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Database settings for docker-compose
-  POSTGRES_HOST: localhost
-  POSTGRES_PORT: 5432
-  POSTGRES_USER: postgres
-  POSTGRES_PASSWORD: postgres
-  POSTGRES_DB: postgres
-  POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
-  # NATS settings for docker-compose
-  NATS_HOST: localhost
-  NATS_PORT: 4222
-  NATS_URL: nats://localhost:4222
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Start services
-        run: docker compose -f docker/docker-compose.dev.yml up -d
-
-      - name: Wait for services
-        run: |
-          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
-          scripts/wait-for-postgres.sh 60
-          scripts/wait-for-nats.sh 30
-
-      - name: Install diesel CLI
-        run: cargo install diesel_cli --no-default-features --features postgres --locked
-
-      - name: Run migrations
-        run: make generate-migrations
-
-      - name: Check
-        run: cargo check --all-features --workspace
-
-      - name: Stop services
-        if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down -v
-
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -96,32 +48,12 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Start services
-        run: docker compose -f docker/docker-compose.dev.yml up -d
-
-      - name: Wait for services
-        run: |
-          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
-          scripts/wait-for-postgres.sh 60
-          scripts/wait-for-nats.sh 30
-
-      - name: Install diesel CLI
-        run: cargo install diesel_cli --no-default-features --features postgres --locked
-
-      - name: Run migrations
-        run: make generate-migrations
-
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
 
-      - name: Stop services
-        if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down -v
-
-  clippy:
-    name: Clippy
+  check:
+    name: Check & Clippy
     runs-on: ubuntu-latest
-    needs: check
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -134,32 +66,19 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Start services
-        run: docker compose -f docker/docker-compose.dev.yml up -d
+      - name: Check
+        run: cargo check --all-features --workspace
 
-      - name: Wait for services
-        run: |
-          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
-          scripts/wait-for-postgres.sh 60
-          scripts/wait-for-nats.sh 30
-
-      - name: Install diesel CLI
-        run: cargo install diesel_cli --no-default-features --features postgres --locked
-
-      - name: Run migrations
-        run: make generate-migrations
-
-      - name: Run clippy
+      - name: Clippy
         run: cargo clippy --all-targets --all-features --workspace -- -D warnings
-
-      - name: Stop services
-        if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down -v
 
   test:
     name: Test
     runs-on: ubuntu-latest
     needs: check
+    env:
+      POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      NATS_URL: nats://localhost:4222
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -170,20 +89,19 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Install tools
+        run: make install-tools
+
       - name: Start services
         run: docker compose -f docker/docker-compose.dev.yml up -d
 
       - name: Wait for services
         run: |
-          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
           scripts/wait-for-postgres.sh 60
           scripts/wait-for-nats.sh 30
 
-      - name: Install diesel CLI
-        run: cargo install diesel_cli --no-default-features --features postgres --locked
-
       - name: Run migrations
-        run: make generate-migrations
+        run: DATABASE_URL=$POSTGRES_URL diesel migration run
 
       - name: Run tests
         run: cargo test --all-features --workspace
@@ -206,26 +124,7 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Start services
-        run: docker compose -f docker/docker-compose.dev.yml up -d
-
-      - name: Wait for services
-        run: |
-          chmod +x scripts/wait-for-postgres.sh scripts/wait-for-nats.sh
-          scripts/wait-for-postgres.sh 60
-          scripts/wait-for-nats.sh 30
-
-      - name: Install diesel CLI
-        run: cargo install diesel_cli --no-default-features --features postgres --locked
-
-      - name: Run migrations
-        run: make generate-migrations
-
       - name: Build docs
         run: cargo doc --no-deps --all-features --workspace
         env:
           RUSTDOCFLAGS: "-D warnings"
-
-      - name: Stop services
-        if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down -v

@@ -159,7 +159,7 @@ impl DocumentFile {
 
     /// Returns whether the file is ready for use.
     pub fn is_ready(&self) -> bool {
-        self.processing_status.is_successful()
+        self.processing_status.is_ready()
     }
 
     /// Returns whether the file is currently being processed.
@@ -169,12 +169,12 @@ impl DocumentFile {
 
     /// Returns whether the file has completed processing.
     pub fn is_processed(&self) -> bool {
-        self.processing_status.is_successful()
+        self.processing_status.is_final()
     }
 
-    /// Returns whether the file processing has failed.
-    pub fn has_processing_error(&self) -> bool {
-        self.processing_status.is_failed()
+    /// Returns whether the file processing was canceled.
+    pub fn is_canceled(&self) -> bool {
+        self.processing_status.is_canceled()
     }
 
     /// Returns the file size in a human-readable format.

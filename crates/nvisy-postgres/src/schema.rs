@@ -46,12 +46,28 @@ pub mod sql_types {
     pub struct RequireMode;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "run_type"))]
+    pub struct RunType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "studio_session_status"))]
+    pub struct StudioSessionStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "studio_tool_status"))]
+    pub struct StudioToolStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
     pub struct WebhookEvent;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_status"))]
     pub struct WebhookStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "webhook_type"))]
+    pub struct WebhookType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "workspace_role"))]
@@ -251,6 +267,63 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+
+    studio_operations (id) {
+        id -> Uuid,
+        tool_call_id -> Uuid,
+        file_id -> Uuid,
+        chunk_id -> Nullable<Uuid>,
+        operation_type -> Text,
+        operation_diff -> Jsonb,
+        applied -> Bool,
+        reverted -> Bool,
+        created_at -> Timestamptz,
+        applied_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+    use super::sql_types::StudioSessionStatus;
+
+    studio_sessions (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        primary_file_id -> Uuid,
+        display_name -> Text,
+        session_status -> StudioSessionStatus,
+        model_config -> Jsonb,
+        message_count -> Int4,
+        token_count -> Int4,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+    use super::sql_types::StudioToolStatus;
+
+    studio_tool_calls (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        file_id -> Uuid,
+        chunk_id -> Nullable<Uuid>,
+        tool_name -> Text,
+        tool_input -> Jsonb,
+        tool_output -> Jsonb,
+        tool_status -> StudioToolStatus,
+        started_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -269,6 +342,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::RunType;
     use super::sql_types::IntegrationStatus;
 
     workspace_integration_runs (id) {
@@ -276,14 +350,12 @@ diesel::table! {
         workspace_id -> Uuid,
         integration_id -> Nullable<Uuid>,
         account_id -> Nullable<Uuid>,
-        run_name -> Text,
-        run_type -> Text,
+        run_type -> RunType,
         run_status -> IntegrationStatus,
         metadata -> Jsonb,
-        started_at -> Nullable<Timestamptz>,
+        logs -> Jsonb,
+        started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
     }
 }
 
@@ -355,12 +427,15 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::WebhookType;
     use super::sql_types::WebhookEvent;
     use super::sql_types::WebhookStatus;
 
     workspace_webhooks (id) {
         id -> Uuid,
         workspace_id -> Uuid,
+        webhook_type -> WebhookType,
+        integration_id -> Nullable<Uuid>,
         display_name -> Text,
         description -> Text,
         url -> Text,
@@ -408,6 +483,15 @@ diesel::joinable!(document_files -> documents (document_id));
 diesel::joinable!(document_files -> workspaces (workspace_id));
 diesel::joinable!(documents -> accounts (account_id));
 diesel::joinable!(documents -> workspaces (workspace_id));
+diesel::joinable!(studio_operations -> document_chunks (chunk_id));
+diesel::joinable!(studio_operations -> document_files (file_id));
+diesel::joinable!(studio_operations -> studio_tool_calls (tool_call_id));
+diesel::joinable!(studio_sessions -> accounts (account_id));
+diesel::joinable!(studio_sessions -> document_files (primary_file_id));
+diesel::joinable!(studio_sessions -> workspaces (workspace_id));
+diesel::joinable!(studio_tool_calls -> document_chunks (chunk_id));
+diesel::joinable!(studio_tool_calls -> document_files (file_id));
+diesel::joinable!(studio_tool_calls -> studio_sessions (session_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_integration_runs -> accounts (account_id));
@@ -418,6 +502,7 @@ diesel::joinable!(workspace_integrations -> workspaces (workspace_id));
 diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
+diesel::joinable!(workspace_webhooks -> workspace_integrations (integration_id));
 diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
 
@@ -431,6 +516,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     document_comments,
     document_files,
     documents,
+    studio_operations,
+    studio_sessions,
+    studio_tool_calls,
     workspace_activities,
     workspace_integration_runs,
     workspace_integrations,

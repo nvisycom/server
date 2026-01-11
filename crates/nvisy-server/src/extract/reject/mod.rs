@@ -5,16 +5,16 @@
 //! designed to be drop-in replacements for their standard Axum counterparts while
 //! providing additional features like detailed error context and automatic validation.
 
-mod enhanced_form;
-mod enhanced_json;
-mod enhanced_multipart;
-mod enhanced_path;
-mod enhanced_query;
+mod form_with_rej;
+mod json_with_rej;
+mod mutlipart_with_rej;
+mod path_with_rej;
+mod query_with_rej;
 mod validated_json;
 
-pub use self::enhanced_form::Form;
-pub use self::enhanced_json::Json;
-pub use self::enhanced_multipart::Multipart;
-pub use self::enhanced_path::Path;
-pub use self::enhanced_query::Query;
+pub use self::form_with_rej::Form;
+pub use self::json_with_rej::Json;
+pub use self::mutlipart_with_rej::Multipart;
+pub use self::path_with_rej::Path;
+pub use self::query_with_rej::Query;
 pub use self::validated_json::ValidateJson;

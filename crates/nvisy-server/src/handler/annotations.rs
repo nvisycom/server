@@ -11,7 +11,7 @@ use nvisy_postgres::query::{DocumentAnnotationRepository, DocumentFileRepository
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    AnnotationPathParams, CreateAnnotation, CursorPagination, FilePathParams, UpdateAnnotation
+    AnnotationPathParams, CreateAnnotation, CursorPagination, FilePathParams, UpdateAnnotation,
 };
 use crate::handler::response::{Annotation, AnnotationsPage, ErrorResponse};
 use crate::handler::{ErrorKind, Result};

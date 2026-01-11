@@ -4,6 +4,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{Document, NewDocument, UpdateDocument};
@@ -320,14 +321,9 @@ impl DocumentRepository for PgConnection {
     ) -> PgResult<Vec<Document>> {
         use schema::documents::{self, dsl};
 
-        let search_pattern = format!("%{}%", search_query.to_lowercase());
-
         let mut query = documents::table
             .filter(dsl::deleted_at.is_null())
-            .filter(diesel::BoolExpressionMethods::or(
-                dsl::display_name.ilike(&search_pattern),
-                dsl::description.ilike(&search_pattern),
-            ))
+            .filter(dsl::display_name.trgm_similar_to(search_query))
             .order(dsl::display_name.asc())
             .limit(pagination.limit)
             .offset(pagination.offset)

@@ -3,18 +3,22 @@
 use std::time::Duration;
 
 use async_nats::jetstream;
+use derive_more::{Deref, DerefMut};
 use jiff::Timestamp;
 use uuid::Uuid;
 
 use crate::kv::KvStore;
-use crate::kv::api_token::{ApiToken, ApiTokenType, TokenStoreStats};
+use crate::kv::api_token::{ApiToken, ApiTokenType};
 use crate::{Result, TRACING_TARGET_KV};
 
 /// API token store for authentication token management.
 ///
 /// Provides operations for creating, retrieving, updating, and managing
 /// API authentication tokens with automatic expiry handling.
+#[derive(Deref, DerefMut)]
 pub struct ApiTokenStore {
+    #[deref]
+    #[deref_mut]
     store: KvStore<ApiToken>,
     default_ttl: Duration,
 }
@@ -342,44 +346,6 @@ impl ApiTokenStore {
         );
 
         Ok(cleaned_count)
-    }
-
-    /// Get store statistics.
-    pub async fn stats(&self) -> Result<TokenStoreStats> {
-        let all_keys = self.store.keys().await?;
-        let mut stats = TokenStoreStats::default();
-
-        for key in all_keys {
-            if let Ok(Some(kv_token)) = self.store.get(&key).await {
-                let token = kv_token.value;
-                stats.total_tokens += 1;
-
-                if token.is_valid() {
-                    stats.active_tokens += 1;
-                } else if token.is_expired() {
-                    stats.expired_tokens += 1;
-                } else if token.is_deleted() {
-                    stats.deleted_tokens += 1;
-                }
-
-                if token.is_suspicious {
-                    stats.suspicious_tokens += 1;
-                }
-
-                match token.token_type {
-                    ApiTokenType::Web => stats.web_tokens += 1,
-                    ApiTokenType::Mobile => stats.mobile_tokens += 1,
-                    ApiTokenType::Api => stats.api_tokens += 1,
-                }
-            }
-        }
-
-        Ok(stats)
-    }
-
-    /// Get the underlying KV store.
-    pub fn inner(&self) -> &KvStore<ApiToken> {
-        &self.store
     }
 
     /// Get the default TTL for tokens.

@@ -64,6 +64,9 @@ impl FileFormat {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FileFilter {
+    /// Search by file name (case-insensitive, partial match).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
     /// Filter by file formats (any match).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formats: Option<Vec<FileFormat>>,
@@ -76,6 +79,13 @@ impl FileFilter {
         Self::default()
     }
 
+    /// Filters by search term.
+    #[inline]
+    pub fn with_search(mut self, search: String) -> Self {
+        self.search = Some(search);
+        self
+    }
+
     /// Filters by file formats.
     #[inline]
     pub fn with_formats(mut self, formats: Vec<FileFormat>) -> Self {
@@ -86,7 +96,23 @@ impl FileFilter {
     /// Returns whether any filter is active.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.formats.as_ref().is_none_or(|f| f.is_empty())
+        self.search.as_ref().is_none_or(|s| s.is_empty())
+            && self.formats.as_ref().is_none_or(|f| f.is_empty())
+    }
+
+    /// Returns whether a search filter is active.
+    #[inline]
+    pub fn has_search(&self) -> bool {
+        self.search.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
+    /// Returns the search term for trigram search.
+    #[inline]
+    pub fn search_term(&self) -> Option<&str> {
+        self.search
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
     }
 
     /// Returns all MIME types from the format filters.

@@ -29,6 +29,8 @@ pub enum WorkspaceWebhookConstraints {
     FailureCountPositive,
     #[strum(serialize = "workspace_webhooks_max_failures_positive")]
     MaxFailuresPositive,
+    #[strum(serialize = "workspace_webhooks_integration_id_required")]
+    IntegrationIdRequired,
 
     // Webhook chronological constraints
     #[strum(serialize = "workspace_webhooks_updated_after_created")]
@@ -54,7 +56,8 @@ impl WorkspaceWebhookConstraints {
             | WorkspaceWebhookConstraints::EventsNotEmpty
             | WorkspaceWebhookConstraints::HeadersSize
             | WorkspaceWebhookConstraints::FailureCountPositive
-            | WorkspaceWebhookConstraints::MaxFailuresPositive => ConstraintCategory::Validation,
+            | WorkspaceWebhookConstraints::MaxFailuresPositive
+            | WorkspaceWebhookConstraints::IntegrationIdRequired => ConstraintCategory::Validation,
 
             WorkspaceWebhookConstraints::UpdatedAfterCreated
             | WorkspaceWebhookConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,

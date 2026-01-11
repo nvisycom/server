@@ -31,8 +31,8 @@ use crate::handler::request::{
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
+use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
-use crate::utility::DEFAULT_MAX_FILE_BODY_SIZE;
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
@@ -264,6 +264,43 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
+}
+
+/// Gets file metadata without downloading the content.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        file_id = %path_params.file_id,
+    )
+)]
+async fn read_file(
+    State(pg_client): State<PgClient>,
+    Path(path_params): Path<FilePathParams>,
+    AuthState(auth_claims): AuthState,
+) -> Result<(StatusCode, Json<File>)> {
+    tracing::debug!(target: TRACING_TARGET, "Reading file metadata");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    let file = find_file(&mut conn, path_params.file_id).await?;
+
+    auth_claims
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewFiles)
+        .await?;
+
+    tracing::debug!(target: TRACING_TARGET, "File metadata retrieved");
+
+    Ok((StatusCode::OK, Json(File::from_model(file))))
+}
+
+fn read_file_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get file metadata")
+        .description("Returns file metadata without downloading the file content.")
+        .response::<200, Json<File>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates file metadata.
@@ -676,9 +713,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
         // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspaceId}/files/",
-            get_with(list_files, list_files_docs)
-                .post_with(upload_file, upload_file_docs)
-                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE)),
+            post_with(upload_file, upload_file_docs)
+                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE))
+                .get_with(list_files, list_files_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/files/batch",
@@ -688,9 +725,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
         // File-specific routes (file ID is globally unique)
         .api_route(
             "/files/{fileId}",
-            patch_with(update_file, update_file_docs)
-                .get_with(download_file, download_file_docs)
+            get_with(read_file, read_file_docs)
+                .patch_with(update_file, update_file_docs)
                 .delete_with(delete_file, delete_file_docs),
+        )
+        .api_route(
+            "/files/{fileId}/content",
+            get_with(download_file, download_file_docs),
         )
         .with_path_items(|item| item.tag("Files"))
 }

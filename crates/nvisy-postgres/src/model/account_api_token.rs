@@ -147,14 +147,14 @@ impl AccountApiToken {
         self.session_type == ApiTokenType::Web
     }
 
-    /// Returns whether this is a mobile token.
-    pub fn is_mobile_token(&self) -> bool {
-        self.session_type == ApiTokenType::Mobile
-    }
-
     /// Returns whether this is an API token.
     pub fn is_api_token(&self) -> bool {
         self.session_type == ApiTokenType::Api
+    }
+
+    /// Returns whether this is a CLI token.
+    pub fn is_cli_token(&self) -> bool {
+        self.session_type == ApiTokenType::Cli
     }
 
     /// Returns whether the token is long-lived (active for more than 24 hours).

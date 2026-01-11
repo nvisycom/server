@@ -4,10 +4,9 @@ Thank you for your interest in contributing to Nvisy Server.
 
 ## Requirements
 
-- Rust 1.89+
+- Rust 1.89+ (nightly for formatting)
 - PostgreSQL 17+
 - NATS 2.10+ (with JetStream)
-- Ollama (for AI features)
 
 ## Setup
 
@@ -18,20 +17,29 @@ make install-all
 make generate-keys
 ```
 
+## Development
+
+Run all CI checks locally before submitting a pull request:
+
+```bash
+make ci        # runs check, fmt, clippy, test, docs
+make security  # runs cargo deny (requires cargo-deny)
+make fmt       # fix formatting (requires nightly)
+```
+
+To install the security tools:
+
+```bash
+cargo install cargo-deny --locked
+```
+
 ## Pull Request Process
 
 1. Fork the repository
 2. Create a feature branch
 3. Make changes with tests
-4. Run checks: `cargo fmt && cargo clippy && cargo test`
+4. Run `make ci` to verify all checks pass
 5. Submit a pull request
-
-### Checklist
-
-- [ ] Tests pass (`cargo test --workspace`)
-- [ ] Code formatted (`cargo fmt`)
-- [ ] No clippy warnings (`cargo clippy -- -D warnings`)
-- [ ] Migrations included if needed (`make generate-migrations`)
 
 ## Database Changes
 

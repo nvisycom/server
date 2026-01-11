@@ -83,9 +83,9 @@ impl DocumentAnnotation {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
     }
 
-    /// Returns whether this is a note annotation.
-    pub fn is_note(&self) -> bool {
-        self.annotation_type.is_note()
+    /// Returns whether this is a text annotation.
+    pub fn is_annotation(&self) -> bool {
+        self.annotation_type.is_annotation()
     }
 
     /// Returns whether this is a highlight annotation.

@@ -21,35 +21,27 @@ pub enum ApiTokenType {
     #[default]
     Web,
 
-    /// Mobile application token (iOS/Android native apps)
-    #[db_rename = "mobile"]
-    #[serde(rename = "mobile")]
-    Mobile,
-
     /// API client token (programmatic access)
     #[db_rename = "api"]
     #[serde(rename = "api")]
     Api,
 
-    /// Desktop application token (native desktop apps)
-    #[db_rename = "desktop"]
-    #[serde(rename = "desktop")]
-    Desktop,
+    /// CLI tool token (command-line interface)
+    #[db_rename = "cli"]
+    #[serde(rename = "cli")]
+    Cli,
 }
 
 impl ApiTokenType {
     /// Returns whether this token type typically supports interactive user interfaces.
     #[inline]
     pub fn is_interactive(self) -> bool {
-        matches!(
-            self,
-            ApiTokenType::Web | ApiTokenType::Mobile | ApiTokenType::Desktop
-        )
+        matches!(self, ApiTokenType::Web)
     }
 
     /// Returns whether this token type is programmatic (non-interactive).
     #[inline]
     pub fn is_programmatic(self) -> bool {
-        matches!(self, ApiTokenType::Api)
+        matches!(self, ApiTokenType::Api | ApiTokenType::Cli)
     }
 }

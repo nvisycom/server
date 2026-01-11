@@ -43,6 +43,7 @@ diesel-async = { workspace = true, features = ["postgres", "pool", "deadpool", "
 diesel-derive-enum = { workspace = true, features = ["postgres"] }
 deadpool = { workspace = true, features = ["rt_tokio_1"] }
 pgvector = { workspace = true, features = ["diesel"] }
+pgtrgm = { workspace = true, features = ["diesel"] }
 
 # Observability
 tracing = { workspace = true, features = [] }

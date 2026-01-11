@@ -9,7 +9,9 @@ use axum::response::{IntoResponse, Response};
 
 use crate::extract::AuthState;
 use crate::handler::ErrorKind;
-use crate::utility::tracing_targets;
+
+/// Tracing target for authorization middleware.
+const TRACING_TARGET: &str = "nvisy_server::authorization";
 
 /// Requires the authenticated account to have administrator privileges.
 ///
@@ -22,7 +24,7 @@ pub async fn require_admin(
 ) -> Response {
     if !auth_claims.is_admin {
         tracing::warn!(
-            target: tracing_targets::AUTHORIZATION,
+            target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
             "unauthorized admin access attempt"
         );

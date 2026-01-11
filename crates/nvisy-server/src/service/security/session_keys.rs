@@ -12,8 +12,10 @@ use clap::Args;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::utility::tracing_targets::SESSION_KEYS as TRACING_TARGET;
 use crate::{Error, Result};
+
+/// Tracing target for session key operations.
+const TRACING_TARGET: &str = "nvisy_server::session_keys";
 
 /// Authentication key file paths configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,7 +368,7 @@ MCowBQYDK2VwAyEAMveirBCUUpVI8TCv4W5jAZqtkEzfA7eIvozsugFbvDU=
         let temp_dir = TempDir::new().unwrap();
         let pub_path = temp_dir.path().join("nonexistent_public.pem");
         let priv_path = temp_dir.path().join("nonexistent_private.pem");
-        
+
         assert!(SessionKeys::new(&pub_path, &priv_path).await.is_err());
     }
 }

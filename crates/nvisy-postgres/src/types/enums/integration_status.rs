@@ -9,7 +9,7 @@ use strum::{Display, EnumIter, EnumString};
 /// Defines the operational status of a workspace integration.
 ///
 /// This enumeration corresponds to the `INTEGRATION_STATUS` PostgreSQL enum and is used
-/// to manage integration states from initial setup through active execution and error handling.
+/// to manage integration states from initial setup through active execution and cancellation.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
@@ -21,22 +21,28 @@ pub enum IntegrationStatus {
     #[default]
     Pending,
 
-    /// Integration is actively executing and operational
-    #[db_rename = "executing"]
-    #[serde(rename = "executing")]
-    Executing,
+    /// Integration is actively running and operational
+    #[db_rename = "running"]
+    #[serde(rename = "running")]
+    Running,
 
-    /// Integration has encountered an error or failure
-    #[db_rename = "failed"]
-    #[serde(rename = "failed")]
-    Failed,
+    /// Integration has been cancelled
+    #[db_rename = "cancelled"]
+    #[serde(rename = "cancelled")]
+    Cancelled,
 }
 
 impl IntegrationStatus {
     /// Returns whether the integration is operational.
     #[inline]
     pub fn is_operational(self) -> bool {
-        matches!(self, IntegrationStatus::Executing)
+        matches!(self, IntegrationStatus::Running)
+    }
+
+    /// Returns whether the integration is running.
+    #[inline]
+    pub fn is_running(self) -> bool {
+        matches!(self, IntegrationStatus::Running)
     }
 
     /// Returns whether the integration is pending setup.
@@ -45,16 +51,19 @@ impl IntegrationStatus {
         matches!(self, IntegrationStatus::Pending)
     }
 
-    /// Returns whether the integration has failed.
+    /// Returns whether the integration has been cancelled.
     #[inline]
-    pub fn has_failed(self) -> bool {
-        matches!(self, IntegrationStatus::Failed)
+    pub fn is_cancelled(self) -> bool {
+        matches!(self, IntegrationStatus::Cancelled)
     }
 
     /// Returns whether the integration can be activated.
     #[inline]
     pub fn can_activate(self) -> bool {
-        matches!(self, IntegrationStatus::Pending | IntegrationStatus::Failed)
+        matches!(
+            self,
+            IntegrationStatus::Pending | IntegrationStatus::Cancelled
+        )
     }
 
     /// Returns whether the integration can be configured.

@@ -1,0 +1,67 @@
+[package]
+name = "nvisy-rig"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+publish = { workspace = true }
+
+description = "Rig AI framework integration for nvisy"
+keywords = ["rig", "llm", "ai", "client", "rag"]
+categories = ["api-bindings", "web-programming::http-client"]
+
+[features]
+## Default feature set (none for minimal dependencies)
+default = []
+
+## CLI configuration support: enables clap derives for config types
+## This allows config types to be used with command-line argument parsing
+config = ["dep:clap"]
+
+[dependencies]
+# Internal crates
+nvisy-nats = { workspace = true }
+nvisy-postgres = { workspace = true }
+
+# Rig AI framework
+rig-core = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["time", "rt"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Derive macros
+derive_builder = { workspace = true }
+derive_more = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+# Data types
+uuid = { workspace = true }
+bytes = { workspace = true }
+jiff = { workspace = true, features = ["serde"] }
+
+# Text processing
+text-splitter = { workspace = true }
+
+# Cryptography
+sha2 = { workspace = true }
+
+# CLI (optional)
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

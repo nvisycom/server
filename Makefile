@@ -1,12 +1,9 @@
-# Makefile for api.nvisy.com
+# Makefile for the on-premise version of api.nvisy.com
 
 ifneq (,$(wildcard ./.env))
 	include .env
 	export
 endif
-
-# Environment variables.
-EXPOSED_PORT ?= 3000
 
 # PostgreSQL connection URL for diesel CLI.
 POSTGRES_URL ?= postgresql://postgres:postgres@localhost:5432/postgres
@@ -48,14 +45,20 @@ install-tools: # Installs tools required for the repo.
 	fi
 
 .PHONY: install-all
-install-all: install-tools # Installs all dependencies.
+install-all: install-tools ## Installs all dependencies.
 	$(call make-log,Making scripts executable...)
 	@chmod +x scripts/*.sh
 	$(call make-log,Scripts made executable!)
 
+.PHONY: generate-env
+generate-env: ## Copies .env.example to .env.
+	$(call make-log,Copying .env.example to .env...)
+	@cp ./.env.example ./.env
+	$(call make-log,.env file created successfully.)
+
 .PHONY: generate-keys
 generate-keys: ## Generates a private and public auth key pair.
-	$(call make-log,Deleting a generated keys...)
+	$(call make-log,Deleting previously generated keys...)
 	@rm -f $(PRIVATE_KEY_FILE) $(PUBLIC_KEY_FILE)
 	$(call make-log,Previously generated keys deleted.)
 
@@ -102,5 +105,36 @@ clear-migrations: ## Reverts all database migrations.
 	done
 	$(call make-log,All migrations reverted successfully.)
 
-.PHONY: generate
-generate: generate-keys generate-migrations
+.PHONY: generate-all
+generate-all: generate-env generate-keys generate-migrations
+
+.PHONY: all
+all: install-all generate-all
+
+# CI Commands (mirror GitHub Actions)
+.PHONY: ci
+ci: ## Runs all CI checks locally (check, fmt, clippy, test, docs).
+	$(call make-log,Running cargo check...)
+	@cargo check --all-features --workspace
+	$(call make-log,Checking code formatting...)
+	@cargo +nightly fmt --all -- --check
+	$(call make-log,Running clippy...)
+	@cargo clippy --all-targets --all-features --workspace -- -D warnings
+	$(call make-log,Running tests...)
+	@cargo test --all-features --workspace
+	$(call make-log,Building documentation...)
+	@RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --workspace
+	$(call make-log,All CI checks passed!)
+
+.PHONY: fmt
+fmt: ## Fixes code formatting.
+	$(call make-log,Fixing code formatting...)
+	@cargo +nightly fmt --all
+	$(call make-log,Formatting fixed!)
+
+# Security Commands (mirror GitHub Actions)
+.PHONY: security
+security: ## Runs security checks locally (cargo deny).
+	$(call make-log,Running cargo deny...)
+	@cargo deny check all
+	$(call make-log,All security checks passed!)

@@ -23,5 +23,3 @@ Command-line interface and HTTP server for the Nvisy platform.
 
 - **tls** - HTTPS support with rustls
 - **dotenv** - Load configuration from `.env` files
-- **ollama** - Ollama AI backend integration
-- **mock** - Mock AI services for testing

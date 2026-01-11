@@ -10,25 +10,15 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceIntegrationRunConstraints {
-    // Run identity constraints
-    #[strum(serialize = "workspace_integration_runs_run_name_length")]
-    RunNameLength,
-    #[strum(serialize = "workspace_integration_runs_run_type_format")]
-    RunTypeFormat,
-
     // Run data constraints
     #[strum(serialize = "workspace_integration_runs_metadata_size")]
     MetadataSize,
+    #[strum(serialize = "workspace_integration_runs_logs_size")]
+    LogsSize,
 
     // Run timing constraints
     #[strum(serialize = "workspace_integration_runs_completed_after_started")]
     CompletedAfterStarted,
-
-    // Run chronological constraints
-    #[strum(serialize = "workspace_integration_runs_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_integration_runs_started_after_created")]
-    StartedAfterCreated,
 }
 
 impl WorkspaceIntegrationRunConstraints {
@@ -40,13 +30,9 @@ impl WorkspaceIntegrationRunConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceIntegrationRunConstraints::RunNameLength
-            | WorkspaceIntegrationRunConstraints::RunTypeFormat
-            | WorkspaceIntegrationRunConstraints::MetadataSize => ConstraintCategory::Validation,
-
-            WorkspaceIntegrationRunConstraints::CompletedAfterStarted
-            | WorkspaceIntegrationRunConstraints::UpdatedAfterCreated
-            | WorkspaceIntegrationRunConstraints::StartedAfterCreated => {
+            WorkspaceIntegrationRunConstraints::MetadataSize
+            | WorkspaceIntegrationRunConstraints::LogsSize => ConstraintCategory::Validation,
+            WorkspaceIntegrationRunConstraints::CompletedAfterStarted => {
                 ConstraintCategory::Chronological
             }
         }

@@ -7,12 +7,15 @@ mod service;
 pub mod request;
 pub mod response;
 
-pub use request::{WebhookContext, WebhookPayload, WebhookRequest};
-pub use response::WebhookResponse;
-pub use service::WebhookService;
+#[cfg(feature = "reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
+pub mod reqwest;
 
 pub use nvisy_core::types::{ServiceHealth, ServiceStatus};
 pub use nvisy_core::{Error, ErrorKind, Result};
+pub use request::{WebhookContext, WebhookPayload, WebhookRequest};
+pub use response::WebhookResponse;
+pub use service::WebhookService;
 
 /// Tracing target for webhook operations.
 pub const TRACING_TARGET: &str = "nvisy_service::webhook";

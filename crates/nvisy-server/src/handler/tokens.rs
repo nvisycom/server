@@ -12,6 +12,7 @@ use axum_extra::headers::UserAgent;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::UpdateAccountApiToken;
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::types::ApiTokenType;
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
@@ -153,6 +154,13 @@ async fn update_api_token(
 
     // Verify the token exists and belongs to the authenticated account
     let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
+
+    // Only API tokens can be renamed
+    if token.session_type != ApiTokenType::Api {
+        return Err(ErrorKind::Forbidden
+            .with_resource("api_token")
+            .with_message("Only API tokens can be renamed"));
+    }
 
     let update_token = UpdateAccountApiToken {
         name: request.name,

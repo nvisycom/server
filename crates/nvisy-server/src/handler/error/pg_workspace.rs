@@ -132,18 +132,13 @@ impl From<WorkspaceIntegrationConstraints> for Error<'static> {
 impl From<WorkspaceIntegrationRunConstraints> for Error<'static> {
     fn from(c: WorkspaceIntegrationRunConstraints) -> Self {
         let error = match c {
-            WorkspaceIntegrationRunConstraints::RunNameLength => {
-                ErrorKind::BadRequest.with_message("Run name length is invalid")
-            }
-            WorkspaceIntegrationRunConstraints::RunTypeFormat => {
-                ErrorKind::BadRequest.with_message("Run type format is invalid")
-            }
             WorkspaceIntegrationRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Run metadata size is invalid")
             }
-            WorkspaceIntegrationRunConstraints::CompletedAfterStarted
-            | WorkspaceIntegrationRunConstraints::UpdatedAfterCreated
-            | WorkspaceIntegrationRunConstraints::StartedAfterCreated => {
+            WorkspaceIntegrationRunConstraints::LogsSize => {
+                ErrorKind::BadRequest.with_message("Run logs size is invalid")
+            }
+            WorkspaceIntegrationRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
@@ -174,6 +169,9 @@ impl From<WorkspaceWebhookConstraints> for Error<'static> {
             }
             WorkspaceWebhookConstraints::HeadersSize => {
                 ErrorKind::BadRequest.with_message("Webhook headers size is too large")
+            }
+            WorkspaceWebhookConstraints::IntegrationIdRequired => {
+                ErrorKind::BadRequest.with_message("Integration webhooks require an integration ID")
             }
             WorkspaceWebhookConstraints::FailureCountPositive
             | WorkspaceWebhookConstraints::MaxFailuresPositive => {

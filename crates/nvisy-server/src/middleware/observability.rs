@@ -16,8 +16,11 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
+use super::RouteCategory;
 use crate::extract::AppConnectInfo;
-use crate::utility::{RouteCategory, tracing_targets};
+
+/// Tracing target for request metrics.
+const TRACING_TARGET_METRICS: &str = "nvisy_server::metrics";
 
 /// Extension trait for `axum::`[`Router`] to apply observability middleware.
 ///
@@ -82,7 +85,7 @@ pub async fn track_categorized_metrics(
         .unwrap_or(0);
 
     tracing::trace!(
-        target: tracing_targets::METRICS,
+        target: TRACING_TARGET_METRICS,
         method = %method,
         uri = %uri,
         category = category.as_str(),
@@ -102,7 +105,7 @@ pub async fn track_categorized_metrics(
         .unwrap_or(0);
 
     tracing::trace!(
-        target: tracing_targets::METRICS,
+        target: TRACING_TARGET_METRICS,
         method = %method,
         uri = %uri,
         category = category.as_str(),

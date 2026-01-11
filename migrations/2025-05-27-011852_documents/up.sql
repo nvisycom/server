@@ -53,6 +53,10 @@ CREATE INDEX documents_metadata_search_idx
     ON documents USING gin (metadata)
     WHERE deleted_at IS NULL;
 
+CREATE INDEX documents_display_name_trgm_idx
+    ON documents USING gin (display_name gin_trgm_ops)
+    WHERE deleted_at IS NULL;
+
 -- Add table and column comments
 COMMENT ON TABLE documents IS
     'Document containers for organizing and managing file collections with metadata.';
@@ -72,10 +76,8 @@ COMMENT ON COLUMN documents.deleted_at IS 'Soft deletion timestamp';
 CREATE TYPE PROCESSING_STATUS AS ENUM (
     'pending',      -- File is queued for processing
     'processing',   -- File is currently being processed
-    'completed',    -- Processing completed successfully
-    'failed',       -- Processing failed
-    'canceled',     -- Processing was canceled
-    'skipped'       -- Processing was skipped
+    'ready',        -- Processing completed, file is ready for use
+    'canceled'      -- Processing was canceled
 );
 
 COMMENT ON TYPE PROCESSING_STATUS IS
@@ -185,6 +187,10 @@ CREATE INDEX document_files_tags_search_idx
 CREATE INDEX document_files_indexed_idx
     ON document_files (is_indexed, content_segmentation)
     WHERE is_indexed = TRUE AND deleted_at IS NULL;
+
+CREATE INDEX document_files_display_name_trgm_idx
+    ON document_files USING gin (display_name gin_trgm_ops)
+    WHERE deleted_at IS NULL;
 
 -- Add table and column comments
 COMMENT ON TABLE document_files IS
@@ -360,9 +366,8 @@ COMMENT ON COLUMN document_comments.deleted_at IS 'Soft deletion timestamp';
 
 -- Create annotation type enum
 CREATE TYPE ANNOTATION_TYPE AS ENUM (
-    'note',         -- General text note/annotation
-    'highlight',    -- Highlighted text selection
-    'comment'       -- Comment on specific content
+    'annotation',   -- General text annotation
+    'highlight'     -- Highlighted text selection
 );
 
 COMMENT ON TYPE ANNOTATION_TYPE IS
@@ -379,7 +384,7 @@ CREATE TABLE document_annotations (
 
     -- Annotation content
     content             TEXT             NOT NULL,
-    annotation_type     ANNOTATION_TYPE  NOT NULL DEFAULT 'note',
+    annotation_type     ANNOTATION_TYPE  NOT NULL DEFAULT 'annotation',
 
     CONSTRAINT document_annotations_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
 

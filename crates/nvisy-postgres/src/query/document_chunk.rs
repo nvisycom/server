@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use pgvector::Vector;
 use uuid::Uuid;
 
-use crate::model::{DocumentChunk, NewDocumentChunk, UpdateDocumentChunk};
+use crate::model::{DocumentChunk, NewDocumentChunk, ScoredDocumentChunk, UpdateDocumentChunk};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for document chunk database operations.
@@ -70,6 +70,28 @@ pub trait DocumentChunkRepository {
         document_ids: &[Uuid],
         limit: i64,
     ) -> impl Future<Output = PgResult<Vec<DocumentChunk>>> + Send;
+
+    /// Searches for similar chunks within specific files with score filtering.
+    ///
+    /// Returns chunks with similarity score >= min_score, ordered by similarity.
+    fn search_scored_chunks_in_files(
+        &mut self,
+        query_embedding: Vector,
+        file_ids: &[Uuid],
+        min_score: f64,
+        limit: i64,
+    ) -> impl Future<Output = PgResult<Vec<ScoredDocumentChunk>>> + Send;
+
+    /// Searches for similar chunks within all files of specific documents with score filtering.
+    ///
+    /// Returns chunks with similarity score >= min_score, ordered by similarity.
+    fn search_scored_chunks_in_documents(
+        &mut self,
+        query_embedding: Vector,
+        document_ids: &[Uuid],
+        min_score: f64,
+        limit: i64,
+    ) -> impl Future<Output = PgResult<Vec<ScoredDocumentChunk>>> + Send;
 
     /// Gets the total chunk count for a file.
     fn count_document_file_chunks(
@@ -175,7 +197,7 @@ impl DocumentChunkRepository for PgConnection {
         use schema::document_chunks::{self, dsl};
 
         let chunks = document_chunks::table
-            .order(dsl::embedding.cosine_distance(query_embedding))
+            .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
             .select(DocumentChunk::as_select())
             .load(self)
@@ -200,7 +222,7 @@ impl DocumentChunkRepository for PgConnection {
 
         let chunks = document_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
-            .order(dsl::embedding.cosine_distance(query_embedding))
+            .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
             .select(DocumentChunk::as_select())
             .load(self)
@@ -238,7 +260,7 @@ impl DocumentChunkRepository for PgConnection {
 
         let chunks = document_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
-            .order(dsl::embedding.cosine_distance(query_embedding))
+            .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
             .select(DocumentChunk::as_select())
             .load(self)
@@ -246,6 +268,101 @@ impl DocumentChunkRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(chunks)
+    }
+
+    async fn search_scored_chunks_in_files(
+        &mut self,
+        query_embedding: Vector,
+        file_ids: &[Uuid],
+        min_score: f64,
+        limit: i64,
+    ) -> PgResult<Vec<ScoredDocumentChunk>> {
+        use pgvector::VectorExpressionMethods;
+        use schema::document_chunks::{self, dsl};
+
+        if file_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Cosine distance ranges from 0 (identical) to 2 (opposite)
+        // Score = 1 - distance, so min_score threshold means max_distance = 1 - min_score
+        let max_distance = 1.0 - min_score;
+
+        let chunks: Vec<(DocumentChunk, f64)> = document_chunks::table
+            .filter(dsl::file_id.eq_any(file_ids))
+            .filter(
+                dsl::embedding
+                    .cosine_distance(&query_embedding)
+                    .le(max_distance),
+            )
+            .order(dsl::embedding.cosine_distance(&query_embedding))
+            .limit(limit)
+            .select((
+                DocumentChunk::as_select(),
+                (1.0.into_sql::<diesel::sql_types::Double>()
+                    - dsl::embedding.cosine_distance(&query_embedding)),
+            ))
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(chunks
+            .into_iter()
+            .map(|(chunk, score)| ScoredDocumentChunk { chunk, score })
+            .collect())
+    }
+
+    async fn search_scored_chunks_in_documents(
+        &mut self,
+        query_embedding: Vector,
+        document_ids: &[Uuid],
+        min_score: f64,
+        limit: i64,
+    ) -> PgResult<Vec<ScoredDocumentChunk>> {
+        use pgvector::VectorExpressionMethods;
+        use schema::document_chunks::{self, dsl};
+        use schema::document_files;
+
+        if document_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Get all file IDs for the given documents
+        let file_ids: Vec<Uuid> = document_files::table
+            .filter(document_files::document_id.eq_any(document_ids))
+            .select(document_files::id)
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        if file_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let max_distance = 1.0 - min_score;
+
+        let chunks: Vec<(DocumentChunk, f64)> = document_chunks::table
+            .filter(dsl::file_id.eq_any(file_ids))
+            .filter(
+                dsl::embedding
+                    .cosine_distance(&query_embedding)
+                    .le(max_distance),
+            )
+            .order(dsl::embedding.cosine_distance(&query_embedding))
+            .limit(limit)
+            .select((
+                DocumentChunk::as_select(),
+                (1.0.into_sql::<diesel::sql_types::Double>()
+                    - dsl::embedding.cosine_distance(&query_embedding)),
+            ))
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(chunks
+            .into_iter()
+            .map(|(chunk, score)| ScoredDocumentChunk { chunk, score })
+            .collect())
     }
 
     async fn count_document_file_chunks(&mut self, file_id: Uuid) -> PgResult<i64> {

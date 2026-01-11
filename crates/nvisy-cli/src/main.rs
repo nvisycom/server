@@ -9,22 +9,12 @@ use std::process;
 
 use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
-use nvisy_server::middleware::{
-    RouterObservabilityExt, RouterOpenApiExt, RouterRecoveryExt, RouterSecurityExt,
-};
+use nvisy_server::middleware::*;
+use nvisy_server::pipeline::{PipelineState, WorkerHandles};
 use nvisy_server::service::ServiceState;
-use nvisy_worker::{WorkerHandles, WorkerState};
 
-use crate::config::{Cli, MiddlewareConfig, create_inference_service, create_webhook_service};
-
-/// Tracing target for server startup events.
-pub const TRACING_TARGET_SERVER_STARTUP: &str = "nvisy_cli::server::startup";
-
-/// Tracing target for server shutdown events.
-pub const TRACING_TARGET_SERVER_SHUTDOWN: &str = "nvisy_cli::server::shutdown";
-
-/// Tracing target for configuration events.
-pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
+use crate::config::{Cli, MiddlewareConfig};
+use crate::server::TRACING_TARGET_SHUTDOWN;
 
 #[tokio::main]
 async fn main() {
@@ -34,7 +24,7 @@ async fn main() {
 
     if tracing::enabled!(tracing::Level::ERROR) {
         tracing::error!(
-            target: TRACING_TARGET_SERVER_SHUTDOWN,
+            target: TRACING_TARGET_SHUTDOWN,
             error = %error,
             "Application terminated with error"
         );
@@ -50,23 +40,14 @@ async fn run() -> anyhow::Result<()> {
     let cli = Cli::init();
     Cli::init_tracing();
 
-    cli.validate()?;
     cli.log();
 
-    // Create services
-    let inference = create_inference_service(&cli)?;
-    let webhook = create_webhook_service()?;
-
     // Initialize application state
-    let state = ServiceState::from_config(cli.service.clone(), webhook).await?;
+    let state = cli.service_state().await?;
 
-    // Create worker state and spawn background workers
-    let worker_state = WorkerState::new(state.postgres.clone(), state.nats.clone(), inference);
-    let workers = WorkerHandles::spawn(&worker_state);
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_STARTUP,
-        "Document processing workers started"
-    );
+    // Spawn pipeline workers
+    let pipeline_state = PipelineState::new(&state, cli.pipeline.clone());
+    let workers = WorkerHandles::spawn(&pipeline_state);
 
     // Build router
     let router = create_router(state, &cli.middleware);
@@ -75,10 +56,6 @@ async fn run() -> anyhow::Result<()> {
     let result = server::serve(router, cli.server).await;
 
     // Shutdown workers
-    tracing::info!(
-        target: TRACING_TARGET_SERVER_SHUTDOWN,
-        "Stopping document processing workers"
-    );
     workers.shutdown();
 
     result?;

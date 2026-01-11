@@ -27,25 +27,15 @@ pub enum ProcessingStatus {
     #[serde(rename = "processing")]
     Processing,
 
-    /// Processing completed successfully
-    #[db_rename = "completed"]
-    #[serde(rename = "completed")]
-    Completed,
-
-    /// Processing failed due to an error
-    #[db_rename = "failed"]
-    #[serde(rename = "failed")]
-    Failed,
+    /// Processing completed, file is ready for use
+    #[db_rename = "ready"]
+    #[serde(rename = "ready")]
+    Ready,
 
     /// Processing was canceled by user or system
     #[db_rename = "canceled"]
     #[serde(rename = "canceled")]
     Canceled,
-
-    /// Processing was skipped (file doesn't require processing)
-    #[db_rename = "skipped"]
-    #[serde(rename = "skipped")]
-    Skipped,
 }
 
 impl ProcessingStatus {
@@ -61,31 +51,22 @@ impl ProcessingStatus {
         matches!(self, ProcessingStatus::Processing)
     }
 
-    /// Returns whether the processing is in a final state (completed or terminal).
+    /// Returns whether the processing is in a final state.
     #[inline]
     pub fn is_final(self) -> bool {
-        matches!(
-            self,
-            ProcessingStatus::Completed
-                | ProcessingStatus::Failed
-                | ProcessingStatus::Canceled
-                | ProcessingStatus::Skipped
-        )
+        matches!(self, ProcessingStatus::Ready | ProcessingStatus::Canceled)
     }
 
-    /// Returns whether the processing completed successfully.
+    /// Returns whether the file is ready for use.
     #[inline]
-    pub fn is_successful(self) -> bool {
-        matches!(
-            self,
-            ProcessingStatus::Completed | ProcessingStatus::Skipped
-        )
+    pub fn is_ready(self) -> bool {
+        matches!(self, ProcessingStatus::Ready)
     }
 
-    /// Returns whether the processing failed or was terminated.
+    /// Returns whether the processing was canceled.
     #[inline]
-    pub fn is_failed(self) -> bool {
-        matches!(self, ProcessingStatus::Failed | ProcessingStatus::Canceled)
+    pub fn is_canceled(self) -> bool {
+        matches!(self, ProcessingStatus::Canceled)
     }
 
     /// Returns whether the processing is pending (waiting to start).
@@ -94,16 +75,10 @@ impl ProcessingStatus {
         matches!(self, ProcessingStatus::Pending)
     }
 
-    /// Returns whether the file processing was skipped.
-    #[inline]
-    pub fn is_skipped(self) -> bool {
-        matches!(self, ProcessingStatus::Skipped)
-    }
-
     /// Returns whether the processing can be retried.
     #[inline]
     pub fn can_be_retried(self) -> bool {
-        matches!(self, ProcessingStatus::Failed)
+        matches!(self, ProcessingStatus::Ready | ProcessingStatus::Canceled)
     }
 
     /// Returns whether the processing can be canceled.
@@ -129,13 +104,8 @@ impl ProcessingStatus {
         &[ProcessingStatus::Pending, ProcessingStatus::Processing]
     }
 
-    /// Returns processing statuses that represent successful completion.
-    pub fn successful_statuses() -> &'static [ProcessingStatus] {
-        &[ProcessingStatus::Completed, ProcessingStatus::Skipped]
-    }
-
-    /// Returns processing statuses that represent failure or termination.
-    pub fn failed_statuses() -> &'static [ProcessingStatus] {
-        &[ProcessingStatus::Failed, ProcessingStatus::Canceled]
+    /// Returns processing statuses that represent final states.
+    pub fn final_statuses() -> &'static [ProcessingStatus] {
+        &[ProcessingStatus::Ready, ProcessingStatus::Canceled]
     }
 }

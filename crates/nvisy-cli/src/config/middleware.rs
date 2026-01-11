@@ -17,7 +17,7 @@ use clap::Args;
 use nvisy_server::middleware::{CorsConfig, OpenApiConfig, RecoveryConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::TRACING_TARGET_CONFIG;
+use super::TRACING_TARGET_CONFIG;
 
 /// Middleware configuration combining CORS, OpenAPI, and recovery settings.
 ///

@@ -4,13 +4,12 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
+use nvisy_postgres::types::{WebhookEvent, WebhookStatus, WebhookType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Page;
-use crate::handler::utility::{flatten_events, parse_headers};
 
 /// Workspace webhook response.
 #[must_use]
@@ -21,6 +20,11 @@ pub struct Webhook {
     pub webhook_id: Uuid,
     /// Reference to the workspace this webhook belongs to.
     pub workspace_id: Uuid,
+    /// Origin type of the webhook (provided or integration).
+    pub webhook_type: WebhookType,
+    /// Reference to integration (present for integration type webhooks).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration_id: Option<Uuid>,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Detailed description of the webhook's purpose.
@@ -45,14 +49,19 @@ pub struct Webhook {
 
 impl Webhook {
     pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
+        let events = webhook.subscribed_events();
+        let headers = webhook.parsed_headers();
+
         Self {
             webhook_id: webhook.id,
             workspace_id: webhook.workspace_id,
+            webhook_type: webhook.webhook_type,
+            integration_id: webhook.integration_id,
             display_name: webhook.display_name,
             description: webhook.description,
             url: webhook.url,
-            events: flatten_events(webhook.events),
-            headers: parse_headers(webhook.headers),
+            events,
+            headers,
             status: webhook.status,
             last_triggered_at: webhook.last_triggered_at.map(Into::into),
             created_by: webhook.created_by,

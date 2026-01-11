@@ -1,16 +1,18 @@
 //! HTTP server implementation using enhanced lifecycle management.
 
+use std::io;
+
 use axum::Router;
 use nvisy_server::extract::AppConnectInfo;
 use tokio::net::TcpListener;
 
-use crate::TRACING_TARGET_SERVER_STARTUP;
+use super::TRACING_TARGET_STARTUP;
 use crate::config::ServerConfig;
 use crate::server::lifecycle::serve_with_shutdown;
-use crate::server::{ServerResult, shutdown_signal};
+use crate::server::shutdown_signal;
 
 /// Starts an HTTP server with enhanced lifecycle management.
-pub async fn serve_http(app: Router, server_config: ServerConfig) -> ServerResult<()> {
+pub async fn serve_http(app: Router, server_config: ServerConfig) -> io::Result<()> {
     let server_addr = server_config.socket_addr();
     let shutdown_timeout = server_config.shutdown_timeout();
     let shutdown_signal = shutdown_signal(shutdown_timeout);
@@ -19,7 +21,7 @@ pub async fn serve_http(app: Router, server_config: ServerConfig) -> ServerResul
         let listener = TcpListener::bind(server_addr).await?;
 
         tracing::info!(
-            target: TRACING_TARGET_SERVER_STARTUP,
+            target: TRACING_TARGET_STARTUP,
             addr = %server_addr,
             "Server listening"
         );

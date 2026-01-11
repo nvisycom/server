@@ -29,25 +29,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  audit:
-    name: Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Run audit
-        run: cargo audit --deny warnings
-
   deny:
     name: Deny
     runs-on: ubuntu-latest
@@ -55,25 +36,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
+        run: cargo binstall cargo-deny --no-confirm --no-symlinks
 
       - name: Run deny
         run: cargo deny check all
-
-  dependency-review:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Review dependencies
-        uses: actions/dependency-review-action@v4

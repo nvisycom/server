@@ -141,11 +141,12 @@ pub enum SplitStrategy {
 }
 
 /// Order for merging documents.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum MergeOrder {
     /// Use the order provided in file_ids.
+    #[default]
     AsProvided,
     /// Sort by filename alphabetically.
     Alphabetical,
@@ -153,12 +154,6 @@ pub enum MergeOrder {
     ByDate,
     /// Sort by file size.
     BySize,
-}
-
-impl Default for MergeOrder {
-    fn default() -> Self {
-        Self::AsProvided
-    }
 }
 
 #[cfg(test)]

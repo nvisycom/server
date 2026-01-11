@@ -1,42 +1,33 @@
 # Nvisy Server
 
-[![Rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&color=000000&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
-[![Axum](https://img.shields.io/badge/Axum-0.8+-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+[![Crates.io](https://img.shields.io/crates/v/nvisy-server?style=flat-square)](https://crates.io/crates/nvisy-server)
+[![Docs](https://img.shields.io/docsrs/nvisy-server?style=flat-square&label=docs)](https://docs.rs/nvisy-server)
 
 High-performance backend server for the Nvisy document processing platform.
 
 ## Features
 
 - **High-Performance** - Async HTTP server with Axum and Tokio
-- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
 - **LLM Annotations** - AI-driven document edits via structured annotations
+- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
 - **Real-Time Updates** - Live collaboration via NATS pub/sub and WebSocket
 - **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
-
-## Optional Features
-
-| Feature | Description |
-|---------|-------------|
-| **tls** | HTTPS support with rustls |
-| **otel** | OpenTelemetry log filtering |
-| **dotenv** | Load config from `.env` files |
-| **ollama** | Ollama AI backend |
-| **mock** | Mock AI services for testing |
 
 ## Architecture
 
 ```
 server/
 ├── crates/
-│   ├── nvisy-cli/       # Server binary with CLI
-│   ├── nvisy-core/      # Shared types and AI service traits
-│   ├── nvisy-nats/      # NATS client (streams, KV, queues)
-│   ├── nvisy-ollama/    # Ollama client (embeddings, OCR, VLM)
-│   ├── nvisy-postgres/  # PostgreSQL database layer
-│   └── nvisy-server/    # HTTP handlers and middleware
-├── migrations/          # PostgreSQL database migrations
-└── Cargo.toml           # Workspace configuration
+│   ├── nvisy-cli/         # Server binary with CLI and configuration
+│   ├── nvisy-core/        # Shared types, errors, and utilities
+│   ├── nvisy-nats/        # NATS client (streams, KV, object storage, jobs)
+│   ├── nvisy-postgres/    # PostgreSQL database layer with Diesel ORM
+│   ├── nvisy-rig/         # AI services (chat, RAG, embeddings)
+│   ├── nvisy-server/      # HTTP handlers, middleware, pipeline, and OpenAPI
+│   └── nvisy-webhook/     # Webhook delivery with HTTP client
+├── migrations/            # PostgreSQL database migrations
+└── Cargo.toml             # Workspace configuration
 ```
 
 ## Quick Start
@@ -50,7 +41,7 @@ make generate-keys
 make generate-migrations
 
 # Start the server
-cargo run --features ollama,dotenv
+cargo run --features dotenv
 ```
 
 ## Configuration

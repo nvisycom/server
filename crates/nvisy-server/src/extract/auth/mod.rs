@@ -15,9 +15,6 @@ pub use self::auth_state::AuthState;
 pub use self::jwt_claims::AuthClaims;
 pub use self::jwt_header::AuthHeader;
 pub use self::permission::{AuthResult, Permission};
-pub use crate::utility::tracing_targets::{
-    AUTHENTICATION as TRACING_TARGET_AUTHENTICATION, AUTHORIZATION as TRACING_TARGET_AUTHORIZATION,
-};
 
 impl<T> AuthProvider for AuthClaims<T> {
     fn account_id(&self) -> uuid::Uuid {

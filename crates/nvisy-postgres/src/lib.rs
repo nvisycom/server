@@ -25,14 +25,13 @@ pub const TRACING_TARGET_CONNECTION: &str = "nvisy_postgres::connection";
 mod client;
 mod error;
 pub mod model;
-#[doc(hidden)]
-pub mod prelude;
 pub mod query;
 mod schema;
 pub mod types;
 
 pub use diesel_async::AsyncPgConnection as PgConnection;
 pub use jiff_diesel::Timestamp as JiffTimestamp;
+pub use pgvector::Vector;
 
 pub(crate) use crate::client::PooledConnection;
 pub use crate::client::{

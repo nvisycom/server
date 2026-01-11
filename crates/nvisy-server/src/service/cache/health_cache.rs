@@ -15,7 +15,9 @@ use nvisy_postgres::PgClient;
 use tokio::sync::RwLock;
 
 use crate::service::ServiceState;
-use crate::utility::tracing_targets::HEALTH_CACHE as TRACING_TARGET;
+
+/// Tracing target for health cache operations.
+const TRACING_TARGET: &str = "nvisy_server::health_cache";
 
 /// Default cache duration for health checks.
 const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(30);
