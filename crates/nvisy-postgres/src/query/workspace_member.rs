@@ -149,6 +149,16 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         email: &str,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceMember, Account)>>> + Send;
+
+    /// Checks if two accounts share at least one common workspace.
+    ///
+    /// Returns true if both accounts are members of at least one common workspace.
+    /// This is an optimized query that stops at the first match.
+    fn accounts_share_workspace(
+        &mut self,
+        account_id_a: Uuid,
+        account_id_b: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
 }
 
 impl WorkspaceMemberRepository for PgConnection {
@@ -679,5 +689,39 @@ impl WorkspaceMemberRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(result)
+    }
+
+    async fn accounts_share_workspace(
+        &mut self,
+        account_id_a: Uuid,
+        account_id_b: Uuid,
+    ) -> PgResult<bool> {
+        use diesel::dsl::exists;
+        use schema::workspace_members;
+
+        // Self-check: an account always "shares" with itself
+        if account_id_a == account_id_b {
+            return Ok(true);
+        }
+
+        // Use EXISTS with a self-join to find any common workspace
+        // This is optimized to stop at the first match
+        let wm_a = workspace_members::table;
+        let wm_b = diesel::alias!(workspace_members as wm_b);
+
+        let shares = diesel::select(exists(
+            wm_a.inner_join(
+                wm_b.on(wm_b
+                    .field(workspace_members::workspace_id)
+                    .eq(workspace_members::workspace_id)),
+            )
+            .filter(workspace_members::account_id.eq(account_id_a))
+            .filter(wm_b.field(workspace_members::account_id).eq(account_id_b)),
+        ))
+        .get_result::<bool>(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(shares)
     }
 }

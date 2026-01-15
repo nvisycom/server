@@ -3,23 +3,27 @@
 //! This module contains Diesel model definitions for all database tables,
 //! including structs for querying, inserting, and updating records.
 
-pub mod account;
-pub mod account_action_token;
-pub mod account_api_token;
-pub mod account_notification;
-pub mod document;
-pub mod document_annotation;
-pub mod document_chunk;
-pub mod document_comment;
-pub mod document_file;
+mod account;
+mod account_action_token;
+mod account_api_token;
+mod account_notification;
+mod document;
+mod document_annotation;
+mod document_chunk;
+mod document_comment;
+mod document_file;
 
-pub mod workspace;
-pub mod workspace_activity;
-pub mod workspace_integration;
-pub mod workspace_integration_run;
-pub mod workspace_invite;
-pub mod workspace_member;
-pub mod workspace_webhook;
+mod workspace;
+mod workspace_activity;
+mod workspace_integration;
+mod workspace_integration_run;
+mod workspace_invite;
+mod workspace_member;
+mod workspace_webhook;
+
+mod studio_operation;
+mod studio_session;
+mod studio_tool_call;
 
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
@@ -52,3 +56,7 @@ pub use workspace_integration_run::{
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
+// Studio models
+pub use studio_operation::{NewStudioOperation, StudioOperation, UpdateStudioOperation};
+pub use studio_session::{NewStudioSession, StudioSession, UpdateStudioSession};
+pub use studio_tool_call::{NewStudioToolCall, StudioToolCall, UpdateStudioToolCall};

@@ -157,3 +157,15 @@ pub struct TokenPathParams {
     /// Unique identifier of the API token.
     pub token_id: Uuid,
 }
+
+/// Path parameters for account operations.
+///
+/// Used when retrieving account information by ID. Access is granted
+/// if the requester shares at least one workspace with the target account.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountPathParams {
+    /// Unique identifier of the account.
+    pub account_id: Uuid,
+}

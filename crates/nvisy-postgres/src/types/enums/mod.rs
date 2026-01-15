@@ -26,6 +26,10 @@ pub mod content_segmentation;
 pub mod processing_status;
 pub mod require_mode;
 
+// Studio-related enumerations
+pub mod studio_session_status;
+pub mod studio_tool_status;
+
 pub use action_token_type::ActionTokenType;
 pub use activity_type::{ActivityCategory, ActivityType};
 pub use annotation_type::AnnotationType;
@@ -38,6 +42,8 @@ pub use notification_event::NotificationEvent;
 pub use processing_status::ProcessingStatus;
 pub use require_mode::RequireMode;
 pub use run_type::RunType;
+pub use studio_session_status::StudioSessionStatus;
+pub use studio_tool_status::StudioToolStatus;
 pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
 pub use webhook_type::WebhookType;

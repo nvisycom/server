@@ -4,51 +4,57 @@
 //! organized into logical groups for better maintainability.
 
 // Account-related constraint modules
-pub mod account_action_tokens;
-pub mod account_api_tokens;
-pub mod account_notifications;
-pub mod accounts;
+mod account_action_tokens;
+mod account_api_tokens;
+mod account_notifications;
+mod accounts;
 
 // Workspace-related constraint modules
-pub mod workspace_activities;
-pub mod workspace_integrations;
-pub mod workspace_invites;
-pub mod workspace_members;
-pub mod workspace_webhooks;
-pub mod workspaces;
+mod workspace_activities;
+mod workspace_integration_runs;
+mod workspace_integrations;
+mod workspace_invites;
+mod workspace_members;
+mod workspace_webhooks;
+mod workspaces;
 
 // Document-related constraint modules
-pub mod document_annotations;
-pub mod document_chunks;
-pub mod document_comments;
-pub mod document_files;
-pub mod document_versions;
-pub mod documents;
+mod document_annotations;
+mod document_chunks;
+mod document_comments;
+mod document_files;
+mod document_versions;
+mod documents;
 
-// Workspace run constraint modules
-pub mod workspace_integration_runs;
+// Studio-related constraint modules
+mod studio_operations;
+mod studio_sessions;
+mod studio_tool_calls;
 
 use std::fmt;
 
-pub use account_action_tokens::AccountActionTokenConstraints;
-pub use account_api_tokens::AccountApiTokenConstraints;
-// Re-export all constraint types for convenience
-pub use account_notifications::AccountNotificationConstraints;
-pub use accounts::AccountConstraints;
-pub use document_annotations::DocumentAnnotationConstraints;
-pub use document_chunks::DocumentChunkConstraints;
-pub use document_comments::DocumentCommentConstraints;
-pub use document_files::DocumentFileConstraints;
-pub use document_versions::DocumentVersionConstraints;
-pub use documents::DocumentConstraints;
 use serde::{Deserialize, Serialize};
-pub use workspace_activities::WorkspaceActivitiesConstraints;
-pub use workspace_integration_runs::WorkspaceIntegrationRunConstraints;
-pub use workspace_integrations::WorkspaceIntegrationConstraints;
-pub use workspace_invites::WorkspaceInviteConstraints;
-pub use workspace_members::WorkspaceMemberConstraints;
-pub use workspace_webhooks::WorkspaceWebhookConstraints;
-pub use workspaces::WorkspaceConstraints;
+
+pub use self::account_action_tokens::AccountActionTokenConstraints;
+pub use self::account_api_tokens::AccountApiTokenConstraints;
+pub use self::account_notifications::AccountNotificationConstraints;
+pub use self::accounts::AccountConstraints;
+pub use self::document_annotations::DocumentAnnotationConstraints;
+pub use self::document_chunks::DocumentChunkConstraints;
+pub use self::document_comments::DocumentCommentConstraints;
+pub use self::document_files::DocumentFileConstraints;
+pub use self::document_versions::DocumentVersionConstraints;
+pub use self::documents::DocumentConstraints;
+pub use self::studio_operations::StudioOperationConstraints;
+pub use self::studio_sessions::StudioSessionConstraints;
+pub use self::studio_tool_calls::StudioToolCallConstraints;
+pub use self::workspace_activities::WorkspaceActivitiesConstraints;
+pub use self::workspace_integration_runs::WorkspaceIntegrationRunConstraints;
+pub use self::workspace_integrations::WorkspaceIntegrationConstraints;
+pub use self::workspace_invites::WorkspaceInviteConstraints;
+pub use self::workspace_members::WorkspaceMemberConstraints;
+pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
+pub use self::workspaces::WorkspaceConstraints;
 
 /// Unified constraint violation enum that can represent any database constraint.
 ///
@@ -80,6 +86,11 @@ pub enum ConstraintViolation {
     DocumentComment(DocumentCommentConstraints),
     DocumentFile(DocumentFileConstraints),
     DocumentVersion(DocumentVersionConstraints),
+
+    // Studio-related constraints
+    StudioSession(StudioSessionConstraints),
+    StudioToolCall(StudioToolCallConstraints),
+    StudioOperation(StudioOperationConstraints),
 }
 
 /// Categories of database constraint violations.
@@ -156,6 +167,11 @@ impl ConstraintViolation {
                 DocumentFileConstraints::new => DocumentFile,
                 DocumentVersionConstraints::new => DocumentVersion,
             },
+            "studio" => try_parse! {
+                StudioSessionConstraints::new => StudioSession,
+                StudioToolCallConstraints::new => StudioToolCall,
+                StudioOperationConstraints::new => StudioOperation,
+            },
             _ => None,
         }
     }
@@ -187,6 +203,11 @@ impl ConstraintViolation {
             ConstraintViolation::DocumentComment(_) => "document_comments",
             ConstraintViolation::DocumentFile(_) => "document_files",
             ConstraintViolation::DocumentVersion(_) => "document_versions",
+
+            // Studio-related tables
+            ConstraintViolation::StudioSession(_) => "studio_sessions",
+            ConstraintViolation::StudioToolCall(_) => "studio_tool_calls",
+            ConstraintViolation::StudioOperation(_) => "studio_operations",
         }
     }
 
@@ -215,6 +236,10 @@ impl ConstraintViolation {
             | ConstraintViolation::DocumentComment(_)
             | ConstraintViolation::DocumentFile(_)
             | ConstraintViolation::DocumentVersion(_) => "documents",
+
+            ConstraintViolation::StudioSession(_)
+            | ConstraintViolation::StudioToolCall(_)
+            | ConstraintViolation::StudioOperation(_) => "studio",
         }
     }
 
@@ -242,6 +267,10 @@ impl ConstraintViolation {
             ConstraintViolation::DocumentComment(c) => c.categorize(),
             ConstraintViolation::DocumentFile(c) => c.categorize(),
             ConstraintViolation::DocumentVersion(c) => c.categorize(),
+
+            ConstraintViolation::StudioSession(c) => c.categorize(),
+            ConstraintViolation::StudioToolCall(c) => c.categorize(),
+            ConstraintViolation::StudioOperation(c) => c.categorize(),
         }
     }
 
@@ -274,6 +303,10 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::DocumentComment(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentFile(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentVersion(c) => write!(f, "{}", c),
+
+            ConstraintViolation::StudioSession(c) => write!(f, "{}", c),
+            ConstraintViolation::StudioToolCall(c) => write!(f, "{}", c),
+            ConstraintViolation::StudioOperation(c) => write!(f, "{}", c),
         }
     }
 }

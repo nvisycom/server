@@ -11,12 +11,14 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::Account as AccountModel;
-use nvisy_postgres::query::{AccountNotificationRepository, AccountRepository};
+use nvisy_postgres::query::{
+    AccountNotificationRepository, AccountRepository, WorkspaceMemberRepository,
+};
 use uuid::Uuid;
 
-use super::request::{CursorPagination, UpdateAccount};
+use super::request::{AccountPathParams, CursorPagination, UpdateAccount};
 use super::response::{Account, ErrorResponse, Notification, NotificationsPage, UnreadStatus};
-use crate::extract::{AuthState, Json, Query, ValidateJson};
+use crate::extract::{AuthState, Json, Path, Query, ValidateJson};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
@@ -43,10 +45,63 @@ async fn get_own_account(
 }
 
 fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get account")
+    op.summary("Get own account")
         .description("Returns the authenticated user's account details.")
         .response::<200, Json<Account>>()
         .response::<401, Json<ErrorResponse>>()
+}
+
+/// Retrieves an account by ID.
+///
+/// The requester must share at least one workspace with the target account.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        requester_id = %auth_claims.account_id,
+        target_id = %path_params.account_id,
+    )
+)]
+async fn get_account(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_claims): AuthState,
+    Path(path_params): Path<AccountPathParams>,
+) -> Result<(StatusCode, Json<Account>)> {
+    tracing::debug!(target: TRACING_TARGET, "Reading account by ID");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    // Check if requester shares a workspace with target account
+    let shares_workspace = conn
+        .accounts_share_workspace(auth_claims.account_id, path_params.account_id)
+        .await?;
+
+    if !shares_workspace {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            "Access denied: accounts do not share a workspace"
+        );
+        return Err(ErrorKind::Forbidden
+            .with_message("You do not have access to this account")
+            .with_resource("account"));
+    }
+
+    let account = find_account(&mut conn, path_params.account_id).await?;
+
+    tracing::info!(target: TRACING_TARGET, "Account read by ID");
+
+    Ok((StatusCode::OK, Json(Account::from_model(account))))
+}
+
+fn get_account_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get account by ID")
+        .description(
+            "Returns an account's details by ID. \
+             The requester must share at least one workspace with the target account.",
+        )
+        .response::<200, Json<Account>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates the authenticated account.
@@ -261,6 +316,10 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
             get_with(get_own_account, get_own_account_docs)
                 .patch_with(update_own_account, update_own_account_docs)
                 .delete_with(delete_own_account, delete_own_account_docs),
+        )
+        .api_route(
+            "/accounts/{accountId}/",
+            get_with(get_account, get_account_docs),
         )
         .api_route(
             "/notifications/",

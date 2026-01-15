@@ -33,14 +33,13 @@ server/
 ## Quick Start
 
 ```bash
-# Install tools and generate keys
+# Install tools and make scripts executable
 make install-all
-make generate-keys
 
-# Run database migrations
-make generate-migrations
+# Generate keys, env and migration files
+make generate-all
 
-# Start the server
+# Start the server with dotenv feature
 cargo run --features dotenv
 ```
 

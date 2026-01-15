@@ -13,6 +13,7 @@ pub use constraint::{
     AccountNotificationConstraints, ConstraintCategory, ConstraintViolation,
     DocumentAnnotationConstraints, DocumentChunkConstraints, DocumentCommentConstraints,
     DocumentConstraints, DocumentFileConstraints, DocumentVersionConstraints,
+    StudioOperationConstraints, StudioSessionConstraints, StudioToolCallConstraints,
     WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
     WorkspaceIntegrationRunConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
     WorkspaceWebhookConstraints,
@@ -20,8 +21,8 @@ pub use constraint::{
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, AnnotationType, ApiTokenType,
     ContentSegmentation, IntegrationStatus, IntegrationType, InviteStatus, NotificationEvent,
-    ProcessingStatus, RequireMode, RunType, WebhookEvent, WebhookStatus, WebhookType,
-    WorkspaceRole,
+    ProcessingStatus, RequireMode, RunType, StudioSessionStatus, StudioToolStatus, WebhookEvent,
+    WebhookStatus, WebhookType, WorkspaceRole,
 };
 pub use filtering::{FileFilter, FileFormat, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
