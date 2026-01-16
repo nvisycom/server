@@ -1,34 +1,34 @@
-//! Studio tool call model for PostgreSQL database operations.
+//! Chat tool call model for PostgreSQL database operations.
 //!
-//! This module provides models for tracking tool invocations within studio sessions.
+//! This module provides models for tracking tool invocations within chat sessions.
 //! Tool calls represent individual operations performed by the LLM, such as
 //! merging, splitting, redacting, or translating document content.
 //!
 //! ## Models
 //!
-//! - [`StudioToolCall`] - Main tool call model with execution details
-//! - [`NewStudioToolCall`] - Data structure for creating new tool calls
-//! - [`UpdateStudioToolCall`] - Data structure for updating existing tool calls
+//! - [`ChatToolCall`] - Main tool call model with execution details
+//! - [`NewChatToolCall`] - Data structure for creating new tool calls
+//! - [`UpdateChatToolCall`] - Data structure for updating existing tool calls
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::studio_tool_calls;
-use crate::types::{HasCreatedAt, StudioToolStatus};
+use crate::schema::chat_tool_calls;
+use crate::types::{ChatToolStatus, HasCreatedAt};
 
-/// Studio tool call model representing a tool invocation within a session.
+/// Chat tool call model representing a tool invocation within a session.
 ///
 /// This model tracks individual tool calls made during editing sessions,
 /// including the tool name, input parameters, output results, and execution
 /// status. Tool calls are linked to specific files and optionally to chunks.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = studio_tool_calls)]
+#[diesel(table_name = chat_tool_calls)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct StudioToolCall {
+pub struct ChatToolCall {
     /// Unique tool call identifier.
     pub id: Uuid,
-    /// Reference to the studio session this tool call belongs to.
+    /// Reference to the chat session this tool call belongs to.
     pub session_id: Uuid,
     /// Reference to the file being operated on.
     pub file_id: Uuid,
@@ -41,22 +41,22 @@ pub struct StudioToolCall {
     /// Tool output results as JSON.
     pub tool_output: serde_json::Value,
     /// Current execution status of the tool call.
-    pub tool_status: StudioToolStatus,
+    pub tool_status: ChatToolStatus,
     /// Timestamp when the tool call was created/started.
     pub started_at: Timestamp,
     /// Timestamp when the tool execution completed.
     pub completed_at: Option<Timestamp>,
 }
 
-/// Data structure for creating a new studio tool call.
+/// Data structure for creating a new chat tool call.
 ///
 /// Contains all the information necessary to record a new tool invocation.
 /// The tool status defaults to pending, and output is populated upon completion.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = studio_tool_calls)]
+#[diesel(table_name = chat_tool_calls)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewStudioToolCall {
-    /// Reference to the studio session.
+pub struct NewChatToolCall {
+    /// Reference to the chat session.
     pub session_id: Uuid,
     /// Reference to the file being operated on.
     pub file_id: Uuid,
@@ -69,26 +69,26 @@ pub struct NewStudioToolCall {
     /// Optional initial tool output.
     pub tool_output: Option<serde_json::Value>,
     /// Optional initial tool status.
-    pub tool_status: Option<StudioToolStatus>,
+    pub tool_status: Option<ChatToolStatus>,
 }
 
-/// Data structure for updating an existing studio tool call.
+/// Data structure for updating an existing chat tool call.
 ///
 /// Contains optional fields for modifying tool call properties. Primarily
 /// used to update the status and output upon completion or cancellation.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = studio_tool_calls)]
+#[diesel(table_name = chat_tool_calls)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateStudioToolCall {
+pub struct UpdateChatToolCall {
     /// Updated tool output results.
     pub tool_output: Option<serde_json::Value>,
     /// Updated execution status.
-    pub tool_status: Option<StudioToolStatus>,
+    pub tool_status: Option<ChatToolStatus>,
     /// Updated completion timestamp.
     pub completed_at: Option<Option<Timestamp>>,
 }
 
-impl StudioToolCall {
+impl ChatToolCall {
     /// Returns whether the tool call is pending execution.
     #[inline]
     pub fn is_pending(&self) -> bool {
@@ -148,7 +148,7 @@ impl StudioToolCall {
     }
 }
 
-impl HasCreatedAt for StudioToolCall {
+impl HasCreatedAt for ChatToolCall {
     fn created_at(&self) -> jiff::Timestamp {
         self.started_at.into()
     }

@@ -3,6 +3,8 @@
 //! Wraps different embedding model providers into a unified enum,
 //! eliminating the need for generic parameters throughout the codebase.
 
+use nvisy_postgres::types::EMBEDDING_DIMENSIONS;
+use rig::client::Nothing;
 use rig::embeddings::{Embedding, EmbeddingError, EmbeddingModel};
 use rig::providers::ollama;
 
@@ -11,50 +13,68 @@ use rig::providers::ollama;
 /// This enum provides a concrete type for embedding operations,
 /// removing the need for generic `M: EmbeddingModel` parameters.
 ///
-/// Implements [`EmbeddingModel`] so it can be used directly with rig's
-/// APIs like `VectorStoreIndex` and `EmbeddingsBuilder`.
+/// All providers use [`EMBEDDING_DIMENSIONS`] to ensure consistency with the
+/// `document_chunks` table schema.
 #[derive(Clone)]
 pub enum EmbeddingProvider {
     /// Ollama embedding model.
-    Ollama(ollama::EmbeddingModel),
+    Ollama {
+        client: ollama::Client,
+        model: String,
+    },
 }
 
 impl EmbeddingProvider {
     /// Creates a new Ollama embedding provider.
     pub fn ollama(base_url: &str, model: &str) -> Self {
-        let client = ollama::Client::from_url(base_url);
-        Self::Ollama(client.embedding_model(model))
-    }
+        let client = ollama::Client::builder()
+            .api_key(Nothing)
+            .base_url(base_url)
+            .build()
+            .expect("Failed to create Ollama client");
 
-    /// Creates a new Ollama embedding provider with custom dimensions.
-    pub fn ollama_with_ndims(base_url: &str, model: &str, ndims: usize) -> Self {
-        let client = ollama::Client::from_url(base_url);
-        Self::Ollama(client.embedding_model_with_ndims(model, ndims))
+        Self::Ollama {
+            client,
+            model: model.to_string(),
+        }
     }
 
     /// Returns the model name.
     pub fn model_name(&self) -> &str {
         match self {
-            Self::Ollama(model) => &model.model,
+            Self::Ollama { model, .. } => model,
         }
     }
-}
 
-impl EmbeddingModel for EmbeddingProvider {
-    const MAX_DOCUMENTS: usize = 1024;
+    /// Returns the number of dimensions.
+    ///
+    /// This always returns [`EMBEDDING_DIMENSIONS`] to ensure consistency with the database schema.
+    pub fn ndims(&self) -> usize {
+        EMBEDDING_DIMENSIONS
+    }
 
-    fn ndims(&self) -> usize {
+    /// Embed a single text document.
+    pub async fn embed_text(&self, text: &str) -> Result<Embedding, EmbeddingError> {
         match self {
-            Self::Ollama(model) => model.ndims(),
+            Self::Ollama { client, model } => {
+                let embedding_model =
+                    ollama::EmbeddingModel::new(client.clone(), model, EMBEDDING_DIMENSIONS);
+                embedding_model.embed_text(text).await
+            }
         }
     }
 
-    async fn embed_texts(
+    /// Embed multiple text documents.
+    pub async fn embed_texts(
         &self,
         texts: impl IntoIterator<Item = String> + Send,
     ) -> Result<Vec<Embedding>, EmbeddingError> {
         match self {
-            Self::Ollama(model) => model.embed_texts(texts).await,
+            Self::Ollama { client, model } => {
+                let embedding_model =
+                    ollama::EmbeddingModel::new(client.clone(), model, EMBEDDING_DIMENSIONS);
+                embedding_model.embed_texts(texts).await
+            }
         }
     }
 }
@@ -62,9 +82,10 @@ impl EmbeddingModel for EmbeddingProvider {
 impl std::fmt::Debug for EmbeddingProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Ollama(model) => f
+            Self::Ollama { model, .. } => f
                 .debug_struct("EmbeddingProvider::Ollama")
-                .field("model", &model.model)
+                .field("model", model)
+                .field("ndims", &EMBEDDING_DIMENSIONS)
                 .finish(),
         }
     }

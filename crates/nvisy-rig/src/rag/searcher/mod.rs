@@ -11,7 +11,7 @@ use nvisy_nats::object::{DocumentKey, DocumentStore, Files};
 use nvisy_postgres::model::ScoredDocumentChunk;
 use nvisy_postgres::query::DocumentChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
-use rig::embeddings::EmbeddingModel;
+
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 

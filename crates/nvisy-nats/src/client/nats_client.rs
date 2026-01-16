@@ -39,10 +39,7 @@ use tokio::time::timeout;
 use super::nats_config::NatsConfig;
 use crate::kv::{ApiTokenStore, CacheStore, ChatHistoryStore};
 use crate::object::{DocumentBucket, DocumentStore};
-use crate::stream::{
-    DocumentJobPublisher, DocumentJobSubscriber, Stage, WorkspaceEventPublisher,
-    WorkspaceEventSubscriber,
-};
+use crate::stream::{DocumentJobPublisher, DocumentJobSubscriber, Stage};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -186,36 +183,6 @@ impl NatsClient {
         consumer_name: &str,
     ) -> Result<DocumentJobSubscriber<S>> {
         DocumentJobSubscriber::new(&self.inner.jetstream, consumer_name).await
-    }
-
-    /// Create a workspace event publisher.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn workspace_event_publisher(&self) -> Result<WorkspaceEventPublisher> {
-        WorkspaceEventPublisher::new(&self.inner.jetstream).await
-    }
-
-    /// Create a workspace event subscriber.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn workspace_event_subscriber(
-        &self,
-        consumer_name: &str,
-    ) -> Result<WorkspaceEventSubscriber> {
-        WorkspaceEventSubscriber::new(&self.inner.jetstream, consumer_name).await
-    }
-
-    /// Create a workspace event subscriber filtered to a specific workspace.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn workspace_event_subscriber_for_workspace(
-        &self,
-        consumer_name: &str,
-        workspace_id: uuid::Uuid,
-    ) -> Result<WorkspaceEventSubscriber> {
-        WorkspaceEventSubscriber::new_for_workspace(
-            &self.inner.jetstream,
-            consumer_name,
-            workspace_id,
-        )
-        .await
     }
 
     /// Get or create a CacheStore for a specific namespace

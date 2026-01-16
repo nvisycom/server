@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_notifications;
-use crate::types::constants::notification;
+use crate::types::DEFAULT_RETENTION_DAYS;
 use crate::types::{HasCreatedAt, HasExpiresAt, NotificationEvent};
 
 /// Account notification model representing a notification sent to a user.
@@ -186,9 +186,7 @@ impl HasExpiresAt for AccountNotification {
         Some(
             self.expires_at.map(Into::into).unwrap_or(
                 jiff::Timestamp::now()
-                    .checked_add(
-                        jiff::Span::new().hours(notification::DEFAULT_RETENTION_DAYS as i64 * 24),
-                    )
+                    .checked_add(jiff::Span::new().hours(DEFAULT_RETENTION_DAYS as i64 * 24))
                     .expect("valid notification expiry"),
             ),
         )

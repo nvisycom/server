@@ -1,4 +1,4 @@
-//! Studio operation model for PostgreSQL database operations.
+//! Chat operation model for PostgreSQL database operations.
 //!
 //! This module provides models for tracking document operations (diffs) produced
 //! by tool calls. Operations represent the actual changes to be applied to documents,
@@ -6,26 +6,26 @@
 //!
 //! ## Models
 //!
-//! - [`StudioOperation`] - Main operation model with diff details
-//! - [`NewStudioOperation`] - Data structure for creating new operations
-//! - [`UpdateStudioOperation`] - Data structure for updating existing operations
+//! - [`ChatOperation`] - Main operation model with diff details
+//! - [`NewChatOperation`] - Data structure for creating new operations
+//! - [`UpdateChatOperation`] - Data structure for updating existing operations
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::studio_operations;
+use crate::schema::chat_operations;
 use crate::types::HasCreatedAt;
 
-/// Studio operation model representing a document operation (diff).
+/// Chat operation model representing a document operation (diff).
 ///
 /// This model tracks individual operations produced by tool calls that can be
 /// applied to or reverted from documents. Operations store position-based diffs
 /// rather than content, enabling efficient undo/redo functionality.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = studio_operations)]
+#[diesel(table_name = chat_operations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct StudioOperation {
+pub struct ChatOperation {
     /// Unique operation identifier.
     pub id: Uuid,
     /// Reference to the tool call that produced this operation.
@@ -48,14 +48,14 @@ pub struct StudioOperation {
     pub applied_at: Option<Timestamp>,
 }
 
-/// Data structure for creating a new studio operation.
+/// Data structure for creating a new chat operation.
 ///
 /// Contains all the information necessary to record a new document operation.
 /// Operations are created as unapplied by default and can be applied later.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = studio_operations)]
+#[diesel(table_name = chat_operations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewStudioOperation {
+pub struct NewChatOperation {
     /// Reference to the tool call that produced this operation.
     pub tool_call_id: Uuid,
     /// Reference to the file being modified.
@@ -72,14 +72,14 @@ pub struct NewStudioOperation {
     pub reverted: Option<bool>,
 }
 
-/// Data structure for updating an existing studio operation.
+/// Data structure for updating an existing chat operation.
 ///
 /// Contains optional fields for modifying operation properties. Primarily
 /// used to mark operations as applied or reverted.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = studio_operations)]
+#[diesel(table_name = chat_operations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateStudioOperation {
+pub struct UpdateChatOperation {
     /// Updated applied state.
     pub applied: Option<bool>,
     /// Updated reverted state.
@@ -88,7 +88,7 @@ pub struct UpdateStudioOperation {
     pub applied_at: Option<Option<Timestamp>>,
 }
 
-impl StudioOperation {
+impl ChatOperation {
     /// Returns whether the operation has been applied.
     #[inline]
     pub fn is_applied(&self) -> bool {
@@ -179,7 +179,7 @@ impl StudioOperation {
     }
 }
 
-impl HasCreatedAt for StudioOperation {
+impl HasCreatedAt for ChatOperation {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }

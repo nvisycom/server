@@ -117,6 +117,29 @@ pub trait DocumentFileRepository {
         &mut self,
         file_ids: &[Uuid],
     ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    /// Lists all versions of a file (the file itself and all files that have it as parent).
+    ///
+    /// Returns files ordered by version_number descending (newest first).
+    fn list_file_versions(
+        &mut self,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<Vec<DocumentFile>>> + Send;
+
+    /// Finds the latest version of a file by traversing the version chain.
+    ///
+    /// Starting from a file, follows the chain of files where parent_id points
+    /// to the previous version and returns the one with the highest version_number.
+    fn find_latest_version(
+        &mut self,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<DocumentFile>>> + Send;
+
+    /// Gets the next version number for creating a new version of a file.
+    fn get_next_version_number(
+        &mut self,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<i32>> + Send;
 }
 
 impl DocumentFileRepository for PgConnection {
@@ -461,5 +484,56 @@ impl DocumentFileRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(files)
+    }
+
+    async fn list_file_versions(&mut self, file_id: Uuid) -> PgResult<Vec<DocumentFile>> {
+        use schema::document_files::{self, dsl};
+
+        // Get the original file and all files that have it (or its descendants) as parent
+        // This query gets the file itself plus all files where parent_id = file_id
+        let files = document_files::table
+            .filter(dsl::id.eq(file_id).or(dsl::parent_id.eq(file_id)))
+            .filter(dsl::deleted_at.is_null())
+            .order(dsl::version_number.desc())
+            .select(DocumentFile::as_select())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(files)
+    }
+
+    async fn find_latest_version(&mut self, file_id: Uuid) -> PgResult<Option<DocumentFile>> {
+        use schema::document_files::{self, dsl};
+
+        // Find the file with highest version_number that has file_id as parent,
+        // or the file itself if no newer versions exist
+        let latest = document_files::table
+            .filter(dsl::id.eq(file_id).or(dsl::parent_id.eq(file_id)))
+            .filter(dsl::deleted_at.is_null())
+            .order(dsl::version_number.desc())
+            .select(DocumentFile::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(latest)
+    }
+
+    async fn get_next_version_number(&mut self, file_id: Uuid) -> PgResult<i32> {
+        use diesel::dsl::max;
+        use schema::document_files::{self, dsl};
+
+        // Get the max version_number from the file and its versions
+        let max_version: Option<i32> = document_files::table
+            .filter(dsl::id.eq(file_id).or(dsl::parent_id.eq(file_id)))
+            .filter(dsl::deleted_at.is_null())
+            .select(max(dsl::version_number))
+            .first(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(max_version.unwrap_or(0) + 1)
     }
 }

@@ -3,9 +3,9 @@
 mod http_error;
 mod nats_error;
 mod pg_account;
+mod pg_chat;
 mod pg_document;
 mod pg_error;
-mod pg_studio;
 mod pg_workspace;
 mod service_error;
 

@@ -3,6 +3,7 @@
 mod accounts;
 mod annotations;
 mod authentications;
+mod chat;
 mod comments;
 mod documents;
 mod files;
@@ -20,6 +21,7 @@ mod workspaces;
 pub use accounts::*;
 pub use annotations::*;
 pub use authentications::*;
+pub use chat::*;
 pub use comments::*;
 pub use documents::*;
 pub use files::*;

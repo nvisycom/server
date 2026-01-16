@@ -34,9 +34,9 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::DocumentFile(c) => c.into(),
             ConstraintViolation::DocumentVersion(c) => c.into(),
             ConstraintViolation::WorkspaceWebhook(c) => c.into(),
-            ConstraintViolation::StudioSession(c) => c.into(),
-            ConstraintViolation::StudioToolCall(c) => c.into(),
-            ConstraintViolation::StudioOperation(c) => c.into(),
+            ConstraintViolation::ChatSession(c) => c.into(),
+            ConstraintViolation::ChatToolCall(c) => c.into(),
+            ConstraintViolation::ChatOperation(c) => c.into(),
         }
     }
 }

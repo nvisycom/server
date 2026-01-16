@@ -41,18 +41,19 @@ nvisy-webhook = { workspace = true, features = ["schema"] }
 # Async runtime
 tokio = { workspace = true, features = [] }
 tokio-util = { workspace = true, features = [] }
+tokio-stream = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
 # HTTP & Web server
-axum = { workspace = true, features = ["http2", "macros", "ws", "multipart"] }
+axum = { workspace = true, features = ["http2", "macros", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
 axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
 # OpenAPI/Documentation
-aide = { workspace = true, features = ["axum", "axum-query", "axum-form", "axum-json", "axum-ws", "axum-multipart", "axum-extra", "bytes", "http"] }
+aide = { workspace = true, features = ["axum", "axum-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
 schemars = { workspace = true, features = [] }
 
 # Observability

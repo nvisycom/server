@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::document_comments;
-use crate::types::constants::comment;
+use crate::types::EDIT_GRACE_PERIOD_SECONDS;
 use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Document comment model representing user discussions on files.
@@ -99,7 +99,7 @@ impl DocumentComment {
     pub fn is_edited(&self) -> bool {
         let duration =
             jiff::Timestamp::from(self.updated_at) - jiff::Timestamp::from(self.created_at);
-        duration.get_seconds() > comment::EDIT_GRACE_PERIOD_SECONDS
+        duration.get_seconds() > EDIT_GRACE_PERIOD_SECONDS
     }
 }
 

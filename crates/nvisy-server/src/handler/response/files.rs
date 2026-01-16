@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::DocumentFile;
-use nvisy_postgres::types::{ContentSegmentation, ProcessingStatus};
+use nvisy_postgres::types::{ContentSegmentation, FileSource, ProcessingStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -40,6 +40,10 @@ pub struct File {
     pub processing_priority: i32,
     /// Classification tags.
     pub tags: Vec<String>,
+    /// How the file was created (uploaded, imported, generated).
+    pub source: FileSource,
+    /// Account ID of the user who uploaded/created the file.
+    pub uploaded_by: Uuid,
     /// Knowledge extraction settings.
     pub file_knowledge: FileKnowledge,
     /// Creation timestamp.
@@ -57,6 +61,8 @@ impl File {
             status: file.processing_status,
             processing_priority: file.processing_priority,
             tags: file.tags.into_iter().flatten().collect(),
+            source: file.source,
+            uploaded_by: file.account_id,
             file_knowledge: FileKnowledge {
                 is_indexed: file.is_indexed,
                 content_segmentation: file.content_segmentation,

@@ -6,6 +6,7 @@
 mod accounts;
 mod annotations;
 mod authentication;
+mod chat;
 mod comments;
 mod documents;
 mod error;
@@ -20,7 +21,6 @@ mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
-mod websocket;
 mod workspaces;
 
 use aide::axum::ApiRouter;
@@ -51,11 +51,11 @@ fn private_routes(
         .merge(invites::routes())
         .merge(members::routes())
         .merge(webhooks::routes())
-        .merge(websocket::routes())
         .merge(files::routes())
         .merge(documents::routes())
         .merge(comments::routes())
-        .merge(annotations::routes());
+        .merge(annotations::routes())
+        .merge(chat::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);

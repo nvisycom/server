@@ -202,8 +202,8 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "WebSocket".into(),
-            description: Some("Real-time communication".into()),
+            name: "Chat".into(),
+            description: Some("AI chat and document interaction".into()),
             ..Default::default()
         })
 }

@@ -26,10 +26,10 @@ mod document_files;
 mod document_versions;
 mod documents;
 
-// Studio-related constraint modules
-mod studio_operations;
-mod studio_sessions;
-mod studio_tool_calls;
+// Chat-related constraint modules
+mod chat_operations;
+mod chat_sessions;
+mod chat_tool_calls;
 
 use std::fmt;
 
@@ -39,15 +39,15 @@ pub use self::account_action_tokens::AccountActionTokenConstraints;
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
+pub use self::chat_operations::ChatOperationConstraints;
+pub use self::chat_sessions::ChatSessionConstraints;
+pub use self::chat_tool_calls::ChatToolCallConstraints;
 pub use self::document_annotations::DocumentAnnotationConstraints;
 pub use self::document_chunks::DocumentChunkConstraints;
 pub use self::document_comments::DocumentCommentConstraints;
 pub use self::document_files::DocumentFileConstraints;
 pub use self::document_versions::DocumentVersionConstraints;
 pub use self::documents::DocumentConstraints;
-pub use self::studio_operations::StudioOperationConstraints;
-pub use self::studio_sessions::StudioSessionConstraints;
-pub use self::studio_tool_calls::StudioToolCallConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_integration_runs::WorkspaceIntegrationRunConstraints;
 pub use self::workspace_integrations::WorkspaceIntegrationConstraints;
@@ -87,10 +87,10 @@ pub enum ConstraintViolation {
     DocumentFile(DocumentFileConstraints),
     DocumentVersion(DocumentVersionConstraints),
 
-    // Studio-related constraints
-    StudioSession(StudioSessionConstraints),
-    StudioToolCall(StudioToolCallConstraints),
-    StudioOperation(StudioOperationConstraints),
+    // Chat-related constraints
+    ChatSession(ChatSessionConstraints),
+    ChatToolCall(ChatToolCallConstraints),
+    ChatOperation(ChatOperationConstraints),
 }
 
 /// Categories of database constraint violations.
@@ -167,10 +167,10 @@ impl ConstraintViolation {
                 DocumentFileConstraints::new => DocumentFile,
                 DocumentVersionConstraints::new => DocumentVersion,
             },
-            "studio" => try_parse! {
-                StudioSessionConstraints::new => StudioSession,
-                StudioToolCallConstraints::new => StudioToolCall,
-                StudioOperationConstraints::new => StudioOperation,
+            "chat" => try_parse! {
+                ChatSessionConstraints::new => ChatSession,
+                ChatToolCallConstraints::new => ChatToolCall,
+                ChatOperationConstraints::new => ChatOperation,
             },
             _ => None,
         }
@@ -204,10 +204,10 @@ impl ConstraintViolation {
             ConstraintViolation::DocumentFile(_) => "document_files",
             ConstraintViolation::DocumentVersion(_) => "document_versions",
 
-            // Studio-related tables
-            ConstraintViolation::StudioSession(_) => "studio_sessions",
-            ConstraintViolation::StudioToolCall(_) => "studio_tool_calls",
-            ConstraintViolation::StudioOperation(_) => "studio_operations",
+            // Chat-related tables
+            ConstraintViolation::ChatSession(_) => "chat_sessions",
+            ConstraintViolation::ChatToolCall(_) => "chat_tool_calls",
+            ConstraintViolation::ChatOperation(_) => "chat_operations",
         }
     }
 
@@ -237,9 +237,9 @@ impl ConstraintViolation {
             | ConstraintViolation::DocumentFile(_)
             | ConstraintViolation::DocumentVersion(_) => "documents",
 
-            ConstraintViolation::StudioSession(_)
-            | ConstraintViolation::StudioToolCall(_)
-            | ConstraintViolation::StudioOperation(_) => "studio",
+            ConstraintViolation::ChatSession(_)
+            | ConstraintViolation::ChatToolCall(_)
+            | ConstraintViolation::ChatOperation(_) => "chat",
         }
     }
 
@@ -268,9 +268,9 @@ impl ConstraintViolation {
             ConstraintViolation::DocumentFile(c) => c.categorize(),
             ConstraintViolation::DocumentVersion(c) => c.categorize(),
 
-            ConstraintViolation::StudioSession(c) => c.categorize(),
-            ConstraintViolation::StudioToolCall(c) => c.categorize(),
-            ConstraintViolation::StudioOperation(c) => c.categorize(),
+            ConstraintViolation::ChatSession(c) => c.categorize(),
+            ConstraintViolation::ChatToolCall(c) => c.categorize(),
+            ConstraintViolation::ChatOperation(c) => c.categorize(),
         }
     }
 
@@ -304,9 +304,9 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::DocumentFile(c) => write!(f, "{}", c),
             ConstraintViolation::DocumentVersion(c) => write!(f, "{}", c),
 
-            ConstraintViolation::StudioSession(c) => write!(f, "{}", c),
-            ConstraintViolation::StudioToolCall(c) => write!(f, "{}", c),
-            ConstraintViolation::StudioOperation(c) => write!(f, "{}", c),
+            ConstraintViolation::ChatSession(c) => write!(f, "{}", c),
+            ConstraintViolation::ChatToolCall(c) => write!(f, "{}", c),
+            ConstraintViolation::ChatOperation(c) => write!(f, "{}", c),
         }
     }
 }

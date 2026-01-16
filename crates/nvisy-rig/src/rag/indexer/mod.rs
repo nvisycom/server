@@ -7,7 +7,7 @@ mod indexed;
 use nvisy_postgres::model::NewDocumentChunk;
 use nvisy_postgres::query::DocumentChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
-use rig::embeddings::EmbeddingModel;
+
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 

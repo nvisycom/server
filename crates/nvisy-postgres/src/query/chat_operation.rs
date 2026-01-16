@@ -1,4 +1,4 @@
-//! Studio operation repository for managing document operations (diffs).
+//! Chat operation repository for managing document operations (diffs).
 
 use std::future::Future;
 
@@ -6,42 +6,42 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::model::{NewStudioOperation, StudioOperation, UpdateStudioOperation};
+use crate::model::{ChatOperation, NewChatOperation, UpdateChatOperation};
 use crate::types::{CursorPage, CursorPagination, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
-/// Repository for studio operation database operations.
+/// Repository for chat operation database operations.
 ///
 /// Handles document operation tracking including CRUD operations, apply/revert
 /// state management, and querying by tool call or file.
-pub trait StudioOperationRepository {
-    /// Creates a new studio operation.
-    fn create_studio_operation(
+pub trait ChatOperationRepository {
+    /// Creates a new chat operation.
+    fn create_chat_operation(
         &mut self,
-        operation: NewStudioOperation,
-    ) -> impl Future<Output = PgResult<StudioOperation>> + Send;
+        operation: NewChatOperation,
+    ) -> impl Future<Output = PgResult<ChatOperation>> + Send;
 
-    /// Creates multiple studio operations in a batch.
-    fn create_studio_operations(
+    /// Creates multiple chat operations in a batch.
+    fn create_chat_operations(
         &mut self,
-        operations: Vec<NewStudioOperation>,
-    ) -> impl Future<Output = PgResult<Vec<StudioOperation>>> + Send;
+        operations: Vec<NewChatOperation>,
+    ) -> impl Future<Output = PgResult<Vec<ChatOperation>>> + Send;
 
-    /// Finds a studio operation by its unique identifier.
-    fn find_studio_operation_by_id(
-        &mut self,
-        operation_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<StudioOperation>>> + Send;
-
-    /// Updates an existing studio operation.
-    fn update_studio_operation(
+    /// Finds a chat operation by its unique identifier.
+    fn find_chat_operation_by_id(
         &mut self,
         operation_id: Uuid,
-        changes: UpdateStudioOperation,
-    ) -> impl Future<Output = PgResult<StudioOperation>> + Send;
+    ) -> impl Future<Output = PgResult<Option<ChatOperation>>> + Send;
 
-    /// Deletes a studio operation.
-    fn delete_studio_operation(
+    /// Updates an existing chat operation.
+    fn update_chat_operation(
+        &mut self,
+        operation_id: Uuid,
+        changes: UpdateChatOperation,
+    ) -> impl Future<Output = PgResult<ChatOperation>> + Send;
+
+    /// Deletes a chat operation.
+    fn delete_chat_operation(
         &mut self,
         operation_id: Uuid,
     ) -> impl Future<Output = PgResult<()>> + Send;
@@ -50,45 +50,45 @@ pub trait StudioOperationRepository {
     fn list_tool_call_operations(
         &mut self,
         tool_call_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<StudioOperation>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ChatOperation>>> + Send;
 
     /// Lists operations for a file with offset pagination.
     fn offset_list_file_operations(
         &mut self,
         file_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<StudioOperation>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ChatOperation>>> + Send;
 
     /// Lists operations for a file with cursor pagination.
     fn cursor_list_file_operations(
         &mut self,
         file_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<StudioOperation>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<ChatOperation>>> + Send;
 
     /// Lists pending (unapplied) operations for a file.
     fn list_pending_file_operations(
         &mut self,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<StudioOperation>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ChatOperation>>> + Send;
 
     /// Marks an operation as applied.
-    fn apply_studio_operation(
+    fn apply_chat_operation(
         &mut self,
         operation_id: Uuid,
-    ) -> impl Future<Output = PgResult<StudioOperation>> + Send;
+    ) -> impl Future<Output = PgResult<ChatOperation>> + Send;
 
     /// Marks multiple operations as applied.
-    fn apply_studio_operations(
+    fn apply_chat_operations(
         &mut self,
         operation_ids: Vec<Uuid>,
-    ) -> impl Future<Output = PgResult<Vec<StudioOperation>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ChatOperation>>> + Send;
 
     /// Marks an operation as reverted.
-    fn revert_studio_operation(
+    fn revert_chat_operation(
         &mut self,
         operation_id: Uuid,
-    ) -> impl Future<Output = PgResult<StudioOperation>> + Send;
+    ) -> impl Future<Output = PgResult<ChatOperation>> + Send;
 
     /// Counts operations by status for a file.
     fn count_file_operations(
@@ -110,16 +110,16 @@ pub struct FileOperationCounts {
     pub reverted: i64,
 }
 
-impl StudioOperationRepository for PgConnection {
-    async fn create_studio_operation(
+impl ChatOperationRepository for PgConnection {
+    async fn create_chat_operation(
         &mut self,
-        operation: NewStudioOperation,
-    ) -> PgResult<StudioOperation> {
-        use schema::studio_operations;
+        operation: NewChatOperation,
+    ) -> PgResult<ChatOperation> {
+        use schema::chat_operations;
 
-        let operation = diesel::insert_into(studio_operations::table)
+        let operation = diesel::insert_into(chat_operations::table)
             .values(&operation)
-            .returning(StudioOperation::as_returning())
+            .returning(ChatOperation::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
@@ -127,15 +127,15 @@ impl StudioOperationRepository for PgConnection {
         Ok(operation)
     }
 
-    async fn create_studio_operations(
+    async fn create_chat_operations(
         &mut self,
-        operations: Vec<NewStudioOperation>,
-    ) -> PgResult<Vec<StudioOperation>> {
-        use schema::studio_operations;
+        operations: Vec<NewChatOperation>,
+    ) -> PgResult<Vec<ChatOperation>> {
+        use schema::chat_operations;
 
-        let operations = diesel::insert_into(studio_operations::table)
+        let operations = diesel::insert_into(chat_operations::table)
             .values(&operations)
-            .returning(StudioOperation::as_returning())
+            .returning(ChatOperation::as_returning())
             .get_results(self)
             .await
             .map_err(PgError::from)?;
@@ -143,15 +143,15 @@ impl StudioOperationRepository for PgConnection {
         Ok(operations)
     }
 
-    async fn find_studio_operation_by_id(
+    async fn find_chat_operation_by_id(
         &mut self,
         operation_id: Uuid,
-    ) -> PgResult<Option<StudioOperation>> {
-        use schema::studio_operations::dsl::*;
+    ) -> PgResult<Option<ChatOperation>> {
+        use schema::chat_operations::dsl::*;
 
-        let operation = studio_operations
+        let operation = chat_operations
             .filter(id.eq(operation_id))
-            .select(StudioOperation::as_select())
+            .select(ChatOperation::as_select())
             .first(self)
             .await
             .optional()
@@ -160,17 +160,17 @@ impl StudioOperationRepository for PgConnection {
         Ok(operation)
     }
 
-    async fn update_studio_operation(
+    async fn update_chat_operation(
         &mut self,
         operation_id: Uuid,
-        changes: UpdateStudioOperation,
-    ) -> PgResult<StudioOperation> {
-        use schema::studio_operations::dsl::*;
+        changes: UpdateChatOperation,
+    ) -> PgResult<ChatOperation> {
+        use schema::chat_operations::dsl::*;
 
-        let operation = diesel::update(studio_operations)
+        let operation = diesel::update(chat_operations)
             .filter(id.eq(operation_id))
             .set(&changes)
-            .returning(StudioOperation::as_returning())
+            .returning(ChatOperation::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
@@ -178,10 +178,10 @@ impl StudioOperationRepository for PgConnection {
         Ok(operation)
     }
 
-    async fn delete_studio_operation(&mut self, operation_id: Uuid) -> PgResult<()> {
-        use schema::studio_operations::dsl::*;
+    async fn delete_chat_operation(&mut self, operation_id: Uuid) -> PgResult<()> {
+        use schema::chat_operations::dsl::*;
 
-        diesel::delete(studio_operations)
+        diesel::delete(chat_operations)
             .filter(id.eq(operation_id))
             .execute(self)
             .await
@@ -190,12 +190,12 @@ impl StudioOperationRepository for PgConnection {
         Ok(())
     }
 
-    async fn list_tool_call_operations(&mut self, tc_id: Uuid) -> PgResult<Vec<StudioOperation>> {
-        use schema::studio_operations::{self, dsl};
+    async fn list_tool_call_operations(&mut self, tc_id: Uuid) -> PgResult<Vec<ChatOperation>> {
+        use schema::chat_operations::{self, dsl};
 
-        let operations = studio_operations::table
+        let operations = chat_operations::table
             .filter(dsl::tool_call_id.eq(tc_id))
-            .select(StudioOperation::as_select())
+            .select(ChatOperation::as_select())
             .order(dsl::created_at.asc())
             .load(self)
             .await
@@ -208,12 +208,12 @@ impl StudioOperationRepository for PgConnection {
         &mut self,
         f_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<StudioOperation>> {
-        use schema::studio_operations::{self, dsl};
+    ) -> PgResult<Vec<ChatOperation>> {
+        use schema::chat_operations::{self, dsl};
 
-        let operations = studio_operations::table
+        let operations = chat_operations::table
             .filter(dsl::file_id.eq(f_id))
-            .select(StudioOperation::as_select())
+            .select(ChatOperation::as_select())
             .order(dsl::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
@@ -228,12 +228,12 @@ impl StudioOperationRepository for PgConnection {
         &mut self,
         f_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<StudioOperation>> {
-        use schema::studio_operations::{self, dsl};
+    ) -> PgResult<CursorPage<ChatOperation>> {
+        use schema::chat_operations::{self, dsl};
 
         let total = if pagination.include_count {
             Some(
-                studio_operations::table
+                chat_operations::table
                     .filter(dsl::file_id.eq(f_id))
                     .count()
                     .get_result::<i64>(self)
@@ -246,26 +246,26 @@ impl StudioOperationRepository for PgConnection {
 
         let limit = pagination.limit + 1;
 
-        let items: Vec<StudioOperation> = if let Some(cursor) = &pagination.after {
+        let items: Vec<ChatOperation> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            studio_operations::table
+            chat_operations::table
                 .filter(dsl::file_id.eq(f_id))
                 .filter(
                     dsl::created_at
                         .lt(&cursor_time)
                         .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
                 )
-                .select(StudioOperation::as_select())
+                .select(ChatOperation::as_select())
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(limit)
                 .load(self)
                 .await
                 .map_err(PgError::from)?
         } else {
-            studio_operations::table
+            chat_operations::table
                 .filter(dsl::file_id.eq(f_id))
-                .select(StudioOperation::as_select())
+                .select(ChatOperation::as_select())
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(limit)
                 .load(self)
@@ -277,17 +277,17 @@ impl StudioOperationRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |op: &StudioOperation| (op.created_at.into(), op.id),
+            |op: &ChatOperation| (op.created_at.into(), op.id),
         ))
     }
 
-    async fn list_pending_file_operations(&mut self, f_id: Uuid) -> PgResult<Vec<StudioOperation>> {
-        use schema::studio_operations::{self, dsl};
+    async fn list_pending_file_operations(&mut self, f_id: Uuid) -> PgResult<Vec<ChatOperation>> {
+        use schema::chat_operations::{self, dsl};
 
-        let operations = studio_operations::table
+        let operations = chat_operations::table
             .filter(dsl::file_id.eq(f_id))
             .filter(dsl::applied.eq(false))
-            .select(StudioOperation::as_select())
+            .select(ChatOperation::as_select())
             .order(dsl::created_at.asc())
             .load(self)
             .await
@@ -296,28 +296,28 @@ impl StudioOperationRepository for PgConnection {
         Ok(operations)
     }
 
-    async fn apply_studio_operation(&mut self, operation_id: Uuid) -> PgResult<StudioOperation> {
-        let changes = UpdateStudioOperation {
+    async fn apply_chat_operation(&mut self, operation_id: Uuid) -> PgResult<ChatOperation> {
+        let changes = UpdateChatOperation {
             applied: Some(true),
             applied_at: Some(Some(jiff_diesel::Timestamp::from(jiff::Timestamp::now()))),
             ..Default::default()
         };
 
-        self.update_studio_operation(operation_id, changes).await
+        self.update_chat_operation(operation_id, changes).await
     }
 
-    async fn apply_studio_operations(
+    async fn apply_chat_operations(
         &mut self,
         operation_ids: Vec<Uuid>,
-    ) -> PgResult<Vec<StudioOperation>> {
-        use schema::studio_operations::dsl::*;
+    ) -> PgResult<Vec<ChatOperation>> {
+        use schema::chat_operations::dsl::*;
 
         let now = jiff_diesel::Timestamp::from(jiff::Timestamp::now());
 
-        let operations = diesel::update(studio_operations)
+        let operations = diesel::update(chat_operations)
             .filter(id.eq_any(&operation_ids))
             .set((applied.eq(true), applied_at.eq(Some(now))))
-            .returning(StudioOperation::as_returning())
+            .returning(ChatOperation::as_returning())
             .get_results(self)
             .await
             .map_err(PgError::from)?;
@@ -325,27 +325,27 @@ impl StudioOperationRepository for PgConnection {
         Ok(operations)
     }
 
-    async fn revert_studio_operation(&mut self, operation_id: Uuid) -> PgResult<StudioOperation> {
-        let changes = UpdateStudioOperation {
+    async fn revert_chat_operation(&mut self, operation_id: Uuid) -> PgResult<ChatOperation> {
+        let changes = UpdateChatOperation {
             reverted: Some(true),
             ..Default::default()
         };
 
-        self.update_studio_operation(operation_id, changes).await
+        self.update_chat_operation(operation_id, changes).await
     }
 
     async fn count_file_operations(&mut self, f_id: Uuid) -> PgResult<FileOperationCounts> {
         use diesel::dsl::count_star;
-        use schema::studio_operations::{self, dsl};
+        use schema::chat_operations::{self, dsl};
 
-        let total = studio_operations::table
+        let total = chat_operations::table
             .filter(dsl::file_id.eq(f_id))
             .select(count_star())
             .get_result::<i64>(self)
             .await
             .map_err(PgError::from)?;
 
-        let applied_count = studio_operations::table
+        let applied_count = chat_operations::table
             .filter(dsl::file_id.eq(f_id))
             .filter(dsl::applied.eq(true))
             .select(count_star())
@@ -353,7 +353,7 @@ impl StudioOperationRepository for PgConnection {
             .await
             .map_err(PgError::from)?;
 
-        let reverted_count = studio_operations::table
+        let reverted_count = chat_operations::table
             .filter(dsl::file_id.eq(f_id))
             .filter(dsl::reverted.eq(true))
             .select(count_star())

@@ -5,9 +5,10 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::document_files;
-use crate::types::constants::file;
+use crate::types::RECENTLY_UPLOADED_HOURS;
 use crate::types::{
-    ContentSegmentation, HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus, RequireMode,
+    ContentSegmentation, FileSource, HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProcessingStatus,
+    RequireMode,
 };
 
 /// Document file model representing a file attached to a document.
@@ -23,8 +24,10 @@ pub struct DocumentFile {
     pub document_id: Option<Uuid>,
     /// Reference to the account that owns this file.
     pub account_id: Uuid,
-    /// Parent file reference for hierarchical relationships.
+    /// Parent file reference for hierarchical relationships or version chains.
     pub parent_id: Option<Uuid>,
+    /// Version number (1 for original, increments for new versions).
+    pub version_number: i32,
     /// Human-readable file name for display.
     pub display_name: String,
     /// Original filename when uploaded.
@@ -33,6 +36,8 @@ pub struct DocumentFile {
     pub file_extension: String,
     /// Classification tags.
     pub tags: Vec<Option<String>>,
+    /// How the file was created (uploaded, imported, generated).
+    pub source: FileSource,
     /// Processing mode requirements.
     pub require_mode: RequireMode,
     /// Processing priority (higher numbers = higher priority).
@@ -74,8 +79,10 @@ pub struct NewDocumentFile {
     pub document_id: Option<Uuid>,
     /// Account ID.
     pub account_id: Uuid,
-    /// Parent file ID.
+    /// Parent file ID (for derived files or version chains).
     pub parent_id: Option<Uuid>,
+    /// Version number (defaults to 1).
+    pub version_number: Option<i32>,
     /// Display name.
     pub display_name: Option<String>,
     /// Original filename.
@@ -84,6 +91,8 @@ pub struct NewDocumentFile {
     pub file_extension: Option<String>,
     /// Tags
     pub tags: Option<Vec<Option<String>>>,
+    /// How the file was created.
+    pub source: Option<FileSource>,
     /// Require mode
     pub require_mode: Option<RequireMode>,
     /// Processing priority
@@ -124,6 +133,8 @@ pub struct UpdateDocumentFile {
     pub parent_id: Option<Option<Uuid>>,
     /// Tags
     pub tags: Option<Vec<Option<String>>>,
+    /// How the file was created.
+    pub source: Option<FileSource>,
     /// Require mode
     pub require_mode: Option<RequireMode>,
     /// Processing priority
@@ -149,7 +160,7 @@ pub struct UpdateDocumentFile {
 impl DocumentFile {
     /// Returns whether the file was uploaded recently.
     pub fn is_recently_uploaded(&self) -> bool {
-        self.was_created_within(jiff::Span::new().hours(file::RECENTLY_UPLOADED_HOURS))
+        self.was_created_within(jiff::Span::new().hours(RECENTLY_UPLOADED_HOURS))
     }
 
     /// Returns whether the file is deleted.
@@ -249,6 +260,16 @@ impl DocumentFile {
             p if p >= 3 => "Low",
             _ => "Minimal",
         }
+    }
+
+    /// Returns whether this is the original version (version 1).
+    pub fn is_original_version(&self) -> bool {
+        self.version_number == 1
+    }
+
+    /// Returns whether this file is a newer version of another file.
+    pub fn is_version_of(&self, other: &DocumentFile) -> bool {
+        self.parent_id == Some(other.id) && self.version_number > other.version_number
     }
 }
 

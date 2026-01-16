@@ -6,8 +6,8 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_api_tokens;
-use crate::types::constants::token;
 use crate::types::{ApiTokenType, HasCreatedAt, HasExpiresAt, HasSecurityContext};
+use crate::types::{EXPIRY_WARNING_MINUTES, LONG_LIVED_THRESHOLD_HOURS};
 
 /// Account API token model representing an authentication token.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -139,7 +139,7 @@ impl AccountApiToken {
 
     /// Returns whether the token is about to expire (within warning threshold).
     pub fn is_expiring_soon_default(&self) -> bool {
-        self.is_expiring_soon(token::EXPIRY_WARNING_MINUTES)
+        self.is_expiring_soon(EXPIRY_WARNING_MINUTES)
     }
 
     /// Returns whether this is a web token.
@@ -159,7 +159,7 @@ impl AccountApiToken {
 
     /// Returns whether the token is long-lived (active for more than 24 hours).
     pub fn is_long_lived(&self) -> bool {
-        i64::from(self.token_duration().get_hours()) > token::LONG_LIVED_THRESHOLD_HOURS
+        i64::from(self.token_duration().get_hours()) > LONG_LIVED_THRESHOLD_HOURS
     }
 
     /// Returns a shortened version of the token ID for logging/display.

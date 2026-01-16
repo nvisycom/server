@@ -1,4 +1,4 @@
-//! Studio session model for PostgreSQL database operations.
+//! Chat session model for PostgreSQL database operations.
 //!
 //! This module provides models for managing LLM-assisted document editing sessions.
 //! Sessions track the interaction between users and AI models during document editing,
@@ -6,26 +6,26 @@
 //!
 //! ## Models
 //!
-//! - [`StudioSession`] - Main session model with full configuration and status
-//! - [`NewStudioSession`] - Data structure for creating new sessions
-//! - [`UpdateStudioSession`] - Data structure for updating existing sessions
+//! - [`ChatSession`] - Main session model with full configuration and status
+//! - [`NewChatSession`] - Data structure for creating new sessions
+//! - [`UpdateChatSession`] - Data structure for updating existing sessions
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::studio_sessions;
-use crate::types::{HasCreatedAt, HasOwnership, HasUpdatedAt, StudioSessionStatus};
+use crate::schema::chat_sessions;
+use crate::types::{ChatSessionStatus, HasCreatedAt, HasOwnership, HasUpdatedAt};
 
-/// Studio session model representing an LLM-assisted document editing session.
+/// Chat session model representing an LLM-assisted document editing session.
 ///
 /// This model manages the lifecycle of editing sessions where users interact with
 /// AI models to edit documents. Each session tracks the primary file being edited,
 /// model configuration, and usage statistics like message and token counts.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = studio_sessions)]
+#[diesel(table_name = chat_sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct StudioSession {
+pub struct ChatSession {
     /// Unique session identifier.
     pub id: Uuid,
     /// Reference to the workspace this session belongs to.
@@ -37,7 +37,7 @@ pub struct StudioSession {
     /// User-friendly session name.
     pub display_name: String,
     /// Current lifecycle status of the session.
-    pub session_status: StudioSessionStatus,
+    pub session_status: ChatSessionStatus,
     /// LLM configuration (model, temperature, max tokens, etc.).
     pub model_config: serde_json::Value,
     /// Total number of messages exchanged in this session.
@@ -50,15 +50,15 @@ pub struct StudioSession {
     pub updated_at: Timestamp,
 }
 
-/// Data structure for creating a new studio session.
+/// Data structure for creating a new chat session.
 ///
 /// Contains all the information necessary to create a new editing session.
 /// Most fields have sensible defaults, allowing sessions to be created with
 /// minimal required information.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = studio_sessions)]
+#[diesel(table_name = chat_sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewStudioSession {
+pub struct NewChatSession {
     /// Reference to the workspace this session will belong to.
     pub workspace_id: Uuid,
     /// Account creating this session.
@@ -68,24 +68,24 @@ pub struct NewStudioSession {
     /// Optional user-friendly session name.
     pub display_name: Option<String>,
     /// Optional initial session status.
-    pub session_status: Option<StudioSessionStatus>,
+    pub session_status: Option<ChatSessionStatus>,
     /// Optional LLM configuration.
     pub model_config: Option<serde_json::Value>,
 }
 
-/// Data structure for updating an existing studio session.
+/// Data structure for updating an existing chat session.
 ///
 /// Contains optional fields for modifying session properties. Only the
 /// fields that need to be changed should be set to Some(value), while
 /// unchanged fields remain None to preserve their current values.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = studio_sessions)]
+#[diesel(table_name = chat_sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateStudioSession {
+pub struct UpdateChatSession {
     /// Updated session display name.
     pub display_name: Option<String>,
     /// Updated session status.
-    pub session_status: Option<StudioSessionStatus>,
+    pub session_status: Option<ChatSessionStatus>,
     /// Updated LLM configuration.
     pub model_config: Option<serde_json::Value>,
     /// Updated message count.
@@ -94,7 +94,7 @@ pub struct UpdateStudioSession {
     pub token_count: Option<i32>,
 }
 
-impl StudioSession {
+impl ChatSession {
     /// Returns whether the session is currently active.
     #[inline]
     pub fn is_active(&self) -> bool {
@@ -149,19 +149,19 @@ impl StudioSession {
     }
 }
 
-impl HasCreatedAt for StudioSession {
+impl HasCreatedAt for ChatSession {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }
 }
 
-impl HasUpdatedAt for StudioSession {
+impl HasUpdatedAt for ChatSession {
     fn updated_at(&self) -> jiff::Timestamp {
         self.updated_at.into()
     }
 }
 
-impl HasOwnership for StudioSession {
+impl HasOwnership for ChatSession {
     fn created_by(&self) -> Uuid {
         self.account_id
     }

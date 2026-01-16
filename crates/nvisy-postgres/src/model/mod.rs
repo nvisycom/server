@@ -21,9 +21,9 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_webhook;
 
-mod studio_operation;
-mod studio_session;
-mod studio_tool_call;
+mod chat_operation;
+mod chat_session;
+mod chat_tool_call;
 
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
@@ -56,7 +56,7 @@ pub use workspace_integration_run::{
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
-// Studio models
-pub use studio_operation::{NewStudioOperation, StudioOperation, UpdateStudioOperation};
-pub use studio_session::{NewStudioSession, StudioSession, UpdateStudioSession};
-pub use studio_tool_call::{NewStudioToolCall, StudioToolCall, UpdateStudioToolCall};
+// Chat models
+pub use chat_operation::{ChatOperation, NewChatOperation, UpdateChatOperation};
+pub use chat_session::{ChatSession, NewChatSession, UpdateChatSession};
+pub use chat_tool_call::{ChatToolCall, NewChatToolCall, UpdateChatToolCall};

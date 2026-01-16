@@ -32,22 +32,22 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_webhook;
 
-mod studio_operation;
-mod studio_session;
-mod studio_tool_call;
+mod chat_operation;
+mod chat_session;
+mod chat_tool_call;
 
 pub use account::AccountRepository;
 pub use account_action_token::AccountActionTokenRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
+pub use chat_operation::{ChatOperationRepository, FileOperationCounts};
+pub use chat_session::ChatSessionRepository;
+pub use chat_tool_call::ChatToolCallRepository;
 pub use document::DocumentRepository;
 pub use document_annotation::DocumentAnnotationRepository;
 pub use document_chunk::DocumentChunkRepository;
 pub use document_comment::DocumentCommentRepository;
 pub use document_file::DocumentFileRepository;
-pub use studio_operation::{FileOperationCounts, StudioOperationRepository};
-pub use studio_session::StudioSessionRepository;
-pub use studio_tool_call::StudioToolCallRepository;
 pub use workspace::WorkspaceRepository;
 pub use workspace_activity::WorkspaceActivityRepository;
 pub use workspace_integration::WorkspaceIntegrationRepository;

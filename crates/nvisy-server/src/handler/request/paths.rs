@@ -169,3 +169,15 @@ pub struct AccountPathParams {
     /// Unique identifier of the account.
     pub account_id: Uuid,
 }
+
+/// Path parameters for chat session operations (session ID only).
+///
+/// Since session IDs are globally unique UUIDs, workspace context can be
+/// derived from the session record itself for authorization purposes.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSessionPathParams {
+    /// Unique identifier of the chat session.
+    pub session_id: Uuid,
+}
