@@ -37,7 +37,7 @@ impl JobHandler for PreprocessingHandler {
             // TODO: Implement metadata validation
             // - Format detection
             // - File integrity checks
-            // - Metadata extraction and fixes
+            // - Metadata extraction
         }
 
         // Step 2: Run OCR

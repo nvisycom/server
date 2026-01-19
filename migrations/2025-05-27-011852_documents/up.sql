@@ -212,6 +212,58 @@ CREATE INDEX document_files_version_chain_idx
     ON document_files (parent_id, version_number DESC)
     WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 
+-- Trigger function to ensure parent file is from the same document
+CREATE OR REPLACE FUNCTION check_parent_same_document()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.parent_id IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM document_files
+            WHERE id = NEW.parent_id
+            AND (document_id IS NOT DISTINCT FROM NEW.document_id)
+        ) THEN
+            RAISE EXCEPTION 'Parent file must belong to the same document'
+                USING ERRCODE = 'check_violation',
+                      CONSTRAINT = 'document_files_parent_same_document';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER document_files_parent_same_document_trigger
+    BEFORE INSERT OR UPDATE OF parent_id, document_id ON document_files
+    FOR EACH ROW
+    EXECUTE FUNCTION check_parent_same_document();
+
+COMMENT ON FUNCTION check_parent_same_document() IS
+    'Ensures parent_id references a file in the same document.';
+
+-- Trigger function to auto-set version_number based on parent
+CREATE OR REPLACE FUNCTION set_file_version_number()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- If parent_id is set, calculate version as parent's version + 1
+    IF NEW.parent_id IS NOT NULL THEN
+        SELECT version_number + 1 INTO NEW.version_number
+        FROM document_files
+        WHERE id = NEW.parent_id;
+    ELSE
+        -- No parent means version 1
+        NEW.version_number := 1;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER document_files_set_version_trigger
+    BEFORE INSERT ON document_files
+    FOR EACH ROW
+    EXECUTE FUNCTION set_file_version_number();
+
+COMMENT ON FUNCTION set_file_version_number() IS
+    'Automatically sets version_number based on parent file version.';
+
 -- Add table and column comments
 COMMENT ON TABLE document_files IS
     'Source files for document processing with pipeline management and version tracking.';

@@ -63,6 +63,11 @@ impl From<DocumentFileConstraints> for Error<'static> {
                 DocumentFileConstraints::TagsCountMax => {
                     ErrorKind::BadRequest.with_message("Maximum number of tags exceeded")
                 }
+                DocumentFileConstraints::VersionNumberMin => {
+                    ErrorKind::BadRequest.with_message("Version number must be at least 1")
+                }
+                DocumentFileConstraints::ParentSameDocument => ErrorKind::BadRequest
+                    .with_message("Parent file must belong to the same document"),
                 DocumentFileConstraints::UpdatedAfterCreated
                 | DocumentFileConstraints::DeletedAfterCreated
                 | DocumentFileConstraints::DeletedAfterUpdated

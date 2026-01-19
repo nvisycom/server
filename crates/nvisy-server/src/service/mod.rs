@@ -1,7 +1,6 @@
 //! Application state and dependency injection.
 
 mod cache;
-mod compression;
 mod config;
 mod integration;
 mod security;
@@ -9,11 +8,14 @@ mod security;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_rig::RigService;
+use nvisy_runtime::RuntimeService;
 use nvisy_webhook::WebhookService;
+
+// Re-export archive types for handler use
+pub use nvisy_runtime::{ArchiveFormat, ArchiveResult, ArchiveService};
 
 use crate::Result;
 pub use crate::service::cache::HealthCache;
-pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
 pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
@@ -33,12 +35,13 @@ pub struct ServiceState {
     pub nats: NatsClient,
     pub webhook: WebhookService,
 
-    // AI services:
+    // AI & document services:
     pub rig: RigService,
+    pub runtime: RuntimeService,
+    pub archive: ArchiveService,
 
     // Internal services:
     pub health_cache: HealthCache,
-    pub archive_service: ArchiveService,
     pub integration_provider: IntegrationProvider,
     pub password_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
@@ -74,9 +77,10 @@ impl ServiceState {
             webhook: webhook_service,
 
             rig,
+            runtime: RuntimeService::new(),
+            archive: ArchiveService::new(),
 
             health_cache: HealthCache::new(),
-            archive_service: ArchiveService::new(),
             integration_provider: IntegrationProvider::new(),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
@@ -103,12 +107,13 @@ impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
 
-// AI services:
+// AI and document services:
 impl_di!(rig: RigService);
+impl_di!(runtime: RuntimeService);
+impl_di!(archive: ArchiveService);
 
 // Internal services:
 impl_di!(health_cache: HealthCache);
-impl_di!(archive_service: ArchiveService);
 impl_di!(integration_provider: IntegrationProvider);
 impl_di!(password_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);

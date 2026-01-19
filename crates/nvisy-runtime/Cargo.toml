@@ -1,0 +1,42 @@
+[package]
+name = "nvisy-runtime"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+description = "Document processing runtime for nvisy"
+keywords = ["document", "pdf", "docx", "archive", "processing"]
+categories = ["document-processing", "parsing"]
+
+[features]
+default = []
+config = ["clap"]
+
+[dependencies]
+nvisy-rt-core = { workspace = true }
+nvisy-rt-document = { workspace = true }
+nvisy-rt-engine = { workspace = true }
+
+# CLI
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
+# (De)serialization
+serde = { workspace = true }
+schemars = { workspace = true }
+
+# Derive macros
+derive_more = { workspace = true, features = ["deref", "deref_mut"] }
+thiserror = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs"] }

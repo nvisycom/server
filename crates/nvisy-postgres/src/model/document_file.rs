@@ -81,8 +81,6 @@ pub struct NewDocumentFile {
     pub account_id: Uuid,
     /// Parent file ID (for derived files or version chains).
     pub parent_id: Option<Uuid>,
-    /// Version number (defaults to 1).
-    pub version_number: Option<i32>,
     /// Display name.
     pub display_name: Option<String>,
     /// Original filename.

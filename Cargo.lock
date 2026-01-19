@@ -169,15 +169,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
-dependencies = [
- "derive_arbitrary",
-]
-
-[[package]]
 name = "arc-swap"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -906,6 +897,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52cd9d68cf7efc6ddfaaee42e7288d3a99d613d4b50f76ce9827ae0c6e14f938"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde_core",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704a3c26996a80471189265814dbc2c257598b96b8a7feae2d31ace646bb9782"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1053,17 +1065,6 @@ checksum = "ececcb659e7ba858fb4f10388c250a7252eb0a27373f1a72b8748afdd248e587"
 dependencies = [
  "powerfmt",
  "serde_core",
-]
-
-[[package]]
-name = "derive_arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1588,6 +1589,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52f04ae4152da20c76fe800fa48659201d5cf627c5149ca0b707b69d7eef6cf9"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows-link",
+ "windows-result",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1731,6 +1747,16 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hipstr"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07a5072958d04f9147e517881d929d3f4706612712f8f4cfcd247f2b716d5262"
+dependencies = [
+ "loom",
+ "serde",
+]
 
 [[package]]
 name = "hmac"
@@ -2284,6 +2310,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2291,12 +2330,32 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lzma-rust2"
-version = "0.15.4"
+version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48172246aa7c3ea28e423295dd1ca2589a24617cc4e588bb8cfe177cb2c54d95"
+checksum = "1670343e58806300d87950e3401e820b519b9384281bbabfb15e3636689ffd69"
 dependencies = [
  "crc",
  "sha2",
+]
+
+[[package]]
+name = "lzma-sys"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fda04ab3764e6cde78b9974eec4f779acaba7c4e84b36eca3cf77c581b85d27"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
+name = "markdown"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5cab8f2cadc416a82d2e783a1946388b31654d391d1c7d92cc1f03e295b1deb"
+dependencies = [
+ "unicode-id",
 ]
 
 [[package]]
@@ -2654,6 +2713,142 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvisy-rt-archive"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "bytes",
+ "bzip2",
+ "derive_more",
+ "flate2",
+ "nvisy-rt-core",
+ "strum",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "xz2",
+ "zip",
+]
+
+[[package]]
+name = "nvisy-rt-core"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "bytes",
+ "derive_more",
+ "hex",
+ "hipstr",
+ "jiff",
+ "serde",
+ "sha2",
+ "strum",
+ "thiserror 2.0.17",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nvisy-rt-document"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bytes",
+ "derive_more",
+ "jiff",
+ "nvisy-rt-core",
+ "serde",
+ "serde_json",
+ "strum",
+ "thiserror 2.0.17",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nvisy-rt-docx"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "nvisy-rt-document",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "nvisy-rt-engine"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "bytes",
+ "jiff",
+ "nvisy-rt-archive",
+ "nvisy-rt-document",
+ "nvisy-rt-docx",
+ "nvisy-rt-image",
+ "nvisy-rt-pdf",
+ "nvisy-rt-text",
+ "serde",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "nvisy-rt-image"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "nvisy-rt-document",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "nvisy-rt-pdf"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "nvisy-rt-document",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "nvisy-rt-text"
+version = "0.1.0"
+source = "git+ssh://git@github.com/nvisycom/runtime.git?branch=feature%2Fprerelease#1962b90589342d4e9becb14402ef1ee4f95a19cc"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "csv",
+ "markdown",
+ "nvisy-rt-document",
+ "serde_json",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "nvisy-runtime"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "derive_more",
+ "nvisy-rt-core",
+ "nvisy-rt-document",
+ "nvisy-rt-engine",
+ "schemars 0.9.0",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "nvisy-server"
 version = "0.1.0"
 dependencies = [
@@ -2670,7 +2865,6 @@ dependencies = [
  "clap",
  "derive_more",
  "dotenvy",
- "flate2",
  "futures",
  "ipnet",
  "jiff",
@@ -2678,6 +2872,7 @@ dependencies = [
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-rig",
+ "nvisy-runtime",
  "nvisy-webhook",
  "rand 0.10.0-rc.6",
  "regex",
@@ -2686,7 +2881,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "strum",
- "tar",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -2700,7 +2894,6 @@ dependencies = [
  "uuid",
  "validator",
  "woothee",
- "zip",
  "zxcvbn",
 ]
 
@@ -3569,6 +3762,12 @@ checksum = "1b24aae2d0636530f359e9d5ef0c04669d11c5e756699b27a6a6d845d8329091"
 dependencies = [
  "pin-project-lite",
 ]
+
+[[package]]
+name = "scoped-tls"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
 
 [[package]]
 name = "scopeguard"
@@ -4470,6 +4669,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
+name = "unicode-id"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70ba288e709927c043cbe476718d37be306be53fb1fafecd0dbe36d072be2580"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5014,6 +5219,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xz2"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "388c44dc09d76f1536602ead6d325eb532f5c122f17782bd57fb47baeeb767e2"
+dependencies = [
+ "lzma-sys",
+]
+
+[[package]]
 name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5094,9 +5308,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize_derive"
-version = "1.4.2"
+version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+checksum = "85a5b4158499876c763cb03bc4e49185d3cccbabb15b33c627f7884f43db852e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5139,12 +5353,11 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "7.0.0"
+version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd8a47718a4ee5fe78e07667cd36f3de80e7c2bfe727c7074245ffc7303c037"
+checksum = "9013f1222db8a6d680f13a7ccdc60a781199cd09c2fa4eff58e728bb181757fc"
 dependencies = [
  "aes",
- "arbitrary",
  "bzip2",
  "constant_time_eq",
  "crc32fast",

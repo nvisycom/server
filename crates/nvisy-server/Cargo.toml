@@ -36,6 +36,7 @@ config = [
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-rig = { workspace = true, features = [] }
+nvisy-runtime = { workspace = true }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime
@@ -75,11 +76,6 @@ validator = { workspace = true, features = [] }
 # Text processing
 regex = { workspace = true, features = [] }
 woothee = { workspace = true, features = [] }
-
-# Archive/Compression
-tar = { workspace = true, features = [] }
-flate2 = { workspace = true, features = [] }
-zip = { workspace = true, features = [] }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }

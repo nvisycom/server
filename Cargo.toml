@@ -8,6 +8,7 @@ members = [
     "./crates/nvisy-nats",
     "./crates/nvisy-postgres",
     "./crates/nvisy-rig",
+    "./crates/nvisy-runtime",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
 ]
@@ -35,8 +36,15 @@ nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
+nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
+
+# Runtime crates (from github.com/nvisycom/runtime)
+nvisy-rt-archive = { git = "ssh://git@github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
+nvisy-rt-core = { git = "ssh://git@github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
+nvisy-rt-document = { git = "ssh://git@github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
+nvisy-rt-engine = { git = "ssh://git@github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }
@@ -125,8 +133,3 @@ woothee = { version = "0.13", features = [] }
 
 # AI/ML frameworks
 rig-core = { version = "0.28", default-features = false, features = ["reqwest-rustls"] }
-
-# Archive/Compression
-tar = { version = "0.4", features = [] }
-flate2 = { version = "1.1", features = [] }
-zip = { version = "7.0", features = [] }

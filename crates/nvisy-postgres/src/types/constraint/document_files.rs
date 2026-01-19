@@ -42,6 +42,12 @@ pub enum DocumentFileConstraints {
     #[strum(serialize = "document_files_retention_period")]
     RetentionPeriod,
 
+    // File version constraints
+    #[strum(serialize = "document_files_version_number_min")]
+    VersionNumberMin,
+    #[strum(serialize = "document_files_parent_same_document")]
+    ParentSameDocument,
+
     // File chronological constraints
     #[strum(serialize = "document_files_updated_after_created")]
     UpdatedAfterCreated,
@@ -72,7 +78,9 @@ impl DocumentFileConstraints {
             | DocumentFileConstraints::StorageBucketNotEmpty
             | DocumentFileConstraints::FileHashSha256Length
             | DocumentFileConstraints::MetadataSize
-            | DocumentFileConstraints::RetentionPeriod => ConstraintCategory::Validation,
+            | DocumentFileConstraints::RetentionPeriod
+            | DocumentFileConstraints::VersionNumberMin
+            | DocumentFileConstraints::ParentSameDocument => ConstraintCategory::Validation,
 
             DocumentFileConstraints::UpdatedAfterCreated
             | DocumentFileConstraints::DeletedAfterCreated
