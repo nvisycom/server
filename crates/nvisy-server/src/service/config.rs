@@ -4,7 +4,6 @@ use clap::Args;
 use clap::Parser;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
-use nvisy_rig::RigConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::service::security::{SessionKeys, SessionKeysConfig};
@@ -29,10 +28,6 @@ pub struct ServiceConfig {
     /// Authentication key paths configuration.
     #[cfg_attr(any(test, feature = "config"), command(flatten))]
     pub session_config: SessionKeysConfig,
-
-    /// AI services configuration.
-    #[cfg_attr(any(test, feature = "config"), command(flatten))]
-    pub rig_config: RigConfig,
 }
 
 impl ServiceConfig {

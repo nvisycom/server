@@ -30,7 +30,6 @@ mod server;
 use std::process;
 
 use clap::Parser;
-use nvisy_server::pipeline::PipelineConfig;
 use nvisy_server::service::{ServiceConfig, ServiceState};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::reqwest::{ReqwestClient, ReqwestConfig};
@@ -70,10 +69,6 @@ pub struct Cli {
     /// External service configuration (databases, message queues).
     #[clap(flatten)]
     pub service: ServiceConfig,
-
-    /// Pipeline configuration for document processing workers.
-    #[clap(flatten)]
-    pub pipeline: PipelineConfig,
 
     /// HTTP client configuration for webhook delivery.
     #[clap(flatten)]

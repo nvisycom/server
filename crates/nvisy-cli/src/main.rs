@@ -10,7 +10,6 @@ use std::process;
 use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::*;
-use nvisy_server::pipeline::{PipelineState, WorkerHandles};
 use nvisy_server::service::ServiceState;
 
 use crate::config::{Cli, MiddlewareConfig};
@@ -45,20 +44,11 @@ async fn run() -> anyhow::Result<()> {
     // Initialize application state
     let state = cli.service_state().await?;
 
-    // Spawn pipeline workers
-    let pipeline_state = PipelineState::new(&state, cli.pipeline.clone());
-    let workers = WorkerHandles::spawn(&pipeline_state);
-
     // Build router
     let router = create_router(state, &cli.middleware);
 
     // Run the HTTP server
-    let result = server::serve(router, cli.server).await;
-
-    // Shutdown workers
-    workers.shutdown();
-
-    result?;
+    server::serve(router, cli.server).await?;
     Ok(())
 }
 

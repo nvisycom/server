@@ -1,12 +1,15 @@
 //! Storage backend implementation.
 
+use async_trait::async_trait;
+use bytes::Bytes;
+use futures::Stream;
+use nvisy_data::{DataError, DataInput, DataOutput, DataResult, InputContext, OutputContext};
 use opendal::{Operator, services};
 
 use crate::TRACING_TARGET;
 use crate::azblob::AzureBlobConfig;
 use crate::config::StorageConfig;
 use crate::dropbox::DropboxConfig;
-use crate::error::{StorageError, StorageResult};
 use crate::gcs::GcsConfig;
 use crate::gdrive::GoogleDriveConfig;
 use crate::onedrive::OneDriveConfig;
@@ -21,7 +24,7 @@ pub struct StorageBackend {
 
 impl StorageBackend {
     /// Creates a new storage backend from configuration.
-    pub async fn new(config: StorageConfig) -> StorageResult<Self> {
+    pub async fn new(config: StorageConfig) -> DataResult<Self> {
         let operator = Self::create_operator(&config)?;
 
         tracing::info!(
@@ -43,75 +46,14 @@ impl StorageBackend {
         self.config.backend_name()
     }
 
-    /// Reads a file from storage.
-    pub async fn read(&self, path: &str) -> StorageResult<Vec<u8>> {
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path,
-            "Reading file"
-        );
-
-        let data = self.operator.read(path).await?.to_vec();
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path,
-            size = data.len(),
-            "File read complete"
-        );
-
-        Ok(data)
-    }
-
-    /// Writes data to a file in storage.
-    pub async fn write(&self, path: &str, data: &[u8]) -> StorageResult<()> {
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path,
-            size = data.len(),
-            "Writing file"
-        );
-
-        self.operator.write(path, data.to_vec()).await?;
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path,
-            "File write complete"
-        );
-
-        Ok(())
-    }
-
-    /// Deletes a file from storage.
-    pub async fn delete(&self, path: &str) -> StorageResult<()> {
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path,
-            "Deleting file"
-        );
-
-        self.operator.delete(path).await?;
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path,
-            "File deleted"
-        );
-
-        Ok(())
-    }
-
-    /// Checks if a file exists.
-    pub async fn exists(&self, path: &str) -> StorageResult<bool> {
-        Ok(self.operator.exists(path).await?)
-    }
-
     /// Gets metadata for a file.
-    pub async fn stat(&self, path: &str) -> StorageResult<FileMetadata> {
-        let meta = self.operator.stat(path).await?;
+    pub async fn stat(&self, path: &str) -> DataResult<FileMetadata> {
+        let meta = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
 
-        // Convert chrono DateTime to jiff Timestamp
         let last_modified = meta
             .last_modified()
             .and_then(|dt| jiff::Timestamp::from_second(dt.timestamp()).ok());
@@ -123,17 +65,8 @@ impl StorageBackend {
         })
     }
 
-    /// Lists files in a directory.
-    pub async fn list(&self, path: &str) -> StorageResult<Vec<String>> {
-        use futures::TryStreamExt;
-
-        let entries: Vec<_> = self.operator.lister(path).await?.try_collect().await?;
-
-        Ok(entries.into_iter().map(|e| e.path().to_string()).collect())
-    }
-
     /// Copies a file from one path to another.
-    pub async fn copy(&self, from: &str, to: &str) -> StorageResult<()> {
+    pub async fn copy(&self, from: &str, to: &str) -> DataResult<()> {
         tracing::debug!(
             target: TRACING_TARGET,
             from = %from,
@@ -141,13 +74,16 @@ impl StorageBackend {
             "Copying file"
         );
 
-        self.operator.copy(from, to).await?;
+        self.operator
+            .copy(from, to)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
 
         Ok(())
     }
 
     /// Moves a file from one path to another.
-    pub async fn rename(&self, from: &str, to: &str) -> StorageResult<()> {
+    pub async fn rename(&self, from: &str, to: &str) -> DataResult<()> {
         tracing::debug!(
             target: TRACING_TARGET,
             from = %from,
@@ -155,13 +91,16 @@ impl StorageBackend {
             "Moving file"
         );
 
-        self.operator.rename(from, to).await?;
+        self.operator
+            .rename(from, to)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
 
         Ok(())
     }
 
     /// Creates an OpenDAL operator based on configuration.
-    fn create_operator(config: &StorageConfig) -> StorageResult<Operator> {
+    fn create_operator(config: &StorageConfig) -> DataResult<Operator> {
         match config {
             StorageConfig::S3(cfg) => Self::create_s3_operator(cfg),
             StorageConfig::Gcs(cfg) => Self::create_gcs_operator(cfg),
@@ -172,7 +111,7 @@ impl StorageBackend {
         }
     }
 
-    fn create_s3_operator(cfg: &S3Config) -> StorageResult<Operator> {
+    fn create_s3_operator(cfg: &S3Config) -> DataResult<Operator> {
         let mut builder = services::S3::default()
             .bucket(&cfg.bucket)
             .region(&cfg.region);
@@ -189,34 +128,32 @@ impl StorageBackend {
             builder = builder.secret_access_key(secret_access_key);
         }
 
-        // Apply prefix as root path
         if let Some(ref prefix) = cfg.prefix {
             builder = builder.root(prefix);
         }
 
         Operator::new(builder)
             .map(|op| op.finish())
-            .map_err(|e| StorageError::init(e.to_string()))
+            .map_err(|e| DataError::backend(e.to_string()))
     }
 
-    fn create_gcs_operator(cfg: &GcsConfig) -> StorageResult<Operator> {
+    fn create_gcs_operator(cfg: &GcsConfig) -> DataResult<Operator> {
         let mut builder = services::Gcs::default().bucket(&cfg.bucket);
 
         if let Some(ref credentials) = cfg.credentials {
             builder = builder.credential(credentials);
         }
 
-        // Apply prefix as root path
         if let Some(ref prefix) = cfg.prefix {
             builder = builder.root(prefix);
         }
 
         Operator::new(builder)
             .map(|op| op.finish())
-            .map_err(|e| StorageError::init(e.to_string()))
+            .map_err(|e| DataError::backend(e.to_string()))
     }
 
-    fn create_azblob_operator(cfg: &AzureBlobConfig) -> StorageResult<Operator> {
+    fn create_azblob_operator(cfg: &AzureBlobConfig) -> DataResult<Operator> {
         let mut builder = services::Azblob::default()
             .container(&cfg.container)
             .account_name(&cfg.account_name);
@@ -225,17 +162,16 @@ impl StorageBackend {
             builder = builder.account_key(account_key);
         }
 
-        // Apply prefix as root path
         if let Some(ref prefix) = cfg.prefix {
             builder = builder.root(prefix);
         }
 
         Operator::new(builder)
             .map(|op| op.finish())
-            .map_err(|e| StorageError::init(e.to_string()))
+            .map_err(|e| DataError::backend(e.to_string()))
     }
 
-    fn create_gdrive_operator(cfg: &GoogleDriveConfig) -> StorageResult<Operator> {
+    fn create_gdrive_operator(cfg: &GoogleDriveConfig) -> DataResult<Operator> {
         let mut builder = services::Gdrive::default().root(&cfg.root);
 
         if let Some(ref access_token) = cfg.access_token {
@@ -244,10 +180,10 @@ impl StorageBackend {
 
         Operator::new(builder)
             .map(|op| op.finish())
-            .map_err(|e| StorageError::init(e.to_string()))
+            .map_err(|e| DataError::backend(e.to_string()))
     }
 
-    fn create_dropbox_operator(cfg: &DropboxConfig) -> StorageResult<Operator> {
+    fn create_dropbox_operator(cfg: &DropboxConfig) -> DataResult<Operator> {
         let mut builder = services::Dropbox::default().root(&cfg.root);
 
         if let Some(ref access_token) = cfg.access_token {
@@ -268,10 +204,10 @@ impl StorageBackend {
 
         Operator::new(builder)
             .map(|op| op.finish())
-            .map_err(|e| StorageError::init(e.to_string()))
+            .map_err(|e| DataError::backend(e.to_string()))
     }
 
-    fn create_onedrive_operator(cfg: &OneDriveConfig) -> StorageResult<Operator> {
+    fn create_onedrive_operator(cfg: &OneDriveConfig) -> DataResult<Operator> {
         let mut builder = services::Onedrive::default().root(&cfg.root);
 
         if let Some(ref access_token) = cfg.access_token {
@@ -280,7 +216,172 @@ impl StorageBackend {
 
         Operator::new(builder)
             .map(|op| op.finish())
-            .map_err(|e| StorageError::init(e.to_string()))
+            .map_err(|e| DataError::backend(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl DataInput for StorageBackend {
+    async fn read(&self, _ctx: &InputContext, path: &str) -> DataResult<Bytes> {
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "Reading file"
+        );
+
+        let data = self
+            .operator
+            .read(path)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            size = data.len(),
+            "File read complete"
+        );
+
+        Ok(data.to_bytes())
+    }
+
+    async fn read_stream(
+        &self,
+        _ctx: &InputContext,
+        path: &str,
+    ) -> DataResult<Box<dyn Stream<Item = DataResult<Bytes>> + Send + Unpin>> {
+        use futures::StreamExt;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "Reading file as stream"
+        );
+
+        let reader = self
+            .operator
+            .reader(path)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        let stream = reader
+            .into_bytes_stream(0..u64::MAX)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?
+            .map(|result| result.map_err(|e| DataError::backend(e.to_string())));
+
+        Ok(Box::new(stream))
+    }
+
+    async fn exists(&self, _ctx: &InputContext, path: &str) -> DataResult<bool> {
+        self.operator
+            .exists(path)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))
+    }
+
+    async fn list(&self, _ctx: &InputContext, prefix: &str) -> DataResult<Vec<String>> {
+        use futures::TryStreamExt;
+
+        let entries: Vec<_> = self
+            .operator
+            .lister(prefix)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?
+            .try_collect()
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        Ok(entries.into_iter().map(|e| e.path().to_string()).collect())
+    }
+}
+
+#[async_trait]
+impl DataOutput for StorageBackend {
+    async fn write(&self, _ctx: &OutputContext, path: &str, data: Bytes) -> DataResult<()> {
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            size = data.len(),
+            "Writing file"
+        );
+
+        self.operator
+            .write(path, data)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "File write complete"
+        );
+
+        Ok(())
+    }
+
+    async fn write_stream(
+        &self,
+        _ctx: &OutputContext,
+        path: &str,
+        stream: Box<dyn Stream<Item = DataResult<Bytes>> + Send + Unpin>,
+    ) -> DataResult<()> {
+        use futures::StreamExt;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "Writing file from stream"
+        );
+
+        let mut writer = self
+            .operator
+            .writer(path)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        let mut stream = stream;
+        while let Some(result) = stream.next().await {
+            let chunk = result?;
+            writer
+                .write(chunk)
+                .await
+                .map_err(|e| DataError::backend(e.to_string()))?;
+        }
+
+        writer
+            .close()
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "File stream write complete"
+        );
+
+        Ok(())
+    }
+
+    async fn delete(&self, _ctx: &OutputContext, path: &str) -> DataResult<()> {
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "Deleting file"
+        );
+
+        self.operator
+            .delete(path)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        tracing::debug!(
+            target: TRACING_TARGET,
+            path = %path,
+            "File deleted"
+        );
+
+        Ok(())
     }
 }
 

@@ -42,7 +42,7 @@ pub enum WorkflowError {
 
     /// Storage operation failed.
     #[error("storage error: {0}")]
-    Storage(#[from] nvisy_opendal::StorageError),
+    Storage(#[from] nvisy_opendal::DataError),
 
     /// Serialization/deserialization error.
     #[error("serialization error: {0}")]

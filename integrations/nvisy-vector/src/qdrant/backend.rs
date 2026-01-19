@@ -3,19 +3,21 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use nvisy_data::{
+    DataError, DataResult, VectorContext, VectorData, VectorOutput, VectorSearchOptions,
+    VectorSearchResult,
+};
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::vectors_config::Config as VectorsConfig;
 use qdrant_client::qdrant::with_payload_selector::SelectorOptions;
 use qdrant_client::qdrant::with_vectors_selector::SelectorOptions as VectorsSelectorOptions;
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, DeletePointsBuilder, Distance, Filter, GetPointsBuilder,
-    PointId, PointStruct, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, Distance, Filter, PointId, PointStruct,
+    SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
 };
 
 use super::QdrantConfig;
 use crate::TRACING_TARGET;
-use crate::error::{VectorError, VectorResult};
-use crate::store::{SearchOptions, SearchResult, VectorData, VectorStoreBackend};
 
 /// Qdrant backend implementation.
 pub struct QdrantBackend {
@@ -26,11 +28,11 @@ pub struct QdrantBackend {
 
 impl QdrantBackend {
     /// Creates a new Qdrant backend.
-    pub async fn new(config: &QdrantConfig) -> VectorResult<Self> {
+    pub async fn new(config: &QdrantConfig) -> DataResult<Self> {
         let client = Qdrant::from_url(&config.url)
             .api_key(config.api_key.clone())
             .build()
-            .map_err(|e| VectorError::connection(e.to_string()))?;
+            .map_err(|e| DataError::connection(e.to_string()))?;
 
         tracing::debug!(
             target: TRACING_TARGET,
@@ -42,6 +44,37 @@ impl QdrantBackend {
             client,
             config: config.clone(),
         })
+    }
+
+    /// Ensures a collection exists, creating it if necessary.
+    async fn ensure_collection(&self, name: &str, dimensions: usize) -> DataResult<()> {
+        let exists = self
+            .client
+            .collection_exists(name)
+            .await
+            .map_err(|e| DataError::backend(e.to_string()))?;
+
+        if !exists {
+            let vectors_config = VectorsConfig::Params(
+                VectorParamsBuilder::new(dimensions as u64, Distance::Cosine).build(),
+            );
+
+            self.client
+                .create_collection(
+                    CreateCollectionBuilder::new(name).vectors_config(vectors_config),
+                )
+                .await
+                .map_err(|e| DataError::backend(e.to_string()))?;
+
+            tracing::info!(
+                target: TRACING_TARGET,
+                collection = %name,
+                dimensions = %dimensions,
+                "Created Qdrant collection"
+            );
+        }
+
+        Ok(())
     }
 
     /// Extracts vector data from Qdrant's VectorsOutput.
@@ -72,53 +105,21 @@ impl QdrantBackend {
 }
 
 #[async_trait]
-impl VectorStoreBackend for QdrantBackend {
-    async fn create_collection(&self, name: &str, dimensions: usize) -> VectorResult<()> {
-        let vectors_config = VectorsConfig::Params(
-            VectorParamsBuilder::new(dimensions as u64, Distance::Cosine).build(),
-        );
+impl VectorOutput for QdrantBackend {
+    async fn insert(&self, ctx: &VectorContext, vectors: Vec<VectorData>) -> DataResult<()> {
+        if vectors.is_empty() {
+            return Ok(());
+        }
 
-        self.client
-            .create_collection(CreateCollectionBuilder::new(name).vectors_config(vectors_config))
-            .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
+        // Get dimensions from the first vector
+        let dimensions = vectors
+            .first()
+            .map(|v| v.vector.len())
+            .ok_or_else(|| DataError::invalid("No vectors provided"))?;
 
-        tracing::info!(
-            target: TRACING_TARGET,
-            collection = %name,
-            dimensions = %dimensions,
-            "Created Qdrant collection"
-        );
+        // Ensure collection exists
+        self.ensure_collection(&ctx.collection, dimensions).await?;
 
-        Ok(())
-    }
-
-    async fn delete_collection(&self, name: &str) -> VectorResult<()> {
-        self.client
-            .delete_collection(name)
-            .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
-
-        tracing::info!(
-            target: TRACING_TARGET,
-            collection = %name,
-            "Deleted Qdrant collection"
-        );
-
-        Ok(())
-    }
-
-    async fn collection_exists(&self, name: &str) -> VectorResult<bool> {
-        let exists = self
-            .client
-            .collection_exists(name)
-            .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
-
-        Ok(exists)
-    }
-
-    async fn upsert(&self, collection: &str, vectors: Vec<VectorData>) -> VectorResult<()> {
         let points: Vec<PointStruct> = vectors
             .into_iter()
             .map(|v| {
@@ -133,21 +134,21 @@ impl VectorStoreBackend for QdrantBackend {
             .collect();
 
         self.client
-            .upsert_points(UpsertPointsBuilder::new(collection, points))
+            .upsert_points(UpsertPointsBuilder::new(&ctx.collection, points))
             .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
+            .map_err(|e| DataError::backend(e.to_string()))?;
 
         Ok(())
     }
 
     async fn search(
         &self,
-        collection: &str,
+        ctx: &VectorContext,
         query: Vec<f32>,
         limit: usize,
-        options: SearchOptions,
-    ) -> VectorResult<Vec<SearchResult>> {
-        let mut search = SearchPointsBuilder::new(collection, query, limit as u64);
+        options: VectorSearchOptions,
+    ) -> DataResult<Vec<VectorSearchResult>> {
+        let mut search = SearchPointsBuilder::new(&ctx.collection, query, limit as u64);
 
         if options.include_vectors {
             search = search.with_vectors(VectorsSelectorOptions::Enable(true));
@@ -167,7 +168,7 @@ impl VectorStoreBackend for QdrantBackend {
             .client
             .search_points(search)
             .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
+            .map_err(|e| DataError::backend(e.to_string()))?;
 
         let results = response
             .result
@@ -182,60 +183,12 @@ impl VectorStoreBackend for QdrantBackend {
                     .map(|(k, v)| (k, qdrant_value_to_json(v)))
                     .collect();
 
-                SearchResult {
+                VectorSearchResult {
                     id,
                     score: point.score,
                     vector,
                     metadata,
                 }
-            })
-            .collect();
-
-        Ok(results)
-    }
-
-    async fn delete(&self, collection: &str, ids: Vec<String>) -> VectorResult<()> {
-        let point_ids: Vec<PointId> = ids.into_iter().map(PointId::from).collect();
-
-        self.client
-            .delete_points(DeletePointsBuilder::new(collection).points(point_ids))
-            .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
-
-        Ok(())
-    }
-
-    async fn get(&self, collection: &str, ids: Vec<String>) -> VectorResult<Vec<VectorData>> {
-        let point_ids: Vec<PointId> = ids.into_iter().map(PointId::from).collect();
-
-        let response = self
-            .client
-            .get_points(
-                GetPointsBuilder::new(collection, point_ids)
-                    .with_vectors(VectorsSelectorOptions::Enable(true))
-                    .with_payload(SelectorOptions::Enable(true)),
-            )
-            .await
-            .map_err(|e| VectorError::backend(e.to_string()))?;
-
-        let results = response
-            .result
-            .into_iter()
-            .filter_map(|point| {
-                let id = Self::extract_point_id(point.id)?;
-                let vector = Self::extract_vector(point.vectors)?;
-
-                let metadata: HashMap<String, serde_json::Value> = point
-                    .payload
-                    .into_iter()
-                    .map(|(k, v)| (k, qdrant_value_to_json(v)))
-                    .collect();
-
-                Some(VectorData {
-                    id,
-                    vector,
-                    metadata,
-                })
             })
             .collect();
 
@@ -306,7 +259,6 @@ fn qdrant_value_to_json(value: qdrant_client::qdrant::Value) -> serde_json::Valu
 
 /// Parses a JSON filter into Qdrant conditions.
 fn parse_filter(filter: &serde_json::Value) -> Option<Vec<Condition>> {
-    // Simple filter parsing - can be extended for more complex queries
     if let serde_json::Value::Object(obj) = filter {
         let conditions: Vec<Condition> = obj
             .iter()

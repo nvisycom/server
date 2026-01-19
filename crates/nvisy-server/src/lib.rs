@@ -7,7 +7,6 @@ mod error;
 pub mod extract;
 pub mod handler;
 pub mod middleware;
-pub mod pipeline;
 pub mod service;
 
 pub use crate::error::{BoxedError, Error, ErrorKind, Result};

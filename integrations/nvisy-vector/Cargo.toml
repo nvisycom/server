@@ -20,7 +20,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true }
+nvisy-data = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt", "sync"] }
@@ -37,12 +37,19 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 
 # Derive macros & utilities
-thiserror = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["debug", "display", "from", "into"] }
 async-trait = { workspace = true, features = [] }
 
 # Vector store clients
 qdrant-client = "1.13"
+pinecone-sdk = "0.1"
+milvus-sdk-rust = "0.1"
+prost-types = "0.12"
+
+# Database (for pgvector)
+diesel = { workspace = true, features = ["postgres"] }
+diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
+pgvector = { workspace = true, features = ["diesel"] }
+deadpool = { workspace = true, features = [] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

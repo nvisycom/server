@@ -7,7 +7,6 @@ mod security;
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use nvisy_rig::RigService;
 use nvisy_webhook::WebhookService;
 
 use crate::Result;
@@ -31,9 +30,6 @@ pub struct ServiceState {
     pub nats: NatsClient,
     pub webhook: WebhookService,
 
-    // AI services:
-    pub rig: RigService,
-
     // Internal services:
     pub health_cache: HealthCache,
     pub integration_provider: IntegrationProvider,
@@ -54,23 +50,10 @@ impl ServiceState {
         let postgres = service_config.connect_postgres().await?;
         let nats = service_config.connect_nats().await?;
 
-        // Initialize AI services
-        let rig = RigService::new(
-            service_config.rig_config.clone(),
-            postgres.clone(),
-            nats.clone(),
-        )
-        .await
-        .map_err(|e| {
-            crate::Error::internal("rig", "Failed to initialize rig service").with_source(e)
-        })?;
-
         let service_state = Self {
             postgres,
             nats,
             webhook: webhook_service,
-
-            rig,
 
             health_cache: HealthCache::new(),
             integration_provider: IntegrationProvider::new(),
@@ -98,9 +81,6 @@ macro_rules! impl_di {
 impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
-
-// AI services:
-impl_di!(rig: RigService);
 
 // Internal services:
 impl_di!(health_cache: HealthCache);

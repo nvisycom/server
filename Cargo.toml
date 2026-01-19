@@ -7,10 +7,11 @@ members = [
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-postgres",
-    "./crates/nvisy-rig",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
+    "./integrations/nvisy-data",
     "./integrations/nvisy-opendal",
+    "./integrations/nvisy-rig",
     "./integrations/nvisy-runtime",
     "./integrations/nvisy-vector",
 ]
@@ -35,10 +36,11 @@ documentation = "https://docs.rs/nvisy-server"
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-data = { path = "./integrations/nvisy-data", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-opendal = { path = "./integrations/nvisy-opendal", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
-nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
+nvisy-rig = { path = "./integrations/nvisy-rig", version = "0.1.0" }
 nvisy-runtime = { path = "./integrations/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-vector = { path = "./integrations/nvisy-vector", version = "0.1.0" }
