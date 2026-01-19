@@ -3,8 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 mod error;
-#[doc(hidden)]
-pub mod prelude;
 pub mod types;
 
 pub use error::{BoxedError, Error, ErrorKind, Result};

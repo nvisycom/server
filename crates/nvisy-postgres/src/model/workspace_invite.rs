@@ -5,8 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_invites;
-use crate::types::RECENTLY_SENT_HOURS;
-use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, WorkspaceRole};
+use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, RECENTLY_SENT_HOURS, WorkspaceRole};
 
 /// Workspace invitation model representing an invitation to join a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]

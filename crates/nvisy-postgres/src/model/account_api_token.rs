@@ -6,8 +6,10 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_api_tokens;
-use crate::types::{ApiTokenType, HasCreatedAt, HasExpiresAt, HasSecurityContext};
-use crate::types::{EXPIRY_WARNING_MINUTES, LONG_LIVED_THRESHOLD_HOURS};
+use crate::types::{
+    ApiTokenType, EXPIRY_WARNING_MINUTES, HasCreatedAt, HasExpiresAt, HasSecurityContext,
+    LONG_LIVED_THRESHOLD_HOURS,
+};
 
 /// Account API token model representing an authentication token.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]

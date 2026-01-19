@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use tokio::sync::Semaphore;
 
+use super::EngineConfig;
 use crate::error::WorkflowResult;
 use crate::graph::WorkflowGraph;
-
-use super::EngineConfig;
 
 /// Tracing target for engine operations.
 const TRACING_TARGET: &str = "nvisy_workflow::engine";

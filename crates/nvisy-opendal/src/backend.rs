@@ -3,8 +3,14 @@
 use opendal::{Operator, services};
 
 use crate::TRACING_TARGET;
-use crate::config::{BackendType, StorageConfig};
+use crate::azblob::AzureBlobConfig;
+use crate::config::StorageConfig;
+use crate::dropbox::DropboxConfig;
 use crate::error::{StorageError, StorageResult};
+use crate::gcs::GcsConfig;
+use crate::gdrive::GoogleDriveConfig;
+use crate::onedrive::OneDriveConfig;
+use crate::s3::S3Config;
 
 /// Unified storage backend that wraps OpenDAL operators.
 #[derive(Clone)]
@@ -20,8 +26,7 @@ impl StorageBackend {
 
         tracing::info!(
             target: TRACING_TARGET,
-            backend = ?config.backend_type,
-            root = %config.root,
+            backend = %config.backend_name(),
             "Storage backend initialized"
         );
 
@@ -33,9 +38,9 @@ impl StorageBackend {
         &self.config
     }
 
-    /// Returns the backend type.
-    pub fn backend_type(&self) -> &BackendType {
-        &self.config.backend_type
+    /// Returns the backend name.
+    pub fn backend_name(&self) -> &'static str {
+        self.config.backend_name()
     }
 
     /// Reads a file from storage.
@@ -156,119 +161,126 @@ impl StorageBackend {
     }
 
     /// Creates an OpenDAL operator based on configuration.
-    #[allow(unreachable_patterns)]
     fn create_operator(config: &StorageConfig) -> StorageResult<Operator> {
-        match config.backend_type {
-            #[cfg(feature = "s3")]
-            BackendType::S3 => {
-                let mut builder = services::S3::default().bucket(&config.root);
-
-                if let Some(ref region) = config.region {
-                    builder = builder.region(region);
-                }
-
-                if let Some(ref endpoint) = config.endpoint {
-                    builder = builder.endpoint(endpoint);
-                }
-
-                if let Some(ref access_key_id) = config.access_key_id {
-                    builder = builder.access_key_id(access_key_id);
-                }
-
-                if let Some(ref secret_access_key) = config.secret_access_key {
-                    builder = builder.secret_access_key(secret_access_key);
-                }
-
-                Operator::new(builder)
-                    .map(|op| op.finish())
-                    .map_err(|e| StorageError::init(e.to_string()))
-            }
-
-            #[cfg(feature = "gcs")]
-            BackendType::Gcs => {
-                let builder = services::Gcs::default().bucket(&config.root);
-
-                Operator::new(builder)
-                    .map(|op| op.finish())
-                    .map_err(|e| StorageError::init(e.to_string()))
-            }
-
-            #[cfg(feature = "azblob")]
-            BackendType::AzureBlob => {
-                let mut builder = services::Azblob::default().container(&config.root);
-
-                if let Some(ref account_name) = config.account_name {
-                    builder = builder.account_name(account_name);
-                }
-
-                if let Some(ref account_key) = config.account_key {
-                    builder = builder.account_key(account_key);
-                }
-
-                Operator::new(builder)
-                    .map(|op| op.finish())
-                    .map_err(|e| StorageError::init(e.to_string()))
-            }
-
-            #[cfg(feature = "gdrive")]
-            BackendType::GoogleDrive => {
-                let mut builder = services::Gdrive::default().root(&config.root);
-
-                if let Some(ref access_token) = config.access_token {
-                    builder = builder.access_token(access_token);
-                }
-
-                Operator::new(builder)
-                    .map(|op| op.finish())
-                    .map_err(|e| StorageError::init(e.to_string()))
-            }
-
-            #[cfg(feature = "dropbox")]
-            BackendType::Dropbox => {
-                let mut builder = services::Dropbox::default().root(&config.root);
-
-                if let Some(ref access_token) = config.access_token {
-                    builder = builder.access_token(access_token);
-                }
-
-                if let Some(ref refresh_token) = config.refresh_token {
-                    builder = builder.refresh_token(refresh_token);
-                }
-
-                if let Some(ref client_id) = config.access_key_id {
-                    builder = builder.client_id(client_id);
-                }
-
-                if let Some(ref client_secret) = config.secret_access_key {
-                    builder = builder.client_secret(client_secret);
-                }
-
-                Operator::new(builder)
-                    .map(|op| op.finish())
-                    .map_err(|e| StorageError::init(e.to_string()))
-            }
-
-            #[cfg(feature = "onedrive")]
-            BackendType::OneDrive => {
-                let mut builder = services::Onedrive::default().root(&config.root);
-
-                if let Some(ref access_token) = config.access_token {
-                    builder = builder.access_token(access_token);
-                }
-
-                Operator::new(builder)
-                    .map(|op| op.finish())
-                    .map_err(|e| StorageError::init(e.to_string()))
-            }
-
-            // This should never be reached if the config was properly created
-            // with the same features enabled
-            #[allow(unreachable_patterns)]
-            _ => Err(StorageError::init(format!(
-                "Backend type {:?} is not supported with current features",
-                config.backend_type
-            ))),
+        match config {
+            StorageConfig::S3(cfg) => Self::create_s3_operator(cfg),
+            StorageConfig::Gcs(cfg) => Self::create_gcs_operator(cfg),
+            StorageConfig::AzureBlob(cfg) => Self::create_azblob_operator(cfg),
+            StorageConfig::GoogleDrive(cfg) => Self::create_gdrive_operator(cfg),
+            StorageConfig::Dropbox(cfg) => Self::create_dropbox_operator(cfg),
+            StorageConfig::OneDrive(cfg) => Self::create_onedrive_operator(cfg),
         }
+    }
+
+    fn create_s3_operator(cfg: &S3Config) -> StorageResult<Operator> {
+        let mut builder = services::S3::default()
+            .bucket(&cfg.bucket)
+            .region(&cfg.region);
+
+        if let Some(ref endpoint) = cfg.endpoint {
+            builder = builder.endpoint(endpoint);
+        }
+
+        if let Some(ref access_key_id) = cfg.access_key_id {
+            builder = builder.access_key_id(access_key_id);
+        }
+
+        if let Some(ref secret_access_key) = cfg.secret_access_key {
+            builder = builder.secret_access_key(secret_access_key);
+        }
+
+        // Apply prefix as root path
+        if let Some(ref prefix) = cfg.prefix {
+            builder = builder.root(prefix);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::init(e.to_string()))
+    }
+
+    fn create_gcs_operator(cfg: &GcsConfig) -> StorageResult<Operator> {
+        let mut builder = services::Gcs::default().bucket(&cfg.bucket);
+
+        if let Some(ref credentials) = cfg.credentials {
+            builder = builder.credential(credentials);
+        }
+
+        // Apply prefix as root path
+        if let Some(ref prefix) = cfg.prefix {
+            builder = builder.root(prefix);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::init(e.to_string()))
+    }
+
+    fn create_azblob_operator(cfg: &AzureBlobConfig) -> StorageResult<Operator> {
+        let mut builder = services::Azblob::default()
+            .container(&cfg.container)
+            .account_name(&cfg.account_name);
+
+        if let Some(ref account_key) = cfg.account_key {
+            builder = builder.account_key(account_key);
+        }
+
+        // Apply prefix as root path
+        if let Some(ref prefix) = cfg.prefix {
+            builder = builder.root(prefix);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::init(e.to_string()))
+    }
+
+    fn create_gdrive_operator(cfg: &GoogleDriveConfig) -> StorageResult<Operator> {
+        let mut builder = services::Gdrive::default().root(&cfg.root);
+
+        if let Some(ref access_token) = cfg.access_token {
+            builder = builder.access_token(access_token);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::init(e.to_string()))
+    }
+
+    fn create_dropbox_operator(cfg: &DropboxConfig) -> StorageResult<Operator> {
+        let mut builder = services::Dropbox::default().root(&cfg.root);
+
+        if let Some(ref access_token) = cfg.access_token {
+            builder = builder.access_token(access_token);
+        }
+
+        if let Some(ref refresh_token) = cfg.refresh_token {
+            builder = builder.refresh_token(refresh_token);
+        }
+
+        if let Some(ref client_id) = cfg.client_id {
+            builder = builder.client_id(client_id);
+        }
+
+        if let Some(ref client_secret) = cfg.client_secret {
+            builder = builder.client_secret(client_secret);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::init(e.to_string()))
+    }
+
+    fn create_onedrive_operator(cfg: &OneDriveConfig) -> StorageResult<Operator> {
+        let mut builder = services::Onedrive::default().root(&cfg.root);
+
+        if let Some(ref access_token) = cfg.access_token {
+            builder = builder.access_token(access_token);
+        }
+
+        Operator::new(builder)
+            .map(|op| op.finish())
+            .map_err(|e| StorageError::init(e.to_string()))
     }
 }
 
@@ -286,8 +298,7 @@ pub struct FileMetadata {
 impl std::fmt::Debug for StorageBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorageBackend")
-            .field("backend_type", &self.config.backend_type)
-            .field("root", &self.config.root)
+            .field("backend", &self.config.backend_name())
             .finish()
     }
 }

@@ -7,7 +7,6 @@ mod indexed;
 use nvisy_postgres::model::NewFileChunk;
 use nvisy_postgres::query::FileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
-
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 

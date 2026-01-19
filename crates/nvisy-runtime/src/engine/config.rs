@@ -27,10 +27,10 @@ pub struct EngineConfig {
 
 impl EngineConfigBuilder {
     fn validate(&self) -> Result<(), String> {
-        if let Some(max) = self.max_concurrent_runs {
-            if max == 0 {
-                return Err("max_concurrent_runs must be at least 1".into());
-            }
+        if let Some(max) = self.max_concurrent_runs
+            && max == 0
+        {
+            return Err("max_concurrent_runs must be at least 1".into());
         }
         Ok(())
     }

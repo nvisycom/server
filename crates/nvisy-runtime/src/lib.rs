@@ -8,9 +8,6 @@ pub mod graph;
 pub mod node;
 pub mod runtime;
 
-#[doc(hidden)]
-pub mod prelude;
-
 pub use error::{WorkflowError, WorkflowResult};
 
 /// Tracing target for runtime operations.

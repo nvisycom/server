@@ -43,9 +43,6 @@ make generate-all
 cargo run --features dotenv
 ```
 
-> **Note**: Some dependencies require SSH access to private GitHub repositories.
-> See [CONTRIBUTING.md](CONTRIBUTING.md#ssh-access) for setup instructions.
-
 ## Configuration
 
 See [.env.example](.env.example) for all available environment variables.

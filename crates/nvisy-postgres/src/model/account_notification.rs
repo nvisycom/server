@@ -5,8 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_notifications;
-use crate::types::DEFAULT_RETENTION_DAYS;
-use crate::types::{HasCreatedAt, HasExpiresAt, NotificationEvent};
+use crate::types::{DEFAULT_RETENTION_DAYS, HasCreatedAt, HasExpiresAt, NotificationEvent};
 
 /// Account notification model representing a notification sent to a user.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]

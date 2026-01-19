@@ -17,23 +17,6 @@ make install-all
 make generate-keys
 ```
 
-### SSH Access
-
-Some dependencies are fetched from private GitHub repositories via SSH. Ensure
-your SSH key is added to your GitHub account and ssh-agent is running:
-
-```bash
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519
-ssh -T git@github.com  # verify access
-```
-
-If cargo fails to fetch git dependencies, enable CLI-based git fetching:
-
-```bash
-export CARGO_NET_GIT_FETCH_WITH_CLI=true
-```
-
 ## Development
 
 Run all CI checks locally before submitting a pull request:
