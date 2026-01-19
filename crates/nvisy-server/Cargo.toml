@@ -36,7 +36,6 @@ config = [
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-rig = { workspace = true, features = [] }
-nvisy-runtime = { workspace = true }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime

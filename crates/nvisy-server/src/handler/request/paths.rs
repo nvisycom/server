@@ -13,15 +13,6 @@ pub struct WorkspacePathParams {
     pub workspace_id: Uuid,
 }
 
-/// Path parameters for document operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentPathParams {
-    /// Unique identifier of the document.
-    pub document_id: Uuid,
-}
-
 /// Path parameters for workspace member operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -98,18 +89,6 @@ pub struct VersionPathParams {
     pub version_id: Uuid,
 }
 
-/// Path parameters for comment operations (comment ID only).
-///
-/// Since comment IDs are globally unique UUIDs, file/workspace context can be
-/// derived from the comment record itself for authorization purposes.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CommentPathParams {
-    /// Unique identifier of the comment.
-    pub comment_id: Uuid,
-}
-
 /// Path parameters for webhook operations (webhook ID only).
 ///
 /// Since webhook IDs are globally unique UUIDs, workspace context can be
@@ -170,14 +149,14 @@ pub struct AccountPathParams {
     pub account_id: Uuid,
 }
 
-/// Path parameters for chat session operations (session ID only).
+/// Path parameters for pipeline operations.
 ///
-/// Since session IDs are globally unique UUIDs, workspace context can be
-/// derived from the session record itself for authorization purposes.
+/// Since pipeline IDs are globally unique UUIDs, workspace context can be
+/// derived from the pipeline record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatSessionPathParams {
-    /// Unique identifier of the chat session.
-    pub session_id: Uuid,
+pub struct PipelinePathParams {
+    /// Unique identifier of the pipeline.
+    pub pipeline_id: Uuid,
 }

@@ -23,17 +23,7 @@ pub enum Permission {
     /// Can delete the entire workspace.
     DeleteWorkspace,
 
-    // Document permissions
-    /// Can view and read documents in the workspace.
-    ViewDocuments,
-    /// Can create new documents in the workspace.
-    CreateDocuments,
-    /// Can edit existing documents.
-    UpdateDocuments,
-    /// Can delete documents from the workspace.
-    DeleteDocuments,
-
-    // File and asset permissions
+    // File permissions
     /// Can view and download files.
     ViewFiles,
     /// Can upload new files to the workspace.
@@ -44,6 +34,20 @@ pub enum Permission {
     DownloadFiles,
     /// Can delete files from the workspace.
     DeleteFiles,
+    /// Can create and manage annotations on files.
+    AnnotateFiles,
+
+    // Pipeline permissions
+    /// Can view pipelines in the workspace.
+    ViewPipelines,
+    /// Can create new pipelines.
+    CreatePipelines,
+    /// Can update existing pipelines.
+    UpdatePipelines,
+    /// Can delete pipelines.
+    DeletePipelines,
+    /// Can execute pipeline runs.
+    RunPipelines,
 
     // Member management permissions
     /// Can view workspace members and their roles.
@@ -72,12 +76,6 @@ pub enum Permission {
     DeleteWebhooks,
     /// Can test webhooks by sending test payloads.
     TestWebhooks,
-
-    // Workspace settings and configuration
-    /// Can view workspace settings.
-    ViewSettings,
-    /// Can modify workspace settings and configuration.
-    ManageSettings,
 }
 
 impl Permission {
@@ -94,25 +92,26 @@ impl Permission {
     #[must_use]
     pub const fn minimum_required_role(self) -> WorkspaceRole {
         match self {
-            // Guest-level permissions
+            // Guest-level permissions (read-only access)
             Self::ViewWorkspace
-            | Self::ViewDocuments
             | Self::ViewFiles
+            | Self::ViewPipelines
             | Self::ViewMembers
             | Self::ViewIntegrations
-            | Self::ViewWebhooks
-            | Self::ViewSettings => WorkspaceRole::Guest,
+            | Self::ViewWebhooks => WorkspaceRole::Guest,
 
-            // Member-level permissions
-            Self::CreateDocuments
-            | Self::UpdateDocuments
-            | Self::DeleteDocuments
-            | Self::UploadFiles
+            // Member-level permissions (create and modify own resources)
+            Self::UploadFiles
             | Self::UpdateFiles
             | Self::DownloadFiles
-            | Self::DeleteFiles => WorkspaceRole::Member,
+            | Self::DeleteFiles
+            | Self::AnnotateFiles
+            | Self::CreatePipelines
+            | Self::UpdatePipelines
+            | Self::DeletePipelines
+            | Self::RunPipelines => WorkspaceRole::Member,
 
-            // Admin-level permissions
+            // Admin-level permissions (manage workspace resources)
             Self::UpdateWorkspace
             | Self::InviteMembers
             | Self::RemoveMembers
@@ -120,8 +119,7 @@ impl Permission {
             | Self::CreateWebhooks
             | Self::UpdateWebhooks
             | Self::DeleteWebhooks
-            | Self::TestWebhooks
-            | Self::ManageSettings => WorkspaceRole::Admin,
+            | Self::TestWebhooks => WorkspaceRole::Admin,
 
             // Owner-only permissions (highest level)
             Self::DeleteWorkspace | Self::ManageRoles => WorkspaceRole::Owner,

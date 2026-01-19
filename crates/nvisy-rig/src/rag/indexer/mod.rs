@@ -4,8 +4,8 @@
 
 mod indexed;
 
-use nvisy_postgres::model::NewDocumentChunk;
-use nvisy_postgres::query::DocumentChunkRepository;
+use nvisy_postgres::model::NewFileChunk;
+use nvisy_postgres::query::FileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
 
 use sha2::{Digest, Sha256};
@@ -99,7 +99,7 @@ impl Indexer {
         // Prepare new chunk records
         let model_name = self.provider.model_name();
 
-        let new_chunks: Vec<NewDocumentChunk> = chunks
+        let new_chunks: Vec<NewFileChunk> = chunks
             .iter()
             .zip(embeddings.iter())
             .enumerate()
@@ -117,14 +117,14 @@ impl Indexer {
                     "page": chunk.metadata.page,
                 });
 
-                NewDocumentChunk {
+                NewFileChunk {
                     file_id: self.file_id,
                     chunk_index: Some(idx as i32),
                     content_sha256,
                     content_size: Some(content_size),
                     token_count: Some(estimate_tokens(&chunk.text) as i32),
                     embedding: Vector::from(embedding_vec),
-                    embedding_model: Some(model_name.to_owned()),
+                    embedding_model: model_name.to_owned(),
                     metadata: Some(metadata),
                 }
             })
@@ -138,7 +138,7 @@ impl Indexer {
             .map_err(|e| Error::retrieval(format!("failed to get connection: {e}")))?;
 
         let created = conn
-            .create_document_chunks(new_chunks)
+            .create_file_chunks(new_chunks)
             .await
             .map_err(|e| Error::retrieval(format!("failed to create chunks: {e}")))?;
 
@@ -154,7 +154,7 @@ impl Indexer {
             .map_err(|e| Error::retrieval(format!("failed to get connection: {e}")))?;
 
         let deleted = conn
-            .delete_document_file_chunks(self.file_id)
+            .delete_file_chunks(self.file_id)
             .await
             .map_err(|e| Error::retrieval(format!("failed to delete chunks: {e}")))?;
 

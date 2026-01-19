@@ -6,6 +6,7 @@ members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
+    "./crates/nvisy-opendal",
     "./crates/nvisy-postgres",
     "./crates/nvisy-rig",
     "./crates/nvisy-runtime",
@@ -34,6 +35,7 @@ documentation = "https://docs.rs/nvisy-server"
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
+nvisy-opendal = { path = "./crates/nvisy-opendal", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
 nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
@@ -133,3 +135,7 @@ woothee = { version = "0.13", features = [] }
 
 # AI/ML frameworks
 rig-core = { version = "0.28", default-features = false, features = ["reqwest-rustls"] }
+
+# Storage abstraction
+opendal = { version = "0.53", features = [] }
+chrono = { version = "0.4", features = ["serde"] }

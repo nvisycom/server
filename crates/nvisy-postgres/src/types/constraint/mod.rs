@@ -18,18 +18,14 @@ mod workspace_members;
 mod workspace_webhooks;
 mod workspaces;
 
-// Document-related constraint modules
-mod document_annotations;
-mod document_chunks;
-mod document_comments;
-mod document_files;
-mod document_versions;
-mod documents;
+// File-related constraint modules
+mod file_annotations;
+mod file_chunks;
+mod files;
 
-// Chat-related constraint modules
-mod chat_operations;
-mod chat_sessions;
-mod chat_tool_calls;
+// Pipeline-related constraint modules
+mod pipeline_runs;
+mod pipelines;
 
 use std::fmt;
 
@@ -39,15 +35,11 @@ pub use self::account_action_tokens::AccountActionTokenConstraints;
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
-pub use self::chat_operations::ChatOperationConstraints;
-pub use self::chat_sessions::ChatSessionConstraints;
-pub use self::chat_tool_calls::ChatToolCallConstraints;
-pub use self::document_annotations::DocumentAnnotationConstraints;
-pub use self::document_chunks::DocumentChunkConstraints;
-pub use self::document_comments::DocumentCommentConstraints;
-pub use self::document_files::DocumentFileConstraints;
-pub use self::document_versions::DocumentVersionConstraints;
-pub use self::documents::DocumentConstraints;
+pub use self::file_annotations::FileAnnotationConstraints;
+pub use self::file_chunks::FileChunkConstraints;
+pub use self::files::FileConstraints;
+pub use self::pipeline_runs::PipelineRunConstraints;
+pub use self::pipelines::PipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_integration_runs::WorkspaceIntegrationRunConstraints;
 pub use self::workspace_integrations::WorkspaceIntegrationConstraints;
@@ -79,18 +71,14 @@ pub enum ConstraintViolation {
     WorkspaceWebhook(WorkspaceWebhookConstraints),
     WorkspaceIntegrationRun(WorkspaceIntegrationRunConstraints),
 
-    // Document-related constraints
-    Document(DocumentConstraints),
-    DocumentAnnotation(DocumentAnnotationConstraints),
-    DocumentChunk(DocumentChunkConstraints),
-    DocumentComment(DocumentCommentConstraints),
-    DocumentFile(DocumentFileConstraints),
-    DocumentVersion(DocumentVersionConstraints),
+    // File-related constraints
+    File(FileConstraints),
+    FileAnnotation(FileAnnotationConstraints),
+    FileChunk(FileChunkConstraints),
 
-    // Chat-related constraints
-    ChatSession(ChatSessionConstraints),
-    ChatToolCall(ChatToolCallConstraints),
-    ChatOperation(ChatOperationConstraints),
+    // Pipeline-related constraints
+    Pipeline(PipelineConstraints),
+    PipelineRun(PipelineRunConstraints),
 }
 
 /// Categories of database constraint violations.
@@ -159,19 +147,13 @@ impl ConstraintViolation {
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
                 WorkspaceIntegrationRunConstraints::new => WorkspaceIntegrationRun,
             },
-            "documents" => try_parse!(DocumentConstraints::new => Document),
-            "document" => try_parse! {
-                DocumentAnnotationConstraints::new => DocumentAnnotation,
-                DocumentChunkConstraints::new => DocumentChunk,
-                DocumentCommentConstraints::new => DocumentComment,
-                DocumentFileConstraints::new => DocumentFile,
-                DocumentVersionConstraints::new => DocumentVersion,
+            "files" => try_parse!(FileConstraints::new => File),
+            "file" => try_parse! {
+                FileAnnotationConstraints::new => FileAnnotation,
+                FileChunkConstraints::new => FileChunk,
             },
-            "chat" => try_parse! {
-                ChatSessionConstraints::new => ChatSession,
-                ChatToolCallConstraints::new => ChatToolCall,
-                ChatOperationConstraints::new => ChatOperation,
-            },
+            "pipelines" => try_parse!(PipelineConstraints::new => Pipeline),
+            "pipeline" => try_parse!(PipelineRunConstraints::new => PipelineRun),
             _ => None,
         }
     }
@@ -196,18 +178,14 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceWebhook(_) => "workspace_webhooks",
             ConstraintViolation::WorkspaceIntegrationRun(_) => "workspace_integration_runs",
 
-            // Document-related tables
-            ConstraintViolation::Document(_) => "documents",
-            ConstraintViolation::DocumentAnnotation(_) => "document_annotations",
-            ConstraintViolation::DocumentChunk(_) => "document_chunks",
-            ConstraintViolation::DocumentComment(_) => "document_comments",
-            ConstraintViolation::DocumentFile(_) => "document_files",
-            ConstraintViolation::DocumentVersion(_) => "document_versions",
+            // File-related tables
+            ConstraintViolation::File(_) => "files",
+            ConstraintViolation::FileAnnotation(_) => "file_annotations",
+            ConstraintViolation::FileChunk(_) => "file_chunks",
 
-            // Chat-related tables
-            ConstraintViolation::ChatSession(_) => "chat_sessions",
-            ConstraintViolation::ChatToolCall(_) => "chat_tool_calls",
-            ConstraintViolation::ChatOperation(_) => "chat_operations",
+            // Pipeline-related tables
+            ConstraintViolation::Pipeline(_) => "pipelines",
+            ConstraintViolation::PipelineRun(_) => "pipeline_runs",
         }
     }
 
@@ -215,7 +193,6 @@ impl ConstraintViolation {
     ///
     /// This groups constraints by their business domain for higher-level categorization.
     pub fn functional_area(&self) -> &'static str {
-        // TODO: Implement functional area enumeration.
         match self {
             ConstraintViolation::Account(_)
             | ConstraintViolation::AccountNotification(_)
@@ -230,16 +207,11 @@ impl ConstraintViolation {
             | ConstraintViolation::WorkspaceWebhook(_)
             | ConstraintViolation::WorkspaceIntegrationRun(_) => "workspaces",
 
-            ConstraintViolation::Document(_)
-            | ConstraintViolation::DocumentAnnotation(_)
-            | ConstraintViolation::DocumentChunk(_)
-            | ConstraintViolation::DocumentComment(_)
-            | ConstraintViolation::DocumentFile(_)
-            | ConstraintViolation::DocumentVersion(_) => "documents",
+            ConstraintViolation::File(_)
+            | ConstraintViolation::FileAnnotation(_)
+            | ConstraintViolation::FileChunk(_) => "files",
 
-            ConstraintViolation::ChatSession(_)
-            | ConstraintViolation::ChatToolCall(_)
-            | ConstraintViolation::ChatOperation(_) => "chat",
+            ConstraintViolation::Pipeline(_) | ConstraintViolation::PipelineRun(_) => "pipelines",
         }
     }
 
@@ -261,16 +233,12 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
             ConstraintViolation::WorkspaceIntegrationRun(c) => c.categorize(),
 
-            ConstraintViolation::Document(c) => c.categorize(),
-            ConstraintViolation::DocumentAnnotation(c) => c.categorize(),
-            ConstraintViolation::DocumentChunk(c) => c.categorize(),
-            ConstraintViolation::DocumentComment(c) => c.categorize(),
-            ConstraintViolation::DocumentFile(c) => c.categorize(),
-            ConstraintViolation::DocumentVersion(c) => c.categorize(),
+            ConstraintViolation::File(c) => c.categorize(),
+            ConstraintViolation::FileAnnotation(c) => c.categorize(),
+            ConstraintViolation::FileChunk(c) => c.categorize(),
 
-            ConstraintViolation::ChatSession(c) => c.categorize(),
-            ConstraintViolation::ChatToolCall(c) => c.categorize(),
-            ConstraintViolation::ChatOperation(c) => c.categorize(),
+            ConstraintViolation::Pipeline(c) => c.categorize(),
+            ConstraintViolation::PipelineRun(c) => c.categorize(),
         }
     }
 
@@ -297,16 +265,12 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceIntegrationRun(c) => write!(f, "{}", c),
 
-            ConstraintViolation::Document(c) => write!(f, "{}", c),
-            ConstraintViolation::DocumentAnnotation(c) => write!(f, "{}", c),
-            ConstraintViolation::DocumentChunk(c) => write!(f, "{}", c),
-            ConstraintViolation::DocumentComment(c) => write!(f, "{}", c),
-            ConstraintViolation::DocumentFile(c) => write!(f, "{}", c),
-            ConstraintViolation::DocumentVersion(c) => write!(f, "{}", c),
+            ConstraintViolation::File(c) => write!(f, "{}", c),
+            ConstraintViolation::FileAnnotation(c) => write!(f, "{}", c),
+            ConstraintViolation::FileChunk(c) => write!(f, "{}", c),
 
-            ConstraintViolation::ChatSession(c) => write!(f, "{}", c),
-            ConstraintViolation::ChatToolCall(c) => write!(f, "{}", c),
-            ConstraintViolation::ChatOperation(c) => write!(f, "{}", c),
+            ConstraintViolation::Pipeline(c) => write!(f, "{}", c),
+            ConstraintViolation::PipelineRun(c) => write!(f, "{}", c),
         }
     }
 }
@@ -340,10 +304,8 @@ mod tests {
         );
 
         assert_eq!(
-            ConstraintViolation::new("document_versions_version_number_min"),
-            Some(ConstraintViolation::DocumentVersion(
-                DocumentVersionConstraints::VersionNumberMin
-            ))
+            ConstraintViolation::new("files_version_number_min"),
+            Some(ConstraintViolation::File(FileConstraints::VersionNumberMin))
         );
 
         assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
@@ -357,9 +319,8 @@ mod tests {
         let violation = ConstraintViolation::Workspace(WorkspaceConstraints::DisplayNameLength);
         assert_eq!(violation.table_name(), "workspaces");
 
-        let violation =
-            ConstraintViolation::DocumentFile(DocumentFileConstraints::StoragePathNotEmpty);
-        assert_eq!(violation.table_name(), "document_files");
+        let violation = ConstraintViolation::File(FileConstraints::StoragePathNotEmpty);
+        assert_eq!(violation.table_name(), "files");
     }
 
     #[test]
@@ -375,9 +336,8 @@ mod tests {
             ConstraintViolation::WorkspaceMember(WorkspaceMemberConstraints::ShowOrderRange);
         assert_eq!(violation.functional_area(), "workspaces");
 
-        let violation =
-            ConstraintViolation::DocumentVersion(DocumentVersionConstraints::VersionNumberMin);
-        assert_eq!(violation.functional_area(), "documents");
+        let violation = ConstraintViolation::File(FileConstraints::VersionNumberMin);
+        assert_eq!(violation.functional_area(), "files");
     }
 
     #[test]

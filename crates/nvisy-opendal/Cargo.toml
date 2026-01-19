@@ -1,0 +1,72 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-opendal"
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+readme = "./README.md"
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# Default feature set (none for minimal dependencies)
+default = []
+
+# Amazon S3 storage backend
+s3 = ["opendal/services-s3"]
+
+# Google Cloud Storage backend
+gcs = ["opendal/services-gcs"]
+
+# Azure Blob Storage backend
+azblob = ["opendal/services-azblob"]
+
+# Google Drive backend
+gdrive = ["opendal/services-gdrive"]
+
+# Dropbox backend
+dropbox = ["opendal/services-dropbox"]
+
+# OneDrive backend
+onedrive = ["opendal/services-onedrive"]
+
+# All storage backends
+all-backends = ["s3", "gcs", "azblob", "gdrive", "dropbox", "onedrive"]
+
+[dependencies]
+# Internal crates
+nvisy-core = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt", "sync", "io-util"] }
+futures = { workspace = true, features = [] }
+
+# Storage
+opendal = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["debug", "display", "from", "into"] }
+
+# Data types
+jiff = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

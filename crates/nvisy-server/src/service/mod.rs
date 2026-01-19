@@ -8,11 +8,7 @@ mod security;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use nvisy_rig::RigService;
-use nvisy_runtime::RuntimeService;
 use nvisy_webhook::WebhookService;
-
-// Re-export archive types for handler use
-pub use nvisy_runtime::{ArchiveFormat, ArchiveResult, ArchiveService};
 
 use crate::Result;
 pub use crate::service::cache::HealthCache;
@@ -35,10 +31,8 @@ pub struct ServiceState {
     pub nats: NatsClient,
     pub webhook: WebhookService,
 
-    // AI & document services:
+    // AI services:
     pub rig: RigService,
-    pub runtime: RuntimeService,
-    pub archive: ArchiveService,
 
     // Internal services:
     pub health_cache: HealthCache,
@@ -77,8 +71,6 @@ impl ServiceState {
             webhook: webhook_service,
 
             rig,
-            runtime: RuntimeService::new(),
-            archive: ArchiveService::new(),
 
             health_cache: HealthCache::new(),
             integration_provider: IntegrationProvider::new(),
@@ -107,10 +99,8 @@ impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
 
-// AI and document services:
+// AI services:
 impl_di!(rig: RigService);
-impl_di!(runtime: RuntimeService);
-impl_di!(archive: ArchiveService);
 
 // Internal services:
 impl_di!(health_cache: HealthCache);

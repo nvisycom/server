@@ -6,15 +6,13 @@
 mod accounts;
 mod annotations;
 mod authentication;
-mod chat;
-mod comments;
-mod documents;
 mod error;
 mod files;
 mod integrations;
 mod invites;
 mod members;
 mod monitors;
+mod pipelines;
 pub mod request;
 pub mod response;
 mod runs;
@@ -52,10 +50,8 @@ fn private_routes(
         .merge(members::routes())
         .merge(webhooks::routes())
         .merge(files::routes())
-        .merge(documents::routes())
-        .merge(comments::routes())
         .merge(annotations::routes())
-        .merge(chat::routes());
+        .merge(pipelines::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);

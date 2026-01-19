@@ -18,10 +18,6 @@ pub mod sql_types {
     pub struct ApiTokenType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "content_segmentation"))]
-    pub struct ContentSegmentation;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "file_source"))]
     pub struct FileSource;
 
@@ -42,24 +38,20 @@ pub mod sql_types {
     pub struct NotificationEvent;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "processing_status"))]
-    pub struct ProcessingStatus;
+    #[diesel(postgres_type(name = "pipeline_run_status"))]
+    pub struct PipelineRunStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "require_mode"))]
-    pub struct RequireMode;
+    #[diesel(postgres_type(name = "pipeline_status"))]
+    pub struct PipelineStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "pipeline_trigger_type"))]
+    pub struct PipelineTriggerType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "run_type"))]
     pub struct RunType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "chat_session_status"))]
-    pub struct ChatSessionStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "chat_tool_status"))]
-    pub struct ChatToolStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
@@ -166,9 +158,9 @@ diesel::table! {
     use pgvector::sql_types::*;
     use super::sql_types::AnnotationType;
 
-    document_annotations (id) {
+    file_annotations (id) {
         id -> Uuid,
-        document_file_id -> Uuid,
+        file_id -> Uuid,
         account_id -> Uuid,
         content -> Text,
         annotation_type -> AnnotationType,
@@ -183,7 +175,7 @@ diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
 
-    document_chunks (id) {
+    file_chunks (id) {
         id -> Uuid,
         file_id -> Uuid,
         chunk_index -> Int4,
@@ -201,47 +193,20 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-
-    document_comments (id) {
-        id -> Uuid,
-        file_id -> Uuid,
-        account_id -> Uuid,
-        parent_comment_id -> Nullable<Uuid>,
-        reply_to_account_id -> Nullable<Uuid>,
-        content -> Text,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::RequireMode;
-    use super::sql_types::ProcessingStatus;
-    use super::sql_types::ContentSegmentation;
     use super::sql_types::FileSource;
 
-    document_files (id) {
+    files (id) {
         id -> Uuid,
         workspace_id -> Uuid,
-        document_id -> Nullable<Uuid>,
         account_id -> Uuid,
         parent_id -> Nullable<Uuid>,
         version_number -> Int4,
         display_name -> Text,
         original_filename -> Text,
         file_extension -> Text,
+        mime_type -> Nullable<Text>,
         tags -> Array<Nullable<Text>>,
         source -> FileSource,
-        require_mode -> RequireMode,
-        processing_priority -> Int4,
-        processing_status -> ProcessingStatus,
-        is_indexed -> Bool,
-        content_segmentation -> ContentSegmentation,
-        visual_support -> Bool,
         file_size_bytes -> Int8,
         file_hash_sha256 -> Bytea,
         storage_path -> Text,
@@ -256,75 +221,44 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::PipelineTriggerType;
+    use super::sql_types::PipelineRunStatus;
 
-    documents (id) {
+    pipeline_runs (id) {
+        id -> Uuid,
+        pipeline_id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        trigger_type -> PipelineTriggerType,
+        status -> PipelineRunStatus,
+        input_config -> Jsonb,
+        output_config -> Jsonb,
+        definition_snapshot -> Jsonb,
+        error -> Nullable<Jsonb>,
+        metrics -> Jsonb,
+        started_at -> Nullable<Timestamptz>,
+        completed_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+    use super::sql_types::PipelineStatus;
+
+    pipelines (id) {
         id -> Uuid,
         workspace_id -> Uuid,
         account_id -> Uuid,
-        display_name -> Text,
+        name -> Text,
         description -> Nullable<Text>,
-        tags -> Array<Nullable<Text>>,
+        status -> PipelineStatus,
+        definition -> Jsonb,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-
-    chat_operations (id) {
-        id -> Uuid,
-        tool_call_id -> Uuid,
-        file_id -> Uuid,
-        chunk_id -> Nullable<Uuid>,
-        operation_type -> Text,
-        operation_diff -> Jsonb,
-        applied -> Bool,
-        reverted -> Bool,
-        created_at -> Timestamptz,
-        applied_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::ChatSessionStatus;
-
-    chat_sessions (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        account_id -> Uuid,
-        primary_file_id -> Uuid,
-        display_name -> Text,
-        session_status -> ChatSessionStatus,
-        model_config -> Jsonb,
-        message_count -> Int4,
-        token_count -> Int4,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::ChatToolStatus;
-
-    chat_tool_calls (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        file_id -> Uuid,
-        chunk_id -> Nullable<Uuid>,
-        tool_name -> Text,
-        tool_input -> Jsonb,
-        tool_output -> Jsonb,
-        tool_status -> ChatToolStatus,
-        started_at -> Timestamptz,
-        completed_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -481,24 +415,16 @@ diesel::table! {
 diesel::joinable!(account_action_tokens -> accounts (account_id));
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
-diesel::joinable!(document_annotations -> accounts (account_id));
-diesel::joinable!(document_annotations -> document_files (document_file_id));
-diesel::joinable!(document_chunks -> document_files (file_id));
-diesel::joinable!(document_comments -> document_files (file_id));
-diesel::joinable!(document_files -> accounts (account_id));
-diesel::joinable!(document_files -> documents (document_id));
-diesel::joinable!(document_files -> workspaces (workspace_id));
-diesel::joinable!(documents -> accounts (account_id));
-diesel::joinable!(documents -> workspaces (workspace_id));
-diesel::joinable!(chat_operations -> document_chunks (chunk_id));
-diesel::joinable!(chat_operations -> document_files (file_id));
-diesel::joinable!(chat_operations -> chat_tool_calls (tool_call_id));
-diesel::joinable!(chat_sessions -> accounts (account_id));
-diesel::joinable!(chat_sessions -> document_files (primary_file_id));
-diesel::joinable!(chat_sessions -> workspaces (workspace_id));
-diesel::joinable!(chat_tool_calls -> document_chunks (chunk_id));
-diesel::joinable!(chat_tool_calls -> document_files (file_id));
-diesel::joinable!(chat_tool_calls -> chat_sessions (session_id));
+diesel::joinable!(file_annotations -> accounts (account_id));
+diesel::joinable!(file_annotations -> files (file_id));
+diesel::joinable!(file_chunks -> files (file_id));
+diesel::joinable!(files -> accounts (account_id));
+diesel::joinable!(files -> workspaces (workspace_id));
+diesel::joinable!(pipeline_runs -> accounts (account_id));
+diesel::joinable!(pipeline_runs -> pipelines (pipeline_id));
+diesel::joinable!(pipeline_runs -> workspaces (workspace_id));
+diesel::joinable!(pipelines -> accounts (account_id));
+diesel::joinable!(pipelines -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_integration_runs -> accounts (account_id));
@@ -518,14 +444,11 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_api_tokens,
     account_notifications,
     accounts,
-    chat_operations,
-    chat_sessions,
-    chat_tool_calls,
-    document_annotations,
-    document_chunks,
-    document_comments,
-    document_files,
-    documents,
+    file_annotations,
+    file_chunks,
+    files,
+    pipeline_runs,
+    pipelines,
     workspace_activities,
     workspace_integration_runs,
     workspace_integrations,

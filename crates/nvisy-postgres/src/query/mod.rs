@@ -18,11 +18,12 @@ mod account_action_token;
 mod account_api_token;
 mod account_notification;
 
-mod document;
-mod document_annotation;
-mod document_chunk;
-mod document_comment;
-mod document_file;
+mod file;
+mod file_annotation;
+mod file_chunk;
+
+mod pipeline;
+mod pipeline_run;
 
 mod workspace;
 mod workspace_activity;
@@ -32,22 +33,18 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_webhook;
 
-mod chat_operation;
-mod chat_session;
-mod chat_tool_call;
-
 pub use account::AccountRepository;
 pub use account_action_token::AccountActionTokenRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
-pub use chat_operation::{ChatOperationRepository, FileOperationCounts};
-pub use chat_session::ChatSessionRepository;
-pub use chat_tool_call::ChatToolCallRepository;
-pub use document::DocumentRepository;
-pub use document_annotation::DocumentAnnotationRepository;
-pub use document_chunk::DocumentChunkRepository;
-pub use document_comment::DocumentCommentRepository;
-pub use document_file::DocumentFileRepository;
+
+pub use file::FileRepository;
+pub use file_annotation::FileAnnotationRepository;
+pub use file_chunk::FileChunkRepository;
+
+pub use pipeline::PipelineRepository;
+pub use pipeline_run::PipelineRunRepository;
+
 pub use workspace::WorkspaceRepository;
 pub use workspace_activity::WorkspaceActivityRepository;
 pub use workspace_integration::WorkspaceIntegrationRepository;

@@ -1,19 +1,17 @@
-//! Document processing runtime for nvisy.
-//!
-//! This crate provides a service wrapper around the nvisy runtime engine,
-//! integrating document processing capabilities with the server infrastructure.
+#![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc = include_str!("../README.md")]
 
-mod archive;
-mod service;
+pub mod engine;
+mod error;
+pub mod graph;
+pub mod node;
+pub mod runtime;
 
-pub use nvisy_rt_core as rt_core;
-pub use nvisy_rt_engine as rt_engine;
+#[doc(hidden)]
+pub mod prelude;
 
-pub use archive::{ArchiveError, ArchiveFormat, ArchiveResult, ArchiveService};
-pub use service::{RuntimeConfig, RuntimeService};
+pub use error::{WorkflowError, WorkflowResult};
 
-// Re-export commonly used types from the engine
-pub use nvisy_rt_engine::{
-    BoundingBox, Capabilities, Document, DocumentFormat, Engine, EngineConfig, FormatRegistry,
-    LoadedDocument, Point, Region, RegionId, RegionKind, doc,
-};
+/// Tracing target for runtime operations.
+pub const TRACING_TARGET: &str = "nvisy_runtime";

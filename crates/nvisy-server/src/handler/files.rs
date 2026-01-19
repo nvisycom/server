@@ -17,35 +17,31 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{DocumentKey, DocumentStore, Files as FilesBucket};
 use nvisy_nats::stream::{DocumentJobPublisher, PreprocessingData};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{DocumentFile, NewDocumentFile};
-use nvisy_postgres::query::DocumentFileRepository;
-use nvisy_postgres::types::ProcessingStatus;
+use nvisy_postgres::model::{File as FileModel, NewFile};
+use nvisy_postgres::query::FileRepository;
 use uuid::Uuid;
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CursorPagination, DeleteFiles, DownloadFiles, FilePathParams, ListFiles, UpdateFile,
-    WorkspacePathParams,
+    CursorPagination, FilePathParams, ListFiles, UpdateFile, WorkspacePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
-use crate::service::{ArchiveFormat, ArchiveService, ServiceState};
+use crate::service::ServiceState;
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 
 /// Finds a file by ID or returns NotFound error.
-async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<DocumentFile> {
-    conn.find_document_file_by_id(file_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("File not found")
-                .with_resource("file")
-        })
+async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<FileModel> {
+    conn.find_file_by_id(file_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("File not found")
+            .with_resource("file")
+    })
 }
 
 /// Lists files in a workspace with cursor-based pagination.
@@ -115,7 +111,7 @@ async fn process_single_file(
     conn: &mut nvisy_postgres::PgConn,
     ctx: &FileUploadContext,
     field: axum::extract::multipart::Field<'_>,
-) -> Result<DocumentFile> {
+) -> Result<FileModel> {
     let filename = field
         .file_name()
         .map(ToString::to_string)
@@ -152,7 +148,7 @@ async fn process_single_file(
     );
 
     // Step 2: Create DB record with all storage info (Postgres generates its own id)
-    let file_record = NewDocumentFile {
+    let file_record = NewFile {
         workspace_id: ctx.workspace_id,
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
@@ -162,11 +158,10 @@ async fn process_single_file(
         file_hash_sha256: put_result.sha256().to_vec(),
         storage_path: document_key.to_string(),
         storage_bucket: ctx.document_store.bucket().to_owned(),
-        processing_status: Some(ProcessingStatus::Pending),
         ..Default::default()
     };
 
-    let created_file = conn.create_document_file(file_record).await?;
+    let created_file = conn.create_file(file_record).await?;
 
     // Step 3: Publish job to queue (use Postgres-generated file ID)
     let job = nvisy_nats::stream::DocumentJob::new(
@@ -331,7 +326,7 @@ async fn update_file(
     let updates = request.into_model();
 
     let updated_file = conn
-        .update_document_file(path_params.file_id, updates)
+        .update_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
@@ -491,14 +486,12 @@ async fn delete_file(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::DeleteFiles)
         .await?;
 
-    conn.delete_document_file(path_params.file_id)
-        .await
-        .map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
-            ErrorKind::InternalServerError
-                .with_message("Failed to delete file")
-                .with_context(format!("Database error: {}", err))
-        })?;
+    conn.delete_file(path_params.file_id).await.map_err(|err| {
+        tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
+        ErrorKind::InternalServerError
+            .with_message("Failed to delete file")
+            .with_context(format!("Database error: {}", err))
+    })?;
 
     tracing::info!(target: TRACING_TARGET, "File deleted");
     Ok(StatusCode::NO_CONTENT)
@@ -508,196 +501,6 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete file")
         .description("Soft deletes a file by setting a deleted timestamp. The file can be recovered within the retention period.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// Deletes multiple files (soft delete).
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %path_params.workspace_id,
-    )
-)]
-async fn delete_multiple_files(
-    State(pg_client): State<PgClient>,
-    Path(path_params): Path<WorkspacePathParams>,
-    AuthState(auth_claims): AuthState,
-    ValidateJson(request): ValidateJson<DeleteFiles>,
-) -> Result<StatusCode> {
-    tracing::info!(target: TRACING_TARGET, file_count = request.file_ids.len(), "Deleting multiple files");
-
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DeleteFiles)
-        .await?;
-
-    // Soft delete all files in a single query
-    let deleted_count = conn
-        .delete_document_files(path_params.workspace_id, &request.file_ids)
-        .await?;
-
-    // Check if all requested files were deleted
-    if deleted_count != request.file_ids.len() {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            requested = request.file_ids.len(),
-            deleted = deleted_count,
-            "Some files were not found or already deleted"
-        );
-        return Err(ErrorKind::NotFound
-            .with_message("One or more files not found")
-            .with_resource("file"));
-    }
-
-    tracing::info!(target: TRACING_TARGET, file_count = deleted_count, "Files deleted");
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-fn delete_multiple_files_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Delete multiple files")
-        .description("Soft deletes multiple files by setting deleted timestamps. Files can be recovered within the retention period.")
-        .response::<204, ()>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// Downloads all or specific workspace files as an archive.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %path_params.workspace_id,
-    )
-)]
-async fn download_archived_files(
-    State(pg_client): State<PgClient>,
-    State(nats_client): State<NatsClient>,
-    State(archive): State<ArchiveService>,
-    Path(path_params): Path<WorkspacePathParams>,
-    AuthState(auth_claims): AuthState,
-    Json(request): Json<DownloadFiles>,
-) -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
-    tracing::debug!(target: TRACING_TARGET, "Downloading archived files");
-
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::DownloadFiles,
-        )
-        .await?;
-
-    let document_store = nats_client
-        .document_store::<FilesBucket>()
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                "Failed to create document store"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to initialize file storage")
-        })?;
-
-    // Determine which files to download
-    let files = if let Some(specific_ids) = request.file_ids {
-        // Batch fetch specific files
-        conn.find_document_files_by_ids(&specific_ids).await?
-    } else {
-        // Get all workspace files using the workspace-scoped query
-        conn.cursor_list_workspace_files(
-            path_params.workspace_id,
-            Default::default(),
-            Default::default(),
-        )
-        .await?
-        .items
-    };
-
-    // Filter to only files belonging to this workspace and not deleted
-    let valid_files: Vec<_> = files
-        .into_iter()
-        .filter(|f| f.workspace_id == path_params.workspace_id && f.deleted_at.is_none())
-        .collect();
-
-    if valid_files.is_empty() {
-        return Err(ErrorKind::NotFound.with_message("No files found for archive"));
-    }
-
-    // Fetch all file contents
-    let mut files_data = Vec::new();
-
-    for file in &valid_files {
-        let document_key = DocumentKey::from_str(&file.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid file storage path")
-                .with_context(format!("Parse error: {}", err))
-        })?;
-
-        if let Ok(Some(mut get_result)) = document_store.get(&document_key).await {
-            let mut buffer = Vec::with_capacity(get_result.size());
-            if tokio::io::AsyncReadExt::read_to_end(get_result.reader(), &mut buffer)
-                .await
-                .is_ok()
-            {
-                files_data.push((file.display_name.clone(), buffer));
-            }
-        }
-    }
-
-    if files_data.is_empty() {
-        return Err(ErrorKind::NotFound.with_message("No files found for archive"));
-    }
-
-    // Create archive
-    let archive_bytes = archive.create_archive(files_data, request.format).await?;
-
-    // Determine content type and file extension based on format
-    let (content_type, extension) = match request.format {
-        ArchiveFormat::Tar => ("application/x-tar", "tar.gz"),
-        ArchiveFormat::Zip => ("application/zip", "zip"),
-    };
-
-    // Set up response headers
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "content-disposition",
-        format!(
-            "attachment; filename=\"workspace_{}_archive.{}\"",
-            path_params.workspace_id, extension
-        )
-        .parse()
-        .unwrap(),
-    );
-    headers.insert("content-type", content_type.parse().unwrap());
-    headers.insert(
-        "content-length",
-        archive_bytes.len().to_string().parse().unwrap(),
-    );
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        file_count = valid_files.len(),
-        "Workspace files downloaded as archive",
-    );
-
-    Ok((StatusCode::OK, headers, archive_bytes))
-}
-
-fn download_archived_files_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Download archived files")
-        .description("Downloads all or specific workspace files as a compressed archive. Supports zip and tar.gz formats.")
-        .response::<200, ()>()
-        .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -716,11 +519,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(upload_file, upload_file_docs)
                 .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE))
                 .get_with(list_files, list_files_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceId}/files/batch",
-            get_with(download_archived_files, download_archived_files_docs)
-                .delete_with(delete_multiple_files, delete_multiple_files_docs),
         )
         // File-specific routes (file ID is globally unique)
         .api_route(

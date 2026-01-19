@@ -20,33 +20,30 @@ pub mod webhook_status;
 pub mod webhook_type;
 pub mod workspace_role;
 
-// Document-related enumerations
+// File-related enumerations
 pub mod annotation_type;
-pub mod content_segmentation;
 pub mod file_source;
-pub mod processing_status;
-pub mod require_mode;
 
-// Chat-related enumerations
-pub mod chat_session_status;
-pub mod chat_tool_status;
+// Pipeline-related enumerations
+pub mod pipeline_run_status;
+pub mod pipeline_status;
+pub mod pipeline_trigger_type;
 
 pub use action_token_type::ActionTokenType;
 pub use activity_type::{ActivityCategory, ActivityType};
 pub use annotation_type::AnnotationType;
 pub use api_token_type::ApiTokenType;
-pub use chat_session_status::ChatSessionStatus;
-pub use chat_tool_status::ChatToolStatus;
-pub use content_segmentation::ContentSegmentation;
 pub use file_source::FileSource;
 pub use integration_status::IntegrationStatus;
 pub use integration_type::IntegrationType;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
-pub use processing_status::ProcessingStatus;
-pub use require_mode::RequireMode;
 pub use run_type::RunType;
 pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
 pub use webhook_type::WebhookType;
 pub use workspace_role::WorkspaceRole;
+
+pub use pipeline_run_status::PipelineRunStatus;
+pub use pipeline_status::PipelineStatus;
+pub use pipeline_trigger_type::PipelineTriggerType;

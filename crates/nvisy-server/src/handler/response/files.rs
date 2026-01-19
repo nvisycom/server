@@ -1,51 +1,45 @@
-//! Document file response types.
+//! File response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::DocumentFile;
-use nvisy_postgres::types::{ContentSegmentation, FileSource, ProcessingStatus};
+use nvisy_postgres::model::File as FileModel;
+use nvisy_postgres::types::FileSource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Page;
 
-/// Knowledge-related fields for file responses.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileKnowledge {
-    /// Whether the file is indexed for knowledge extraction.
-    pub is_indexed: bool,
-
-    /// Content segmentation strategy.
-    pub content_segmentation: ContentSegmentation,
-
-    /// Whether visual elements are supported.
-    pub visual_support: bool,
-}
-
-/// Represents an uploaded file.
+/// Represents a file in responses.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct File {
     /// Unique file identifier.
-    pub file_id: Uuid,
+    pub id: Uuid,
+    /// Workspace this file belongs to.
+    pub workspace_id: Uuid,
     /// Display name.
     pub display_name: String,
+    /// Original filename when uploaded.
+    pub original_filename: String,
+    /// File extension (without dot).
+    pub file_extension: String,
+    /// MIME type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
     /// File size in bytes.
     pub file_size: i64,
-    /// Processing status.
-    pub status: ProcessingStatus,
-    /// Processing priority (1-10).
-    pub processing_priority: i32,
     /// Classification tags.
     pub tags: Vec<String>,
     /// How the file was created (uploaded, imported, generated).
     pub source: FileSource,
     /// Account ID of the user who uploaded/created the file.
     pub uploaded_by: Uuid,
-    /// Knowledge extraction settings.
-    pub file_knowledge: FileKnowledge,
+    /// Version number (1 for original, higher for newer versions).
+    pub version_number: i32,
+    /// Parent file ID if this is a newer version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
     /// Creation timestamp.
     pub created_at: Timestamp,
     /// Last update timestamp.
@@ -53,21 +47,20 @@ pub struct File {
 }
 
 impl File {
-    pub fn from_model(file: DocumentFile) -> Self {
+    pub fn from_model(file: FileModel) -> Self {
         Self {
-            file_id: file.id,
+            id: file.id,
+            workspace_id: file.workspace_id,
             display_name: file.display_name,
+            original_filename: file.original_filename,
+            file_extension: file.file_extension,
+            mime_type: file.mime_type,
             file_size: file.file_size_bytes,
-            status: file.processing_status,
-            processing_priority: file.processing_priority,
             tags: file.tags.into_iter().flatten().collect(),
             source: file.source,
             uploaded_by: file.account_id,
-            file_knowledge: FileKnowledge {
-                is_indexed: file.is_indexed,
-                content_segmentation: file.content_segmentation,
-                visual_support: file.visual_support,
-            },
+            version_number: file.version_number,
+            parent_id: file.parent_id,
             created_at: file.created_at.into(),
             updated_at: file.updated_at.into(),
         }
