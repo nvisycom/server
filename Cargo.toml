@@ -6,13 +6,13 @@ members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
-    "./crates/nvisy-opendal",
     "./crates/nvisy-postgres",
     "./crates/nvisy-rig",
-    "./crates/nvisy-runtime",
     "./crates/nvisy-server",
-    "./crates/nvisy-vector",
     "./crates/nvisy-webhook",
+    "./integrations/nvisy-opendal",
+    "./integrations/nvisy-runtime",
+    "./integrations/nvisy-vector",
 ]
 
 [workspace.package]
@@ -36,12 +36,12 @@ documentation = "https://docs.rs/nvisy-server"
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-opendal = { path = "./crates/nvisy-opendal", version = "0.1.0" }
+nvisy-opendal = { path = "./integrations/nvisy-opendal", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
-nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
+nvisy-runtime = { path = "./integrations/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
-nvisy-vector = { path = "./crates/nvisy-vector", version = "0.1.0" }
+nvisy-vector = { path = "./integrations/nvisy-vector", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
 # Runtime crates (from github.com/nvisycom/runtime)
@@ -140,7 +140,7 @@ rig-core = { version = "0.28", default-features = false, features = ["reqwest-ru
 
 # Storage abstraction
 opendal = { version = "0.53", features = [] }
-chrono = { version = "0.4", features = ["serde"] }
+
 
 # Graph data structures
 petgraph = { version = "0.8", features = ["serde-1"] }
