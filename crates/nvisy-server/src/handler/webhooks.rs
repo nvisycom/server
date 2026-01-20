@@ -19,7 +19,9 @@ use crate::handler::request::{
     CreateWebhook, CursorPagination, TestWebhook, UpdateWebhook as UpdateWebhookRequest,
     WebhookPathParams, WorkspacePathParams,
 };
-use crate::handler::response::{ErrorResponse, Webhook, WebhookResult, WebhooksPage};
+use crate::handler::response::{
+    ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
+};
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -41,7 +43,7 @@ async fn create_webhook(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateWebhook>,
-) -> Result<(StatusCode, Json<Webhook>)> {
+) -> Result<(StatusCode, Json<WebhookCreated>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
 
     let mut conn = pg_client.get_connection().await?;
@@ -63,13 +65,21 @@ async fn create_webhook(
         "Webhook created",
     );
 
-    Ok((StatusCode::CREATED, Json(Webhook::from_model(webhook))))
+    // Return WebhookCreated which includes the secret (visible only once)
+    Ok((
+        StatusCode::CREATED,
+        Json(WebhookCreated::from_model(webhook)),
+    ))
 }
 
 fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create webhook")
-        .description("Creates a new webhook for the workspace.")
-        .response::<201, Json<Webhook>>()
+        .description(
+            "Creates a new webhook for the workspace. The response includes the signing secret \
+             which is used for HMAC-SHA256 verification of webhook payloads. **Important**: The \
+             secret is only shown once upon creation and cannot be retrieved again.",
+        )
+        .response::<201, Json<WebhookCreated>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

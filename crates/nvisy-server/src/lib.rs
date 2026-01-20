@@ -8,5 +8,6 @@ pub mod extract;
 pub mod handler;
 pub mod middleware;
 pub mod service;
+pub mod worker;
 
 pub use crate::error::{BoxedError, Error, ErrorKind, Result};

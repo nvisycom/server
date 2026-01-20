@@ -147,8 +147,7 @@ impl VectorOutput for PgVectorBackend {
         }
 
         // Get dimensions from the first vector
-        let dimensions = vectors
-            .get(0)
+        let dimensions = <[_]>::first(&vectors)
             .map(|v| v.vector.len())
             .ok_or_else(|| DataError::invalid("No vectors provided"))?;
 

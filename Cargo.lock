@@ -3191,6 +3191,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3225,9 +3226,7 @@ name = "nvisy-nats"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "async-stream",
  "base64 0.22.1",
- "bytes",
  "clap",
  "derive_more",
  "futures",
@@ -3238,7 +3237,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "strum 0.27.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

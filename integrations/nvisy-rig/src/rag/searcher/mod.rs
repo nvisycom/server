@@ -7,7 +7,7 @@ mod scope;
 
 use std::collections::HashMap;
 
-use nvisy_nats::object::{DocumentKey, DocumentStore, Files};
+use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::ScoredFileChunk;
 use nvisy_postgres::query::FileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
@@ -25,7 +25,7 @@ use crate::{Error, Result};
 pub struct Searcher {
     provider: EmbeddingProvider,
     db: PgClient,
-    files: DocumentStore<Files>,
+    files: ObjectStore<FilesBucket, FileKey>,
     scope: SearchScope,
     min_score: Option<f64>,
 }
@@ -35,7 +35,7 @@ impl Searcher {
     pub(crate) fn new(
         provider: EmbeddingProvider,
         db: PgClient,
-        files: DocumentStore<Files>,
+        files: ObjectStore<FilesBucket, FileKey>,
         scope: SearchScope,
     ) -> Self {
         Self {
@@ -150,7 +150,7 @@ impl Searcher {
     }
 
     async fn fetch_file(&self, file_id: Uuid) -> Result<Vec<u8>> {
-        let key = DocumentKey::from_parts(Uuid::nil(), file_id);
+        let key = FileKey::from_parts(Uuid::nil(), file_id);
 
         let mut result = self
             .files

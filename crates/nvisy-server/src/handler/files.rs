@@ -14,8 +14,8 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{DocumentKey, DocumentStore, Files as FilesBucket};
-use nvisy_nats::stream::{DocumentJobPublisher, PreprocessingData};
+use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
+use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{File as FileModel, NewFile};
 use nvisy_postgres::query::FileRepository;
@@ -30,10 +30,13 @@ use crate::handler::request::{
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
-use crate::service::ServiceState;
+use crate::service::{ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
+
+/// Type alias for file job publisher.
+type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<FileModel> {
@@ -102,8 +105,8 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
 struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
-    document_store: DocumentStore<FilesBucket>,
-    publisher: DocumentJobPublisher<PreprocessingData>,
+    file_store: ObjectStore<FilesBucket, FileKey>,
+    publisher: FileJobPublisher,
 }
 
 /// Processes a single file from a multipart upload using streaming.
@@ -123,12 +126,12 @@ async fn process_single_file(
         .unwrap_or("bin")
         .to_lowercase();
 
-    // Generate document key with unique object ID for NATS storage
-    let document_key = DocumentKey::generate(ctx.workspace_id);
+    // Generate file key with unique object ID for NATS storage
+    let file_key = FileKey::generate(ctx.workspace_id);
 
     tracing::debug!(
         target: TRACING_TARGET,
-        object_id = %document_key.object_id(),
+        object_id = %file_key.object_id,
         "Streaming file to storage"
     );
 
@@ -137,11 +140,11 @@ async fn process_single_file(
         field.map(|result| result.map_err(std::io::Error::other)),
     );
 
-    let put_result = ctx.document_store.put(&document_key, reader).await?;
+    let put_result = ctx.file_store.put(&file_key, reader).await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
-        object_id = %document_key.object_id(),
+        object_id = %file_key.object_id,
         size = put_result.size(),
         sha256 = %put_result.sha256_hex(),
         "File streamed to storage"
@@ -156,27 +159,22 @@ async fn process_single_file(
         file_extension: Some(file_extension.clone()),
         file_size_bytes: put_result.size() as i64,
         file_hash_sha256: put_result.sha256().to_vec(),
-        storage_path: document_key.to_string(),
-        storage_bucket: ctx.document_store.bucket().to_owned(),
+        storage_path: file_key.to_string(),
+        storage_bucket: ctx.file_store.bucket().to_owned(),
         ..Default::default()
     };
 
     let created_file = conn.create_file(file_record).await?;
 
     // Step 3: Publish job to queue (use Postgres-generated file ID)
-    let job = nvisy_nats::stream::DocumentJob::new(
-        created_file.id,
-        document_key.to_string(),
-        file_extension,
-        PreprocessingData::default(),
-    );
+    let job = FileJob::new(created_file.id, file_key.to_string(), file_extension, ());
 
-    ctx.publisher.publish_job(&job).await.map_err(|err| {
+    ctx.publisher.publish(&job).await.map_err(|err| {
         tracing::error!(
             target: TRACING_TARGET,
             error = %err,
             file_id = %created_file.id,
-            "Failed to publish document job"
+            "Failed to publish file job"
         );
         ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
     })?;
@@ -185,7 +183,7 @@ async fn process_single_file(
         target: TRACING_TARGET,
         file_id = %created_file.id,
         job_id = %job.id,
-        "Document job published"
+        "File job published"
     );
 
     Ok(created_file)
@@ -202,6 +200,7 @@ async fn process_single_file(
 async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
+    State(webhook_emitter): State<WebhookEmitter>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
     Multipart(mut multipart): Multipart,
@@ -214,16 +213,14 @@ async fn upload_file(
         .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UploadFiles)
         .await?;
 
-    let document_store = nats_client.document_store::<FilesBucket>().await?;
+    let file_store = nats_client.object_store::<FilesBucket, FileKey>().await?;
 
-    let publisher = nats_client
-        .document_job_publisher::<PreprocessingData>()
-        .await?;
+    let publisher: FileJobPublisher = nats_client.event_publisher().await?;
 
     let ctx = FileUploadContext {
         workspace_id: path_params.workspace_id,
         account_id: auth_claims.account_id,
-        document_store,
+        file_store,
         publisher,
     };
 
@@ -241,6 +238,30 @@ async fn upload_file(
 
     if uploaded_files.is_empty() {
         return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
+    }
+
+    // Emit webhook events for created files (fire-and-forget)
+    for file in &uploaded_files {
+        let data = serde_json::json!({
+            "displayName": file.display_name,
+            "fileSizeBytes": file.file_size,
+        });
+        if let Err(err) = webhook_emitter
+            .emit_file_created(
+                path_params.workspace_id,
+                file.id,
+                Some(auth_claims.account_id),
+                Some(data),
+            )
+            .await
+        {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                error = %err,
+                file_id = %file.id,
+                "Failed to emit file:created webhook event"
+            );
+        }
     }
 
     tracing::info!(
@@ -308,6 +329,7 @@ fn read_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
+    State(webhook_emitter): State<WebhookEmitter>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateFile>,
@@ -332,6 +354,27 @@ async fn update_file(
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
             ErrorKind::InternalServerError.with_message("Failed to update file")
         })?;
+
+    // Emit webhook event (fire-and-forget)
+    let data = serde_json::json!({
+        "displayName": updated_file.display_name,
+    });
+    if let Err(err) = webhook_emitter
+        .emit_file_updated(
+            file.workspace_id,
+            path_params.file_id,
+            Some(auth_claims.account_id),
+            Some(data),
+        )
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            file_id = %path_params.file_id,
+            "Failed to emit file:updated webhook event"
+        );
+    }
 
     tracing::info!(target: TRACING_TARGET, "File updated");
 
@@ -376,19 +419,19 @@ async fn download_file(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::DownloadFiles)
         .await?;
 
-    let document_store = nats_client
-        .document_store::<FilesBucket>()
+    let file_store = nats_client
+        .object_store::<FilesBucket, FileKey>()
         .await
         .map_err(|err| {
             tracing::error!(
                 target: TRACING_TARGET,
                 error = %err,
-                "Failed to create document store"
+                "Failed to create file store"
             );
             ErrorKind::InternalServerError.with_message("Failed to initialize file storage")
         })?;
 
-    let document_key = DocumentKey::from_str(&file.storage_path).map_err(|err| {
+    let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
         tracing::error!(
             target: TRACING_TARGET,
             error = %err,
@@ -400,9 +443,9 @@ async fn download_file(
             .with_context(format!("Parse error: {}", err))
     })?;
 
-    // Get streaming content from NATS document store
-    let get_result = document_store
-        .get(&document_key)
+    // Get streaming content from NATS file store
+    let get_result = file_store
+        .get(&file_key)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -472,6 +515,7 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_file(
     State(pg_client): State<PgClient>,
+    State(webhook_emitter): State<WebhookEmitter>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
@@ -492,6 +536,27 @@ async fn delete_file(
             .with_message("Failed to delete file")
             .with_context(format!("Database error: {}", err))
     })?;
+
+    // Emit webhook event (fire-and-forget)
+    let data = serde_json::json!({
+        "displayName": file.display_name,
+    });
+    if let Err(err) = webhook_emitter
+        .emit_file_deleted(
+            file.workspace_id,
+            path_params.file_id,
+            Some(auth_claims.account_id),
+            Some(data),
+        )
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            file_id = %path_params.file_id,
+            "Failed to emit file:deleted webhook event"
+        );
+    }
 
     tracing::info!(target: TRACING_TARGET, "File deleted");
     Ok(StatusCode::NO_CONTENT)

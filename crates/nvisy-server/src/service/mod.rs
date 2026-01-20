@@ -4,6 +4,7 @@ mod cache;
 mod config;
 mod integration;
 mod security;
+mod webhook;
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
@@ -16,6 +17,7 @@ pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
+pub use crate::service::webhook::WebhookEmitter;
 
 /// Application state.
 ///
@@ -37,6 +39,7 @@ pub struct ServiceState {
     pub password_strength: PasswordStrength,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
+    pub webhook_emitter: WebhookEmitter,
 }
 
 impl ServiceState {
@@ -50,6 +53,8 @@ impl ServiceState {
         let postgres = service_config.connect_postgres().await?;
         let nats = service_config.connect_nats().await?;
 
+        let webhook_emitter = WebhookEmitter::new(postgres.clone(), nats.clone());
+
         let service_state = Self {
             postgres,
             nats,
@@ -61,6 +66,7 @@ impl ServiceState {
             password_strength: PasswordStrength::new(),
             session_keys: service_config.load_session_keys().await?,
             user_agent_parser: UserAgentParser::new(),
+            webhook_emitter,
         };
 
         Ok(service_state)
@@ -89,3 +95,4 @@ impl_di!(password_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(session_keys: SessionKeys);
 impl_di!(user_agent_parser: UserAgentParser);
+impl_di!(webhook_emitter: WebhookEmitter);

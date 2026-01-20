@@ -33,13 +33,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::{Client, ConnectOptions, jetstream};
-use bytes::Bytes;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 
 use super::nats_config::NatsConfig;
-use crate::kv::{ApiTokenStore, CacheStore, ChatHistoryStore};
-use crate::object::{DocumentBucket, DocumentStore};
-use crate::stream::{DocumentJobPublisher, DocumentJobSubscriber, Stage};
+use crate::kv::{
+    ApiToken, ApiTokensBucket, ChatHistoryBucket, KvBucket, KvKey, KvStore, SessionKey, TokenKey,
+};
+use crate::object::{
+    AccountKey, AvatarsBucket, FileKey, FilesBucket, IntermediatesBucket, ObjectBucket, ObjectKey,
+    ObjectStore, ThumbnailsBucket,
+};
+use crate::stream::{EventPublisher, EventStream, EventSubscriber, FileStream, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -157,196 +163,155 @@ impl NatsClient {
             async_nats::connection::State::Connected
         )
     }
+}
 
-    /// Get or create an ApiTokenStore
+// Key-value store getters
+impl NatsClient {
+    /// Get or create a KV store for the specified key, value, and bucket types.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn api_token_store(&self, ttl: Option<Duration>) -> Result<ApiTokenStore> {
-        ApiTokenStore::new(&self.inner.jetstream, ttl).await
-    }
-
-    /// Get or create a document store for the specified bucket type.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn document_store<B: DocumentBucket>(&self) -> Result<DocumentStore<B>> {
-        DocumentStore::new(&self.inner.jetstream).await
-    }
-
-    /// Create a document job publisher for a specific stage.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn document_job_publisher<S: Stage>(&self) -> Result<DocumentJobPublisher<S>> {
-        DocumentJobPublisher::new(&self.inner.jetstream).await
-    }
-
-    /// Create a document job subscriber for a specific stage.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn document_job_subscriber<S: Stage>(
-        &self,
-        consumer_name: &str,
-    ) -> Result<DocumentJobSubscriber<S>> {
-        DocumentJobSubscriber::new(&self.inner.jetstream, consumer_name).await
-    }
-
-    /// Get or create a CacheStore for a specific namespace
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn cache_store<T>(
-        &self,
-        namespace: &str,
-        ttl: Option<Duration>,
-    ) -> Result<CacheStore<T>>
+    pub async fn kv_store<K, V, B>(&self) -> Result<KvStore<K, V, B>>
     where
-        T: serde::Serialize + for<'de> serde::Deserialize<'de> + Clone + Send + Sync + 'static,
+        K: KvKey,
+        V: Serialize + DeserializeOwned + Send + Sync + 'static,
+        B: KvBucket,
     {
-        CacheStore::new(&self.inner.jetstream, namespace, ttl).await
+        KvStore::new(&self.inner.jetstream).await
     }
 
-    /// Get or create a ChatHistoryStore for ephemeral sessions.
+    /// Get or create a KV store with custom TTL.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn chat_history_store<T>(&self, ttl: Option<Duration>) -> Result<ChatHistoryStore<T>>
+    pub async fn kv_store_with_ttl<K, V, B>(&self, ttl: Duration) -> Result<KvStore<K, V, B>>
     where
-        T: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
+        K: KvKey,
+        V: Serialize + DeserializeOwned + Send + Sync + 'static,
+        B: KvBucket,
     {
-        match ttl {
-            Some(ttl) => ChatHistoryStore::with_ttl(&self.inner.jetstream, ttl).await,
-            None => ChatHistoryStore::new(&self.inner.jetstream).await,
-        }
+        KvStore::with_ttl(&self.inner.jetstream, ttl).await
+    }
+
+    /// Get or create an API token store.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn api_token_store(
+        &self,
+        ttl: Duration,
+    ) -> Result<KvStore<TokenKey, ApiToken, ApiTokensBucket>> {
+        self.kv_store_with_ttl(ttl).await
+    }
+
+    /// Get or create a chat history store with default TTL.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn chat_history_store<V>(&self) -> Result<KvStore<SessionKey, V, ChatHistoryBucket>>
+    where
+        V: Serialize + DeserializeOwned + Send + Sync + 'static,
+    {
+        self.kv_store().await
+    }
+
+    /// Get or create a chat history store with custom TTL.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn chat_history_store_with_ttl<V>(
+        &self,
+        ttl: Duration,
+    ) -> Result<KvStore<SessionKey, V, ChatHistoryBucket>>
+    where
+        V: Serialize + DeserializeOwned + Send + Sync + 'static,
+    {
+        self.kv_store_with_ttl(ttl).await
     }
 }
 
-/// A NATS connection wrapper for basic pub/sub operations
-#[derive(Debug, Clone)]
-pub struct NatsConnection {
-    client: Client,
-    request_timeout: Duration,
+// Object store getters
+impl NatsClient {
+    /// Get or create an object store for the specified bucket and key types.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn object_store<B, K>(&self) -> Result<ObjectStore<B, K>>
+    where
+        B: ObjectBucket,
+        K: ObjectKey,
+    {
+        ObjectStore::new(&self.inner.jetstream).await
+    }
+
+    /// Get or create a file store for primary file storage.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn file_store(&self) -> Result<ObjectStore<FilesBucket, FileKey>> {
+        self.object_store().await
+    }
+
+    /// Get or create an intermediates store for temporary processing artifacts.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn intermediates_store(&self) -> Result<ObjectStore<IntermediatesBucket, FileKey>> {
+        self.object_store().await
+    }
+
+    /// Get or create a thumbnail store for document thumbnails.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn thumbnail_store(&self) -> Result<ObjectStore<ThumbnailsBucket, FileKey>> {
+        self.object_store().await
+    }
+
+    /// Get or create an avatar store for account avatars.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn avatar_store(&self) -> Result<ObjectStore<AvatarsBucket, AccountKey>> {
+        self.object_store().await
+    }
 }
 
-impl NatsConnection {
-    /// Publish a message to a subject
-    #[tracing::instrument(skip(self, payload))]
-    pub async fn publish(&self, subject: &str, payload: impl Into<Bytes>) -> Result<()> {
-        timeout(
-            self.request_timeout,
-            self.client.publish(subject.to_string(), payload.into()),
-        )
-        .await
-        .map_err(|_| Error::Timeout {
-            timeout: self.request_timeout,
-        })?
-        .map_err(|e| Error::delivery_failed(subject, e.to_string()))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            subject = %subject,
-            "Published message"
-        );
-        Ok(())
-    }
-
-    /// Publish a message with a reply subject
-    #[tracing::instrument(skip(self, payload), target = TRACING_TARGET_CLIENT)]
-    pub async fn publish_with_reply(
-        &self,
-        subject: &str,
-        reply: &str,
-        payload: impl Into<Bytes>,
-    ) -> Result<()> {
-        timeout(
-            self.request_timeout,
-            self.client
-                .publish_with_reply(subject.to_string(), reply.to_string(), payload.into()),
-        )
-        .await
-        .map_err(|_| Error::Timeout {
-            timeout: self.request_timeout,
-        })?
-        .map_err(|e| Error::delivery_failed(subject, e.to_string()))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            subject = %subject,
-            reply = %reply,
-            "Published message with reply"
-        );
-        Ok(())
-    }
-
-    /// Send a request and wait for a response
-    #[tracing::instrument(skip(self, payload), target = TRACING_TARGET_CLIENT)]
-    pub async fn request(
-        &self,
-        subject: &str,
-        payload: impl Into<Bytes>,
-    ) -> Result<async_nats::Message> {
-        let response = timeout(
-            self.request_timeout,
-            self.client.request(subject.to_string(), payload.into()),
-        )
-        .await
-        .map_err(|_| Error::Timeout {
-            timeout: self.request_timeout,
-        })?
-        .map_err(|e| Error::delivery_failed(subject, e.to_string()))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            subject = %subject,
-            payload_size = response.payload.len(),
-            "Received response for request"
-        );
-        Ok(response)
-    }
-
-    /// Subscribe to a subject
+// Stream getters
+impl NatsClient {
+    /// Create an event publisher for the specified stream type.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn subscribe(&self, subject: &str) -> Result<async_nats::Subscriber> {
-        let subscriber = self
-            .client
-            .subscribe(subject.to_string())
-            .await
-            .map_err(|e| Error::Connection(Box::new(e)))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            subject = %subject,
-            "Subscribed to subject"
-        );
-        Ok(subscriber)
+    pub async fn event_publisher<T, S>(&self) -> Result<EventPublisher<T, S>>
+    where
+        T: Serialize + Send + Sync + 'static,
+        S: EventStream,
+    {
+        EventPublisher::new(&self.inner.jetstream).await
     }
 
-    /// Subscribe to a subject with a queue group
+    /// Create an event subscriber for the specified stream type.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn queue_subscribe(
-        &self,
-        subject: &str,
-        queue: &str,
-    ) -> Result<async_nats::Subscriber> {
-        let subscriber = self
-            .client
-            .queue_subscribe(subject.to_string(), queue.to_string())
-            .await
-            .map_err(|e| Error::Connection(Box::new(e)))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            subject = %subject,
-            queue = %queue,
-            "Subscribed to subject with queue group"
-        );
-        Ok(subscriber)
+    pub async fn event_subscriber<T, S>(&self) -> Result<EventSubscriber<T, S>>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+        S: EventStream,
+    {
+        EventSubscriber::new(&self.inner.jetstream).await
     }
 
-    /// Flush pending messages
+    /// Create a file job publisher.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn flush(&self) -> Result<()> {
-        timeout(self.request_timeout, self.client.flush())
-            .await
-            .map_err(|_| Error::Timeout {
-                timeout: self.request_timeout,
-            })?
-            .map_err(|e| Error::Connection(Box::new(e)))?;
+    pub async fn file_publisher<T>(&self) -> Result<EventPublisher<T, FileStream>>
+    where
+        T: Serialize + Send + Sync + 'static,
+    {
+        self.event_publisher().await
+    }
 
-        tracing::debug!(
-            target: TRACING_TARGET_CLIENT,
-            "Flushed pending messages"
-        );
-        Ok(())
+    /// Create a file job subscriber.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn file_subscriber<T>(&self) -> Result<EventSubscriber<T, FileStream>>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
+        self.event_subscriber().await
+    }
+
+    /// Create a webhook publisher.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn webhook_publisher<T>(&self) -> Result<EventPublisher<T, WebhookStream>>
+    where
+        T: Serialize + Send + Sync + 'static,
+    {
+        self.event_publisher().await
+    }
+
+    /// Create a webhook subscriber.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn webhook_subscriber<T>(&self) -> Result<EventSubscriber<T, WebhookStream>>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
+        self.event_subscriber().await
     }
 }

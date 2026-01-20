@@ -35,5 +35,5 @@ pub mod stream;
 
 // Re-export async_nats types needed by consumers
 pub use async_nats::jetstream;
-pub use client::{NatsClient, NatsConfig, NatsConnection};
+pub use client::{NatsClient, NatsConfig};
 pub use error::{Error, Result};

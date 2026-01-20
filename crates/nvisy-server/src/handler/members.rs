@@ -19,7 +19,7 @@ use crate::handler::request::{
 };
 use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
 use crate::handler::{ErrorKind, Result};
-use crate::service::ServiceState;
+use crate::service::{ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::members";
@@ -150,6 +150,7 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_member(
     State(pg_client): State<PgClient>,
+    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<StatusCode> {
@@ -188,6 +189,27 @@ async fn delete_member(
     conn.remove_workspace_member(path_params.workspace_id, path_params.account_id)
         .await?;
 
+    // Emit webhook event (fire-and-forget)
+    let data = serde_json::json!({
+        "removedAccountId": path_params.account_id,
+        "removedBy": auth_state.account_id,
+    });
+    if let Err(err) = webhook_emitter
+        .emit_member_deleted(
+            path_params.workspace_id,
+            path_params.account_id, // Use account_id as resource_id
+            Some(auth_state.account_id),
+            Some(data),
+        )
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            "Failed to emit member:deleted webhook event"
+        );
+    }
+
     tracing::warn!(target: TRACING_TARGET, "Workspace member removed");
 
     Ok(StatusCode::OK)
@@ -221,6 +243,7 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_member(
     State(pg_client): State<PgClient>,
+    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMember>,
@@ -254,6 +277,7 @@ async fn update_member(
             .with_context("Owners can only leave the workspace themselves"));
     }
 
+    let new_role = request.role;
     conn.update_workspace_member(
         path_params.workspace_id,
         path_params.account_id,
@@ -267,6 +291,28 @@ async fn update_member(
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
     };
+
+    // Emit webhook event (fire-and-forget)
+    let data = serde_json::json!({
+        "accountId": path_params.account_id,
+        "previousRole": current_member.member_role.to_string(),
+        "newRole": new_role.to_string(),
+    });
+    if let Err(err) = webhook_emitter
+        .emit_member_updated(
+            path_params.workspace_id,
+            path_params.account_id, // Use account_id as resource_id
+            Some(auth_state.account_id),
+            Some(data),
+        )
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            "Failed to emit member:updated webhook event"
+        );
+    }
 
     tracing::info!(
         target: TRACING_TARGET,

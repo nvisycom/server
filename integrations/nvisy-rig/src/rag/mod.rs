@@ -31,7 +31,7 @@ mod splitter;
 use std::sync::Arc;
 
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{DocumentStore, Files};
+use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::PgClient;
 use uuid::Uuid;
 
@@ -54,7 +54,7 @@ pub struct RagService {
 struct RagServiceInner {
     provider: EmbeddingProvider,
     db: PgClient,
-    files: DocumentStore<Files>,
+    files: ObjectStore<FilesBucket, FileKey>,
     config: RagConfig,
 }
 
@@ -67,9 +67,9 @@ impl RagService {
         nats: NatsClient,
     ) -> Result<Self> {
         let files = nats
-            .document_store::<Files>()
+            .object_store::<FilesBucket, FileKey>()
             .await
-            .map_err(|e| crate::Error::retrieval(format!("failed to open document store: {e}")))?;
+            .map_err(|e| crate::Error::retrieval(format!("failed to open file store: {e}")))?;
 
         let inner = RagServiceInner {
             provider,

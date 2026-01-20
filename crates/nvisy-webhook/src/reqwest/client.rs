@@ -148,6 +148,13 @@ impl WebhookProvider for ReqwestClient {
             .header("X-Webhook-Request-Id", request.request_id.to_string())
             .timeout(timeout);
 
+        // Add HMAC-SHA256 signature if secret is present
+        if let Some(ref secret) = request.secret {
+            let signature = Self::sign_payload(secret, timestamp, &payload_bytes);
+            http_request =
+                http_request.header("X-Webhook-Signature", format!("sha256={}", signature));
+        }
+
         // Add custom headers
         for (name, value) in &request.headers {
             http_request = http_request.header(name, value);

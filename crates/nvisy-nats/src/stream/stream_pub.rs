@@ -34,7 +34,7 @@ where
 {
     /// Create a new type-safe stream publisher
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
-    pub async fn new(jetstream: &Context, stream_name: &str) -> Result<Self> {
+    pub(crate) async fn new(jetstream: &Context, stream_name: &str) -> Result<Self> {
         let stream_config = stream::Config {
             name: stream_name.to_string(),
             description: Some(format!("Type-safe stream: {}", stream_name)),

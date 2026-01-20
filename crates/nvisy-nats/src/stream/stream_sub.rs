@@ -37,7 +37,11 @@ where
 {
     /// Create a new type-safe stream subscriber.
     #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
-    pub async fn new(jetstream: &Context, stream_name: &str, consumer_name: &str) -> Result<Self> {
+    pub(crate) async fn new(
+        jetstream: &Context,
+        stream_name: &str,
+        consumer_name: &str,
+    ) -> Result<Self> {
         // Verify stream exists
         jetstream
             .get_stream(stream_name)
@@ -254,38 +258,6 @@ where
             .await
             .map_err(|e| Error::operation("consumer_info", e.to_string()))
             .map(|info| (*info).clone())
-    }
-
-    /// Create a new subscriber with exponential backoff retry logic.
-    #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
-    pub async fn new_with_retry(
-        jetstream: &Context,
-        stream_name: &str,
-        consumer_name: &str,
-        max_retries: u32,
-    ) -> Result<Self> {
-        let mut attempts = 0;
-        let mut delay = std::time::Duration::from_millis(100);
-
-        loop {
-            match Self::new(jetstream, stream_name, consumer_name).await {
-                Ok(subscriber) => return Ok(subscriber),
-                Err(e) if attempts < max_retries => {
-                    attempts += 1;
-                    debug!(
-                        target: TRACING_TARGET_STREAM,
-                        attempt = attempts,
-                        max_retries = max_retries,
-                        delay_ms = delay.as_millis(),
-                        error = %e,
-                        "Retrying subscriber creation"
-                    );
-                    tokio::time::sleep(delay).await;
-                    delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(30));
-                }
-                Err(e) => return Err(e),
-            }
-        }
     }
 }
 

@@ -11,6 +11,8 @@ use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::*;
 use nvisy_server::service::ServiceState;
+use nvisy_server::worker::WebhookWorker;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::{Cli, MiddlewareConfig};
 use crate::server::TRACING_TARGET_SHUTDOWN;
@@ -45,10 +47,34 @@ async fn run() -> anyhow::Result<()> {
     let state = cli.service_state().await?;
 
     // Build router
-    let router = create_router(state, &cli.middleware);
+    let router = create_router(state.clone(), &cli.middleware);
+
+    // Create cancellation token for graceful shutdown of workers
+    let cancel = CancellationToken::new();
+
+    // Spawn webhook worker (logs lifecycle events internally)
+    let webhook_worker = WebhookWorker::new(state.nats.clone(), state.webhook.clone());
+    let worker_cancel = cancel.clone();
+    let worker_handle = tokio::spawn(async move {
+        let _ = webhook_worker.run(worker_cancel).await;
+    });
 
     // Run the HTTP server
-    server::serve(router, cli.server).await?;
+    let server_result = server::serve(router, cli.server).await;
+
+    // Signal workers to stop
+    cancel.cancel();
+
+    // Wait for worker to finish
+    if let Err(err) = worker_handle.await {
+        tracing::error!(
+            target: TRACING_TARGET_SHUTDOWN,
+            error = %err,
+            "Webhook worker task panicked"
+        );
+    }
+
+    server_result?;
     Ok(())
 }
 

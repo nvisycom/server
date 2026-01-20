@@ -6,42 +6,32 @@
 //!
 //! # Architecture
 //!
-//! ## Generic Store
-//! - [`ObjectStore`] - Generic object store wrapper with streaming support
+//! ## Store
+//! - [`ObjectStore<B, K>`] - Type-safe object store with bucket and key configuration
 //!
-//! ## Document Storage
-//! - [`DocumentStore`] - Specialized store for document files
-//! - [`DocumentKey`] - Unique key for documents (workspace + object ID)
+//! ## Key Types
+//! - [`FileKey`] - Unique key for files (workspace + object ID)
+//! - [`AccountKey`] - Key for account-scoped objects (account ID)
 //!
-//! ## Avatar Storage
-//! - [`AvatarStore`] - Specialized store for account avatars
-//! - [`AvatarKey`] - Key for avatars (account ID)
-//!
-//! ## Thumbnail Storage
-//! - [`ThumbnailStore`] - Specialized store for document thumbnails
-//! - Uses [`DocumentKey`] for addressing
+//! ## Bucket Types
+//! - [`FilesBucket`] - Primary file storage (no expiration)
+//! - [`IntermediatesBucket`] - Temporary processing artifacts (7 day TTL)
+//! - [`ThumbnailsBucket`] - Document thumbnails (no expiration)
+//! - [`AvatarsBucket`] - Account avatars (no expiration)
 //!
 //! ## Common Types
 //! - [`PutResult`] - Result of upload operations with size and SHA-256 hash
 //! - [`GetResult`] - Result of download operations with streaming reader
 
-mod avatar_bucket;
-mod avatar_key;
-mod avatar_store;
-mod document_bucket;
-mod document_key;
-mod document_store;
 mod hashing_reader;
+mod object_bucket;
 mod object_data;
+mod object_key;
 mod object_store;
-mod thumbnail_bucket;
-mod thumbnail_store;
 
-pub use avatar_key::AvatarKey;
-pub use avatar_store::AvatarStore;
-pub use document_bucket::{DocumentBucket, Files, Intermediates};
-pub use document_key::DocumentKey;
-pub use document_store::DocumentStore;
+pub use object_bucket::{
+    AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ThumbnailsBucket,
+};
 pub use object_data::{GetResult, PutResult};
+pub use object_key::{AccountKey, FileKey, ObjectKey};
 pub use object_store::ObjectStore;
-pub use thumbnail_store::ThumbnailStore;

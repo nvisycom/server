@@ -174,6 +174,12 @@ impl From<nvisy_nats::Error> for Error {
     }
 }
 
+impl From<nvisy_postgres::PgError> for Error {
+    fn from(err: nvisy_postgres::PgError) -> Self {
+        Error::external("postgres", err.to_string()).with_source(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

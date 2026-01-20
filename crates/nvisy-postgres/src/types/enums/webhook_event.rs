@@ -152,4 +152,26 @@ impl WebhookEvent {
             | WebhookEvent::IntegrationDesynced => "integration",
         }
     }
+
+    /// Returns the event as a subject string for NATS routing.
+    ///
+    /// Format: `{category}.{action}` (e.g., "file.created", "member.deleted")
+    pub fn as_subject(&self) -> &'static str {
+        match self {
+            WebhookEvent::DocumentCreated => "document.created",
+            WebhookEvent::DocumentUpdated => "document.updated",
+            WebhookEvent::DocumentDeleted => "document.deleted",
+            WebhookEvent::FileCreated => "file.created",
+            WebhookEvent::FileUpdated => "file.updated",
+            WebhookEvent::FileDeleted => "file.deleted",
+            WebhookEvent::MemberAdded => "member.added",
+            WebhookEvent::MemberDeleted => "member.deleted",
+            WebhookEvent::MemberUpdated => "member.updated",
+            WebhookEvent::IntegrationCreated => "integration.created",
+            WebhookEvent::IntegrationUpdated => "integration.updated",
+            WebhookEvent::IntegrationDeleted => "integration.deleted",
+            WebhookEvent::IntegrationSynced => "integration.synced",
+            WebhookEvent::IntegrationDesynced => "integration.desynced",
+        }
+    }
 }
