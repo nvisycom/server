@@ -21,7 +21,6 @@ pub use config::{
     AzureBlobConfig, DropboxConfig, GcsConfig, GoogleDriveConfig, OneDriveConfig, S3Config,
     StorageConfig,
 };
-
 // Re-export types from nvisy-data for convenience
 pub use nvisy_data::{DataError, DataInput, DataOutput, DataResult, InputContext, OutputContext};
 

@@ -40,10 +40,10 @@ serde_json = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
 # Vector store clients
-qdrant-client = "1.13"
-pinecone-sdk = "0.1"
-milvus-sdk-rust = "0.1"
-prost-types = "0.12"
+qdrant-client = { workspace = true, features = [] }
+pinecone-sdk = { workspace = true, features = [] }
+milvus-sdk-rust = { workspace = true, features = [] }
+prost-types = { workspace = true, features = [] }
 
 # Database (for pgvector)
 diesel = { workspace = true, features = ["postgres"] }

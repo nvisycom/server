@@ -18,13 +18,12 @@ pub use config::{
     MilvusConfig, PgVectorConfig, PgVectorDistanceMetric, PgVectorIndexType, PineconeConfig,
     QdrantConfig, VectorStoreConfig,
 };
-pub use store::VectorStore;
-
 // Re-export types from nvisy-data for convenience
 pub use nvisy_data::{
     DataError, DataResult, VectorContext, VectorData, VectorOutput, VectorSearchOptions,
     VectorSearchResult,
 };
+pub use store::VectorStore;
 
 /// Tracing target for vector store operations.
 pub const TRACING_TARGET: &str = "nvisy_vector";

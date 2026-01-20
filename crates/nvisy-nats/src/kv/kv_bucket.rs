@@ -23,8 +23,8 @@ pub trait KvBucket: Clone + Send + Sync + 'static {
 pub struct ApiTokensBucket;
 
 impl KvBucket for ApiTokensBucket {
-    const NAME: &'static str = "api_tokens";
     const DESCRIPTION: &'static str = "API authentication tokens";
+    const NAME: &'static str = "api_tokens";
     const TTL: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60)); // 24 hours
 }
 
@@ -33,8 +33,8 @@ impl KvBucket for ApiTokensBucket {
 pub struct ChatHistoryBucket;
 
 impl KvBucket for ChatHistoryBucket {
-    const NAME: &'static str = "chat_history";
     const DESCRIPTION: &'static str = "Ephemeral chat sessions";
+    const NAME: &'static str = "chat_history";
     const TTL: Option<Duration> = Some(Duration::from_secs(30 * 60)); // 30 minutes
 }
 

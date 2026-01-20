@@ -27,10 +27,10 @@ pub trait EventStream: Clone + Send + Sync + 'static {
 pub struct FileStream;
 
 impl EventStream for FileStream {
+    const CONSUMER_NAME: &'static str = "file-worker";
+    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(7 * 24 * 60 * 60));
     const NAME: &'static str = "FILE_JOBS";
     const SUBJECT: &'static str = "file.jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(7 * 24 * 60 * 60));
-    const CONSUMER_NAME: &'static str = "file-worker";
 }
 
 /// Stream for webhook delivery.
@@ -40,10 +40,10 @@ impl EventStream for FileStream {
 pub struct WebhookStream;
 
 impl EventStream for WebhookStream {
+    const CONSUMER_NAME: &'static str = "webhook-worker";
+    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60));
     const NAME: &'static str = "WEBHOOKS";
     const SUBJECT: &'static str = "webhooks";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60));
-    const CONSUMER_NAME: &'static str = "webhook-worker";
 }
 
 #[cfg(test)]
