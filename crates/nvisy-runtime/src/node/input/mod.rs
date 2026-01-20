@@ -1,9 +1,9 @@
 //! Input node types for reading data from storage backends.
 
-mod config;
-
-pub use config::InputConfig;
+use nvisy_dal::DataTypeId;
 use serde::{Deserialize, Serialize};
+
+use super::provider::ProviderParams;
 
 /// A data input node that reads or produces data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,18 +14,23 @@ pub struct InputNode {
     /// Description of what this input does.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Input configuration.
-    pub config: InputConfig,
+    /// Provider parameters (credentials referenced by ID).
+    pub provider: ProviderParams,
 }
 
 impl InputNode {
     /// Creates a new input node.
-    pub fn new(config: InputConfig) -> Self {
+    pub fn new(provider: ProviderParams) -> Self {
         Self {
             name: None,
             description: None,
-            config,
+            provider,
         }
+    }
+
+    /// Returns the output data type based on the provider kind.
+    pub const fn output_type(&self) -> DataTypeId {
+        self.provider.output_type()
     }
 
     /// Sets the display name.
@@ -41,8 +46,8 @@ impl InputNode {
     }
 }
 
-impl From<InputConfig> for InputNode {
-    fn from(config: InputConfig) -> Self {
-        Self::new(config)
+impl From<ProviderParams> for InputNode {
+    fn from(provider: ProviderParams) -> Self {
+        Self::new(provider)
     }
 }

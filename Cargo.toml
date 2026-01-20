@@ -5,14 +5,12 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
-    "./crates/nvisy-data",
+    "./crates/nvisy-dal",
     "./crates/nvisy-nats",
-    "./crates/nvisy-opendal",
     "./crates/nvisy-postgres",
     "./crates/nvisy-rig",
     "./crates/nvisy-runtime",
     "./crates/nvisy-server",
-    "./crates/nvisy-vector",
     "./crates/nvisy-webhook",
 ]
 
@@ -36,14 +34,12 @@ documentation = "https://docs.rs/nvisy-server"
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
-nvisy-data = { path = "./crates/nvisy-data", version = "0.1.0" }
+nvisy-dal = { path = "./crates/nvisy-dal", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-opendal = { path = "./crates/nvisy-opendal", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
 nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
-nvisy-vector = { path = "./crates/nvisy-vector", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
 # Runtime crates (from github.com/nvisycom/runtime)
@@ -130,6 +126,8 @@ uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
 ipnet = { version = "2.11", features = [] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 bytes = { version = "1.10", features = ["serde"] }
+petgraph = { version = "0.8", features = ["serde-1"] }
+semver = { version = "1.0", features = ["serde"] }
 url = { version = "2.5", features = [] }
 
 # Text processing
@@ -140,17 +138,9 @@ woothee = { version = "0.13", features = [] }
 # AI/ML frameworks
 rig-core = { version = "0.28", default-features = false, features = ["reqwest-rustls"] }
 
-# Vector store clients
+# Storage abstractions and providers
+opendal = { version = "0.53", features = [] }
 qdrant-client = { version = "1.13", features = [] }
 pinecone-sdk = { version = "0.1", features = [] }
 milvus-sdk-rust = { version = "0.1", features = [] }
 prost-types = { version = "0.12", features = [] }
-
-# Storage abstraction
-opendal = { version = "0.53", features = [] }
-
-# Graph data structures
-petgraph = { version = "0.8", features = ["serde-1"] }
-
-# Versioning
-semver = { version = "1.0", features = ["serde"] }

@@ -1,6 +1,7 @@
 //! Workflow error types.
 
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::node::NodeId;
 
@@ -40,9 +41,17 @@ pub enum WorkflowError {
     #[error("workflow execution timed out")]
     Timeout,
 
+    /// Failed to construct credentials registry.
+    #[error("failed to construct credentials registry: {0}")]
+    CredentialsRegistry(#[source] serde_json::Error),
+
+    /// Credentials not found.
+    #[error("credentials not found: {0}")]
+    CredentialsNotFound(Uuid),
+
     /// Storage operation failed.
     #[error("storage error: {0}")]
-    Storage(#[from] nvisy_opendal::DataError),
+    Storage(#[from] nvisy_dal::StorageError),
 
     /// Serialization/deserialization error.
     #[error("serialization error: {0}")]

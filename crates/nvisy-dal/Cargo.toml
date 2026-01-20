@@ -1,0 +1,58 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-dal"
+description = "Data abstraction layer for workflow inputs and outputs"
+readme = "./README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["rt", "sync"] }
+futures = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Derive macros & utilities
+async-trait = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["from"] }
+thiserror = { workspace = true, features = [] }
+
+# Data types
+bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4", "v7"] }
+jiff = { workspace = true, features = ["serde"] }
+
+# Storage (OpenDAL)
+opendal = { workspace = true, features = ["services-s3", "services-gcs", "services-azblob", "services-postgresql", "services-mysql"] }
+
+# Vector store clients
+qdrant-client = { workspace = true, features = [] }
+pinecone-sdk = { workspace = true, features = [] }
+milvus-sdk-rust = { workspace = true, features = [] }
+prost-types = { workspace = true, features = [] }
+
+# Database (for pgvector)
+diesel = { workspace = true, features = ["postgres"] }
+diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
+pgvector = { workspace = true, features = ["diesel"] }
+deadpool = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

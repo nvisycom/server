@@ -1,9 +1,8 @@
 //! Output node types for writing data to storage backends.
 
-mod config;
-
-pub use config::{OutputConfig, WebhookConfig};
 use serde::{Deserialize, Serialize};
+
+use super::provider::ProviderParams;
 
 /// A data output node that writes or consumes data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,17 +13,17 @@ pub struct OutputNode {
     /// Description of what this output does.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Output configuration.
-    pub config: OutputConfig,
+    /// Provider parameters (credentials referenced by ID).
+    pub provider: ProviderParams,
 }
 
 impl OutputNode {
     /// Creates a new output node.
-    pub fn new(config: OutputConfig) -> Self {
+    pub fn new(provider: ProviderParams) -> Self {
         Self {
             name: None,
             description: None,
-            config,
+            provider,
         }
     }
 
@@ -41,8 +40,8 @@ impl OutputNode {
     }
 }
 
-impl From<OutputConfig> for OutputNode {
-    fn from(config: OutputConfig) -> Self {
-        Self::new(config)
+impl From<ProviderParams> for OutputNode {
+    fn from(provider: ProviderParams) -> Self {
+        Self::new(provider)
     }
 }

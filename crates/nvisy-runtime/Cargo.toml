@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true }
-nvisy-opendal = { workspace = true }
+nvisy-dal = { workspace = true }
 
 # Runtime crates
 nvisy-rt-core = { workspace = true }
@@ -39,6 +39,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 
 # Derive macros & utilities
+async-trait = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["debug", "display", "from", "into"] }
 derive_builder = { workspace = true, features = [] }
