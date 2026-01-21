@@ -15,12 +15,15 @@ keywords = ["rig", "llm", "ai", "client", "rag"]
 categories = ["api-bindings", "web-programming::http-client"]
 
 [features]
-## Default feature set (none for minimal dependencies)
-default = []
+## Default feature set includes Ollama for local development
+default = ["ollama"]
 
 ## CLI configuration support: enables clap derives for config types
 ## This allows config types to be used with command-line argument parsing
 config = ["dep:clap"]
+
+## Ollama local model support
+ollama = []
 
 [dependencies]
 # Internal crates

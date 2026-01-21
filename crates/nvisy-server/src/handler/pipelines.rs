@@ -213,13 +213,6 @@ async fn update_pipeline(
         )
         .await?;
 
-    // Check if pipeline is editable
-    if !existing.is_editable() {
-        return Err(ErrorKind::BadRequest
-            .with_message("Pipeline cannot be edited in its current state")
-            .with_resource("pipeline"));
-    }
-
     let update_data = request.into_model();
     let pipeline = conn
         .update_pipeline(path_params.pipeline_id, update_data)
@@ -234,7 +227,7 @@ async fn update_pipeline(
 
 fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update pipeline")
-        .description("Updates an existing pipeline. Only provided fields are updated. Pipeline must be in an editable state.")
+        .description("Updates an existing pipeline. Only provided fields are updated.")
         .response::<200, Json<Pipeline>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()

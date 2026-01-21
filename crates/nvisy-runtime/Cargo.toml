@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 nvisy-core = { workspace = true }
 nvisy-dal = { workspace = true }
+nvisy-rig = { workspace = true }
 
 # Runtime crates
 nvisy-rt-core = { workspace = true }
@@ -46,6 +47,7 @@ derive_builder = { workspace = true, features = [] }
 
 # Data types
 uuid = { workspace = true, features = ["v7", "serde"] }
+jiff = { workspace = true, features = ["serde"] }
 
 # Graph data structures
 petgraph = { workspace = true, features = [] }

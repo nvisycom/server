@@ -4,7 +4,7 @@
 -- Pipeline status enum
 CREATE TYPE PIPELINE_STATUS AS ENUM (
     'draft',        -- Pipeline is being configured
-    'active',       -- Pipeline is ready to run
+    'enabled',      -- Pipeline is ready to run
     'disabled'      -- Pipeline is disabled
 );
 

@@ -9,7 +9,7 @@ use strum::{Display, EnumIter, EnumString};
 /// Defines the lifecycle status of a pipeline definition.
 ///
 /// This enumeration corresponds to the `PIPELINE_STATUS` PostgreSQL enum and is used
-/// to track whether a pipeline is being configured, active and ready to run, or disabled.
+/// to track whether a pipeline is being configured, enabled and ready to run, or disabled.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
@@ -22,9 +22,9 @@ pub enum PipelineStatus {
     Draft,
 
     /// Pipeline is ready to run
-    #[db_rename = "active"]
-    #[serde(rename = "active")]
-    Active,
+    #[db_rename = "enabled"]
+    #[serde(rename = "enabled")]
+    Enabled,
 
     /// Pipeline is disabled
     #[db_rename = "disabled"]
@@ -39,27 +39,15 @@ impl PipelineStatus {
         matches!(self, PipelineStatus::Draft)
     }
 
-    /// Returns whether the pipeline is active.
+    /// Returns whether the pipeline is enabled.
     #[inline]
-    pub fn is_active(self) -> bool {
-        matches!(self, PipelineStatus::Active)
+    pub fn is_enabled(self) -> bool {
+        matches!(self, PipelineStatus::Enabled)
     }
 
     /// Returns whether the pipeline is disabled.
     #[inline]
     pub fn is_disabled(self) -> bool {
         matches!(self, PipelineStatus::Disabled)
-    }
-
-    /// Returns whether the pipeline can be executed.
-    #[inline]
-    pub fn is_runnable(self) -> bool {
-        matches!(self, PipelineStatus::Active)
-    }
-
-    /// Returns whether the pipeline can be edited.
-    #[inline]
-    pub fn is_editable(self) -> bool {
-        matches!(self, PipelineStatus::Draft | PipelineStatus::Disabled)
     }
 }

@@ -87,9 +87,9 @@ impl Pipeline {
         self.status.is_draft()
     }
 
-    /// Returns whether the pipeline is active.
-    pub fn is_active(&self) -> bool {
-        self.status.is_active()
+    /// Returns whether the pipeline is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.status.is_enabled()
     }
 
     /// Returns whether the pipeline is disabled.
@@ -97,34 +97,9 @@ impl Pipeline {
         self.status.is_disabled()
     }
 
-    /// Returns whether the pipeline can be executed.
-    pub fn is_runnable(&self) -> bool {
-        self.status.is_runnable() && !self.is_deleted()
-    }
-
-    /// Returns whether the pipeline can be edited.
-    pub fn is_editable(&self) -> bool {
-        self.status.is_editable() && !self.is_deleted()
-    }
-
     /// Returns whether the pipeline has a description.
     pub fn has_description(&self) -> bool {
         self.description.as_ref().is_some_and(|d| !d.is_empty())
-    }
-
-    /// Returns whether the pipeline has custom metadata.
-    pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
-    }
-
-    /// Returns the steps from the definition, if any.
-    pub fn steps(&self) -> Option<&Vec<serde_json::Value>> {
-        self.definition.get("steps")?.as_array()
-    }
-
-    /// Returns the number of steps in the pipeline.
-    pub fn step_count(&self) -> usize {
-        self.steps().map_or(0, |s| s.len())
     }
 }
 

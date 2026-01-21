@@ -4,13 +4,17 @@
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
-use crate::provider::EmbeddingProvider;
+#[cfg(feature = "ollama")]
+use crate::Result;
+#[cfg(feature = "ollama")]
+use crate::provider::{EmbeddingProvider, OllamaEmbeddingModel};
 
 /// Configuration for AI services (chat and RAG).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "config", derive(Args))]
 pub struct RigConfig {
     /// Ollama base URL for embeddings.
+    #[cfg(feature = "ollama")]
     #[cfg_attr(
         feature = "config",
         arg(
@@ -22,6 +26,7 @@ pub struct RigConfig {
     pub ollama_base_url: String,
 
     /// Ollama embedding model name.
+    #[cfg(feature = "ollama")]
     #[cfg_attr(
         feature = "config",
         arg(
@@ -31,20 +36,37 @@ pub struct RigConfig {
         )
     )]
     pub ollama_embedding_model: String,
+
+    /// Ollama embedding model dimensions.
+    #[cfg(feature = "ollama")]
+    #[cfg_attr(
+        feature = "config",
+        arg(long, env = "OLLAMA_EMBEDDING_DIMENSIONS", default_value = "768")
+    )]
+    pub ollama_embedding_dimensions: usize,
 }
 
 impl Default for RigConfig {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "ollama")]
             ollama_base_url: "http://localhost:11434".to_string(),
+            #[cfg(feature = "ollama")]
             ollama_embedding_model: "nomic-embed-text".to_string(),
+            #[cfg(feature = "ollama")]
+            ollama_embedding_dimensions: 768,
         }
     }
 }
 
+#[cfg(feature = "ollama")]
 impl RigConfig {
-    /// Creates an embedding provider from this configuration.
-    pub(crate) fn embedding_provider(&self) -> EmbeddingProvider {
-        EmbeddingProvider::ollama(&self.ollama_base_url, &self.ollama_embedding_model)
+    /// Creates an Ollama embedding provider from this configuration.
+    pub(crate) fn embedding_provider(&self) -> Result<EmbeddingProvider> {
+        let model = OllamaEmbeddingModel::new(
+            &self.ollama_embedding_model,
+            self.ollama_embedding_dimensions,
+        );
+        EmbeddingProvider::ollama(&self.ollama_base_url, model)
     }
 }

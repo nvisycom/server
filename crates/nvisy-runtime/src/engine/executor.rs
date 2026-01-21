@@ -8,7 +8,7 @@ use tokio::sync::Semaphore;
 use super::EngineConfig;
 use super::context::ExecutionContext;
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::graph::{NodeData, NodeId, WorkflowGraph};
+use crate::graph::{InputSource, NodeData, NodeId, OutputDestination, WorkflowGraph};
 use crate::provider::{CredentialsRegistry, InputProvider, OutputProvider};
 
 /// Tracing target for engine operations.
@@ -105,8 +105,8 @@ impl Engine {
         order: &[NodeId],
         ctx: &ExecutionContext,
     ) -> WorkflowResult<Pipeline> {
-        let mut input_providers = Vec::new();
-        let mut output_providers = Vec::new();
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
 
         for node_id in order {
             let Some(node) = workflow.get_node(*node_id) else {
@@ -115,18 +115,30 @@ impl Engine {
 
             match node {
                 NodeData::Input(input_node) => {
-                    let credentials_id = input_node.provider.credentials_id();
-                    let credentials = ctx.credentials().get(credentials_id)?.clone();
-                    let config = input_node.provider.clone().into_config(credentials)?;
-                    let provider = config.into_provider()?;
-                    input_providers.push((*node_id, provider));
+                    let input = match &input_node.source {
+                        InputSource::Provider(params) => {
+                            let credentials_id = params.credentials_id();
+                            let credentials = ctx.credentials().get(credentials_id)?.clone();
+                            let config = params.clone().into_config(credentials)?;
+                            let provider = config.into_provider()?;
+                            PipelineInput::Provider(provider)
+                        }
+                        InputSource::Cache(slot) => PipelineInput::Cache(slot.slot.clone()),
+                    };
+                    inputs.push((*node_id, input));
                 }
                 NodeData::Output(output_node) => {
-                    let credentials_id = output_node.provider.credentials_id();
-                    let credentials = ctx.credentials().get(credentials_id)?.clone();
-                    let config = output_node.provider.clone().into_config(credentials)?;
-                    let provider = config.into_provider().await?;
-                    output_providers.push((*node_id, provider));
+                    let output = match &output_node.destination {
+                        OutputDestination::Provider(params) => {
+                            let credentials_id = params.credentials_id();
+                            let credentials = ctx.credentials().get(credentials_id)?.clone();
+                            let config = params.clone().into_config(credentials)?;
+                            let provider = config.into_provider().await?;
+                            PipelineOutput::Provider(provider)
+                        }
+                        OutputDestination::Cache(slot) => PipelineOutput::Cache(slot.slot.clone()),
+                    };
+                    outputs.push((*node_id, output));
                 }
                 NodeData::Transformer(_) => {
                     // Transformers don't need pre-built providers
@@ -134,10 +146,7 @@ impl Engine {
             }
         }
 
-        Ok(Pipeline {
-            input_providers,
-            output_providers,
-        })
+        Ok(Pipeline { inputs, outputs })
     }
 
     /// Executes the pipeline by streaming items through.
@@ -153,16 +162,21 @@ impl Engine {
         pipeline: &Pipeline,
         ctx: &mut ExecutionContext,
     ) -> WorkflowResult<()> {
-        // For each input provider, stream items through the pipeline
-        for (input_node_id, input_provider) in &pipeline.input_providers {
+        // For each input, stream items through the pipeline
+        for (input_node_id, input) in &pipeline.inputs {
             tracing::debug!(
                 target: TRACING_TARGET,
                 node_id = %input_node_id,
-                "Reading from input provider"
+                "Reading from input"
             );
 
-            let dal_ctx = Context::default();
-            let items = input_provider.read(&dal_ctx).await?;
+            let items = match input {
+                PipelineInput::Provider(provider) => {
+                    let dal_ctx = Context::default();
+                    provider.read(&dal_ctx).await?
+                }
+                PipelineInput::Cache(name) => ctx.read_cache(name),
+            };
 
             // Process each input item through the pipeline
             for item in items {
@@ -180,19 +194,26 @@ impl Engine {
                     }
                 }
 
-                // Write all resulting items to output providers
+                // Write all resulting items to outputs
                 let output_data = ctx.take_current();
                 if !output_data.is_empty() {
-                    for (output_node_id, output_provider) in &pipeline.output_providers {
+                    for (output_node_id, output) in &pipeline.outputs {
                         tracing::trace!(
                             target: TRACING_TARGET,
                             node_id = %output_node_id,
                             item_count = output_data.len(),
-                            "Writing to output provider"
+                            "Writing to output"
                         );
 
-                        let dal_ctx = Context::default();
-                        output_provider.write(&dal_ctx, output_data.clone()).await?;
+                        match output {
+                            PipelineOutput::Provider(provider) => {
+                                let dal_ctx = Context::default();
+                                provider.write(&dal_ctx, output_data.clone()).await?;
+                            }
+                            PipelineOutput::Cache(name) => {
+                                ctx.write_cache(name, output_data.clone());
+                            }
+                        }
                     }
                 }
 
@@ -208,7 +229,7 @@ impl Engine {
     fn execute_transformer(
         &self,
         node_id: NodeId,
-        _transformer_node: &crate::graph::TransformerNode,
+        _transformer_config: &crate::graph::TransformerConfig,
         ctx: &mut ExecutionContext,
     ) -> WorkflowResult<()> {
         // TODO: Apply transformation based on transformer_node.config
@@ -230,10 +251,26 @@ impl Engine {
     }
 }
 
-/// Pre-built pipeline with providers ready for execution.
+/// Pre-built pipeline with inputs and outputs ready for execution.
 struct Pipeline {
-    input_providers: Vec<(NodeId, InputProvider)>,
-    output_providers: Vec<(NodeId, OutputProvider)>,
+    inputs: Vec<(NodeId, PipelineInput)>,
+    outputs: Vec<(NodeId, PipelineOutput)>,
+}
+
+/// Input source in the pipeline.
+enum PipelineInput {
+    /// Read from a storage provider.
+    Provider(InputProvider),
+    /// Read from a named cache slot.
+    Cache(String),
+}
+
+/// Output destination in the pipeline.
+enum PipelineOutput {
+    /// Write to a storage provider.
+    Provider(OutputProvider),
+    /// Write to a named cache slot.
+    Cache(String),
 }
 
 impl std::fmt::Debug for Engine {

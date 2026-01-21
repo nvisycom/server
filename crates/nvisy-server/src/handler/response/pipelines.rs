@@ -3,6 +3,7 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::PipelineStatus;
+use nvisy_runtime::graph::WorkflowGraph;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,16 +27,9 @@ pub struct Pipeline {
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
-    /// Pipeline definition (steps, configuration).
-    pub definition: serde_json::Value,
-    /// Extended metadata.
-    pub metadata: serde_json::Value,
-    /// Number of steps in the pipeline.
-    pub step_count: usize,
-    /// Whether the pipeline can be executed.
-    pub is_runnable: bool,
-    /// Whether the pipeline can be edited.
-    pub is_editable: bool,
+    /// Pipeline definition (workflow graph).
+    #[schemars(with = "serde_json::Value")]
+    pub definition: WorkflowGraph,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
@@ -45,18 +39,16 @@ pub struct Pipeline {
 impl Pipeline {
     /// Creates a new instance of [`Pipeline`] from the database model.
     pub fn from_model(pipeline: model::Pipeline) -> Self {
+        let definition: WorkflowGraph =
+            serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {
             pipeline_id: pipeline.id,
             workspace_id: pipeline.workspace_id,
             account_id: pipeline.account_id,
-            name: pipeline.name.clone(),
-            description: pipeline.description.clone(),
+            name: pipeline.name,
+            description: pipeline.description,
             status: pipeline.status,
-            step_count: pipeline.step_count(),
-            is_runnable: pipeline.is_runnable(),
-            is_editable: pipeline.is_editable(),
-            definition: pipeline.definition.clone(),
-            metadata: pipeline.metadata.clone(),
+            definition,
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),
         }
@@ -79,10 +71,6 @@ pub struct PipelineSummary {
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
-    /// Number of steps in the pipeline.
-    pub step_count: usize,
-    /// Whether the pipeline can be executed.
-    pub is_runnable: bool,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
@@ -92,15 +80,11 @@ pub struct PipelineSummary {
 impl PipelineSummary {
     /// Creates a new instance of [`PipelineSummary`] from the database model.
     pub fn from_model(pipeline: model::Pipeline) -> Self {
-        let step_count = pipeline.step_count();
-        let is_runnable = pipeline.is_runnable();
         Self {
             pipeline_id: pipeline.id,
             name: pipeline.name,
             description: pipeline.description,
             status: pipeline.status,
-            step_count,
-            is_runnable,
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),
         }

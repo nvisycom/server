@@ -57,3 +57,14 @@ impl Edge {
         self
     }
 }
+
+/// Edge data stored in the graph.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct EdgeData {
+    /// Optional port/slot name on the source node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_port: Option<String>,
+    /// Optional port/slot name on the target node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_port: Option<String>,
+}

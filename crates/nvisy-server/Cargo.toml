@@ -34,6 +34,7 @@ config = [
 # Internal crates
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
+nvisy-runtime = { workspace = true, features = [] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime

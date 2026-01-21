@@ -1,6 +1,7 @@
 //! Agent context for a single request.
 
-use crate::rag::{RetrievedChunk, estimate_tokens};
+use crate::provider::estimate_tokens;
+use crate::rag::RetrievedChunk;
 use crate::session::Session;
 
 /// Context for an agent request.

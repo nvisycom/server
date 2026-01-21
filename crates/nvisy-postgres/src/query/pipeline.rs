@@ -60,8 +60,8 @@ pub trait PipelineRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Pipeline>>> + Send;
 
-    /// Lists active pipelines in a workspace.
-    fn list_active_workspace_pipelines(
+    /// Lists enabled pipelines in a workspace.
+    fn list_enabled_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
     ) -> impl Future<Output = PgResult<Vec<Pipeline>>> + Send;
@@ -269,7 +269,7 @@ impl PipelineRepository for PgConnection {
         Ok(pipelines)
     }
 
-    async fn list_active_workspace_pipelines(
+    async fn list_enabled_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
     ) -> PgResult<Vec<Pipeline>> {
@@ -277,7 +277,7 @@ impl PipelineRepository for PgConnection {
 
         let pipelines = pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::status.eq(PipelineStatus::Active))
+            .filter(dsl::status.eq(PipelineStatus::Enabled))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::name.asc())
             .select(Pipeline::as_select())

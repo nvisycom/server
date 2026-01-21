@@ -8,20 +8,17 @@ use uuid::Uuid;
 
 use super::{ChatEvent, ChatResponse, ChatService, UsageStats};
 use crate::Result;
-use crate::provider::ModelRef;
+use crate::provider::CompletionModel;
 use crate::session::Session;
 use crate::tool::edit::ProposedEdit;
 
 /// Streaming chat response.
-///
-/// Implements `Stream<Item = Result<ChatEvent>>` for async iteration.
 pub struct ChatStream {
     session: Session,
     message: String,
-    model_override: Option<ModelRef>,
+    model_override: Option<CompletionModel>,
     service: ChatService,
 
-    // State
     started: bool,
     finished: bool,
     accumulated_content: String,
@@ -49,7 +46,7 @@ impl ChatStream {
     pub async fn with_model(
         session: Session,
         message: String,
-        model_override: Option<ModelRef>,
+        model_override: Option<CompletionModel>,
         service: ChatService,
     ) -> Result<Self> {
         Ok(Self {
@@ -75,7 +72,6 @@ impl ChatStream {
         self.session.document_id()
     }
 
-    /// Polls the underlying agent for the next event.
     fn poll_next_event(&mut self, _cx: &mut Context<'_>) -> Poll<Option<Result<ChatEvent>>> {
         if self.finished {
             return Poll::Ready(None);
@@ -84,24 +80,14 @@ impl ChatStream {
         if !self.started {
             self.started = true;
 
-            // TODO: Start the actual agent pipeline:
-            // 1. Retrieve relevant context via RAG
-            // 2. Build prompt with tools, context, and history
-            // 3. Stream completion from provider
-            // 4. Handle tool calls and proposed edits
-            // 5. Apply auto-apply policies
-
-            // For now, emit a placeholder response
-            // These references silence unused warnings until the pipeline is implemented
             let _ = (&self.message, &self.service, &self.accumulated_content);
 
-            // Emit done event with placeholder
             self.finished = true;
 
             let model = self
                 .model_override
                 .as_ref()
-                .map(|m| m.to_string())
+                .map(|m| m.as_str().to_string())
                 .unwrap_or_else(|| "default".to_string());
 
             let response = ChatResponse::new(

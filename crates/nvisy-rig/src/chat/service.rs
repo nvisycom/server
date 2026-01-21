@@ -7,40 +7,33 @@ use uuid::Uuid;
 
 use super::ChatStream;
 use crate::Result;
-use crate::provider::{ModelRef, ProviderRegistry};
+use crate::provider::{CompletionModel, EmbeddingProvider};
 use crate::session::{CreateSession, Session, SessionStore};
 use crate::tool::ToolRegistry;
 use crate::tool::edit::ApplyResult;
 
 /// Inner state for [`ChatService`].
 struct ChatServiceInner {
-    providers: ProviderRegistry,
+    embedding_provider: EmbeddingProvider,
     tools: ToolRegistry,
     sessions: SessionStore,
 }
 
 /// Chat service for AI-powered document conversations.
-///
-/// This type is cheap to clone and can be shared across threads.
-///
-/// Provides a high-level API for:
-/// - Creating and managing chat sessions
-/// - Streaming chat responses with tool use
-/// - Approving and applying document edits
 #[derive(Clone)]
 pub struct ChatService {
     inner: Arc<ChatServiceInner>,
 }
 
 impl ChatService {
-    /// Creates a new ChatService with automatic ToolRegistry and SessionStore.
-    pub async fn new(providers: ProviderRegistry, nats: NatsClient) -> Result<Self> {
+    /// Creates a new ChatService.
+    pub async fn new(embedding_provider: EmbeddingProvider, nats: NatsClient) -> Result<Self> {
         let tools = ToolRegistry::with_defaults();
         let sessions = SessionStore::new(nats).await?;
 
         Ok(Self {
             inner: Arc::new(ChatServiceInner {
-                providers,
+                embedding_provider,
                 tools,
                 sessions,
             }),
@@ -49,13 +42,13 @@ impl ChatService {
 
     /// Creates a new ChatService with custom tools and session store.
     pub fn with_components(
-        providers: ProviderRegistry,
+        embedding_provider: EmbeddingProvider,
         tools: ToolRegistry,
         sessions: SessionStore,
     ) -> Self {
         Self {
             inner: Arc::new(ChatServiceInner {
-                providers,
+                embedding_provider,
                 tools,
                 sessions,
             }),
@@ -75,14 +68,9 @@ impl ChatService {
     }
 
     /// Sends a chat message and returns a streaming response.
-    ///
-    /// The stream emits [`ChatEvent`](super::ChatEvent)s as the agent processes the request,
-    /// including thinking, tool calls, proposed edits, and text deltas.
     pub async fn chat(&self, session_id: Uuid, message: &str) -> Result<ChatStream> {
-        // Touch session to reset TTL
         self.inner.sessions.touch(session_id).await?;
 
-        // Get session
         let session = self
             .inner
             .sessions
@@ -90,7 +78,6 @@ impl ChatService {
             .await?
             .ok_or_else(|| crate::Error::session("session not found"))?;
 
-        // Create chat stream
         ChatStream::new(session, message.to_string(), self.clone()).await
     }
 
@@ -99,12 +86,10 @@ impl ChatService {
         &self,
         session_id: Uuid,
         message: &str,
-        model: ModelRef,
+        model: CompletionModel,
     ) -> Result<ChatStream> {
-        // Touch session to reset TTL
         self.inner.sessions.touch(session_id).await?;
 
-        // Get session
         let session = self
             .inner
             .sessions
@@ -112,7 +97,6 @@ impl ChatService {
             .await?
             .ok_or_else(|| crate::Error::session("session not found"))?;
 
-        // Create chat stream with model override
         ChatStream::with_model(session, message.to_string(), Some(model), self.clone()).await
     }
 
@@ -152,22 +136,14 @@ impl ChatService {
     }
 
     /// Generates embeddings for text.
-    ///
-    /// Used for indexing documents into the vector store.
-    pub async fn embed(&self, text: &str, model: Option<&ModelRef>) -> Result<Vec<f32>> {
-        let (_provider, _model_name) = self.inner.providers.resolve_embedding(model)?;
-
-        // TODO: Implement using rig-core embedding
-        let _ = text;
-        Err(crate::Error::provider(
-            "rig",
-            "embedding not yet implemented",
-        ))
+    pub async fn embed(&self, text: &str) -> Result<Vec<f64>> {
+        let embedding = self.inner.embedding_provider.embed_text(text).await?;
+        Ok(embedding.vec)
     }
 
-    /// Returns a reference to the provider registry.
-    pub fn providers(&self) -> &ProviderRegistry {
-        &self.inner.providers
+    /// Returns a reference to the embedding provider.
+    pub fn embedding_provider(&self) -> &EmbeddingProvider {
+        &self.inner.embedding_provider
     }
 
     /// Returns a reference to the tool registry.

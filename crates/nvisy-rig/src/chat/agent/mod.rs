@@ -1,10 +1,4 @@
 //! Agent module for orchestrating AI-powered document processing.
-//!
-//! The agent is responsible for:
-//! - Managing the conversation loop with the LLM
-//! - Executing tool calls
-//! - Proposing and applying edits
-//! - Streaming responses back to the client
 
 mod context;
 mod executor;
@@ -20,7 +14,7 @@ use uuid::Uuid;
 
 use super::ChatEvent;
 use crate::Result;
-use crate::provider::{ModelRef, ProviderRegistry};
+use crate::provider::CompletionModel;
 use crate::rag::RetrievedChunk;
 use crate::session::Session;
 use crate::tool::ToolRegistry;
@@ -40,6 +34,9 @@ pub struct AgentConfig {
 
     /// Whether to include thinking in output.
     pub include_thinking: bool,
+
+    /// Default completion model.
+    pub default_model: CompletionModel,
 }
 
 impl Default for AgentConfig {
@@ -49,6 +46,7 @@ impl Default for AgentConfig {
             max_tokens: 4096,
             temperature: 0.7,
             include_thinking: false,
+            default_model: CompletionModel::Ollama("llama3.2".to_string()),
         }
     }
 }
@@ -56,54 +54,34 @@ impl Default for AgentConfig {
 /// The core agent that processes chat messages.
 pub struct Agent {
     config: AgentConfig,
-    providers: Arc<ProviderRegistry>,
     tools: Arc<ToolRegistry>,
 }
 
 impl Agent {
     /// Creates a new agent.
-    pub fn new(
-        config: AgentConfig,
-        providers: Arc<ProviderRegistry>,
-        tools: Arc<ToolRegistry>,
-    ) -> Self {
-        Self {
-            config,
-            providers,
-            tools,
-        }
+    pub fn new(config: AgentConfig, tools: Arc<ToolRegistry>) -> Self {
+        Self { config, tools }
     }
 
     /// Processes a chat message and returns a stream of events.
-    ///
-    /// The `retrieved_chunks` should be pre-fetched using the RAG system.
     pub async fn process(
         &self,
         session: &Session,
         message: &str,
         retrieved_chunks: Vec<RetrievedChunk>,
-        model_override: Option<&ModelRef>,
+        model_override: Option<CompletionModel>,
     ) -> Result<BoxStream<'static, Result<ChatEvent>>> {
-        // Build context for this request
         let context = AgentContext::new(session.clone(), message.to_string(), retrieved_chunks);
 
-        // Create executor
-        let executor = AgentExecutor::new(
-            self.config.clone(),
-            self.providers.clone(),
-            self.tools.clone(),
-            context,
-            model_override.cloned(),
-        );
+        let model = model_override.unwrap_or_else(|| self.config.default_model.clone());
 
-        // Run the agent loop
+        let executor = AgentExecutor::new(self.config.clone(), self.tools.clone(), context, model);
+
         executor.run().await
     }
 
     /// Returns proposed edits from an agent run.
     pub fn extract_edits(&self, _events: &[ChatEvent]) -> Vec<ProposedEdit> {
-        // Extract proposed edits from the event stream
-        // This is called after processing to collect all edits
         Vec::new()
     }
 }

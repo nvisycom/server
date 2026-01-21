@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Default maximum file size: 100 MB.
-const DEFAULT_MAX_FILE_SIZE: u64 = 100 * 1024 * 1024;
+/// Default maximum file size: 12 MB.
+const DEFAULT_MAX_FILE_SIZE: u64 = 12 * 1024 * 1024;
 
 /// Configuration for the runtime service with sensible defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]

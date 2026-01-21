@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use jiff::Timestamp;
 use petgraph::Direction;
 use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -9,6 +10,7 @@ use petgraph::visit::EdgeRef;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+use super::edge::EdgeData;
 use super::{Edge, NodeData, NodeId};
 use crate::error::{WorkflowError, WorkflowResult};
 
@@ -27,15 +29,12 @@ pub struct WorkflowMetadata {
     /// Tags for organization.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    /// Author identifier.
+    /// Creation timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub author: Option<String>,
-    /// Creation timestamp (ISO 8601).
+    pub created_at: Option<Timestamp>,
+    /// Last update timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<String>,
-    /// Last update timestamp (ISO 8601).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<String>,
+    pub updated_at: Option<Timestamp>,
 }
 
 impl WorkflowMetadata {
@@ -62,12 +61,6 @@ impl WorkflowMetadata {
         self
     }
 
-    /// Sets the author.
-    pub fn with_author(mut self, author: impl Into<String>) -> Self {
-        self.author = Some(author.into());
-        self
-    }
-
     /// Adds tags.
     pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.tags = tags.into_iter().map(Into::into).collect();
@@ -88,17 +81,6 @@ pub struct WorkflowGraph {
     index_to_id: HashMap<NodeIndex, NodeId>,
     /// Workflow metadata.
     pub metadata: WorkflowMetadata,
-}
-
-/// Edge data stored in the graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub struct EdgeData {
-    /// Optional port/slot name on the source node.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from_port: Option<String>,
-    /// Optional port/slot name on the target node.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to_port: Option<String>,
 }
 
 impl WorkflowGraph {

@@ -7,19 +7,21 @@
 //! - [`EdgeData`]: Data stored on edges in the underlying petgraph
 //! - [`NodeId`]: Unique identifier for nodes
 //! - [`NodeData`]: Data associated with each node (Input, Transformer, Output)
+//! - [`CacheSlot`]: Named cache slot for in-memory data passing
+//! - [`SwitchNode`]: Conditional routing based on data properties
 
-mod data;
 mod edge;
-mod id;
 pub mod input;
+mod node;
 pub mod output;
-pub mod transformer;
+pub mod route;
+pub mod transform;
 mod workflow;
 
-pub use data::NodeData;
-pub use edge::Edge;
-pub use id::NodeId;
-pub use input::InputNode;
-pub use output::OutputNode;
-pub use transformer::{TransformerConfig, TransformerNode};
-pub use workflow::{EdgeData, WorkflowGraph, WorkflowMetadata};
+pub use edge::{Edge, EdgeData};
+pub use input::{InputNode, InputSource};
+pub use node::{Node, NodeCommon, NodeData, NodeId};
+pub use output::{OutputDestination, OutputNode};
+pub use route::{CacheSlot, SwitchBranch, SwitchCondition, SwitchNode};
+pub use transform::TransformerConfig;
+pub use workflow::{WorkflowGraph, WorkflowMetadata};

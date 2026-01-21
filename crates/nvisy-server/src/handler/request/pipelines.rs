@@ -6,6 +6,7 @@
 
 use nvisy_postgres::model::{NewPipeline, UpdatePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::PipelineStatus;
+use nvisy_runtime::graph::WorkflowGraph;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,8 +14,8 @@ use validator::Validate;
 
 /// Request payload for creating a new pipeline.
 ///
-/// Creates a new pipeline with the specified configuration. The creator is
-/// automatically set as the owner of the pipeline.
+/// Creates a new pipeline with the specified name and optional description.
+/// The definition can be added later via update.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -25,10 +26,6 @@ pub struct CreatePipeline {
     /// Optional description of the pipeline (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
-    /// Pipeline definition containing steps and configuration.
-    pub definition: Option<serde_json::Value>,
-    /// Extended metadata for the pipeline.
-    pub metadata: Option<serde_json::Value>,
 }
 
 impl CreatePipeline {
@@ -45,8 +42,6 @@ impl CreatePipeline {
             account_id,
             name: self.name,
             description: self.description,
-            definition: self.definition,
-            metadata: self.metadata,
             ..Default::default()
         }
     }
@@ -55,6 +50,7 @@ impl CreatePipeline {
 /// Request payload to update an existing pipeline.
 ///
 /// All fields are optional; only provided fields will be updated.
+/// The definition field accepts a strictly typed WorkflowGraph.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -67,10 +63,9 @@ pub struct UpdatePipeline {
     pub description: Option<String>,
     /// New status for the pipeline.
     pub status: Option<PipelineStatus>,
-    /// New definition for the pipeline.
-    pub definition: Option<serde_json::Value>,
-    /// New metadata for the pipeline.
-    pub metadata: Option<serde_json::Value>,
+    /// New definition for the pipeline (strictly typed workflow graph).
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub definition: Option<WorkflowGraph>,
 }
 
 impl UpdatePipeline {
@@ -80,8 +75,9 @@ impl UpdatePipeline {
             name: self.name,
             description: self.description.map(Some),
             status: self.status,
-            definition: self.definition,
-            metadata: self.metadata,
+            definition: self.definition.map(|d| {
+                serde_json::to_value(d).expect("WorkflowGraph serialization should not fail")
+            }),
             ..Default::default()
         }
     }

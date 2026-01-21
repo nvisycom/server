@@ -136,7 +136,7 @@ text-splitter = { version = "0.29", features = [] }
 woothee = { version = "0.13", features = [] }
 
 # AI/ML frameworks
-rig-core = { version = "0.28", default-features = false, features = ["reqwest-rustls"] }
+rig-core = { version = "0.29", default-features = false, features = ["reqwest-rustls"] }
 
 # Storage abstractions and providers
 opendal = { version = "0.53", features = [] }
