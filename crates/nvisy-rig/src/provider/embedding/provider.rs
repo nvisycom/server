@@ -1,10 +1,7 @@
 //! Embedding provider abstraction.
 
-use super::credentials::EmbeddingCredentials;
-use super::model::EmbeddingModel;
-#[cfg(feature = "ollama")]
-use super::model::OllamaEmbeddingModel;
-use crate::{Error, Result};
+use std::sync::Arc;
+
 #[cfg(feature = "ollama")]
 use rig::client::Nothing;
 use rig::embeddings::{Embedding, EmbeddingModel as RigEmbeddingModel};
@@ -13,9 +10,24 @@ use rig::prelude::EmbeddingsClient;
 use rig::providers::ollama;
 use rig::providers::{cohere, gemini, openai};
 
+use super::credentials::EmbeddingCredentials;
+use super::model::EmbeddingModel;
+#[cfg(feature = "ollama")]
+use super::model::OllamaEmbeddingModel;
+use crate::{Error, Result};
+
+/// Default maximum documents per embedding request.
+///
+/// This is a conservative default; individual providers may support more.
+pub(crate) const DEFAULT_MAX_DOCUMENTS: usize = 96;
+
 /// Embedding provider that wraps different rig embedding model implementations.
+///
+/// This is a cheaply cloneable wrapper around an `Arc<EmbeddingService>`.
 #[derive(Clone)]
-pub enum EmbeddingProvider {
+pub struct EmbeddingProvider(Arc<EmbeddingService>);
+
+pub(crate) enum EmbeddingService {
     OpenAi {
         model: openai::EmbeddingModel,
         model_name: String,
@@ -37,36 +49,41 @@ pub enum EmbeddingProvider {
 }
 
 impl EmbeddingProvider {
+    /// Returns a reference to the inner provider.
+    pub(crate) fn inner(&self) -> &EmbeddingService {
+        &self.0
+    }
+
     /// Creates a new embedding provider from credentials and model.
     pub fn new(credentials: &EmbeddingCredentials, model: &EmbeddingModel) -> Result<Self> {
-        match (credentials, model) {
+        let inner = match (credentials, model) {
             (EmbeddingCredentials::OpenAi { api_key }, EmbeddingModel::OpenAi(m)) => {
                 let client = openai::Client::new(api_key)
                     .map_err(|e| Error::provider("openai", e.to_string()))?;
-                Ok(Self::OpenAi {
-                    model: client.embedding_model_with_ndims(m.as_str(), m.dimensions()),
-                    model_name: m.as_str().to_string(),
-                })
+                EmbeddingService::OpenAi {
+                    model: client.embedding_model_with_ndims(m.as_ref(), m.dimensions()),
+                    model_name: m.as_ref().to_string(),
+                }
             }
             (EmbeddingCredentials::Cohere { api_key }, EmbeddingModel::Cohere(m)) => {
                 let client = cohere::Client::new(api_key)
                     .map_err(|e| Error::provider("cohere", e.to_string()))?;
-                Ok(Self::Cohere {
+                EmbeddingService::Cohere {
                     model: client.embedding_model_with_ndims(
-                        m.as_str(),
+                        m.as_ref(),
                         "search_document",
                         m.dimensions(),
                     ),
-                    model_name: m.as_str().to_string(),
-                })
+                    model_name: m.as_ref().to_string(),
+                }
             }
             (EmbeddingCredentials::Gemini { api_key }, EmbeddingModel::Gemini(m)) => {
                 let client = gemini::Client::new(api_key)
                     .map_err(|e| Error::provider("gemini", e.to_string()))?;
-                Ok(Self::Gemini {
-                    model: client.embedding_model_with_ndims(m.as_str(), m.dimensions()),
-                    model_name: m.as_str().to_string(),
-                })
+                EmbeddingService::Gemini {
+                    model: client.embedding_model_with_ndims(m.as_ref(), m.dimensions()),
+                    model_name: m.as_ref().to_string(),
+                }
             }
             #[cfg(feature = "ollama")]
             (EmbeddingCredentials::Ollama { base_url }, EmbeddingModel::Ollama(m)) => {
@@ -75,15 +92,16 @@ impl EmbeddingProvider {
                     .base_url(base_url)
                     .build()
                     .map_err(|e| Error::provider("ollama", e.to_string()))?;
-                Ok(Self::Ollama {
+                EmbeddingService::Ollama {
                     client,
                     model_name: m.name.clone(),
                     ndims: m.dimensions,
-                })
+                }
             }
             #[allow(unreachable_patterns)]
-            _ => Err(Error::config("mismatched credentials and model provider")),
-        }
+            _ => return Err(Error::config("mismatched credentials and model provider")),
+        };
+        Ok(Self(Arc::new(inner)))
     }
 
     /// Creates an Ollama embedding provider (convenience for local development).
@@ -94,95 +112,77 @@ impl EmbeddingProvider {
             .base_url(base_url)
             .build()
             .map_err(|e| Error::provider("ollama", e.to_string()))?;
-        Ok(Self::Ollama {
+        Ok(Self(Arc::new(EmbeddingService::Ollama {
             client,
             model_name: model.name,
             ndims: model.dimensions,
-        })
+        })))
     }
 
     /// Returns the model name.
     pub fn model_name(&self) -> &str {
-        match self {
-            Self::OpenAi { model_name, .. } => model_name,
-            Self::Cohere { model_name, .. } => model_name,
-            Self::Gemini { model_name, .. } => model_name,
+        match self.0.as_ref() {
+            EmbeddingService::OpenAi { model_name, .. } => model_name,
+            EmbeddingService::Cohere { model_name, .. } => model_name,
+            EmbeddingService::Gemini { model_name, .. } => model_name,
             #[cfg(feature = "ollama")]
-            Self::Ollama { model_name, .. } => model_name,
+            EmbeddingService::Ollama { model_name, .. } => model_name,
         }
     }
 
-    /// Returns the number of dimensions.
-    pub fn ndims(&self) -> usize {
-        match self {
-            Self::OpenAi { model, .. } => model.ndims(),
-            Self::Cohere { model, .. } => model.ndims(),
-            Self::Gemini { model, .. } => model.ndims(),
+    /// Returns the provider name.
+    pub fn provider_name(&self) -> &'static str {
+        match self.0.as_ref() {
+            EmbeddingService::OpenAi { .. } => "openai",
+            EmbeddingService::Cohere { .. } => "cohere",
+            EmbeddingService::Gemini { .. } => "gemini",
             #[cfg(feature = "ollama")]
-            Self::Ollama { ndims, .. } => *ndims,
+            EmbeddingService::Ollama { .. } => "ollama",
         }
     }
 
     /// Embed a single text document.
+    ///
+    /// This is a convenience method that delegates to the trait implementation.
     pub async fn embed_text(&self, text: &str) -> Result<Embedding> {
-        match self {
-            Self::OpenAi { model, .. } => Ok(model.embed_text(text).await?),
-            Self::Cohere { model, .. } => Ok(model.embed_text(text).await?),
-            Self::Gemini { model, .. } => Ok(model.embed_text(text).await?),
-            #[cfg(feature = "ollama")]
-            Self::Ollama {
-                client,
-                model_name,
-                ndims,
-            } => {
-                let model = ollama::EmbeddingModel::new(client.clone(), model_name, *ndims);
-                Ok(model.embed_text(text).await?)
-            }
-        }
+        RigEmbeddingModel::embed_text(self, text)
+            .await
+            .map_err(|e| Error::provider(self.provider_name(), e.to_string()))
     }
 
     /// Embed multiple text documents.
+    ///
+    /// This is a convenience method that delegates to the trait implementation.
     pub async fn embed_texts(
         &self,
         texts: impl IntoIterator<Item = String> + Send,
     ) -> Result<Vec<Embedding>> {
-        match self {
-            Self::OpenAi { model, .. } => Ok(model.embed_texts(texts).await?),
-            Self::Cohere { model, .. } => Ok(model.embed_texts(texts).await?),
-            Self::Gemini { model, .. } => Ok(model.embed_texts(texts).await?),
-            #[cfg(feature = "ollama")]
-            Self::Ollama {
-                client,
-                model_name,
-                ndims,
-            } => {
-                let model = ollama::EmbeddingModel::new(client.clone(), model_name, *ndims);
-                Ok(model.embed_texts(texts).await?)
-            }
-        }
+        RigEmbeddingModel::embed_texts(self, texts)
+            .await
+            .map_err(|e| Error::provider(self.provider_name(), e.to_string()))
     }
 }
 
 impl std::fmt::Debug for EmbeddingProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::OpenAi { model, model_name } => f
+        match self.0.as_ref() {
+            EmbeddingService::OpenAi { model, model_name } => f
                 .debug_struct("EmbeddingProvider::OpenAi")
                 .field("model", model_name)
                 .field("ndims", &model.ndims())
                 .finish(),
-            Self::Cohere { model, model_name } => f
+            EmbeddingService::Cohere { model, model_name } => f
                 .debug_struct("EmbeddingProvider::Cohere")
                 .field("model", model_name)
                 .field("ndims", &model.ndims())
                 .finish(),
-            Self::Gemini { model, model_name } => f
+            EmbeddingService::Gemini { model, model_name } => f
                 .debug_struct("EmbeddingProvider::Gemini")
                 .field("model", model_name)
                 .field("ndims", &model.ndims())
                 .finish(),
             #[cfg(feature = "ollama")]
-            Self::Ollama {
+            EmbeddingService::Ollama {
                 model_name, ndims, ..
             } => f
                 .debug_struct("EmbeddingProvider::Ollama")

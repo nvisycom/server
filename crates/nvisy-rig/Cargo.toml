@@ -48,6 +48,7 @@ thiserror = { workspace = true }
 # Derive macros
 derive_builder = { workspace = true }
 derive_more = { workspace = true }
+strum = { workspace = true }
 
 # Observability
 tracing = { workspace = true }

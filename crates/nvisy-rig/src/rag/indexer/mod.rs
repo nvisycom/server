@@ -6,11 +6,10 @@ use nvisy_postgres::model::NewFileChunk;
 use nvisy_postgres::query::FileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
 use sha2::{Digest, Sha256};
-use tracing::{debug, instrument};
 use uuid::Uuid;
 
 pub use self::indexed::IndexedChunk;
-use crate::provider::{EmbeddingProvider, OwnedChunk, TextSplitter, estimate_tokens};
+use crate::provider::{EmbeddingProvider, OwnedChunk, TextSplitter};
 use crate::{Error, Result};
 
 /// Indexer for batch-embedding and storing document chunks.
@@ -43,28 +42,28 @@ impl Indexer {
     }
 
     /// Indexes text by splitting, embedding, and storing chunks.
-    #[instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
     pub async fn index(&self, text: &str) -> Result<Vec<IndexedChunk>> {
         let chunks = self.splitter.split_owned(text);
         self.index_chunks(chunks).await
     }
 
     /// Indexes text with page awareness.
-    #[instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
     pub async fn index_with_pages(&self, text: &str) -> Result<Vec<IndexedChunk>> {
         let chunks = self.splitter.split_with_pages_owned(text);
         self.index_chunks(chunks).await
     }
 
     /// Deletes all existing chunks for the file before indexing.
-    #[instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
     pub async fn reindex(&self, text: &str) -> Result<Vec<IndexedChunk>> {
         let chunks = self.splitter.split_owned(text);
         self.reindex_chunks(chunks).await
     }
 
     /// Deletes all existing chunks for the file before indexing with page awareness.
-    #[instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(file_id = %self.file_id, text_len = text.len()))]
     pub async fn reindex_with_pages(&self, text: &str) -> Result<Vec<IndexedChunk>> {
         let chunks = self.splitter.split_with_pages_owned(text);
         self.reindex_chunks(chunks).await
@@ -72,14 +71,14 @@ impl Indexer {
 
     async fn index_chunks(&self, chunks: Vec<OwnedChunk>) -> Result<Vec<IndexedChunk>> {
         if chunks.is_empty() {
-            debug!("no chunks to index");
+            tracing::debug!("no chunks to index");
             return Ok(vec![]);
         }
 
         let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
         let chunk_count = texts.len();
 
-        debug!(chunk_count, "embedding chunks");
+        tracing::debug!(chunk_count, "embedding chunks");
         let embeddings = self.provider.embed_texts(texts).await?;
 
         if embeddings.len() != chunk_count {
@@ -115,7 +114,7 @@ impl Indexer {
                     chunk_index: Some(idx as i32),
                     content_sha256,
                     content_size: Some(content_size),
-                    token_count: Some(estimate_tokens(&chunk.text) as i32),
+                    token_count: None,
                     embedding: Vector::from(embedding_vec),
                     embedding_model: model_name.to_owned(),
                     metadata: Some(metadata),
@@ -134,7 +133,7 @@ impl Indexer {
             .await
             .map_err(|e| Error::retrieval(format!("failed to create chunks: {e}")))?;
 
-        debug!(created_count = created.len(), "stored chunks");
+        tracing::debug!(created_count = created.len(), "stored chunks");
         Ok(created.into_iter().map(IndexedChunk::from).collect())
     }
 
@@ -151,7 +150,7 @@ impl Indexer {
             .map_err(|e| Error::retrieval(format!("failed to delete chunks: {e}")))?;
 
         if deleted > 0 {
-            debug!(deleted, "deleted existing chunks");
+            tracing::debug!(deleted, "deleted existing chunks");
         }
 
         drop(conn);

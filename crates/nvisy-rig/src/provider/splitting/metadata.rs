@@ -1,5 +1,7 @@
 //! Split chunk metadata.
 
+use std::num::NonZeroU32;
+
 use serde::{Deserialize, Serialize};
 
 /// Metadata about a split chunk's location in the source text.
@@ -13,7 +15,7 @@ pub struct ChunkMetadata {
     pub end_offset: u32,
     /// Page number (1-indexed, if applicable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub page: Option<u32>,
+    pub page: Option<NonZeroU32>,
 }
 
 impl ChunkMetadata {
@@ -28,7 +30,7 @@ impl ChunkMetadata {
     }
 
     /// Sets the page number.
-    pub fn with_page(mut self, page: u32) -> Self {
+    pub fn with_page(mut self, page: NonZeroU32) -> Self {
         self.page = Some(page);
         self
     }

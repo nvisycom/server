@@ -1,6 +1,5 @@
 //! Agent context for a single request.
 
-use crate::provider::estimate_tokens;
 use crate::rag::RetrievedChunk;
 use crate::session::Session;
 
@@ -46,15 +45,6 @@ impl AgentContext {
     pub fn has_context(&self) -> bool {
         !self.retrieved_chunks.is_empty()
     }
-
-    /// Returns the total token count of retrieved chunks (estimated).
-    pub fn context_tokens(&self) -> u32 {
-        self.retrieved_chunks
-            .iter()
-            .filter_map(|c| c.content.as_deref())
-            .map(estimate_tokens)
-            .sum()
-    }
 }
 
 #[cfg(test)]
@@ -74,6 +64,5 @@ mod tests {
         let context = AgentContext::new(session, "Hello".to_string(), Vec::new());
 
         assert!(!context.has_context());
-        assert_eq!(context.context_tokens(), 0);
     }
 }

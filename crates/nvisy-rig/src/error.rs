@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use rig::completion::{CompletionError, PromptError};
 use rig::embeddings::EmbeddingError;
 
 /// Result type alias for rig operations.
@@ -25,6 +26,14 @@ pub enum Error {
     /// Embedding error.
     #[error("embedding error: {0}")]
     Embedding(#[from] EmbeddingError),
+
+    /// Completion error.
+    #[error("completion error: {0}")]
+    Completion(#[from] CompletionError),
+
+    /// Prompt error.
+    #[error("prompt error: {0}")]
+    Prompt(#[from] PromptError),
 
     /// Configuration error.
     #[error("configuration error: {0}")]

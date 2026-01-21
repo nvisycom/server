@@ -6,4 +6,4 @@ mod splitter;
 
 pub use chunk::{Chunk, OwnedChunk};
 pub use metadata::ChunkMetadata;
-pub use splitter::{TextSplitter, estimate_tokens};
+pub use splitter::TextSplitter;

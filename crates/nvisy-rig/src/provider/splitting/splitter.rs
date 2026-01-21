@@ -1,7 +1,8 @@
 //! Text splitting implementation.
 
+use std::num::NonZeroU32;
+
 use text_splitter::{ChunkConfig, TextSplitter as TextSplitterImpl};
-use tracing::{debug, instrument};
 
 use super::{Chunk, ChunkMetadata, OwnedChunk};
 
@@ -9,24 +10,33 @@ use super::{Chunk, ChunkMetadata, OwnedChunk};
 #[derive(Debug, Clone)]
 pub struct TextSplitter {
     max_characters: u32,
-    overlap: u32,
-    trim: bool,
+    overlap_characters: Option<NonZeroU32>,
+    trim_whitespace: bool,
 }
 
 impl TextSplitter {
     /// Creates a new text splitter.
-    pub fn new(max_characters: u32, overlap: u32, trim: bool) -> Self {
-        debug!(max_characters, overlap, trim, "created text splitter");
+    pub fn new(
+        max_characters: u32,
+        overlap_characters: Option<NonZeroU32>,
+        trim_whitespace: bool,
+    ) -> Self {
+        tracing::debug!(
+            max_characters,
+            ?overlap_characters,
+            trim_whitespace,
+            "created text splitter"
+        );
         Self {
             max_characters,
-            overlap,
-            trim,
+            overlap_characters,
+            trim_whitespace,
         }
     }
 
     /// Creates a splitter with default settings (512 chars, no overlap, trimmed).
     pub fn with_defaults() -> Self {
-        Self::new(512, 0, true)
+        Self::new(512, None, true)
     }
 
     /// Returns the maximum characters per chunk.
@@ -35,17 +45,18 @@ impl TextSplitter {
     }
 
     /// Returns the overlap between chunks.
-    pub fn overlap(&self) -> u32 {
-        self.overlap
+    pub fn overlap_characters(&self) -> Option<NonZeroU32> {
+        self.overlap_characters
     }
 
     /// Splits text into chunks with byte offset tracking.
-    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn split<'a>(&self, text: &'a str) -> Vec<Chunk<'a>> {
+        let overlap = self.overlap_characters.map_or(0, |v| v.get() as usize);
         let chunk_config = ChunkConfig::new(self.max_characters as usize)
-            .with_overlap(self.overlap as usize)
+            .with_overlap(overlap)
             .expect("overlap must be less than max_characters")
-            .with_trim(self.trim);
+            .with_trim(self.trim_whitespace);
 
         let splitter = TextSplitterImpl::new(chunk_config);
 
@@ -61,12 +72,12 @@ impl TextSplitter {
             })
             .collect();
 
-        debug!(chunk_count = chunks.len(), "split text into chunks");
+        tracing::debug!(chunk_count = chunks.len(), "split text into chunks");
         chunks
     }
 
     /// Splits text and returns owned chunks.
-    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn split_owned(&self, text: &str) -> Vec<OwnedChunk> {
         self.split(text)
             .into_iter()
@@ -77,7 +88,7 @@ impl TextSplitter {
     /// Splits text with page awareness.
     ///
     /// Page breaks are indicated by form feed characters (`\x0c`).
-    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn split_with_pages<'a>(&self, text: &'a str) -> Vec<Chunk<'a>> {
         let page_breaks: Vec<u32> = text
             .char_indices()
@@ -85,16 +96,19 @@ impl TextSplitter {
             .map(|(i, _)| i as u32)
             .collect();
 
-        debug!(page_count = page_breaks.len() + 1, "detected pages");
+        tracing::debug!(page_count = page_breaks.len() + 1, "detected pages");
 
         self.split(text)
             .into_iter()
             .map(|chunk| {
-                let page = page_breaks
+                let page_num = page_breaks
                     .iter()
                     .take_while(|&&pos| pos < chunk.metadata.start_offset)
                     .count() as u32
                     + 1;
+
+                // SAFETY: page_num is always >= 1
+                let page = NonZeroU32::new(page_num).expect("page number is always >= 1");
 
                 Chunk {
                     text: chunk.text,
@@ -105,7 +119,7 @@ impl TextSplitter {
     }
 
     /// Splits text with page awareness and returns owned chunks.
-    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    #[tracing::instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn split_with_pages_owned(&self, text: &str) -> Vec<OwnedChunk> {
         self.split_with_pages(text)
             .into_iter()
@@ -120,18 +134,13 @@ impl Default for TextSplitter {
     }
 }
 
-/// Estimates the token count (~4 chars per token).
-pub fn estimate_tokens(text: &str) -> u32 {
-    (text.len() / 4) as u32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_split_basic() {
-        let splitter = TextSplitter::new(50, 0, true);
+        let splitter = TextSplitter::new(50, None, true);
         let text = "Hello world. This is a test. Another sentence here.";
         let chunks = splitter.split(text);
 
@@ -143,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_split_with_overlap() {
-        let splitter = TextSplitter::new(20, 5, true);
+        let splitter = TextSplitter::new(20, NonZeroU32::new(5), true);
         let text = "The quick brown fox jumps over the lazy dog.";
         let chunks = splitter.split(text);
 
@@ -152,28 +161,22 @@ mod tests {
 
     #[test]
     fn test_split_with_pages() {
-        let splitter = TextSplitter::new(100, 0, true);
+        let splitter = TextSplitter::new(100, None, true);
         let text = "Page one content.\x0cPage two content.\x0cPage three.";
         let chunks = splitter.split_with_pages(text);
 
         assert!(!chunks.is_empty());
-        assert_eq!(chunks[0].metadata.page, Some(1));
+        assert_eq!(chunks[0].metadata.page, NonZeroU32::new(1));
     }
 
     #[test]
     fn test_metadata_offsets() {
-        let splitter = TextSplitter::new(500, 0, false);
+        let splitter = TextSplitter::new(500, None, false);
         let text = "Hello world";
         let chunks = splitter.split(text);
 
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].metadata.start_offset, 0);
         assert_eq!(chunks[0].metadata.end_offset, text.len() as u32);
-    }
-
-    #[test]
-    fn test_estimate_tokens() {
-        assert_eq!(estimate_tokens("hello"), 1);
-        assert_eq!(estimate_tokens("hello world"), 2);
     }
 }

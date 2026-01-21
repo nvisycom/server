@@ -5,6 +5,7 @@
 mod config;
 mod indexer;
 mod searcher;
+mod vector_store;
 
 use std::sync::Arc;
 
@@ -15,7 +16,8 @@ use uuid::Uuid;
 
 pub use self::config::RagConfig;
 pub use self::indexer::{IndexedChunk, Indexer};
-pub use self::searcher::{RetrievedChunk, SearchScope, Searcher};
+pub use self::searcher::{ChunkMetadata, RetrievedChunk, SearchScope, Searcher};
+pub use self::vector_store::{ChunkDocument, PgFilter, PgVectorStore};
 use crate::Result;
 use crate::provider::{EmbeddingProvider, TextSplitter};
 
@@ -66,8 +68,8 @@ impl RagService {
     pub fn indexer(&self, file_id: Uuid) -> Indexer {
         let splitter = TextSplitter::new(
             self.inner.config.max_chunk_characters,
-            self.inner.config.chunk_overlap,
-            self.inner.config.trim_chunks,
+            self.inner.config.chunk_overlap_characters,
+            self.inner.config.trim_whitespace,
         );
 
         Indexer::new(

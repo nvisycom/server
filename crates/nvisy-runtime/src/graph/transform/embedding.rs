@@ -9,4 +9,8 @@ pub struct EmbeddingConfig {
     /// Model to use for embedding generation.
     #[serde(flatten)]
     pub model: EmbeddingModel,
+
+    /// Whether to L2-normalize the output embeddings.
+    #[serde(default)]
+    pub normalize: bool,
 }

@@ -3335,6 +3335,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "strum 0.27.2",
  "text-splitter",
  "thiserror 2.0.18",
  "tokio",
