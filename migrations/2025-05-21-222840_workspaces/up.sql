@@ -498,9 +498,11 @@ CREATE TABLE workspace_webhooks (
     -- Event configuration
     events           WEBHOOK_EVENT[]  NOT NULL DEFAULT '{}',
     headers          JSONB            NOT NULL DEFAULT '{}',
+    secret           TEXT             NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex'),
 
     CONSTRAINT workspace_webhooks_events_not_empty CHECK (array_length(events, 1) > 0),
     CONSTRAINT workspace_webhooks_headers_size CHECK (length(headers::TEXT) BETWEEN 2 AND 4096),
+    CONSTRAINT workspace_webhooks_secret_length CHECK (length(secret) = 64),
 
     -- Webhook status
     status           WEBHOOK_STATUS   NOT NULL DEFAULT 'active',

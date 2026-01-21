@@ -1,22 +1,10 @@
-//! Provider params, credentials, and registry.
-//!
-//! This module separates provider configuration into:
-//! - [`ProviderParams`]: Non-sensitive parameters (part of node definition)
-//! - [`ProviderCredentials`]: Sensitive credentials (stored per workspace)
-//! - [`CredentialsRegistry`]: In-memory registry for credentials lookup
-
-mod credentials;
-mod params;
+//! Credentials registry for workflow execution.
 
 use std::collections::HashMap;
 
-pub use credentials::{
-    AzblobCredentials, GcsCredentials, MysqlCredentials, PostgresCredentials, ProviderCredentials,
-    S3Credentials,
-};
-pub use params::{AzblobParams, GcsParams, MysqlParams, PostgresParams, ProviderParams, S3Params};
 use uuid::Uuid;
 
+use super::ProviderCredentials;
 use crate::error::{WorkflowError, WorkflowResult};
 
 /// In-memory credentials registry.

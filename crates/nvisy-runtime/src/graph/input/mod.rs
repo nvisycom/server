@@ -3,7 +3,7 @@
 use nvisy_dal::DataTypeId;
 use serde::{Deserialize, Serialize};
 
-use super::provider::ProviderParams;
+use crate::provider::InputProviderParams;
 
 /// A data input node that reads or produces data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,12 +15,12 @@ pub struct InputNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Provider parameters (credentials referenced by ID).
-    pub provider: ProviderParams,
+    pub provider: InputProviderParams,
 }
 
 impl InputNode {
     /// Creates a new input node.
-    pub fn new(provider: ProviderParams) -> Self {
+    pub fn new(provider: InputProviderParams) -> Self {
         Self {
             name: None,
             description: None,
@@ -32,22 +32,10 @@ impl InputNode {
     pub const fn output_type(&self) -> DataTypeId {
         self.provider.output_type()
     }
-
-    /// Sets the display name.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Sets the description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
 }
 
-impl From<ProviderParams> for InputNode {
-    fn from(provider: ProviderParams) -> Self {
+impl From<InputProviderParams> for InputNode {
+    fn from(provider: InputProviderParams) -> Self {
         Self::new(provider)
     }
 }

@@ -1,8 +1,9 @@
-//! Output node types for writing data to storage backends.
+//! Output node types for writing data to storage backends and vector databases.
 
+use nvisy_dal::DataTypeId;
 use serde::{Deserialize, Serialize};
 
-use super::provider::ProviderParams;
+use crate::provider::OutputProviderParams;
 
 /// A data output node that writes or consumes data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,12 +15,12 @@ pub struct OutputNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Provider parameters (credentials referenced by ID).
-    pub provider: ProviderParams,
+    pub provider: OutputProviderParams,
 }
 
 impl OutputNode {
     /// Creates a new output node.
-    pub fn new(provider: ProviderParams) -> Self {
+    pub fn new(provider: OutputProviderParams) -> Self {
         Self {
             name: None,
             description: None,
@@ -27,21 +28,14 @@ impl OutputNode {
         }
     }
 
-    /// Sets the display name.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Sets the description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
+    /// Returns the expected input data type based on the provider kind.
+    pub const fn input_type(&self) -> DataTypeId {
+        self.provider.output_type()
     }
 }
 
-impl From<ProviderParams> for OutputNode {
-    fn from(provider: ProviderParams) -> Self {
+impl From<OutputProviderParams> for OutputNode {
+    fn from(provider: OutputProviderParams) -> Self {
         Self::new(provider)
     }
 }

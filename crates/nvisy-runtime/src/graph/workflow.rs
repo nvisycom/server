@@ -9,9 +9,8 @@ use petgraph::visit::EdgeRef;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use super::Edge;
+use super::{Edge, NodeData, NodeId};
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::node::{NodeData, NodeId};
 
 /// Workflow metadata.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

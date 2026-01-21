@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::node::NodeId;
+use super::NodeId;
 
 /// An edge connecting two nodes in the workflow graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
