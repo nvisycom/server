@@ -8,7 +8,7 @@ use super::route::CacheSlot;
 
 /// Output provider definition for workflow nodes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OutputProviderDef {
+pub struct OutputProvider {
     /// Provider parameters (contains credentials_id).
     pub provider: OutputProviderParams,
 }
@@ -18,7 +18,7 @@ pub struct OutputProviderDef {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputTarget {
     /// Write to external provider (S3, Qdrant, etc.).
-    Provider(OutputProviderDef),
+    Provider(OutputProvider),
     /// Write to named cache slot (resolved at compile time).
     Cache(CacheSlot),
 }
@@ -34,7 +34,7 @@ impl OutputDef {
     /// Creates a new output definition from a provider.
     pub fn from_provider(provider: OutputProviderParams) -> Self {
         Self {
-            target: OutputTarget::Provider(OutputProviderDef { provider }),
+            target: OutputTarget::Provider(OutputProvider { provider }),
         }
     }
 

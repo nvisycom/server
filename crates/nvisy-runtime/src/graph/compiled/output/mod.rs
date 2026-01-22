@@ -1,6 +1,8 @@
 //! Compiled output node types.
 
-use super::stream::OutputStream;
+mod stream;
+
+pub use stream::{DataSink, OutputStream};
 
 /// Compiled output node - ready to receive data.
 ///

@@ -2,6 +2,7 @@
 
 use std::str::FromStr;
 
+use derive_builder::Builder;
 use derive_more::{Debug, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -65,40 +66,78 @@ impl AsRef<Uuid> for NodeId {
     }
 }
 
+/// Position of a node in the visual editor.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Position {
+    /// X coordinate.
+    pub x: f32,
+    /// Y coordinate.
+    pub y: f32,
+}
+
+impl Position {
+    /// Creates a new position.
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
 /// A generic node wrapper that adds optional name and description to any inner type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct NodeCommon<T> {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
+#[builder(
+    name = "NodeCommonBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(validate = "Self::validate")
+)]
+pub struct NodeCommon<T>
+where
+    T: Clone,
+{
     /// Display name of the node.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub name: Option<String>,
     /// Description of what this node does.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub description: Option<String>,
+    /// Position in the visual editor.
+    #[serde(default, skip_serializing_if = "is_default_position")]
+    #[builder(default)]
+    pub position: Position,
     /// Inner node configuration.
     #[serde(flatten)]
     pub inner: T,
 }
 
-impl<T> NodeCommon<T> {
+fn is_default_position(pos: &Position) -> bool {
+    pos.x == 0.0 && pos.y == 0.0
+}
+
+impl<T: Clone> NodeCommonBuilder<T> {
+    fn validate(&self) -> Result<(), String> {
+        if self.inner.is_none() {
+            return Err("inner is required".into());
+        }
+        Ok(())
+    }
+}
+
+impl<T: Clone> NodeCommon<T> {
     /// Creates a new node with the given inner value.
     pub fn new(inner: T) -> Self {
         Self {
             name: None,
             description: None,
+            position: Position::default(),
             inner,
         }
     }
 
-    /// Sets the display name.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Sets the description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
+    /// Returns a builder for creating a node.
+    pub fn builder() -> NodeCommonBuilder<T> {
+        NodeCommonBuilder::default()
     }
 }
 

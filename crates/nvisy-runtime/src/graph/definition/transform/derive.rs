@@ -1,13 +1,10 @@
-//! Derive transformer - generate new content from input.
+//! Derive transform definition.
 
-use nvisy_dal::AnyDataValue;
 use serde::{Deserialize, Serialize};
 
-use super::Transform;
-use crate::error::Result;
-use crate::provider::{CompletionProviderParams, CredentialsRegistry};
+use crate::provider::CompletionProviderParams;
 
-/// Derive transformer for generating new content from input.
+/// Derive transform for generating new content from input.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Derive {
     /// Completion provider parameters (includes credentials_id and model).
@@ -20,18 +17,6 @@ pub struct Derive {
     /// Optional prompt override for the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_prompt: Option<String>,
-}
-
-impl Transform for Derive {
-    async fn transform(
-        &self,
-        input: Vec<AnyDataValue>,
-        _registry: &CredentialsRegistry,
-    ) -> Result<Vec<AnyDataValue>> {
-        // TODO: Implement derivation using completion provider
-        // For now, pass through unchanged
-        Ok(input)
-    }
 }
 
 /// Tasks for generating new content from input.

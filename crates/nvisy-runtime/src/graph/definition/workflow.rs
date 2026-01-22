@@ -147,9 +147,8 @@ pub enum ValidationError {
 mod tests {
     use super::*;
     use crate::graph::definition::{
-        CacheSlot, InputDef, InputSource, OutputDef, OutputTarget, Transformer,
+        CacheSlot, InputDef, InputSource, OutputDef, OutputTarget, Partition, Transformer,
     };
-    use crate::graph::transform::Partition;
     use uuid::Uuid;
 
     /// Creates a deterministic NodeId for testing.

@@ -9,7 +9,7 @@ use super::EngineConfig;
 use super::context::ExecutionContext;
 use crate::error::{Error, Result};
 use crate::graph::NodeId;
-use crate::graph::compiled::{CompiledGraph, CompiledNode, InputStream, OutputStream};
+use crate::graph::compiled::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};
 use crate::provider::CredentialsRegistry;
 
 /// Tracing target for engine operations.

@@ -1,6 +1,8 @@
 //! Compiled input node types.
 
-use super::stream::InputStream;
+mod stream;
+
+pub use stream::{DataStream, InputStream};
 
 /// Compiled input node - ready to stream data.
 ///

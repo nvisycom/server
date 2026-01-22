@@ -1,11 +1,18 @@
 //! Edge types for connecting nodes in a workflow graph.
 
+use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 
 use super::NodeId;
 
 /// An edge connecting two nodes in the workflow graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Builder)]
+#[builder(
+    name = "EdgeBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with"),
+    build_fn(validate = "Self::validate")
+)]
 pub struct Edge {
     /// Source node ID.
     pub from: NodeId,
@@ -13,10 +20,24 @@ pub struct Edge {
     pub to: NodeId,
     /// Optional port/slot name on the source node.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub from_port: Option<String>,
     /// Optional port/slot name on the target node.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub to_port: Option<String>,
+}
+
+impl EdgeBuilder {
+    fn validate(&self) -> Result<(), String> {
+        if self.from.is_none() {
+            return Err("from is required".into());
+        }
+        if self.to.is_none() {
+            return Err("to is required".into());
+        }
+        Ok(())
+    }
 }
 
 impl Edge {
@@ -30,41 +51,43 @@ impl Edge {
         }
     }
 
-    /// Creates an edge with port specifications.
-    pub fn with_ports(
-        from: NodeId,
-        from_port: impl Into<String>,
-        to: NodeId,
-        to_port: impl Into<String>,
-    ) -> Self {
-        Self {
-            from,
-            to,
-            from_port: Some(from_port.into()),
-            to_port: Some(to_port.into()),
-        }
-    }
-
-    /// Sets the source port.
-    pub fn from_port(mut self, port: impl Into<String>) -> Self {
-        self.from_port = Some(port.into());
-        self
-    }
-
-    /// Sets the target port.
-    pub fn to_port(mut self, port: impl Into<String>) -> Self {
-        self.to_port = Some(port.into());
-        self
+    /// Returns a builder for creating an edge.
+    pub fn builder() -> EdgeBuilder {
+        EdgeBuilder::default()
     }
 }
 
 /// Edge data stored in the compiled graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    Builder
+)]
+#[builder(
+    name = "EdgeDataBuilder",
+    pattern = "owned",
+    setter(into, strip_option, prefix = "with")
+)]
 pub struct EdgeData {
     /// Optional port/slot name on the source node.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub from_port: Option<String>,
     /// Optional port/slot name on the target node.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub to_port: Option<String>,
+}
+
+impl EdgeData {
+    /// Returns a builder for creating edge data.
+    pub fn builder() -> EdgeDataBuilder {
+        EdgeDataBuilder::default()
+    }
 }

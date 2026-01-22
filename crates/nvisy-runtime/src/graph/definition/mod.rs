@@ -21,10 +21,16 @@ mod workflow;
 pub use edge::{Edge, EdgeData};
 pub use input::{InputDef, InputProvider, InputSource};
 pub use metadata::WorkflowMetadata;
-pub use node::{Node, NodeCommon, NodeDef, NodeId};
-pub use output::{OutputDef, OutputProviderDef, OutputTarget};
+pub use node::{Node, NodeCommon, NodeDef, NodeId, Position};
+pub use output::{OutputDef, OutputProvider, OutputTarget};
 pub use route::{
-    CacheSlot, ContentTypeCategory, DateField, SwitchBranch, SwitchCondition, SwitchDef,
+    CacheSlot, ContentTypeCategory, ContentTypeCondition, DateField, DurationCondition,
+    FileDateCondition, FileExtensionCondition, FileNameCondition, FileSizeCondition,
+    LanguageCondition, PageCountCondition, PatternMatchType, SwitchCondition, SwitchDef,
 };
-pub use transform::{Chunk, Derive, Embedding, Enrich, Extract, Partition, Transform, Transformer};
+pub use transform::{
+    AnalyzeTask, Chunk, ChunkStrategy, ConvertTask, Derive, DeriveTask, Embedding, Enrich,
+    EnrichTask, Extract, ExtractTask, ImageEnrichTask, Partition, PartitionStrategy,
+    TableConvertTask, TableEnrichTask, TextConvertTask, Transformer,
+};
 pub use workflow::{ValidationError, WorkflowDefinition};

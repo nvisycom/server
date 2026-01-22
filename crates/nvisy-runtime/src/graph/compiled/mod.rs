@@ -14,16 +14,14 @@ mod input;
 mod node;
 mod output;
 mod route;
-mod stream;
 mod transform;
 
 pub use graph::CompiledGraph;
-pub use input::CompiledInput;
+pub use input::{CompiledInput, DataStream, InputStream};
 pub use node::CompiledNode;
-pub use output::CompiledOutput;
+pub use output::{CompiledOutput, DataSink, OutputStream};
 pub use route::CompiledSwitch;
-pub use stream::{DataSink, DataStream, InputStream, OutputStream};
 pub use transform::{
     ChunkProcessor, CompiledTransform, DeriveProcessor, EmbeddingProcessor, EnrichProcessor,
-    ExtractProcessor, PartitionProcessor,
+    ExtractProcessor, PartitionProcessor, Process,
 };

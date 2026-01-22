@@ -9,7 +9,9 @@ use super::input::CompiledInput;
 use super::node::CompiledNode;
 use super::output::CompiledOutput;
 use super::route::CompiledSwitch;
-use crate::graph::definition::{EdgeData, NodeId, WorkflowMetadata};
+use crate::graph::definition::{
+    ContentTypeCategory, ContentTypeCondition, EdgeData, NodeId, SwitchCondition, WorkflowMetadata,
+};
 
 /// A compiled workflow graph ready for execution.
 ///
@@ -157,7 +159,13 @@ impl CompiledGraph {
             if let Some(node) = self.graph.node_weight_mut(idx) {
                 // Use mem::replace with a placeholder to take ownership
                 // This is safe because we won't access the graph again
-                let placeholder = CompiledNode::Switch(CompiledSwitch::new(vec![], None));
+                let placeholder = CompiledNode::Switch(CompiledSwitch::new(
+                    SwitchCondition::ContentType(ContentTypeCondition {
+                        category: ContentTypeCategory::Other,
+                    }),
+                    String::new(),
+                    String::new(),
+                ));
                 let owned = std::mem::replace(node, placeholder);
                 nodes.insert(*id, owned);
             }

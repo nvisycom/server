@@ -1,13 +1,10 @@
-//! Extract transformer - extract structured data or convert formats.
+//! Extract transform definition.
 
-use nvisy_dal::AnyDataValue;
 use serde::{Deserialize, Serialize};
 
-use super::Transform;
-use crate::error::Result;
-use crate::provider::{CompletionProviderParams, CredentialsRegistry};
+use crate::provider::CompletionProviderParams;
 
-/// Extract transformer for extracting structured data or converting formats.
+/// Extract transform for extracting structured data or converting formats.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Extract {
     /// Completion provider parameters (includes credentials_id and model).
@@ -21,18 +18,6 @@ pub struct Extract {
     /// Optional prompt override for the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_prompt: Option<String>,
-}
-
-impl Transform for Extract {
-    async fn transform(
-        &self,
-        input: Vec<AnyDataValue>,
-        _registry: &CredentialsRegistry,
-    ) -> Result<Vec<AnyDataValue>> {
-        // TODO: Implement extraction using completion provider
-        // For now, pass through unchanged
-        Ok(input)
-    }
 }
 
 /// Tasks for extracting structured data or converting formats.
