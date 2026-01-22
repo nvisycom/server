@@ -17,18 +17,17 @@ use nvisy_rig::agent::Agents;
 use nvisy_rig::provider::CompletionProvider;
 use petgraph::graph::{DiGraph, NodeIndex};
 
+use crate::definition::{EdgeData, InputSource, NodeDef, NodeId, OutputTarget, WorkflowDefinition};
 use crate::error::{Error, Result};
-use crate::provider::{
-    CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProviderParams,
-    IntoProvider, OutputProviderParams,
-};
-
-use super::compiled::{
+use crate::graph::{
     ChunkProcessor, CompiledGraph, CompiledInput, CompiledNode, CompiledOutput, CompiledSwitch,
     CompiledTransform, DeriveProcessor, EmbeddingProcessor, EnrichProcessor, ExtractProcessor,
     InputStream, OutputStream, PartitionProcessor,
 };
-use super::definition::{EdgeData, InputSource, NodeDef, NodeId, OutputTarget, WorkflowDefinition};
+use crate::provider::{
+    CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProviderParams,
+    IntoProvider, OutputProviderParams,
+};
 
 /// Workflow compiler that transforms definitions into executable graphs.
 pub struct WorkflowCompiler<'a> {
@@ -200,7 +199,7 @@ impl<'a> WorkflowCompiler<'a> {
     /// Creates an input stream from an input definition.
     async fn create_input_stream(
         &self,
-        input: &super::definition::InputDef,
+        input: &crate::definition::InputDef,
     ) -> Result<InputStream> {
         match &input.source {
             InputSource::Provider(provider_def) => {
@@ -239,7 +238,7 @@ impl<'a> WorkflowCompiler<'a> {
     /// Creates an output stream from an output definition.
     async fn create_output_stream(
         &self,
-        output: &super::definition::OutputDef,
+        output: &crate::definition::OutputDef,
     ) -> Result<OutputStream> {
         match &output.target {
             OutputTarget::Provider(provider_def) => {
@@ -273,9 +272,9 @@ impl<'a> WorkflowCompiler<'a> {
     /// Creates a processor from a transformer definition.
     async fn create_processor(
         &self,
-        transformer: &super::definition::Transformer,
+        transformer: &crate::definition::Transformer,
     ) -> Result<CompiledTransform> {
-        use super::definition::Transformer;
+        use crate::definition::Transformer;
 
         match transformer {
             Transformer::Partition(p) => Ok(CompiledTransform::Partition(PartitionProcessor::new(
@@ -401,13 +400,4 @@ struct ResolvedEdge {
 /// Resolved workflow definition after cache slot resolution.
 struct ResolvedDefinition {
     edges: Vec<ResolvedEdge>,
-}
-
-/// Convenience function to compile a workflow definition.
-pub async fn compile(
-    def: WorkflowDefinition,
-    registry: &CredentialsRegistry,
-    ctx: Context,
-) -> Result<CompiledGraph> {
-    WorkflowCompiler::new(registry, ctx).compile(def).await
 }

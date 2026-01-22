@@ -1,10 +1,11 @@
 //! Web fetch tool for retrieving content from URLs.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// Error type for web fetch operations.
 #[derive(Debug, thiserror::Error)]
@@ -196,11 +197,11 @@ impl<F: WebFetcher> WebFetchTool<F> {
 }
 
 impl<F: WebFetcher + 'static> Tool for WebFetchTool<F> {
-    const NAME: &'static str = "web_fetch";
-
-    type Error = WebFetchError;
     type Args = WebFetchArgs;
+    type Error = WebFetchError;
     type Output = WebFetchResult;
+
+    const NAME: &'static str = "web_fetch";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {

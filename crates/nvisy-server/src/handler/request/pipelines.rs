@@ -6,7 +6,7 @@
 
 use nvisy_postgres::model::{NewPipeline, UpdatePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::PipelineStatus;
-use nvisy_runtime::graph::WorkflowDefinition;
+use nvisy_runtime::definition::WorkflowDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

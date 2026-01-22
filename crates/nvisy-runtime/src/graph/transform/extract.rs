@@ -4,8 +4,8 @@ use nvisy_dal::AnyDataValue;
 use nvisy_rig::agent::Agents;
 
 use super::Process;
+use crate::definition::ExtractTask;
 use crate::error::Result;
-use crate::graph::definition::ExtractTask;
 
 /// Processor for extracting structured data or converting formats.
 pub struct ExtractProcessor {

@@ -2,6 +2,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+pub mod definition;
 pub mod engine;
 mod error;
 pub mod graph;

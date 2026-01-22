@@ -45,24 +45,22 @@ mod openai;
 mod perplexity;
 
 // Storage backend exports
-pub use azblob::{AzblobCredentials, AzblobParams};
-pub use gcs::{GcsCredentials, GcsParams};
-pub use mysql::{MysqlCredentials, MysqlParams};
-pub use postgres::{PostgresCredentials, PostgresParams};
-pub use s3::{S3Credentials, S3Params};
-
-// Vector database exports
-pub use milvus::{MilvusCredentials, MilvusParams};
-pub use pgvector::{PgVectorCredentials, PgVectorParams};
-pub use pinecone::{PineconeCredentials, PineconeParams};
-pub use qdrant::{QdrantCredentials, QdrantParams};
-
 // AI provider exports
 pub use anthropic::{AnthropicCompletionParams, AnthropicCredentials};
+pub use azblob::{AzblobCredentials, AzblobParams};
 pub use cohere::{CohereCompletionParams, CohereCredentials, CohereEmbeddingParams};
+pub use gcs::{GcsCredentials, GcsParams};
 pub use gemini::{GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParams};
+// Vector database exports
+pub use milvus::{MilvusCredentials, MilvusParams};
+pub use mysql::{MysqlCredentials, MysqlParams};
 pub use openai::{OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams};
 pub use perplexity::{PerplexityCompletionParams, PerplexityCredentials};
+pub use pgvector::{PgVectorCredentials, PgVectorParams};
+pub use pinecone::{PineconeCredentials, PineconeParams};
+pub use postgres::{PostgresCredentials, PostgresParams};
+pub use qdrant::{QdrantCredentials, QdrantParams};
+pub use s3::{S3Credentials, S3Params};
 
 /// Trait for provider parameters that can be combined with credentials to create a provider.
 #[async_trait::async_trait]

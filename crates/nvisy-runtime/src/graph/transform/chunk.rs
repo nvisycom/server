@@ -4,8 +4,8 @@ use nvisy_dal::AnyDataValue;
 use nvisy_rig::agent::Agents;
 
 use super::Process;
+use crate::definition::ChunkStrategy;
 use crate::error::Result;
-use crate::graph::definition::ChunkStrategy;
 
 /// Processor for chunking content into smaller pieces.
 pub struct ChunkProcessor {

@@ -74,11 +74,11 @@ impl<F> DocumentFetchTool<F> {
 }
 
 impl<F: DocumentFetcher + 'static> Tool for DocumentFetchTool<F> {
-    const NAME: &'static str = "document_fetch";
-
-    type Error = DocumentFetchError;
     type Args = DocumentFetchArgs;
+    type Error = DocumentFetchError;
     type Output = Vec<Document>;
+
+    const NAME: &'static str = "document_fetch";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {

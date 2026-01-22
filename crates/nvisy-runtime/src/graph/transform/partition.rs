@@ -3,8 +3,8 @@
 use nvisy_dal::AnyDataValue;
 
 use super::Process;
+use crate::definition::PartitionStrategy;
 use crate::error::Result;
-use crate::graph::definition::PartitionStrategy;
 
 /// Processor for partitioning documents into elements.
 #[derive(Debug)]

@@ -166,11 +166,11 @@ impl ScratchpadTool<InMemoryScratchpad> {
 }
 
 impl<S: Scratchpad + 'static> Tool for ScratchpadTool<S> {
-    const NAME: &'static str = "scratchpad";
-
-    type Error = ScratchpadError;
     type Args = ScratchpadArgs;
+    type Error = ScratchpadError;
     type Output = ScratchpadResult;
+
+    const NAME: &'static str = "scratchpad";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {

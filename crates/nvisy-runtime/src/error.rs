@@ -3,7 +3,7 @@
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::graph::NodeId;
+use crate::definition::NodeId;
 
 /// Result type for workflow operations.
 pub type Result<T, E = Error> = std::result::Result<T, E>;

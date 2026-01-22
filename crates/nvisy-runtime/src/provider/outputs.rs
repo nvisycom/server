@@ -16,14 +16,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::graph::compiled::DataSink;
-
 use super::ProviderCredentials;
 use super::backend::{
     AzblobParams, GcsParams, IntoProvider, MilvusParams, MysqlParams, PgVectorParams,
     PineconeParams, PostgresParams, QdrantParams, S3Params,
 };
 use crate::error::{Error, Result};
+use crate::graph::DataSink;
 
 /// Output provider parameters (storage backends + vector DBs).
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]

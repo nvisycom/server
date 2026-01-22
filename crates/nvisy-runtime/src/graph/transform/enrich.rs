@@ -1,25 +1,25 @@
-//! Derive processor.
+//! Enrich processor.
 
 use nvisy_dal::AnyDataValue;
 use nvisy_rig::agent::Agents;
 
 use super::Process;
+use crate::definition::EnrichTask;
 use crate::error::Result;
-use crate::graph::definition::DeriveTask;
 
-/// Processor for generating new content from input.
-pub struct DeriveProcessor {
-    /// Agents for derivation tasks.
+/// Processor for enriching elements with metadata/descriptions.
+pub struct EnrichProcessor {
+    /// Agents for enrichment tasks.
     agents: Agents,
-    /// The derivation task to perform.
-    task: DeriveTask,
+    /// The enrichment task to perform.
+    task: EnrichTask,
     /// Optional prompt override.
     override_prompt: Option<String>,
 }
 
-impl DeriveProcessor {
-    /// Creates a new derive processor.
-    pub fn new(agents: Agents, task: DeriveTask, override_prompt: Option<String>) -> Self {
+impl EnrichProcessor {
+    /// Creates a new enrich processor.
+    pub fn new(agents: Agents, task: EnrichTask, override_prompt: Option<String>) -> Self {
         Self {
             agents,
             task,
@@ -27,9 +27,9 @@ impl DeriveProcessor {
         }
     }
 
-    /// Returns the derivation task.
-    pub fn task(&self) -> DeriveTask {
-        self.task
+    /// Returns the enrichment task.
+    pub fn task(&self) -> &EnrichTask {
+        &self.task
     }
 
     /// Returns the prompt override, if any.
@@ -38,18 +38,19 @@ impl DeriveProcessor {
     }
 }
 
-impl Process for DeriveProcessor {
+impl Process for EnrichProcessor {
     async fn process(&self, input: Vec<AnyDataValue>) -> Result<Vec<AnyDataValue>> {
-        // TODO: Implement derivation using agents
-        // Use self.agents.text_generation_agent for summarization and title generation
+        // TODO: Implement enrichment using agents
+        // Use self.agents.vision_agent for image tasks
+        // Use self.agents.table_agent for table tasks
         let _ = &self.agents; // Suppress unused warning
         Ok(input)
     }
 }
 
-impl std::fmt::Debug for DeriveProcessor {
+impl std::fmt::Debug for EnrichProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeriveProcessor")
+        f.debug_struct("EnrichProcessor")
             .field("task", &self.task)
             .field("override_prompt", &self.override_prompt)
             .finish_non_exhaustive()

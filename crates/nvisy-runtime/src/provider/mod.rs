@@ -23,17 +23,8 @@ mod registry;
 pub mod runtime;
 
 // Storage backend exports
-pub use backend::{
-    AzblobCredentials, AzblobParams, GcsCredentials, GcsParams, MysqlCredentials, MysqlParams,
-    PostgresCredentials, PostgresParams, S3Credentials, S3Params,
-};
-
-// Vector database exports
-pub use backend::{
-    MilvusCredentials, MilvusParams, PgVectorCredentials, PgVectorParams, PineconeCredentials,
-    PineconeParams, QdrantCredentials, QdrantParams,
-};
-
+// AI provider enum exports
+pub use ai::{AiCredentials, CompletionProviderParams, EmbeddingProviderParams};
 // AI provider exports
 pub use backend::{
     AnthropicCompletionParams, AnthropicCredentials, CohereCompletionParams, CohereCredentials,
@@ -41,16 +32,20 @@ pub use backend::{
     OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams, PerplexityCompletionParams,
     PerplexityCredentials,
 };
-
+pub use backend::{
+    AzblobCredentials, AzblobParams, GcsCredentials, GcsParams, IntoProvider, MysqlCredentials,
+    MysqlParams, PostgresCredentials, PostgresParams, S3Credentials, S3Params,
+};
+// Vector database exports
+pub use backend::{
+    MilvusCredentials, MilvusParams, PgVectorCredentials, PgVectorParams, PineconeCredentials,
+    PineconeParams, QdrantCredentials, QdrantParams,
+};
 use derive_more::From;
 pub use inputs::{InputProvider, InputProviderParams};
 pub use outputs::{OutputProvider, OutputProviderParams};
 pub use registry::CredentialsRegistry;
 use serde::{Deserialize, Serialize};
-
-// AI provider enum exports
-pub use ai::{AiCredentials, CompletionProviderParams, EmbeddingProviderParams};
-pub use backend::IntoProvider;
 
 /// Provider credentials (sensitive).
 #[derive(Debug, Clone, From, Serialize, Deserialize)]

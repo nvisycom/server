@@ -81,11 +81,11 @@ impl<S> VectorSearchTool<S> {
 }
 
 impl<S: VectorSearcher + 'static> Tool for VectorSearchTool<S> {
-    const NAME: &'static str = "vector_search";
-
-    type Error = VectorSearchError;
     type Args = VectorSearchArgs;
+    type Error = VectorSearchError;
     type Output = Vec<SearchResult>;
+
+    const NAME: &'static str = "vector_search";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {

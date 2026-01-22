@@ -84,11 +84,11 @@ impl ImageAnalysisTool {
 }
 
 impl Tool for ImageAnalysisTool {
-    const NAME: &'static str = "image_analysis";
-
-    type Error = ImageAnalysisError;
     type Args = ImageAnalysisArgs;
+    type Error = ImageAnalysisError;
     type Output = ImageAnalysisResult;
+
+    const NAME: &'static str = "image_analysis";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {

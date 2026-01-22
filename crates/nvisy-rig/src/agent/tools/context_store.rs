@@ -94,11 +94,11 @@ impl<S> ContextStoreTool<S> {
 }
 
 impl<S: ContextStore + 'static> Tool for ContextStoreTool<S> {
-    const NAME: &'static str = "context_store";
-
-    type Error = ContextStoreError;
     type Args = ContextStoreArgs;
+    type Error = ContextStoreError;
     type Output = ContextStoreResult;
+
+    const NAME: &'static str = "context_store";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {

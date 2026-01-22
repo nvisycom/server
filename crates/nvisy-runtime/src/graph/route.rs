@@ -3,7 +3,9 @@
 use jiff::Timestamp;
 use nvisy_dal::AnyDataValue;
 
-use crate::graph::definition::{ContentTypeCategory, PatternMatchType, SwitchCondition, SwitchDef};
+use crate::definition::{
+    ContentTypeCategory, DateField, PatternMatchType, SwitchCondition, SwitchDef,
+};
 
 /// Compiled switch node - ready to route data.
 ///
@@ -108,12 +110,8 @@ impl CompiledSwitch {
 
             SwitchCondition::FileDate(c) => {
                 let timestamp = match c.field {
-                    crate::graph::definition::DateField::Created => {
-                        self.get_metadata_timestamp(data, "created_at")
-                    }
-                    crate::graph::definition::DateField::Modified => {
-                        self.get_metadata_timestamp(data, "modified_at")
-                    }
+                    DateField::Created => self.get_metadata_timestamp(data, "created_at"),
+                    DateField::Modified => self.get_metadata_timestamp(data, "modified_at"),
                 };
                 match timestamp {
                     Some(ts) => {
@@ -333,7 +331,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::definition::{ContentTypeCondition, FileExtensionCondition};
+    use crate::definition::{ContentTypeCondition, FileExtensionCondition};
 
     #[test]
     fn test_evaluate_file_extension() {

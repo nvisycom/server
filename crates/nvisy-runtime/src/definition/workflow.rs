@@ -145,11 +145,12 @@ pub enum ValidationError {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::*;
-    use crate::graph::definition::{
+    use crate::definition::{
         CacheSlot, InputDef, InputSource, OutputDef, OutputTarget, Partition, Transformer,
     };
-    use uuid::Uuid;
 
     /// Creates a deterministic NodeId for testing.
     fn test_node_id(n: u128) -> NodeId {

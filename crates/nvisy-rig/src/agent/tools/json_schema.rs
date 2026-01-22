@@ -232,11 +232,11 @@ impl Default for JsonSchemaTool {
 }
 
 impl Tool for JsonSchemaTool {
-    const NAME: &'static str = "json_schema";
-
-    type Error = JsonSchemaError;
     type Args = JsonSchemaArgs;
+    type Error = JsonSchemaError;
     type Output = JsonSchemaResult;
+
+    const NAME: &'static str = "json_schema";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -270,8 +270,9 @@ impl Tool for JsonSchemaTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_valid_object() {

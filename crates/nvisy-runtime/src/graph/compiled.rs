@@ -9,7 +9,7 @@ use super::input::CompiledInput;
 use super::node::CompiledNode;
 use super::output::CompiledOutput;
 use super::route::CompiledSwitch;
-use crate::graph::definition::{
+use crate::definition::{
     ContentTypeCategory, ContentTypeCondition, EdgeData, NodeId, SwitchCondition, WorkflowMetadata,
 };
 

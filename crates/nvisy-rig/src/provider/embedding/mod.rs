@@ -9,4 +9,4 @@ pub use credentials::EmbeddingCredentials;
 #[cfg(feature = "ollama")]
 pub use model::OllamaEmbeddingModel;
 pub use model::{CohereEmbeddingModel, EmbeddingModel, GeminiEmbeddingModel, OpenAiEmbeddingModel};
-pub use provider::{EmbeddingProvider};
+pub use provider::EmbeddingProvider;

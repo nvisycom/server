@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::PipelineStatus;
-use nvisy_runtime::graph::WorkflowDefinition;
+use nvisy_runtime::definition::WorkflowDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

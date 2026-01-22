@@ -5,6 +5,7 @@
 //! - [`EngineConfig`]: Configuration options
 //! - [`ExecutionContext`]: Runtime context for workflow execution
 
+mod compiler;
 mod config;
 mod context;
 mod executor;

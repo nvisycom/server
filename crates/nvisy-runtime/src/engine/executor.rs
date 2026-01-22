@@ -3,13 +3,15 @@
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
+use nvisy_dal::core::Context;
 use tokio::sync::Semaphore;
 
 use super::EngineConfig;
+use super::compiler::WorkflowCompiler;
 use super::context::ExecutionContext;
+use crate::definition::{NodeId, WorkflowDefinition};
 use crate::error::{Error, Result};
-use crate::graph::NodeId;
-use crate::graph::compiled::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};
+use crate::graph::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};
 use crate::provider::CredentialsRegistry;
 
 /// Tracing target for engine operations.
@@ -50,15 +52,30 @@ impl Engine {
         &self.config
     }
 
-    /// Executes a pre-compiled workflow graph.
+    /// Executes a workflow definition.
     ///
-    /// The graph should be compiled using [`crate::graph::compiler::compile`]
-    /// before execution.
-    ///
+    /// The definition is compiled into an executable graph and then executed.
     /// Execution is pipe-based: items are read from inputs one at a time,
     /// flow through all transformers, and are written to outputs before
     /// the next item is processed.
     pub async fn execute(
+        &self,
+        definition: WorkflowDefinition,
+        credentials: CredentialsRegistry,
+        ctx: Context,
+    ) -> Result<ExecutionContext> {
+        // Compile the definition into an executable graph
+        let compiler = WorkflowCompiler::new(&credentials, ctx);
+        let graph = compiler.compile(definition).await?;
+
+        self.execute_graph(graph, credentials).await
+    }
+
+    /// Executes a pre-compiled workflow graph.
+    ///
+    /// Use [`Self::execute`] to compile and execute a workflow definition in one step.
+    /// This method is useful when you want to reuse a compiled graph multiple times.
+    pub async fn execute_graph(
         &self,
         mut graph: CompiledGraph,
         credentials: CredentialsRegistry,

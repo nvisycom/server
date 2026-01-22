@@ -2,9 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::provider::InputProviderParams;
-
 use super::route::CacheSlot;
+use crate::provider::InputProviderParams;
 
 /// Input provider definition for workflow nodes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

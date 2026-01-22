@@ -119,11 +119,11 @@ impl<Q> MetadataQueryTool<Q> {
 }
 
 impl<Q: MetadataQuerier + 'static> Tool for MetadataQueryTool<Q> {
-    const NAME: &'static str = "metadata_query";
-
-    type Error = MetadataQueryError;
     type Args = MetadataQueryArgs;
+    type Error = MetadataQueryError;
     type Output = Vec<QueryResult>;
+
+    const NAME: &'static str = "metadata_query";
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
