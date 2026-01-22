@@ -4,6 +4,9 @@ use nvisy_dal::provider::AzblobConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// Azure Blob Storage credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AzblobCredentials {
@@ -29,9 +32,11 @@ pub struct AzblobParams {
     pub prefix: Option<String>,
 }
 
-impl AzblobParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: AzblobCredentials) -> AzblobConfig {
+impl IntoProvider for AzblobParams {
+    type Credentials = AzblobCredentials;
+    type Output = AzblobConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config = AzblobConfig::new(credentials.account_name, self.container);
 
         if let Some(account_key) = credentials.account_key {
@@ -44,6 +49,6 @@ impl AzblobParams {
             config = config.with_prefix(prefix);
         }
 
-        config
+        Ok(config)
     }
 }

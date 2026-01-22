@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::ProviderCredentials;
-use super::backend::{AzblobParams, GcsParams, MysqlParams, PostgresParams, S3Params};
+use super::backend::{
+    AzblobParams, GcsParams, IntoProvider, MysqlParams, PostgresParams, S3Params,
+};
 use crate::error::{WorkflowError, WorkflowResult};
 
 /// Input provider parameters (storage backends only, no vector DBs).
@@ -60,29 +62,28 @@ impl InputProviderParams {
             Self::Postgres(_) | Self::Mysql(_) => DataTypeId::Record,
         }
     }
+}
 
-    /// Combines params with credentials to create a full provider config.
-    ///
-    /// Returns an error if the credentials type doesn't match the params type.
-    pub fn into_config(
-        self,
-        credentials: ProviderCredentials,
-    ) -> WorkflowResult<InputProviderConfig> {
+impl IntoProvider for InputProviderParams {
+    type Credentials = ProviderCredentials;
+    type Output = InputProviderConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         match (self, credentials) {
             (Self::S3(p), ProviderCredentials::S3(c)) => {
-                Ok(InputProviderConfig::S3(p.into_config(c)))
+                Ok(InputProviderConfig::S3(p.into_provider(c)?))
             }
             (Self::Gcs(p), ProviderCredentials::Gcs(c)) => {
-                Ok(InputProviderConfig::Gcs(p.into_config(c)))
+                Ok(InputProviderConfig::Gcs(p.into_provider(c)?))
             }
             (Self::Azblob(p), ProviderCredentials::Azblob(c)) => {
-                Ok(InputProviderConfig::Azblob(p.into_config(c)))
+                Ok(InputProviderConfig::Azblob(p.into_provider(c)?))
             }
             (Self::Postgres(p), ProviderCredentials::Postgres(c)) => {
-                Ok(InputProviderConfig::Postgres(p.into_config(c)))
+                Ok(InputProviderConfig::Postgres(p.into_provider(c)?))
             }
             (Self::Mysql(p), ProviderCredentials::Mysql(c)) => {
-                Ok(InputProviderConfig::Mysql(p.into_config(c)))
+                Ok(InputProviderConfig::Mysql(p.into_provider(c)?))
             }
             (params, creds) => Err(WorkflowError::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",

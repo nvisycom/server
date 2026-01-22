@@ -38,6 +38,10 @@ pub enum Error {
     /// Configuration error.
     #[error("configuration error: {0}")]
     Config(String),
+
+    /// Parse error (JSON parsing, etc.)
+    #[error("parse error: {0}")]
+    Parse(String),
 }
 
 impl Error {
@@ -62,6 +66,11 @@ impl Error {
     /// Creates a configuration error.
     pub fn config(message: impl fmt::Display) -> Self {
         Self::Config(message.to_string())
+    }
+
+    /// Creates a parse error.
+    pub fn parse(message: impl fmt::Display) -> Self {
+        Self::Parse(message.to_string())
     }
 
     /// Returns true if this error is retryable.

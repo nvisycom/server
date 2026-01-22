@@ -2,9 +2,10 @@
 
 use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
+use serde_json::Value;
 
-use crate::Result;
 use crate::provider::CompletionProvider;
+use crate::{Error, Result};
 
 const NAME: &str = "StructuredOutputAgent";
 const DESCRIPTION: &str =
@@ -54,18 +55,43 @@ impl StructuredOutputAgent {
     ///
     /// Attempts to extract structured information from free-form text
     /// and represent it as JSON.
-    pub async fn to_json(&self, text: &str) -> Result<String> {
+    pub async fn to_json(&self, text: &str) -> Result<Value> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_TO_JSON, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
 
     /// Converts text to JSON matching a specific schema.
     ///
     /// Extracts information from text and structures it according to
     /// the provided JSON schema.
-    pub async fn to_structured_json(&self, text: &str, schema: &str) -> Result<String> {
+    pub async fn to_structured_json(&self, text: &str, schema: &str) -> Result<Value> {
         let base_prompt = PROMPT_TO_STRUCTURED_JSON.replace("{}", schema);
         let prompt = format!("{}\n\nText:\n{}", base_prompt, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
+}
+
+/// Parses JSON from LLM response, handling markdown code blocks.
+fn parse_json(response: &str) -> Result<Value> {
+    // Try to extract JSON from markdown code block if present
+    let json_str = if response.contains("```json") {
+        response
+            .split("```json")
+            .nth(1)
+            .and_then(|s| s.split("```").next())
+            .map(|s| s.trim())
+            .unwrap_or(response.trim())
+    } else if response.contains("```") {
+        response
+            .split("```")
+            .nth(1)
+            .map(|s| s.trim())
+            .unwrap_or(response.trim())
+    } else {
+        response.trim()
+    };
+
+    serde_json::from_str(json_str).map_err(|e| Error::parse(format!("invalid JSON: {e}")))
 }

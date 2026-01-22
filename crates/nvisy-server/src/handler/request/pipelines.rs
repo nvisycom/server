@@ -6,7 +6,7 @@
 
 use nvisy_postgres::model::{NewPipeline, UpdatePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::PipelineStatus;
-use nvisy_runtime::graph::WorkflowGraph;
+use nvisy_runtime::graph::WorkflowDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -50,7 +50,7 @@ impl CreatePipeline {
 /// Request payload to update an existing pipeline.
 ///
 /// All fields are optional; only provided fields will be updated.
-/// The definition field accepts a strictly typed WorkflowGraph.
+/// The definition field accepts a strictly typed WorkflowDefinition.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -63,9 +63,9 @@ pub struct UpdatePipeline {
     pub description: Option<String>,
     /// New status for the pipeline.
     pub status: Option<PipelineStatus>,
-    /// New definition for the pipeline (strictly typed workflow graph).
+    /// New definition for the pipeline (strictly typed workflow definition).
     #[schemars(with = "Option<serde_json::Value>")]
-    pub definition: Option<WorkflowGraph>,
+    pub definition: Option<WorkflowDefinition>,
 }
 
 impl UpdatePipeline {
@@ -76,7 +76,7 @@ impl UpdatePipeline {
             description: self.description.map(Some),
             status: self.status,
             definition: self.definition.map(|d| {
-                serde_json::to_value(d).expect("WorkflowGraph serialization should not fail")
+                serde_json::to_value(d).expect("WorkflowDefinition serialization should not fail")
             }),
             ..Default::default()
         }

@@ -1,32 +1,76 @@
 //! Backend provider implementations.
 //!
 //! Each provider file contains credentials and params for a specific backend:
+//!
+//! ## Storage backends
 //! - [`s3`]: Amazon S3
 //! - [`gcs`]: Google Cloud Storage
 //! - [`azblob`]: Azure Blob Storage
 //! - [`postgres`]: PostgreSQL
 //! - [`mysql`]: MySQL
+//!
+//! ## Vector databases
 //! - [`qdrant`]: Qdrant vector database
 //! - [`pinecone`]: Pinecone vector database
 //! - [`milvus`]: Milvus vector database
 //! - [`pgvector`]: pgvector (PostgreSQL extension)
+//!
+//! ## AI providers
+//! - [`openai`]: OpenAI (completion + embedding)
+//! - [`anthropic`]: Anthropic (completion only)
+//! - [`cohere`]: Cohere (completion + embedding)
+//! - [`gemini`]: Google Gemini (completion + embedding)
+//! - [`perplexity`]: Perplexity (completion only)
 
+use crate::error::WorkflowResult;
+
+// Storage backends
 mod azblob;
 mod gcs;
-mod milvus;
 mod mysql;
-mod pgvector;
-mod pinecone;
 mod postgres;
-mod qdrant;
 mod s3;
 
+// Vector databases
+mod milvus;
+mod pgvector;
+mod pinecone;
+mod qdrant;
+
+// AI providers
+mod anthropic;
+mod cohere;
+mod gemini;
+mod openai;
+mod perplexity;
+
+// Storage backend exports
 pub use azblob::{AzblobCredentials, AzblobParams};
 pub use gcs::{GcsCredentials, GcsParams};
-pub use milvus::{MilvusCredentials, MilvusParams};
 pub use mysql::{MysqlCredentials, MysqlParams};
+pub use postgres::{PostgresCredentials, PostgresParams};
+pub use s3::{S3Credentials, S3Params};
+
+// Vector database exports
+pub use milvus::{MilvusCredentials, MilvusParams};
 pub use pgvector::{PgVectorCredentials, PgVectorParams};
 pub use pinecone::{PineconeCredentials, PineconeParams};
-pub use postgres::{PostgresCredentials, PostgresParams};
 pub use qdrant::{QdrantCredentials, QdrantParams};
-pub use s3::{S3Credentials, S3Params};
+
+// AI provider exports
+pub use anthropic::{AnthropicCompletionParams, AnthropicCredentials};
+pub use cohere::{CohereCompletionParams, CohereCredentials, CohereEmbeddingParams};
+pub use gemini::{GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParams};
+pub use openai::{OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams};
+pub use perplexity::{PerplexityCompletionParams, PerplexityCredentials};
+
+/// Trait for provider parameters that can be combined with credentials to create a provider/config.
+pub trait IntoProvider {
+    /// The credentials type required by this provider.
+    type Credentials;
+    /// The output type (provider instance or config).
+    type Output;
+
+    /// Combines params with credentials to create the output.
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output>;
+}

@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use super::ProviderCredentials;
 use super::backend::{
-    AzblobParams, GcsParams, MilvusParams, MysqlParams, PgVectorParams, PineconeParams,
-    PostgresParams, QdrantParams, S3Params,
+    AzblobParams, GcsParams, IntoProvider, MilvusParams, MysqlParams, PgVectorParams,
+    PineconeParams, PostgresParams, QdrantParams, S3Params,
 };
 use crate::error::{WorkflowError, WorkflowResult};
 
@@ -83,41 +83,40 @@ impl OutputProviderParams {
             }
         }
     }
+}
 
-    /// Combines params with credentials to create a full provider config.
-    ///
-    /// Returns an error if the credentials type doesn't match the params type.
-    pub fn into_config(
-        self,
-        credentials: ProviderCredentials,
-    ) -> WorkflowResult<OutputProviderConfig> {
+impl IntoProvider for OutputProviderParams {
+    type Credentials = ProviderCredentials;
+    type Output = OutputProviderConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         match (self, credentials) {
             (Self::S3(p), ProviderCredentials::S3(c)) => {
-                Ok(OutputProviderConfig::S3(p.into_config(c)))
+                Ok(OutputProviderConfig::S3(p.into_provider(c)?))
             }
             (Self::Gcs(p), ProviderCredentials::Gcs(c)) => {
-                Ok(OutputProviderConfig::Gcs(p.into_config(c)))
+                Ok(OutputProviderConfig::Gcs(p.into_provider(c)?))
             }
             (Self::Azblob(p), ProviderCredentials::Azblob(c)) => {
-                Ok(OutputProviderConfig::Azblob(p.into_config(c)))
+                Ok(OutputProviderConfig::Azblob(p.into_provider(c)?))
             }
             (Self::Postgres(p), ProviderCredentials::Postgres(c)) => {
-                Ok(OutputProviderConfig::Postgres(p.into_config(c)))
+                Ok(OutputProviderConfig::Postgres(p.into_provider(c)?))
             }
             (Self::Mysql(p), ProviderCredentials::Mysql(c)) => {
-                Ok(OutputProviderConfig::Mysql(p.into_config(c)))
+                Ok(OutputProviderConfig::Mysql(p.into_provider(c)?))
             }
             (Self::Qdrant(p), ProviderCredentials::Qdrant(c)) => {
-                Ok(OutputProviderConfig::Qdrant(p.into_config(c)))
+                Ok(OutputProviderConfig::Qdrant(p.into_provider(c)?))
             }
             (Self::Pinecone(p), ProviderCredentials::Pinecone(c)) => {
-                Ok(OutputProviderConfig::Pinecone(p.into_config(c)))
+                Ok(OutputProviderConfig::Pinecone(p.into_provider(c)?))
             }
             (Self::Milvus(p), ProviderCredentials::Milvus(c)) => {
-                Ok(OutputProviderConfig::Milvus(p.into_config(c)))
+                Ok(OutputProviderConfig::Milvus(p.into_provider(c)?))
             }
             (Self::PgVector(p), ProviderCredentials::PgVector(c)) => {
-                Ok(OutputProviderConfig::PgVector(p.into_config(c)))
+                Ok(OutputProviderConfig::PgVector(p.into_provider(c)?))
             }
             (params, creds) => Err(WorkflowError::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",

@@ -4,6 +4,9 @@ use nvisy_dal::provider::QdrantConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// Qdrant credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QdrantCredentials {
@@ -26,9 +29,11 @@ pub struct QdrantParams {
     pub dimensions: Option<usize>,
 }
 
-impl QdrantParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: QdrantCredentials) -> QdrantConfig {
+impl IntoProvider for QdrantParams {
+    type Credentials = QdrantCredentials;
+    type Output = QdrantConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config = QdrantConfig::new(credentials.url).with_collection(self.collection);
 
         if let Some(api_key) = credentials.api_key {
@@ -38,6 +43,6 @@ impl QdrantParams {
             config = config.with_dimensions(dimensions);
         }
 
-        config
+        Ok(config)
     }
 }

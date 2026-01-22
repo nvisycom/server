@@ -4,6 +4,9 @@ use nvisy_dal::provider::PineconeConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// Pinecone credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PineconeCredentials {
@@ -28,9 +31,11 @@ pub struct PineconeParams {
     pub dimensions: Option<usize>,
 }
 
-impl PineconeParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: PineconeCredentials) -> PineconeConfig {
+impl IntoProvider for PineconeParams {
+    type Credentials = PineconeCredentials;
+    type Output = PineconeConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config =
             PineconeConfig::new(credentials.api_key, credentials.environment, self.index);
 
@@ -41,6 +46,6 @@ impl PineconeParams {
             config = config.with_dimensions(dimensions);
         }
 
-        config
+        Ok(config)
     }
 }

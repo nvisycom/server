@@ -1,14 +1,15 @@
 //! Derive transformer configuration - generate new content from input.
 
-use nvisy_rig::provider::CompletionModel;
 use serde::{Deserialize, Serialize};
 
+use crate::provider::CompletionProviderParams;
+
 /// Configuration for generating new content from input.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeriveConfig {
-    /// Completion model provider configuration.
+    /// Completion provider parameters (includes credentials_id and model).
     #[serde(flatten)]
-    pub provider: CompletionModel,
+    pub provider: CompletionProviderParams,
 
     /// The derivation task to perform.
     pub task: DeriveTask,

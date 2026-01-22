@@ -4,6 +4,9 @@ use nvisy_dal::provider::MilvusConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// Default Milvus port.
 fn default_milvus_port() -> u16 {
     19530
@@ -40,9 +43,11 @@ pub struct MilvusParams {
     pub dimensions: Option<usize>,
 }
 
-impl MilvusParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: MilvusCredentials) -> MilvusConfig {
+impl IntoProvider for MilvusParams {
+    type Credentials = MilvusCredentials;
+    type Output = MilvusConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config = MilvusConfig::new(credentials.host)
             .with_port(credentials.port)
             .with_collection(self.collection);
@@ -57,6 +62,6 @@ impl MilvusParams {
             config = config.with_dimensions(dimensions);
         }
 
-        config
+        Ok(config)
     }
 }

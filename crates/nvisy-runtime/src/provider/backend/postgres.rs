@@ -4,6 +4,9 @@ use nvisy_dal::provider::PostgresConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// PostgreSQL credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresCredentials {
@@ -23,15 +26,17 @@ pub struct PostgresParams {
     pub schema: Option<String>,
 }
 
-impl PostgresParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: PostgresCredentials) -> PostgresConfig {
+impl IntoProvider for PostgresParams {
+    type Credentials = PostgresCredentials;
+    type Output = PostgresConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config = PostgresConfig::new(credentials.connection_string).with_table(self.table);
 
         if let Some(schema) = self.schema {
             config = config.with_schema(schema);
         }
 
-        config
+        Ok(config)
     }
 }

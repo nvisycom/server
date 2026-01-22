@@ -1,10 +1,58 @@
 //! Text analysis agent for extracting structured information.
 
+use std::collections::HashMap;
+
 use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
+use serde::{Deserialize, Serialize};
 
-use crate::Result;
 use crate::provider::CompletionProvider;
+use crate::{Error, Result};
+
+/// A named entity extracted from text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Entity {
+    /// The text of the entity.
+    pub text: String,
+    /// The type of entity (e.g., "person", "organization", "location").
+    #[serde(rename = "type")]
+    pub entity_type: String,
+    /// The starting character index in the source text.
+    #[serde(default)]
+    pub start_index: Option<usize>,
+}
+
+/// Classification result with labels and confidence scores.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Classification {
+    /// The matched category labels.
+    pub labels: Vec<String>,
+    /// Confidence scores for each label (0.0 to 1.0).
+    pub confidence: HashMap<String, f64>,
+}
+
+/// Sentiment analysis result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sentiment {
+    /// The overall sentiment: "positive", "negative", "neutral", or "mixed".
+    pub sentiment: String,
+    /// Confidence score (0.0 to 1.0).
+    pub confidence: f64,
+    /// Brief explanation of the sentiment.
+    #[serde(default)]
+    pub explanation: Option<String>,
+}
+
+/// A relationship between two entities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Relationship {
+    /// The first entity in the relationship.
+    pub subject: String,
+    /// The type of relationship.
+    pub predicate: String,
+    /// The second entity in the relationship.
+    pub object: String,
+}
 
 const NAME: &str = "TextAnalysisAgent";
 const DESCRIPTION: &str = "Agent for text analysis including entity extraction, keyword extraction, classification, and sentiment analysis";
@@ -74,34 +122,62 @@ impl TextAnalysisAgent {
     }
 
     /// Extracts named entities from text.
-    pub async fn extract_entities(&self, text: &str) -> Result<String> {
+    pub async fn extract_entities(&self, text: &str) -> Result<Vec<Entity>> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_EXTRACT_ENTITIES, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
 
     /// Extracts keywords from text.
-    pub async fn extract_keywords(&self, text: &str) -> Result<String> {
+    pub async fn extract_keywords(&self, text: &str) -> Result<Vec<String>> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_EXTRACT_KEYWORDS, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
 
     /// Classifies text into provided categories.
-    pub async fn classify(&self, text: &str, labels: &[String]) -> Result<String> {
+    pub async fn classify(&self, text: &str, labels: &[String]) -> Result<Classification> {
         let labels_str = labels.join(", ");
         let base_prompt = PROMPT_CLASSIFY.replace("{}", &labels_str);
         let prompt = format!("{}\n\nText:\n{}", base_prompt, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
 
     /// Analyzes sentiment of text.
-    pub async fn analyze_sentiment(&self, text: &str) -> Result<String> {
+    pub async fn analyze_sentiment(&self, text: &str) -> Result<Sentiment> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_ANALYZE_SENTIMENT, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
 
     /// Extracts relationships between entities in text.
-    pub async fn extract_relationships(&self, text: &str) -> Result<String> {
+    pub async fn extract_relationships(&self, text: &str) -> Result<Vec<Relationship>> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_EXTRACT_RELATIONSHIPS, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        parse_json(&response)
     }
+}
+
+/// Parses JSON from LLM response, handling markdown code blocks.
+fn parse_json<T: serde::de::DeserializeOwned>(response: &str) -> Result<T> {
+    // Try to extract JSON from markdown code block if present
+    let json_str = if response.contains("```json") {
+        response
+            .split("```json")
+            .nth(1)
+            .and_then(|s| s.split("```").next())
+            .map(|s| s.trim())
+            .unwrap_or(response.trim())
+    } else if response.contains("```") {
+        response
+            .split("```")
+            .nth(1)
+            .map(|s| s.trim())
+            .unwrap_or(response.trim())
+    } else {
+        response.trim()
+    };
+
+    serde_json::from_str(json_str).map_err(|e| Error::parse(format!("invalid JSON: {e}")))
 }

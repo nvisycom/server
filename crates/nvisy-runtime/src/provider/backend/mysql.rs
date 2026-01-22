@@ -4,6 +4,9 @@ use nvisy_dal::provider::MysqlConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// MySQL credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MysqlCredentials {
@@ -23,15 +26,17 @@ pub struct MysqlParams {
     pub database: Option<String>,
 }
 
-impl MysqlParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: MysqlCredentials) -> MysqlConfig {
+impl IntoProvider for MysqlParams {
+    type Credentials = MysqlCredentials;
+    type Output = MysqlConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config = MysqlConfig::new(credentials.connection_string).with_table(self.table);
 
         if let Some(database) = self.database {
             config = config.with_database(database);
         }
 
-        config
+        Ok(config)
     }
 }

@@ -2,6 +2,7 @@
 //!
 //! This module provides the graph representation for workflows:
 //! - [`WorkflowGraph`]: The main graph structure containing nodes and edges
+//! - [`WorkflowDefinition`]: Serializable workflow definition (JSON-friendly)
 //! - [`WorkflowMetadata`]: Metadata about the workflow
 //! - [`Edge`]: Connections between nodes
 //! - [`EdgeData`]: Data stored on edges in the underlying petgraph
@@ -10,18 +11,17 @@
 //! - [`CacheSlot`]: Named cache slot for in-memory data passing
 //! - [`SwitchNode`]: Conditional routing based on data properties
 
-mod edge;
+mod graph;
 pub mod input;
-mod node;
 pub mod output;
 pub mod route;
 pub mod transform;
-mod workflow;
+pub mod workflow;
 
-pub use edge::{Edge, EdgeData};
+pub use graph::WorkflowGraph;
 pub use input::{InputNode, InputSource};
-pub use node::{Node, NodeCommon, NodeData, NodeId};
 pub use output::{OutputDestination, OutputNode};
 pub use route::{CacheSlot, SwitchBranch, SwitchCondition, SwitchNode};
 pub use transform::TransformerConfig;
-pub use workflow::{WorkflowGraph, WorkflowMetadata};
+pub use workflow::{Edge, EdgeData, Node, NodeCommon, NodeData, NodeId};
+pub use workflow::{WorkflowDefinition, WorkflowMetadata};

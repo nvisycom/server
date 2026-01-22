@@ -1,72 +1,19 @@
-//! Workflow graph definition.
+//! Workflow graph runtime representation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use jiff::Timestamp;
 use petgraph::Direction;
 use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use semver::Version;
-use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use super::edge::EdgeData;
-use super::{Edge, NodeData, NodeId};
+use super::input::InputSource;
+use super::output::OutputDestination;
+use super::transform::TransformerConfig;
+use super::workflow::{Edge, EdgeData, NodeData, NodeId, WorkflowDefinition, WorkflowMetadata};
 use crate::error::{WorkflowError, WorkflowResult};
-
-/// Workflow metadata.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct WorkflowMetadata {
-    /// Workflow name (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// Workflow description.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Workflow version (semver, optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<Version>,
-    /// Tags for organization.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    /// Creation timestamp.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<Timestamp>,
-    /// Last update timestamp.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<Timestamp>,
-}
-
-impl WorkflowMetadata {
-    /// Creates a new empty metadata.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Sets the workflow name.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Sets the workflow description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Sets the workflow version.
-    pub fn with_version(mut self, version: Version) -> Self {
-        self.version = Some(version);
-        self
-    }
-
-    /// Adds tags.
-    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = tags.into_iter().map(Into::into).collect();
-        self
-    }
-}
+use crate::provider::CredentialsRegistry;
 
 /// A workflow graph containing nodes and edges.
 ///
@@ -290,8 +237,56 @@ impl WorkflowGraph {
             .collect()
     }
 
-    /// Validates the workflow graph structure and constraints.
-    pub fn validate(&self) -> WorkflowResult<()> {
+    /// Collects all credentials IDs referenced by nodes in the workflow.
+    ///
+    /// Returns a set of unique credential UUIDs from input providers,
+    /// output providers, and AI-powered transformers.
+    pub fn credentials_ids(&self) -> HashSet<Uuid> {
+        let mut ids = HashSet::new();
+
+        for data in self.graph.node_weights() {
+            match data {
+                NodeData::Input(input) => {
+                    if let InputSource::Provider(params) = &input.source {
+                        ids.insert(params.credentials_id());
+                    }
+                }
+                NodeData::Output(output) => {
+                    if let OutputDestination::Provider(params) = &output.destination {
+                        ids.insert(params.credentials_id());
+                    }
+                }
+                NodeData::Transformer(config) => match config {
+                    TransformerConfig::Embedding(c) => {
+                        ids.insert(c.provider.credentials_id());
+                    }
+                    TransformerConfig::Enrich(c) => {
+                        ids.insert(c.provider.credentials_id());
+                    }
+                    TransformerConfig::Extract(c) => {
+                        ids.insert(c.provider.credentials_id());
+                    }
+                    TransformerConfig::Derive(c) => {
+                        ids.insert(c.provider.credentials_id());
+                    }
+                    // Partition and Chunk don't require credentials
+                    TransformerConfig::Partition(_) | TransformerConfig::Chunk(_) => {}
+                },
+            }
+        }
+
+        ids
+    }
+
+    /// Validates the workflow graph structure, constraints, and credentials.
+    ///
+    /// Checks that:
+    /// - The graph has at least one node
+    /// - There is at least one input and one output node
+    /// - The graph is acyclic
+    /// - Edge constraints are satisfied for each node type
+    /// - All referenced credentials exist in the registry
+    pub fn validate(&self, registry: &CredentialsRegistry) -> WorkflowResult<()> {
         // Must have at least one node
         if self.graph.node_count() == 0 {
             return Err(WorkflowError::InvalidDefinition(
@@ -377,6 +372,11 @@ impl WorkflowGraph {
             }
         }
 
+        // Validate that all referenced credentials exist in the registry
+        for credentials_id in self.credentials_ids() {
+            registry.get(credentials_id)?;
+        }
+
         Ok(())
     }
 
@@ -403,52 +403,28 @@ impl WorkflowGraph {
     pub fn inner_mut(&mut self) -> &mut DiGraph<NodeData, EdgeData> {
         &mut self.graph
     }
-}
 
-impl Serialize for WorkflowGraph {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-
-        let mut state = serializer.serialize_struct("WorkflowGraph", 3)?;
-
-        // Serialize nodes as a map of NodeId -> NodeData
-        let nodes: HashMap<NodeId, &NodeData> = self.nodes().collect();
-        state.serialize_field("nodes", &nodes)?;
-
-        // Serialize edges
-        let edges: Vec<Edge> = self.edges().collect();
-        state.serialize_field("edges", &edges)?;
-
-        state.serialize_field("metadata", &self.metadata)?;
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for WorkflowGraph {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct WorkflowGraphData {
-            nodes: HashMap<NodeId, NodeData>,
-            edges: Vec<Edge>,
-            #[serde(default)]
-            metadata: WorkflowMetadata,
+    /// Converts the workflow graph to a serializable definition.
+    pub fn to_definition(&self) -> WorkflowDefinition {
+        WorkflowDefinition {
+            nodes: self.nodes().map(|(id, data)| (id, data.clone())).collect(),
+            edges: self.edges().collect(),
+            metadata: self.metadata.clone(),
         }
+    }
 
-        let data = WorkflowGraphData::deserialize(deserializer)?;
-        let mut graph = WorkflowGraph::with_metadata(data.metadata);
+    /// Creates a workflow graph from a definition.
+    ///
+    /// Returns an error if any edge references a non-existent node.
+    pub fn from_definition(definition: WorkflowDefinition) -> WorkflowResult<Self> {
+        let mut graph = Self::with_metadata(definition.metadata);
 
-        for (id, node_data) in data.nodes {
+        for (id, node_data) in definition.nodes {
             graph.add_node_with_id(id, node_data);
         }
 
-        for edge in data.edges {
-            graph.add_edge(edge).map_err(serde::de::Error::custom)?;
+        for edge in definition.edges {
+            graph.add_edge(edge)?;
         }
 
         Ok(graph)

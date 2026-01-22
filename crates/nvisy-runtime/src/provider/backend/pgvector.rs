@@ -4,6 +4,9 @@ use nvisy_dal::provider::PgVectorConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// pgvector credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PgVectorCredentials {
@@ -22,9 +25,11 @@ pub struct PgVectorParams {
     pub dimensions: usize,
 }
 
-impl PgVectorParams {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: PgVectorCredentials) -> PgVectorConfig {
-        PgVectorConfig::new(credentials.connection_url, self.dimensions).with_table(self.table)
+impl IntoProvider for PgVectorParams {
+    type Credentials = PgVectorCredentials;
+    type Output = PgVectorConfig;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+        Ok(PgVectorConfig::new(credentials.connection_url, self.dimensions).with_table(self.table))
     }
 }

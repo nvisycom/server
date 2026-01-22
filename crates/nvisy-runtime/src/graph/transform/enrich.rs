@@ -1,14 +1,15 @@
 //! Enrich transformer configuration - add metadata/descriptions to elements.
 
-use nvisy_rig::provider::CompletionModel;
 use serde::{Deserialize, Serialize};
 
+use crate::provider::CompletionProviderParams;
+
 /// Configuration for enriching elements with metadata/descriptions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnrichConfig {
-    /// Completion model provider configuration.
+    /// Completion provider parameters (includes credentials_id and model).
     #[serde(flatten)]
-    pub provider: CompletionModel,
+    pub provider: CompletionProviderParams,
 
     /// The enrichment task to perform.
     #[serde(flatten)]

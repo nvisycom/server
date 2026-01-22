@@ -10,6 +10,9 @@
 //!
 //! Use [`Agents`] to create all agents from a single provider.
 
+pub mod memory;
+pub mod tools;
+
 mod structured_output;
 mod table;
 mod text_analysis;
@@ -18,7 +21,7 @@ mod vision;
 
 pub use structured_output::StructuredOutputAgent;
 pub use table::TableAgent;
-pub use text_analysis::TextAnalysisAgent;
+pub use text_analysis::{Classification, Entity, Relationship, Sentiment, TextAnalysisAgent};
 pub use text_generation::TextGenerationAgent;
 pub use vision::VisionAgent;
 

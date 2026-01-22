@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::PipelineStatus;
-use nvisy_runtime::graph::WorkflowGraph;
+use nvisy_runtime::graph::WorkflowDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -29,7 +29,7 @@ pub struct Pipeline {
     pub status: PipelineStatus,
     /// Pipeline definition (workflow graph).
     #[schemars(with = "serde_json::Value")]
-    pub definition: WorkflowGraph,
+    pub definition: WorkflowDefinition,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
@@ -39,7 +39,7 @@ pub struct Pipeline {
 impl Pipeline {
     /// Creates a new instance of [`Pipeline`] from the database model.
     pub fn from_model(pipeline: model::Pipeline) -> Self {
-        let definition: WorkflowGraph =
+        let definition: WorkflowDefinition =
             serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {
             pipeline_id: pipeline.id,

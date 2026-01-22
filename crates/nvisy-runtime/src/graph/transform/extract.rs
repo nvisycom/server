@@ -1,14 +1,15 @@
 //! Extract transformer configuration - extract structured data or convert formats.
 
-use nvisy_rig::provider::CompletionModel;
 use serde::{Deserialize, Serialize};
 
+use crate::provider::CompletionProviderParams;
+
 /// Configuration for extracting structured data or converting formats.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExtractConfig {
-    /// Completion model provider configuration.
+    /// Completion provider parameters (includes credentials_id and model).
     #[serde(flatten)]
-    pub provider: CompletionModel,
+    pub provider: CompletionProviderParams,
 
     /// The extraction task to perform.
     #[serde(flatten)]

@@ -6,9 +6,9 @@ use derive_more::{Debug, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::input::InputNode;
-use super::output::OutputNode;
-use super::transform::TransformerConfig;
+use crate::graph::input::InputNode;
+use crate::graph::output::OutputNode;
+use crate::graph::transform::TransformerConfig;
 
 /// Unique identifier for a node in a workflow graph.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

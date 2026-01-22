@@ -4,6 +4,9 @@ use nvisy_dal::provider::S3Config;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::IntoProvider;
+use crate::error::WorkflowResult;
+
 /// Amazon S3 credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3Credentials {
@@ -30,9 +33,11 @@ pub struct S3Params {
     pub prefix: Option<String>,
 }
 
-impl S3Params {
-    /// Combines params with credentials to create a full provider config.
-    pub fn into_config(self, credentials: S3Credentials) -> S3Config {
+impl IntoProvider for S3Params {
+    type Credentials = S3Credentials;
+    type Output = S3Config;
+
+    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
         let mut config = S3Config::new(self.bucket, credentials.region)
             .with_credentials(credentials.access_key_id, credentials.secret_access_key);
 
@@ -43,6 +48,6 @@ impl S3Params {
             config = config.with_prefix(prefix);
         }
 
-        config
+        Ok(config)
     }
 }

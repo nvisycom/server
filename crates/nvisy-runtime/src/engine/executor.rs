@@ -9,7 +9,7 @@ use super::EngineConfig;
 use super::context::ExecutionContext;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::graph::{InputSource, NodeData, NodeId, OutputDestination, WorkflowGraph};
-use crate::provider::{CredentialsRegistry, InputProvider, OutputProvider};
+use crate::provider::{CredentialsRegistry, InputProvider, IntoProvider, OutputProvider};
 
 /// Tracing target for engine operations.
 const TRACING_TARGET: &str = "nvisy_workflow::engine";
@@ -49,9 +49,16 @@ impl Engine {
         &self.config
     }
 
-    /// Validates a workflow graph.
-    pub fn validate(&self, workflow: &WorkflowGraph) -> WorkflowResult<()> {
-        workflow.validate()
+    /// Validates a workflow graph against a credentials registry.
+    ///
+    /// Checks graph structure, constraints, and that all referenced
+    /// credentials exist in the registry.
+    pub fn validate(
+        &self,
+        workflow: &WorkflowGraph,
+        registry: &CredentialsRegistry,
+    ) -> WorkflowResult<()> {
+        workflow.validate(registry)
     }
 
     /// Executes a workflow graph with the given credentials.
@@ -70,7 +77,7 @@ impl Engine {
             .await
             .map_err(|e| WorkflowError::Internal(format!("semaphore closed: {}", e)))?;
 
-        workflow.validate()?;
+        workflow.validate(&credentials)?;
 
         let order = workflow.topological_order()?;
 
@@ -119,7 +126,7 @@ impl Engine {
                         InputSource::Provider(params) => {
                             let credentials_id = params.credentials_id();
                             let credentials = ctx.credentials().get(credentials_id)?.clone();
-                            let config = params.clone().into_config(credentials)?;
+                            let config = params.clone().into_provider(credentials)?;
                             let provider = config.into_provider()?;
                             PipelineInput::Provider(provider)
                         }
@@ -132,7 +139,7 @@ impl Engine {
                         OutputDestination::Provider(params) => {
                             let credentials_id = params.credentials_id();
                             let credentials = ctx.credentials().get(credentials_id)?.clone();
-                            let config = params.clone().into_config(credentials)?;
+                            let config = params.clone().into_provider(credentials)?;
                             let provider = config.into_provider().await?;
                             PipelineOutput::Provider(provider)
                         }
