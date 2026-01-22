@@ -1,11 +1,11 @@
 //! Milvus vector database provider.
 
-use nvisy_dal::provider::MilvusConfig;
+use nvisy_dal::provider::{MilvusConfig, MilvusProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// Default Milvus port.
 fn default_milvus_port() -> u16 {
@@ -43,11 +43,12 @@ pub struct MilvusParams {
     pub dimensions: Option<usize>,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for MilvusParams {
     type Credentials = MilvusCredentials;
-    type Output = MilvusConfig;
+    type Output = MilvusProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let mut config = MilvusConfig::new(credentials.host)
             .with_port(credentials.port)
             .with_collection(self.collection);
@@ -62,6 +63,8 @@ impl IntoProvider for MilvusParams {
             config = config.with_dimensions(dimensions);
         }
 
-        Ok(config)
+        MilvusProvider::new(&config)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

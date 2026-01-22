@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::{WorkflowError, WorkflowResult};
+use crate::error::{Error, Result};
 
 /// Gemini credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,17 +35,17 @@ impl GeminiCompletionParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for GeminiCompletionParams {
     type Credentials = GeminiCredentials;
     type Output = CompletionProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let rig_creds = nvisy_rig::provider::CompletionCredentials::Gemini {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::Gemini(self.model);
-        CompletionProvider::new(&rig_creds, &model)
-            .map_err(|e| WorkflowError::Internal(e.to_string()))
+        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
     }
 }
 
@@ -68,16 +68,16 @@ impl GeminiEmbeddingParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for GeminiEmbeddingParams {
     type Credentials = GeminiCredentials;
     type Output = EmbeddingProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let rig_creds = nvisy_rig::provider::EmbeddingCredentials::Gemini {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::EmbeddingModel::Gemini(self.model);
-        EmbeddingProvider::new(&rig_creds, &model)
-            .map_err(|e| WorkflowError::Internal(e.to_string()))
+        EmbeddingProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
     }
 }

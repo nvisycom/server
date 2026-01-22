@@ -7,7 +7,7 @@ mod error;
 pub mod graph;
 pub mod provider;
 
-pub use error::{WorkflowError, WorkflowResult};
+pub use error::{Error, Result};
 
 /// Tracing target for runtime operations.
 pub const TRACING_TARGET: &str = "nvisy_runtime";

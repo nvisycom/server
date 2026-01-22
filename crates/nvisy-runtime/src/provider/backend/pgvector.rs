@@ -1,11 +1,11 @@
 //! pgvector (PostgreSQL extension) provider.
 
-use nvisy_dal::provider::PgVectorConfig;
+use nvisy_dal::provider::{PgVectorConfig, PgVectorProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// pgvector credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,11 +25,16 @@ pub struct PgVectorParams {
     pub dimensions: usize,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for PgVectorParams {
     type Credentials = PgVectorCredentials;
-    type Output = PgVectorConfig;
+    type Output = PgVectorProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
-        Ok(PgVectorConfig::new(credentials.connection_url, self.dimensions).with_table(self.table))
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
+        let config =
+            PgVectorConfig::new(credentials.connection_url, self.dimensions).with_table(self.table);
+        PgVectorProvider::new(&config)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

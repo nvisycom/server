@@ -1,11 +1,11 @@
 //! Pinecone vector database provider.
 
-use nvisy_dal::provider::PineconeConfig;
+use nvisy_dal::provider::{PineconeConfig, PineconeProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// Pinecone credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,11 +31,12 @@ pub struct PineconeParams {
     pub dimensions: Option<usize>,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for PineconeParams {
     type Credentials = PineconeCredentials;
-    type Output = PineconeConfig;
+    type Output = PineconeProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let mut config =
             PineconeConfig::new(credentials.api_key, credentials.environment, self.index);
 
@@ -46,6 +47,8 @@ impl IntoProvider for PineconeParams {
             config = config.with_dimensions(dimensions);
         }
 
-        Ok(config)
+        PineconeProvider::new(&config)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

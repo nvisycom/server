@@ -58,7 +58,7 @@ impl Edge {
     }
 }
 
-/// Edge data stored in the graph.
+/// Edge data stored in the compiled graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct EdgeData {
     /// Optional port/slot name on the source node.

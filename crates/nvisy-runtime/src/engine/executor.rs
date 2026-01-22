@@ -2,14 +2,15 @@
 
 use std::sync::Arc;
 
-use nvisy_dal::core::Context;
+use futures::{SinkExt, StreamExt};
 use tokio::sync::Semaphore;
 
 use super::EngineConfig;
 use super::context::ExecutionContext;
-use crate::error::{WorkflowError, WorkflowResult};
-use crate::graph::{InputSource, NodeData, NodeId, OutputDestination, WorkflowGraph};
-use crate::provider::{CredentialsRegistry, InputProvider, IntoProvider, OutputProvider};
+use crate::error::{Error, Result};
+use crate::graph::NodeId;
+use crate::graph::compiled::{CompiledGraph, CompiledNode, InputStream, OutputStream};
+use crate::provider::CredentialsRegistry;
 
 /// Tracing target for engine operations.
 const TRACING_TARGET: &str = "nvisy_workflow::engine";
@@ -49,37 +50,28 @@ impl Engine {
         &self.config
     }
 
-    /// Validates a workflow graph against a credentials registry.
+    /// Executes a pre-compiled workflow graph.
     ///
-    /// Checks graph structure, constraints, and that all referenced
-    /// credentials exist in the registry.
-    pub fn validate(
-        &self,
-        workflow: &WorkflowGraph,
-        registry: &CredentialsRegistry,
-    ) -> WorkflowResult<()> {
-        workflow.validate(registry)
-    }
-
-    /// Executes a workflow graph with the given credentials.
+    /// The graph should be compiled using [`crate::graph::compiler::compile`]
+    /// before execution.
     ///
     /// Execution is pipe-based: items are read from inputs one at a time,
     /// flow through all transformers, and are written to outputs before
     /// the next item is processed.
     pub async fn execute(
         &self,
-        workflow: &WorkflowGraph,
+        mut graph: CompiledGraph,
         credentials: CredentialsRegistry,
-    ) -> WorkflowResult<ExecutionContext> {
+    ) -> Result<ExecutionContext> {
         let _permit = self
             .semaphore
             .acquire()
             .await
-            .map_err(|e| WorkflowError::Internal(format!("semaphore closed: {}", e)))?;
+            .map_err(|e| Error::Internal(format!("semaphore closed: {}", e)))?;
 
-        workflow.validate(&credentials)?;
-
-        let order = workflow.topological_order()?;
+        let order = graph
+            .topological_order()
+            .ok_or_else(|| Error::InvalidDefinition("compiled graph contains a cycle".into()))?;
 
         tracing::debug!(
             target: TRACING_TARGET,
@@ -89,12 +81,8 @@ impl Engine {
 
         let mut ctx = ExecutionContext::new(credentials);
 
-        // Build the pipeline: create providers for input and output nodes
-        let pipeline = self.build_pipeline(workflow, &order, &ctx).await?;
-
-        // Execute the pipeline: stream items through
-        self.execute_pipeline(workflow, &order, &pipeline, &mut ctx)
-            .await?;
+        // Execute the compiled pipeline
+        self.execute_pipeline(&mut graph, &order, &mut ctx).await?;
 
         tracing::debug!(
             target: TRACING_TARGET,
@@ -105,121 +93,96 @@ impl Engine {
         Ok(ctx)
     }
 
-    /// Builds the pipeline by creating providers for input and output nodes.
-    async fn build_pipeline(
+    /// Executes a compiled pipeline by streaming items through.
+    async fn execute_pipeline(
         &self,
-        workflow: &WorkflowGraph,
+        graph: &mut CompiledGraph,
         order: &[NodeId],
-        ctx: &ExecutionContext,
-    ) -> WorkflowResult<Pipeline> {
-        let mut inputs = Vec::new();
-        let mut outputs = Vec::new();
+        ctx: &mut ExecutionContext,
+    ) -> Result<()> {
+        // Collect input and output node IDs
+        let input_ids: Vec<NodeId> = order
+            .iter()
+            .filter(|id| graph.node(id).map(|n| n.is_input()).unwrap_or(false))
+            .copied()
+            .collect();
 
-        for node_id in order {
-            let Some(node) = workflow.get_node(*node_id) else {
-                continue;
-            };
+        let output_ids: Vec<NodeId> = order
+            .iter()
+            .filter(|id| graph.node(id).map(|n| n.is_output()).unwrap_or(false))
+            .copied()
+            .collect();
 
-            match node {
-                NodeData::Input(input_node) => {
-                    let input = match &input_node.source {
-                        InputSource::Provider(params) => {
-                            let credentials_id = params.credentials_id();
-                            let credentials = ctx.credentials().get(credentials_id)?.clone();
-                            let config = params.clone().into_provider(credentials)?;
-                            let provider = config.into_provider()?;
-                            PipelineInput::Provider(provider)
-                        }
-                        InputSource::Cache(slot) => PipelineInput::Cache(slot.slot.clone()),
-                    };
-                    inputs.push((*node_id, input));
-                }
-                NodeData::Output(output_node) => {
-                    let output = match &output_node.destination {
-                        OutputDestination::Provider(params) => {
-                            let credentials_id = params.credentials_id();
-                            let credentials = ctx.credentials().get(credentials_id)?.clone();
-                            let config = params.clone().into_provider(credentials)?;
-                            let provider = config.into_provider().await?;
-                            PipelineOutput::Provider(provider)
-                        }
-                        OutputDestination::Cache(slot) => PipelineOutput::Cache(slot.slot.clone()),
-                    };
-                    outputs.push((*node_id, output));
-                }
-                NodeData::Transformer(_) => {
-                    // Transformers don't need pre-built providers
-                }
+        let transform_ids: Vec<NodeId> = order
+            .iter()
+            .filter(|id| graph.node(id).map(|n| n.is_transform()).unwrap_or(false))
+            .copied()
+            .collect();
+
+        // Take ownership of input streams
+        let mut input_streams: Vec<(NodeId, InputStream)> = Vec::new();
+        for id in &input_ids {
+            if let Some(node) = graph.node_mut(id)
+                && let CompiledNode::Input(compiled_input) = node
+            {
+                // Create a placeholder stream and swap with the real one
+                let placeholder = InputStream::new(Box::pin(futures::stream::empty()));
+                let stream = std::mem::replace(compiled_input.stream_mut(), placeholder);
+                input_streams.push((*id, stream));
             }
         }
 
-        Ok(Pipeline { inputs, outputs })
-    }
+        // Take ownership of output streams
+        let mut output_streams: Vec<(NodeId, OutputStream)> = Vec::new();
+        for id in &output_ids {
+            if let Some(CompiledNode::Output(compiled_output)) = graph.node_mut(id) {
+                // Create a placeholder sink
+                let placeholder = OutputStream::new(Box::pin(futures::sink::drain().sink_map_err(
+                    |_: std::convert::Infallible| Error::Internal("drain sink error".into()),
+                )));
+                let stream = std::mem::replace(compiled_output.stream_mut(), placeholder);
+                output_streams.push((*id, stream));
+            }
+        }
 
-    /// Executes the pipeline by streaming items through.
-    ///
-    /// For each input item:
-    /// 1. Set as current (single item)
-    /// 2. Run through transformers (can expand: 1 item → N items)
-    /// 3. Write all resulting items to outputs
-    async fn execute_pipeline(
-        &self,
-        workflow: &WorkflowGraph,
-        order: &[NodeId],
-        pipeline: &Pipeline,
-        ctx: &mut ExecutionContext,
-    ) -> WorkflowResult<()> {
-        // For each input, stream items through the pipeline
-        for (input_node_id, input) in &pipeline.inputs {
+        // Process each input stream
+        for (input_node_id, mut input_stream) in input_streams {
             tracing::debug!(
                 target: TRACING_TARGET,
                 node_id = %input_node_id,
-                "Reading from input"
+                "Reading from input stream"
             );
 
-            let items = match input {
-                PipelineInput::Provider(provider) => {
-                    let dal_ctx = Context::default();
-                    provider.read(&dal_ctx).await?
-                }
-                PipelineInput::Cache(name) => ctx.read_cache(name),
-            };
+            while let Some(result) = input_stream.next().await {
+                let item = result?;
 
-            // Process each input item through the pipeline
-            for item in items {
                 // Start with single input item
                 ctx.set_current_single(item);
 
-                // Execute transformers in order (each can expand 1→N)
-                for node_id in order {
-                    let Some(node) = workflow.get_node(*node_id) else {
-                        continue;
-                    };
-
-                    if let NodeData::Transformer(transformer_node) = node {
-                        self.execute_transformer(*node_id, transformer_node, ctx)?;
+                // Execute transforms in order
+                for transform_id in &transform_ids {
+                    if let Some(node) = graph.node(transform_id)
+                        && let Some(transform) = node.as_transform()
+                    {
+                        let input_data = ctx.take_current();
+                        let output_data = transform.process(input_data).await?;
+                        ctx.set_current(output_data);
                     }
                 }
 
-                // Write all resulting items to outputs
+                // Write to outputs
                 let output_data = ctx.take_current();
                 if !output_data.is_empty() {
-                    for (output_node_id, output) in &pipeline.outputs {
+                    for (output_node_id, output_stream) in &mut output_streams {
                         tracing::trace!(
                             target: TRACING_TARGET,
                             node_id = %output_node_id,
                             item_count = output_data.len(),
-                            "Writing to output"
+                            "Writing to output stream"
                         );
 
-                        match output {
-                            PipelineOutput::Provider(provider) => {
-                                let dal_ctx = Context::default();
-                                provider.write(&dal_ctx, output_data.clone()).await?;
-                            }
-                            PipelineOutput::Cache(name) => {
-                                ctx.write_cache(name, output_data.clone());
-                            }
+                        for item in output_data.clone() {
+                            output_stream.send(item).await?;
                         }
                     }
                 }
@@ -229,25 +192,10 @@ impl Engine {
             }
         }
 
-        Ok(())
-    }
-
-    /// Executes a transformer node on the current data.
-    fn execute_transformer(
-        &self,
-        node_id: NodeId,
-        _transformer_config: &crate::graph::TransformerConfig,
-        ctx: &mut ExecutionContext,
-    ) -> WorkflowResult<()> {
-        // TODO: Apply transformation based on transformer_node.config
-        // For now, pass through data unchanged
-
-        tracing::trace!(
-            target: TRACING_TARGET,
-            node_id = %node_id,
-            has_data = ctx.has_current(),
-            "Transformer node executed (passthrough)"
-        );
+        // Close all output streams
+        for (_, mut output_stream) in output_streams {
+            output_stream.close().await?;
+        }
 
         Ok(())
     }
@@ -256,28 +204,6 @@ impl Engine {
     pub fn available_slots(&self) -> usize {
         self.semaphore.available_permits()
     }
-}
-
-/// Pre-built pipeline with inputs and outputs ready for execution.
-struct Pipeline {
-    inputs: Vec<(NodeId, PipelineInput)>,
-    outputs: Vec<(NodeId, PipelineOutput)>,
-}
-
-/// Input source in the pipeline.
-enum PipelineInput {
-    /// Read from a storage provider.
-    Provider(InputProvider),
-    /// Read from a named cache slot.
-    Cache(String),
-}
-
-/// Output destination in the pipeline.
-enum PipelineOutput {
-    /// Write to a storage provider.
-    Provider(OutputProvider),
-    /// Write to a named cache slot.
-    Cache(String),
 }
 
 impl std::fmt::Debug for Engine {

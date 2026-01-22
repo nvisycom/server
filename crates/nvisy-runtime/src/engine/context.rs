@@ -1,7 +1,5 @@
 //! Execution context for workflow runs.
 
-use std::collections::HashMap;
-
 use derive_builder::Builder;
 use nvisy_dal::AnyDataValue;
 
@@ -9,9 +7,8 @@ use crate::provider::CredentialsRegistry;
 
 /// Execution context for a workflow run.
 ///
-/// Manages the current data items flowing through the pipeline, holds
-/// credentials for provider access, and provides named cache slots for
-/// data sharing between workflow branches.
+/// Manages the current data items flowing through the pipeline and holds
+/// credentials for provider access.
 ///
 /// A single input can produce multiple outputs (e.g., 1 document → 1000 embeddings),
 /// so the context holds a `Vec` of values at each stage.
@@ -27,9 +24,6 @@ pub struct ExecutionContext {
     /// Current data items being processed (can expand: 1 input → N outputs).
     #[builder(default)]
     current: Vec<AnyDataValue>,
-    /// Named cache slots for data sharing between workflow branches.
-    #[builder(default)]
-    cache: HashMap<String, Vec<AnyDataValue>>,
     /// Total input items processed in this execution.
     #[builder(default)]
     items_processed: usize,
@@ -50,7 +44,6 @@ impl ExecutionContext {
         Self {
             credentials,
             current: Vec::new(),
-            cache: HashMap::new(),
             items_processed: 0,
         }
     }
@@ -108,30 +101,5 @@ impl ExecutionContext {
     /// Clears the current data items.
     pub fn clear(&mut self) {
         self.current.clear();
-    }
-
-    /// Writes data to a named cache slot.
-    pub fn write_cache(&mut self, name: &str, data: Vec<AnyDataValue>) {
-        self.cache.entry(name.to_string()).or_default().extend(data);
-    }
-
-    /// Reads data from a named cache slot (returns empty vec if not found).
-    pub fn read_cache(&self, name: &str) -> Vec<AnyDataValue> {
-        self.cache.get(name).cloned().unwrap_or_default()
-    }
-
-    /// Clears a named cache slot.
-    pub fn clear_cache(&mut self, name: &str) {
-        self.cache.remove(name);
-    }
-
-    /// Clears all cache slots.
-    pub fn clear_all_caches(&mut self) {
-        self.cache.clear();
-    }
-
-    /// Returns the names of all cache slots.
-    pub fn cache_names(&self) -> Vec<&str> {
-        self.cache.keys().map(|s| s.as_str()).collect()
     }
 }

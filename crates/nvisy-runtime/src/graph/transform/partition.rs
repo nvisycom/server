@@ -1,10 +1,15 @@
-//! Partition transformer configuration.
+//! Partition transformer.
 
+use nvisy_dal::AnyDataValue;
 use serde::{Deserialize, Serialize};
 
-/// Configuration for partitioning documents into elements.
+use super::Transform;
+use crate::error::Result;
+use crate::provider::CredentialsRegistry;
+
+/// Partition transformer for partitioning documents into elements.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PartitionConfig {
+pub struct Partition {
     /// Partitioning strategy.
     pub strategy: PartitionStrategy,
 
@@ -15,6 +20,18 @@ pub struct PartitionConfig {
     /// Whether to discard unsupported element types.
     #[serde(default)]
     pub discard_unsupported: bool,
+}
+
+impl Transform for Partition {
+    async fn transform(
+        &self,
+        input: Vec<AnyDataValue>,
+        _registry: &CredentialsRegistry,
+    ) -> Result<Vec<AnyDataValue>> {
+        // TODO: Implement document partitioning based on strategy
+        // For now, pass through unchanged
+        Ok(input)
+    }
 }
 
 /// Partitioning strategy for document element extraction.

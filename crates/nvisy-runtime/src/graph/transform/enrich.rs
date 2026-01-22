@@ -1,12 +1,15 @@
-//! Enrich transformer configuration - add metadata/descriptions to elements.
+//! Enrich transformer - add metadata/descriptions to elements.
 
+use nvisy_dal::AnyDataValue;
 use serde::{Deserialize, Serialize};
 
-use crate::provider::CompletionProviderParams;
+use super::Transform;
+use crate::error::Result;
+use crate::provider::{CompletionProviderParams, CredentialsRegistry};
 
-/// Configuration for enriching elements with metadata/descriptions.
+/// Enrich transformer for adding metadata/descriptions to elements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EnrichConfig {
+pub struct Enrich {
     /// Completion provider parameters (includes credentials_id and model).
     #[serde(flatten)]
     pub provider: CompletionProviderParams,
@@ -18,6 +21,18 @@ pub struct EnrichConfig {
     /// Optional prompt override for the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_prompt: Option<String>,
+}
+
+impl Transform for Enrich {
+    async fn transform(
+        &self,
+        input: Vec<AnyDataValue>,
+        _registry: &CredentialsRegistry,
+    ) -> Result<Vec<AnyDataValue>> {
+        // TODO: Implement enrichment using completion provider
+        // For now, pass through unchanged
+        Ok(input)
+    }
 }
 
 /// Tasks for adding metadata/descriptions to elements.

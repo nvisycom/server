@@ -12,7 +12,7 @@ use super::backend::{
     IntoProvider, OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams,
     PerplexityCompletionParams, PerplexityCredentials,
 };
-use crate::error::{WorkflowError, WorkflowResult};
+use crate::error::{Error, Result};
 
 /// Completion provider parameters.
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
@@ -54,18 +54,19 @@ impl CompletionProviderParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for CompletionProviderParams {
     type Credentials = ProviderCredentials;
     type Output = CompletionProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         match (self, credentials) {
-            (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c),
-            (Self::Anthropic(p), ProviderCredentials::Anthropic(c)) => p.into_provider(c),
-            (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c),
-            (Self::Gemini(p), ProviderCredentials::Gemini(c)) => p.into_provider(c),
-            (Self::Perplexity(p), ProviderCredentials::Perplexity(c)) => p.into_provider(c),
-            (params, creds) => Err(WorkflowError::Internal(format!(
+            (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c).await,
+            (Self::Anthropic(p), ProviderCredentials::Anthropic(c)) => p.into_provider(c).await,
+            (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c).await,
+            (Self::Gemini(p), ProviderCredentials::Gemini(c)) => p.into_provider(c).await,
+            (Self::Perplexity(p), ProviderCredentials::Perplexity(c)) => p.into_provider(c).await,
+            (params, creds) => Err(Error::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",
                 params.kind(),
                 creds.kind()
@@ -115,16 +116,17 @@ impl EmbeddingProviderParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for EmbeddingProviderParams {
     type Credentials = ProviderCredentials;
     type Output = EmbeddingProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         match (self, credentials) {
-            (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c),
-            (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c),
-            (Self::Gemini(p), ProviderCredentials::Gemini(c)) => p.into_provider(c),
-            (params, creds) => Err(WorkflowError::Internal(format!(
+            (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c).await,
+            (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c).await,
+            (Self::Gemini(p), ProviderCredentials::Gemini(c)) => p.into_provider(c).await,
+            (params, creds) => Err(Error::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",
                 params.kind(),
                 creds.kind()

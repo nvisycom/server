@@ -1,11 +1,11 @@
 //! Google Cloud Storage provider.
 
-use nvisy_dal::provider::GcsConfig;
+use nvisy_dal::provider::{GcsConfig, GcsProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// Google Cloud Storage credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,17 +26,18 @@ pub struct GcsParams {
     pub prefix: Option<String>,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for GcsParams {
     type Credentials = GcsCredentials;
-    type Output = GcsConfig;
+    type Output = GcsProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let mut config = GcsConfig::new(self.bucket).with_credentials(credentials.credentials_json);
 
         if let Some(prefix) = self.prefix {
             config = config.with_prefix(prefix);
         }
 
-        Ok(config)
+        GcsProvider::new(&config).map_err(|e| Error::Internal(e.to_string()))
     }
 }

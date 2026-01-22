@@ -1,11 +1,11 @@
 //! PostgreSQL provider.
 
-use nvisy_dal::provider::PostgresConfig;
+use nvisy_dal::provider::{PostgresConfig, PostgresProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// PostgreSQL credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,17 +26,18 @@ pub struct PostgresParams {
     pub schema: Option<String>,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for PostgresParams {
     type Credentials = PostgresCredentials;
-    type Output = PostgresConfig;
+    type Output = PostgresProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let mut config = PostgresConfig::new(credentials.connection_string).with_table(self.table);
 
         if let Some(schema) = self.schema {
             config = config.with_schema(schema);
         }
 
-        Ok(config)
+        PostgresProvider::new(&config).map_err(|e| Error::Internal(e.to_string()))
     }
 }

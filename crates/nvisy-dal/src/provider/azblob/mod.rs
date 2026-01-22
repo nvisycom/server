@@ -71,10 +71,10 @@ impl DataInput<Blob> for AzblobProvider {
                         match op.read(&path).await {
                             Ok(data) => {
                                 let mut blob = Blob::new(path.clone(), data.to_bytes());
-                                if let Ok(meta) = op.stat(&path).await {
-                                    if let Some(ct) = meta.content_type() {
-                                        blob = blob.with_content_type(ct);
-                                    }
+                                if let Ok(meta) = op.stat(&path).await
+                                    && let Some(ct) = meta.content_type()
+                                {
+                                    blob = blob.with_content_type(ct);
                                 }
                                 Some(Ok(blob))
                             }

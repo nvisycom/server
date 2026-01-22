@@ -1,11 +1,11 @@
 //! MySQL provider.
 
-use nvisy_dal::provider::MysqlConfig;
+use nvisy_dal::provider::{MysqlConfig, MysqlProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// MySQL credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,17 +26,18 @@ pub struct MysqlParams {
     pub database: Option<String>,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for MysqlParams {
     type Credentials = MysqlCredentials;
-    type Output = MysqlConfig;
+    type Output = MysqlProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let mut config = MysqlConfig::new(credentials.connection_string).with_table(self.table);
 
         if let Some(database) = self.database {
             config = config.with_database(database);
         }
 
-        Ok(config)
+        MysqlProvider::new(&config).map_err(|e| Error::Internal(e.to_string()))
     }
 }

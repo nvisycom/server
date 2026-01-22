@@ -6,11 +6,11 @@ use uuid::Uuid;
 use crate::graph::NodeId;
 
 /// Result type for workflow operations.
-pub type WorkflowResult<T> = Result<T, WorkflowError>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Errors that can occur during workflow operations.
 #[derive(Debug, Error)]
-pub enum WorkflowError {
+pub enum Error {
     /// Workflow definition is invalid.
     #[error("invalid workflow definition: {0}")]
     InvalidDefinition(String),

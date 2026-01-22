@@ -1,22 +1,29 @@
 //! Output provider types and implementations.
 
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
+
 use derive_more::From;
+use futures::Sink;
 use nvisy_dal::core::Context;
 use nvisy_dal::provider::{
-    AzblobConfig, AzblobProvider, GcsConfig, GcsProvider, MilvusConfig, MilvusProvider,
-    MysqlConfig, MysqlProvider, PgVectorConfig, PgVectorProvider, PineconeConfig, PineconeProvider,
-    PostgresConfig, PostgresProvider, QdrantConfig, QdrantProvider, S3Config, S3Provider,
+    AzblobProvider, GcsProvider, MilvusProvider, MysqlProvider, PgVectorProvider, PineconeProvider,
+    PostgresProvider, QdrantProvider, S3Provider,
 };
 use nvisy_dal::{AnyDataValue, DataTypeId};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use uuid::Uuid;
+
+use crate::graph::compiled::DataSink;
 
 use super::ProviderCredentials;
 use super::backend::{
     AzblobParams, GcsParams, IntoProvider, MilvusParams, MysqlParams, PgVectorParams,
     PineconeParams, PostgresParams, QdrantParams, S3Params,
 };
-use crate::error::{WorkflowError, WorkflowResult};
+use crate::error::{Error, Result};
 
 /// Output provider parameters (storage backends + vector DBs).
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
@@ -85,97 +92,45 @@ impl OutputProviderParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for OutputProviderParams {
     type Credentials = ProviderCredentials;
-    type Output = OutputProviderConfig;
+    type Output = OutputProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         match (self, credentials) {
             (Self::S3(p), ProviderCredentials::S3(c)) => {
-                Ok(OutputProviderConfig::S3(p.into_provider(c)?))
+                Ok(OutputProvider::S3(p.into_provider(c).await?))
             }
             (Self::Gcs(p), ProviderCredentials::Gcs(c)) => {
-                Ok(OutputProviderConfig::Gcs(p.into_provider(c)?))
+                Ok(OutputProvider::Gcs(p.into_provider(c).await?))
             }
             (Self::Azblob(p), ProviderCredentials::Azblob(c)) => {
-                Ok(OutputProviderConfig::Azblob(p.into_provider(c)?))
+                Ok(OutputProvider::Azblob(p.into_provider(c).await?))
             }
             (Self::Postgres(p), ProviderCredentials::Postgres(c)) => {
-                Ok(OutputProviderConfig::Postgres(p.into_provider(c)?))
+                Ok(OutputProvider::Postgres(p.into_provider(c).await?))
             }
             (Self::Mysql(p), ProviderCredentials::Mysql(c)) => {
-                Ok(OutputProviderConfig::Mysql(p.into_provider(c)?))
+                Ok(OutputProvider::Mysql(p.into_provider(c).await?))
             }
             (Self::Qdrant(p), ProviderCredentials::Qdrant(c)) => {
-                Ok(OutputProviderConfig::Qdrant(p.into_provider(c)?))
+                Ok(OutputProvider::Qdrant(p.into_provider(c).await?))
             }
             (Self::Pinecone(p), ProviderCredentials::Pinecone(c)) => {
-                Ok(OutputProviderConfig::Pinecone(p.into_provider(c)?))
+                Ok(OutputProvider::Pinecone(p.into_provider(c).await?))
             }
             (Self::Milvus(p), ProviderCredentials::Milvus(c)) => {
-                Ok(OutputProviderConfig::Milvus(p.into_provider(c)?))
+                Ok(OutputProvider::Milvus(p.into_provider(c).await?))
             }
             (Self::PgVector(p), ProviderCredentials::PgVector(c)) => {
-                Ok(OutputProviderConfig::PgVector(p.into_provider(c)?))
+                Ok(OutputProvider::PgVector(p.into_provider(c).await?))
             }
-            (params, creds) => Err(WorkflowError::Internal(format!(
+            (params, creds) => Err(Error::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",
                 params.kind(),
                 creds.kind()
             ))),
-        }
-    }
-}
-
-/// Resolved output provider config (params + credentials combined).
-#[derive(Debug, Clone)]
-pub enum OutputProviderConfig {
-    S3(S3Config),
-    Gcs(GcsConfig),
-    Azblob(AzblobConfig),
-    Postgres(PostgresConfig),
-    Mysql(MysqlConfig),
-    Qdrant(QdrantConfig),
-    Pinecone(PineconeConfig),
-    Milvus(MilvusConfig),
-    PgVector(PgVectorConfig),
-}
-
-impl OutputProviderConfig {
-    /// Creates an output provider from this config.
-    pub async fn into_provider(self) -> WorkflowResult<OutputProvider> {
-        match self {
-            Self::S3(config) => S3Provider::new(&config)
-                .map(OutputProvider::S3)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Gcs(config) => GcsProvider::new(&config)
-                .map(OutputProvider::Gcs)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Azblob(config) => AzblobProvider::new(&config)
-                .map(OutputProvider::Azblob)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Postgres(config) => PostgresProvider::new(&config)
-                .map(OutputProvider::Postgres)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Mysql(config) => MysqlProvider::new(&config)
-                .map(OutputProvider::Mysql)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Qdrant(config) => QdrantProvider::new(&config)
-                .await
-                .map(OutputProvider::Qdrant)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Pinecone(config) => PineconeProvider::new(&config)
-                .await
-                .map(OutputProvider::Pinecone)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Milvus(config) => MilvusProvider::new(&config)
-                .await
-                .map(OutputProvider::Milvus)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::PgVector(config) => PgVectorProvider::new(&config)
-                .await
-                .map(OutputProvider::PgVector)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
         }
     }
 }
@@ -206,8 +161,16 @@ impl OutputProvider {
         }
     }
 
+    /// Creates a sink for streaming writes to the provider.
+    ///
+    /// The sink buffers items and writes them on flush/close.
+    pub async fn write_sink(self, ctx: &Context) -> Result<DataSink> {
+        let sink = ProviderSink::new(self, ctx.clone());
+        Ok(Box::pin(sink))
+    }
+
     /// Writes data to the provider, accepting type-erased values.
-    pub async fn write(&self, ctx: &Context, data: Vec<AnyDataValue>) -> WorkflowResult<()> {
+    pub async fn write(&self, ctx: &Context, data: Vec<AnyDataValue>) -> Result<()> {
         match self {
             Self::S3(p) => write_data!(p, ctx, data, Blob, into_blob),
             Self::Gcs(p) => write_data!(p, ctx, data, Blob, into_blob),
@@ -222,6 +185,94 @@ impl OutputProvider {
     }
 }
 
+/// A sink that buffers items and writes them to an output provider.
+struct ProviderSink {
+    provider: Arc<OutputProvider>,
+    ctx: Context,
+    buffer: Arc<Mutex<Vec<AnyDataValue>>>,
+    flush_future: Option<Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>>,
+}
+
+impl ProviderSink {
+    fn new(provider: OutputProvider, ctx: Context) -> Self {
+        Self {
+            provider: Arc::new(provider),
+            ctx,
+            buffer: Arc::new(Mutex::new(Vec::new())),
+            flush_future: None,
+        }
+    }
+}
+
+impl Sink<AnyDataValue> for ProviderSink {
+    type Error = Error;
+
+    fn poll_ready(
+        self: Pin<&mut Self>,
+        _cx: &mut TaskContext<'_>,
+    ) -> Poll<std::result::Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(
+        self: Pin<&mut Self>,
+        item: AnyDataValue,
+    ) -> std::result::Result<(), Self::Error> {
+        let buffer = self.buffer.clone();
+        // Use blocking lock since we're in a sync context
+        if let Ok(mut guard) = buffer.try_lock() {
+            guard.push(item);
+            Ok(())
+        } else {
+            Err(Error::Internal("buffer lock contention".into()))
+        }
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::result::Result<(), Self::Error>> {
+        // If we have an in-progress flush, poll it
+        if let Some(ref mut future) = self.flush_future {
+            return match future.as_mut().poll(cx) {
+                Poll::Ready(result) => {
+                    self.flush_future = None;
+                    Poll::Ready(result)
+                }
+                Poll::Pending => Poll::Pending,
+            };
+        }
+
+        // Take items from buffer and start write
+        let buffer = self.buffer.clone();
+        let provider = self.provider.clone();
+        let ctx = self.ctx.clone();
+
+        let future = Box::pin(async move {
+            let items = {
+                let mut guard = buffer.lock().await;
+                std::mem::take(&mut *guard)
+            };
+
+            if items.is_empty() {
+                return Ok(());
+            }
+
+            provider.write(&ctx, items).await
+        });
+
+        self.flush_future = Some(future);
+        self.poll_flush(cx)
+    }
+
+    fn poll_close(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::result::Result<(), Self::Error>> {
+        self.poll_flush(cx)
+    }
+}
+
 /// Helper macro to write data to a provider from AnyDataValue.
 macro_rules! write_data {
     ($provider:expr, $ctx:expr, $data:expr, $type:ident, $converter:ident) => {{
@@ -233,7 +284,7 @@ macro_rules! write_data {
         $provider
             .write($ctx, items)
             .await
-            .map_err(|e| WorkflowError::Internal(e.to_string()))
+            .map_err(|e| Error::Internal(e.to_string()))
     }};
 }
 

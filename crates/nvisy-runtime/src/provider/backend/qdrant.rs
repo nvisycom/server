@@ -1,11 +1,11 @@
 //! Qdrant vector database provider.
 
-use nvisy_dal::provider::QdrantConfig;
+use nvisy_dal::provider::{QdrantConfig, QdrantProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::WorkflowResult;
+use crate::error::{Error, Result};
 
 /// Qdrant credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,11 +29,12 @@ pub struct QdrantParams {
     pub dimensions: Option<usize>,
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for QdrantParams {
     type Credentials = QdrantCredentials;
-    type Output = QdrantConfig;
+    type Output = QdrantProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let mut config = QdrantConfig::new(credentials.url).with_collection(self.collection);
 
         if let Some(api_key) = credentials.api_key {
@@ -43,6 +44,8 @@ impl IntoProvider for QdrantParams {
             config = config.with_dimensions(dimensions);
         }
 
-        Ok(config)
+        QdrantProvider::new(&config)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

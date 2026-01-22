@@ -3,26 +3,26 @@
 //! Each provider file contains credentials and params for a specific backend:
 //!
 //! ## Storage backends
-//! - [`s3`]: Amazon S3
-//! - [`gcs`]: Google Cloud Storage
-//! - [`azblob`]: Azure Blob Storage
-//! - [`postgres`]: PostgreSQL
-//! - [`mysql`]: MySQL
+//! - `s3` - Amazon S3
+//! - `gcs` - Google Cloud Storage
+//! - `azblob` - Azure Blob Storage
+//! - `postgres` - PostgreSQL
+//! - `mysql` - MySQL
 //!
 //! ## Vector databases
-//! - [`qdrant`]: Qdrant vector database
-//! - [`pinecone`]: Pinecone vector database
-//! - [`milvus`]: Milvus vector database
-//! - [`pgvector`]: pgvector (PostgreSQL extension)
+//! - `qdrant` - Qdrant vector database
+//! - `pinecone` - Pinecone vector database
+//! - `milvus` - Milvus vector database
+//! - `pgvector` - pgvector (PostgreSQL extension)
 //!
 //! ## AI providers
-//! - [`openai`]: OpenAI (completion + embedding)
-//! - [`anthropic`]: Anthropic (completion only)
-//! - [`cohere`]: Cohere (completion + embedding)
-//! - [`gemini`]: Google Gemini (completion + embedding)
-//! - [`perplexity`]: Perplexity (completion only)
+//! - `openai` - OpenAI (completion + embedding)
+//! - `anthropic` - Anthropic (completion only)
+//! - `cohere` - Cohere (completion + embedding)
+//! - `gemini` - Google Gemini (completion + embedding)
+//! - `perplexity` - Perplexity (completion only)
 
-use crate::error::WorkflowResult;
+use crate::error::Result;
 
 // Storage backends
 mod azblob;
@@ -64,13 +64,14 @@ pub use gemini::{GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParam
 pub use openai::{OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams};
 pub use perplexity::{PerplexityCompletionParams, PerplexityCredentials};
 
-/// Trait for provider parameters that can be combined with credentials to create a provider/config.
+/// Trait for provider parameters that can be combined with credentials to create a provider.
+#[async_trait::async_trait]
 pub trait IntoProvider {
     /// The credentials type required by this provider.
-    type Credentials;
-    /// The output type (provider instance or config).
+    type Credentials: Send;
+    /// The output type (provider instance).
     type Output;
 
-    /// Combines params with credentials to create the output.
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output>;
+    /// Combines params with credentials to create the provider.
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output>;
 }

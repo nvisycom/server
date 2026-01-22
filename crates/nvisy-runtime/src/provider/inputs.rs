@@ -3,8 +3,7 @@
 use derive_more::From;
 use nvisy_dal::core::Context;
 use nvisy_dal::provider::{
-    AzblobConfig, AzblobProvider, GcsConfig, GcsProvider, MysqlConfig, MysqlProvider,
-    PostgresConfig, PostgresProvider, S3Config, S3Provider,
+    AzblobProvider, GcsProvider, MysqlProvider, PostgresProvider, S3Provider,
 };
 use nvisy_dal::{AnyDataValue, DataTypeId};
 use serde::{Deserialize, Serialize};
@@ -14,7 +13,7 @@ use super::ProviderCredentials;
 use super::backend::{
     AzblobParams, GcsParams, IntoProvider, MysqlParams, PostgresParams, S3Params,
 };
-use crate::error::{WorkflowError, WorkflowResult};
+use crate::error::{Error, Result};
 
 /// Input provider parameters (storage backends only, no vector DBs).
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
@@ -64,65 +63,33 @@ impl InputProviderParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for InputProviderParams {
     type Credentials = ProviderCredentials;
-    type Output = InputProviderConfig;
+    type Output = InputProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         match (self, credentials) {
             (Self::S3(p), ProviderCredentials::S3(c)) => {
-                Ok(InputProviderConfig::S3(p.into_provider(c)?))
+                Ok(InputProvider::S3(p.into_provider(c).await?))
             }
             (Self::Gcs(p), ProviderCredentials::Gcs(c)) => {
-                Ok(InputProviderConfig::Gcs(p.into_provider(c)?))
+                Ok(InputProvider::Gcs(p.into_provider(c).await?))
             }
             (Self::Azblob(p), ProviderCredentials::Azblob(c)) => {
-                Ok(InputProviderConfig::Azblob(p.into_provider(c)?))
+                Ok(InputProvider::Azblob(p.into_provider(c).await?))
             }
             (Self::Postgres(p), ProviderCredentials::Postgres(c)) => {
-                Ok(InputProviderConfig::Postgres(p.into_provider(c)?))
+                Ok(InputProvider::Postgres(p.into_provider(c).await?))
             }
             (Self::Mysql(p), ProviderCredentials::Mysql(c)) => {
-                Ok(InputProviderConfig::Mysql(p.into_provider(c)?))
+                Ok(InputProvider::Mysql(p.into_provider(c).await?))
             }
-            (params, creds) => Err(WorkflowError::Internal(format!(
+            (params, creds) => Err(Error::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",
                 params.kind(),
                 creds.kind()
             ))),
-        }
-    }
-}
-
-/// Resolved input provider config (params + credentials combined).
-#[derive(Debug, Clone)]
-pub enum InputProviderConfig {
-    S3(S3Config),
-    Gcs(GcsConfig),
-    Azblob(AzblobConfig),
-    Postgres(PostgresConfig),
-    Mysql(MysqlConfig),
-}
-
-impl InputProviderConfig {
-    /// Creates an input provider from this config.
-    pub fn into_provider(self) -> WorkflowResult<InputProvider> {
-        match self {
-            Self::S3(config) => S3Provider::new(&config)
-                .map(InputProvider::S3)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Gcs(config) => GcsProvider::new(&config)
-                .map(InputProvider::Gcs)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Azblob(config) => AzblobProvider::new(&config)
-                .map(InputProvider::Azblob)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Postgres(config) => PostgresProvider::new(&config)
-                .map(InputProvider::Postgres)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
-            Self::Mysql(config) => MysqlProvider::new(&config)
-                .map(InputProvider::Mysql)
-                .map_err(|e| WorkflowError::Internal(e.to_string())),
         }
     }
 }
@@ -146,8 +113,24 @@ impl InputProvider {
         }
     }
 
+    /// Reads data from the provider as a stream.
+    ///
+    /// Returns a boxed stream of type-erased values that can be processed incrementally.
+    pub async fn read_stream(
+        &self,
+        ctx: &Context,
+    ) -> Result<futures::stream::BoxStream<'static, nvisy_dal::Result<AnyDataValue>>> {
+        match self {
+            Self::S3(p) => read_stream!(p, ctx, Blob),
+            Self::Gcs(p) => read_stream!(p, ctx, Blob),
+            Self::Azblob(p) => read_stream!(p, ctx, Blob),
+            Self::Postgres(p) => read_stream!(p, ctx, Record),
+            Self::Mysql(p) => read_stream!(p, ctx, Record),
+        }
+    }
+
     /// Reads data from the provider, returning type-erased values.
-    pub async fn read(&self, ctx: &Context) -> WorkflowResult<Vec<AnyDataValue>> {
+    pub async fn read(&self, ctx: &Context) -> Result<Vec<AnyDataValue>> {
         match self {
             Self::S3(p) => read_data!(p, ctx, Blob),
             Self::Gcs(p) => read_data!(p, ctx, Blob),
@@ -157,6 +140,24 @@ impl InputProvider {
         }
     }
 }
+
+/// Helper macro to read data from a provider as a boxed stream of AnyDataValue.
+macro_rules! read_stream {
+    ($provider:expr, $ctx:expr, $variant:ident) => {{
+        use futures::StreamExt;
+        use nvisy_dal::core::DataInput;
+
+        let stream = $provider
+            .read($ctx)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
+        let mapped = stream.map(|result| result.map(AnyDataValue::$variant));
+        Ok(Box::pin(mapped) as futures::stream::BoxStream<'static, _>)
+    }};
+}
+
+use read_stream;
 
 /// Helper macro to read data from a provider and convert to AnyDataValue.
 macro_rules! read_data {
@@ -168,14 +169,14 @@ macro_rules! read_data {
         let stream = $provider
             .read($ctx)
             .await
-            .map_err(|e| WorkflowError::Internal(e.to_string()))?;
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         let items: Vec<$variant> = stream
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| WorkflowError::Internal(e.to_string()))?;
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         Ok(items.into_iter().map(AnyDataValue::$variant).collect())
     }};

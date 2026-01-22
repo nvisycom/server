@@ -1,4 +1,4 @@
-//! Generic node wrapper, node identifier, and node data types.
+//! Node definition types.
 
 use std::str::FromStr;
 
@@ -6,9 +6,10 @@ use derive_more::{Debug, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::graph::input::InputNode;
-use crate::graph::output::OutputNode;
-use crate::graph::transform::TransformerConfig;
+use super::input::InputDef;
+use super::output::OutputDef;
+use super::route::SwitchDef;
+use super::transform::Transformer;
 
 /// Unique identifier for a node in a workflow graph.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -101,39 +102,47 @@ impl<T> NodeCommon<T> {
     }
 }
 
-/// A workflow node with id, name, description, and node data.
-pub type Node = NodeCommon<NodeData>;
+/// A workflow node definition with common metadata.
+pub type Node = NodeCommon<NodeDef>;
 
-/// Data associated with a workflow node.
+/// Node definition enum for workflow graphs.
 ///
 /// Nodes are categorized by their role in data flow:
 /// - **Input**: Reads/produces data (entry points)
-/// - **Transformer**: Processes/transforms data (intermediate)
+/// - **Transform**: Processes/transforms data (intermediate)
 /// - **Output**: Writes/consumes data (exit points)
+/// - **Switch**: Routes data based on conditions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, From)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum NodeData {
+pub enum NodeDef {
     /// Data input node, reads or produces data.
-    Input(InputNode),
+    Input(InputDef),
     /// Data transformer node, processes or transforms data.
-    Transformer(TransformerConfig),
+    Transform(Transformer),
     /// Data output node, writes or consumes data.
-    Output(OutputNode),
+    Output(OutputDef),
+    /// Conditional routing node.
+    Switch(SwitchDef),
 }
 
-impl NodeData {
+impl NodeDef {
     /// Returns whether this is an input node.
     pub const fn is_input(&self) -> bool {
-        matches!(self, NodeData::Input(_))
+        matches!(self, NodeDef::Input(_))
     }
 
-    /// Returns whether this is a transformer node.
-    pub const fn is_transformer(&self) -> bool {
-        matches!(self, NodeData::Transformer(_))
+    /// Returns whether this is a transform node.
+    pub const fn is_transform(&self) -> bool {
+        matches!(self, NodeDef::Transform(_))
     }
 
     /// Returns whether this is an output node.
     pub const fn is_output(&self) -> bool {
-        matches!(self, NodeData::Output(_))
+        matches!(self, NodeDef::Output(_))
+    }
+
+    /// Returns whether this is a switch node.
+    pub const fn is_switch(&self) -> bool {
+        matches!(self, NodeDef::Switch(_))
     }
 }

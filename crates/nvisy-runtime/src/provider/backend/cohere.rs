@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::IntoProvider;
-use crate::error::{WorkflowError, WorkflowResult};
+use crate::error::{Error, Result};
 
 /// Cohere credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,17 +35,17 @@ impl CohereCompletionParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for CohereCompletionParams {
     type Credentials = CohereCredentials;
     type Output = CompletionProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let rig_creds = nvisy_rig::provider::CompletionCredentials::Cohere {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::Cohere(self.model);
-        CompletionProvider::new(&rig_creds, &model)
-            .map_err(|e| WorkflowError::Internal(e.to_string()))
+        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
     }
 }
 
@@ -68,16 +68,16 @@ impl CohereEmbeddingParams {
     }
 }
 
+#[async_trait::async_trait]
 impl IntoProvider for CohereEmbeddingParams {
     type Credentials = CohereCredentials;
     type Output = EmbeddingProvider;
 
-    fn into_provider(self, credentials: Self::Credentials) -> WorkflowResult<Self::Output> {
+    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
         let rig_creds = nvisy_rig::provider::EmbeddingCredentials::Cohere {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::EmbeddingModel::Cohere(self.model);
-        EmbeddingProvider::new(&rig_creds, &model)
-            .map_err(|e| WorkflowError::Internal(e.to_string()))
+        EmbeddingProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
     }
 }

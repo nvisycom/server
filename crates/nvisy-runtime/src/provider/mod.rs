@@ -10,10 +10,10 @@
 //! # Module Structure
 //!
 //! - [`backend`]: Individual provider implementations (credentials + params)
-//! - [`inputs`]: Input provider types and read operations
-//! - [`outputs`]: Output provider types and write operations
-//! - [`ai`]: AI provider types (completion + embedding)
-//! - [`registry`]: Credentials registry for workflow execution
+//! - `inputs`: Input provider types and read operations
+//! - `outputs`: Output provider types and write operations
+//! - `ai`: AI provider types (completion + embedding)
+//! - `registry`: Credentials registry for workflow execution
 
 mod ai;
 pub mod backend;
@@ -43,8 +43,8 @@ pub use backend::{
 };
 
 use derive_more::From;
-pub use inputs::{InputProvider, InputProviderConfig, InputProviderParams};
-pub use outputs::{OutputProvider, OutputProviderConfig, OutputProviderParams};
+pub use inputs::{InputProvider, InputProviderParams};
+pub use outputs::{OutputProvider, OutputProviderParams};
 pub use registry::CredentialsRegistry;
 use serde::{Deserialize, Serialize};
 
