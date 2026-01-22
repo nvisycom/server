@@ -11,5 +11,5 @@ mod context;
 mod executor;
 
 pub use config::EngineConfig;
-pub use context::ExecutionContext;
+pub use context::{Context, ExecutionContext};
 pub use executor::Engine;

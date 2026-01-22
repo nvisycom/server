@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
+use super::context::Context;
 use futures::{SinkExt, StreamExt};
-use nvisy_dal::core::Context;
 use tokio::sync::Semaphore;
 
 use super::EngineConfig;
 use super::compiler::WorkflowCompiler;
 use super::context::ExecutionContext;
-use crate::definition::{NodeId, WorkflowDefinition};
+use crate::definition::{NodeId, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};
 use crate::provider::CredentialsRegistry;
@@ -60,7 +60,7 @@ impl Engine {
     /// the next item is processed.
     pub async fn execute(
         &self,
-        definition: WorkflowDefinition,
+        definition: Workflow,
         credentials: CredentialsRegistry,
         ctx: Context,
     ) -> Result<ExecutionContext> {

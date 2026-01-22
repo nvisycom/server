@@ -7,10 +7,11 @@ use derive_more::{Debug, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::input::InputDef;
-use super::output::OutputDef;
+use super::input::Input;
+use super::output::Output;
 use super::route::SwitchDef;
 use super::transform::Transformer;
+use super::util::Position;
 
 /// Unique identifier for a node in a workflow graph.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -66,34 +67,20 @@ impl AsRef<Uuid> for NodeId {
     }
 }
 
-/// Position of a node in the visual editor.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub struct Position {
-    /// X coordinate.
-    pub x: f32,
-    /// Y coordinate.
-    pub y: f32,
-}
-
-impl Position {
-    /// Creates a new position.
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-}
-
-/// A generic node wrapper that adds optional name and description to any inner type.
+/// A workflow node definition with metadata and kind.
+///
+/// Nodes are categorized by their role in data flow:
+/// - **Input**: Reads/produces data (entry points)
+/// - **Transform**: Processes/transforms data (intermediate)
+/// - **Output**: Writes/consumes data (exit points)
+/// - **Switch**: Routes data based on conditions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
 #[builder(
-    name = "NodeCommonBuilder",
+    name = "NodeBuilder",
     pattern = "owned",
-    setter(into, strip_option, prefix = "with"),
-    build_fn(validate = "Self::validate")
+    setter(into, strip_option, prefix = "with")
 )]
-pub struct NodeCommon<T>
-where
-    T: Clone,
-{
+pub struct Node {
     /// Display name of the node.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[builder(default)]
@@ -103,85 +90,83 @@ where
     #[builder(default)]
     pub description: Option<String>,
     /// Position in the visual editor.
-    #[serde(default, skip_serializing_if = "is_default_position")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[builder(default)]
-    pub position: Position,
-    /// Inner node configuration.
+    pub position: Option<Position>,
+    /// The node kind/type.
     #[serde(flatten)]
-    pub inner: T,
+    pub kind: NodeKind,
 }
 
-fn is_default_position(pos: &Position) -> bool {
-    pos.x == 0.0 && pos.y == 0.0
-}
-
-impl<T: Clone> NodeCommonBuilder<T> {
-    fn validate(&self) -> Result<(), String> {
-        if self.inner.is_none() {
-            return Err("inner is required".into());
-        }
-        Ok(())
-    }
-}
-
-impl<T: Clone> NodeCommon<T> {
-    /// Creates a new node with the given inner value.
-    pub fn new(inner: T) -> Self {
+impl Node {
+    /// Creates a new node with the given kind.
+    pub fn new(kind: impl Into<NodeKind>) -> Self {
         Self {
             name: None,
             description: None,
-            position: Position::default(),
-            inner,
+            position: None,
+            kind: kind.into(),
         }
     }
 
     /// Returns a builder for creating a node.
-    pub fn builder() -> NodeCommonBuilder<T> {
-        NodeCommonBuilder::default()
+    pub fn builder() -> NodeBuilder {
+        NodeBuilder::default()
     }
-}
 
-/// A workflow node definition with common metadata.
-pub type Node = NodeCommon<NodeDef>;
-
-/// Node definition enum for workflow graphs.
-///
-/// Nodes are categorized by their role in data flow:
-/// - **Input**: Reads/produces data (entry points)
-/// - **Transform**: Processes/transforms data (intermediate)
-/// - **Output**: Writes/consumes data (exit points)
-/// - **Switch**: Routes data based on conditions
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, From)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum NodeDef {
-    /// Data input node, reads or produces data.
-    Input(InputDef),
-    /// Data transformer node, processes or transforms data.
-    Transform(Transformer),
-    /// Data output node, writes or consumes data.
-    Output(OutputDef),
-    /// Conditional routing node.
-    Switch(SwitchDef),
-}
-
-impl NodeDef {
     /// Returns whether this is an input node.
     pub const fn is_input(&self) -> bool {
-        matches!(self, NodeDef::Input(_))
+        self.kind.is_input()
     }
 
     /// Returns whether this is a transform node.
     pub const fn is_transform(&self) -> bool {
-        matches!(self, NodeDef::Transform(_))
+        self.kind.is_transform()
     }
 
     /// Returns whether this is an output node.
     pub const fn is_output(&self) -> bool {
-        matches!(self, NodeDef::Output(_))
+        self.kind.is_output()
     }
 
     /// Returns whether this is a switch node.
     pub const fn is_switch(&self) -> bool {
-        matches!(self, NodeDef::Switch(_))
+        self.kind.is_switch()
+    }
+}
+
+/// Node kind enum for workflow graphs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, From)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeKind {
+    /// Data input node, reads or produces data.
+    Input(Input),
+    /// Data transformer node, processes or transforms data.
+    Transform(Transformer),
+    /// Data output node, writes or consumes data.
+    Output(Output),
+    /// Conditional routing node.
+    Switch(SwitchDef),
+}
+
+impl NodeKind {
+    /// Returns whether this is an input node.
+    pub const fn is_input(&self) -> bool {
+        matches!(self, NodeKind::Input(_))
+    }
+
+    /// Returns whether this is a transform node.
+    pub const fn is_transform(&self) -> bool {
+        matches!(self, NodeKind::Transform(_))
+    }
+
+    /// Returns whether this is an output node.
+    pub const fn is_output(&self) -> bool {
+        matches!(self, NodeKind::Output(_))
+    }
+
+    /// Returns whether this is a switch node.
+    pub const fn is_switch(&self) -> bool {
+        matches!(self, NodeKind::Switch(_))
     }
 }

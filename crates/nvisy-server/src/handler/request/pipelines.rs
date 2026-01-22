@@ -6,7 +6,7 @@
 
 use nvisy_postgres::model::{NewPipeline, UpdatePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::PipelineStatus;
-use nvisy_runtime::definition::WorkflowDefinition;
+use nvisy_runtime::definition::Workflow;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -65,7 +65,7 @@ pub struct UpdatePipeline {
     pub status: Option<PipelineStatus>,
     /// New definition for the pipeline (strictly typed workflow definition).
     #[schemars(with = "Option<serde_json::Value>")]
-    pub definition: Option<WorkflowDefinition>,
+    pub definition: Option<Workflow>,
 }
 
 impl UpdatePipeline {

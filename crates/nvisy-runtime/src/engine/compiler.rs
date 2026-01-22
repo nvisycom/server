@@ -12,17 +12,17 @@
 
 use std::collections::HashMap;
 
-use nvisy_dal::core::Context;
+use super::context::Context;
 use nvisy_rig::agent::Agents;
 use nvisy_rig::provider::CompletionProvider;
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use crate::definition::{EdgeData, InputSource, NodeDef, NodeId, OutputTarget, WorkflowDefinition};
+use crate::definition::{Input, NodeId, NodeKind, Output, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{
     ChunkProcessor, CompiledGraph, CompiledInput, CompiledNode, CompiledOutput, CompiledSwitch,
-    CompiledTransform, DeriveProcessor, EmbeddingProcessor, EnrichProcessor, ExtractProcessor,
-    InputStream, OutputStream, PartitionProcessor,
+    CompiledTransform, DeriveProcessor, EdgeData, EmbeddingProcessor, EnrichProcessor,
+    ExtractProcessor, InputStream, OutputStream, PartitionProcessor,
 };
 use crate::provider::{
     CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProviderParams,
@@ -44,10 +44,9 @@ impl<'a> WorkflowCompiler<'a> {
     }
 
     /// Compiles a workflow definition into an executable graph.
-    pub async fn compile(&self, def: WorkflowDefinition) -> Result<CompiledGraph> {
+    pub async fn compile(&self, def: Workflow) -> Result<CompiledGraph> {
         // Phase 1: Validate definition structure
-        def.validate()
-            .map_err(|e| Error::InvalidDefinition(format!("validation failed: {}", e)))?;
+        self.validate(&def)?;
 
         // Phase 2: Resolve cache slots
         let resolved = self.resolve_cache_slots(&def)?;
@@ -56,10 +55,10 @@ impl<'a> WorkflowCompiler<'a> {
         let mut compiled_nodes = HashMap::new();
         for (id, node) in &def.nodes {
             // Skip cache slot nodes - they're resolved during edge building
-            if self.is_cache_only_node(&node.inner) {
+            if self.is_cache_only_node(&node.kind) {
                 continue;
             }
-            let compiled = self.compile_node(&node.inner).await?;
+            let compiled = self.compile_node(&node.kind).await?;
             compiled_nodes.insert(*id, compiled);
         }
 
@@ -69,23 +68,57 @@ impl<'a> WorkflowCompiler<'a> {
         Ok(CompiledGraph::new(graph, node_indices, def.metadata))
     }
 
+    /// Validates the workflow definition structure.
+    fn validate(&self, def: &Workflow) -> Result<()> {
+        // Check edge references
+        for edge in &def.edges {
+            if !def.nodes.contains_key(&edge.from) {
+                return Err(Error::InvalidDefinition(format!(
+                    "edge references non-existent node: {}",
+                    edge.from
+                )));
+            }
+            if !def.nodes.contains_key(&edge.to) {
+                return Err(Error::InvalidDefinition(format!(
+                    "edge references non-existent node: {}",
+                    edge.to
+                )));
+            }
+        }
+
+        // Check for at least one input and output
+        let has_input = def.nodes.values().any(|n| n.is_input());
+        let has_output = def.nodes.values().any(|n| n.is_output());
+
+        if !has_input {
+            return Err(Error::InvalidDefinition(
+                "workflow must have at least one input node".into(),
+            ));
+        }
+        if !has_output {
+            return Err(Error::InvalidDefinition(
+                "workflow must have at least one output node".into(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Checks if a node is a cache-only node (input from cache or output to cache).
-    fn is_cache_only_node(&self, def: &NodeDef) -> bool {
+    fn is_cache_only_node(&self, def: &NodeKind) -> bool {
         match def {
-            NodeDef::Input(input) => matches!(input.source, InputSource::CacheSlot(_)),
-            NodeDef::Output(output) => matches!(output.target, OutputTarget::Cache(_)),
+            NodeKind::Input(input) => matches!(input, Input::CacheSlot(_)),
+            NodeKind::Output(output) => matches!(output, Output::Cache(_)),
             _ => false,
         }
     }
 
     /// Resolves cache slots by connecting cache inputs to cache outputs.
-    fn resolve_cache_slots(&self, def: &WorkflowDefinition) -> Result<ResolvedDefinition> {
+    fn resolve_cache_slots(&self, def: &Workflow) -> Result<ResolvedDefinition> {
         // Collect cache slot outputs (nodes that write to cache slots)
         let mut cache_outputs: HashMap<String, Vec<NodeId>> = HashMap::new();
         for (id, node) in &def.nodes {
-            if let NodeDef::Output(output) = &node.inner
-                && let OutputTarget::Cache(slot) = &output.target
-            {
+            if let NodeKind::Output(Output::Cache(slot)) = &node.kind {
                 cache_outputs
                     .entry(slot.slot.clone())
                     .or_default()
@@ -96,9 +129,7 @@ impl<'a> WorkflowCompiler<'a> {
         // Collect cache slot inputs (nodes that read from cache slots)
         let mut cache_inputs: HashMap<String, Vec<NodeId>> = HashMap::new();
         for (id, node) in &def.nodes {
-            if let NodeDef::Input(input) = &node.inner
-                && let InputSource::CacheSlot(slot) = &input.source
-            {
+            if let NodeKind::Input(Input::CacheSlot(slot)) = &node.kind {
                 cache_inputs.entry(slot.slot.clone()).or_default().push(*id);
             }
         }
@@ -112,10 +143,10 @@ impl<'a> WorkflowCompiler<'a> {
             let to_node = def.nodes.get(&edge.to);
 
             let from_is_cache = from_node
-                .map(|n| self.is_cache_only_node(&n.inner))
+                .map(|n| self.is_cache_only_node(&n.kind))
                 .unwrap_or(false);
             let to_is_cache = to_node
-                .map(|n| self.is_cache_only_node(&n.inner))
+                .map(|n| self.is_cache_only_node(&n.kind))
                 .unwrap_or(false);
 
             if !from_is_cache && !to_is_cache {
@@ -176,39 +207,36 @@ impl<'a> WorkflowCompiler<'a> {
     }
 
     /// Compiles a single node definition into a compiled node.
-    async fn compile_node(&self, def: &NodeDef) -> Result<CompiledNode> {
+    async fn compile_node(&self, def: &NodeKind) -> Result<CompiledNode> {
         match def {
-            NodeDef::Input(input) => {
+            NodeKind::Input(input) => {
                 let stream = self.create_input_stream(input).await?;
                 Ok(CompiledNode::Input(CompiledInput::new(stream)))
             }
-            NodeDef::Output(output) => {
+            NodeKind::Output(output) => {
                 let stream = self.create_output_stream(output).await?;
                 Ok(CompiledNode::Output(CompiledOutput::new(stream)))
             }
-            NodeDef::Transform(transformer) => {
+            NodeKind::Transform(transformer) => {
                 let processor = self.create_processor(transformer).await?;
                 Ok(CompiledNode::Transform(Box::new(processor)))
             }
-            NodeDef::Switch(switch) => {
+            NodeKind::Switch(switch) => {
                 Ok(CompiledNode::Switch(CompiledSwitch::from(switch.clone())))
             }
         }
     }
 
     /// Creates an input stream from an input definition.
-    async fn create_input_stream(
-        &self,
-        input: &crate::definition::InputDef,
-    ) -> Result<InputStream> {
-        match &input.source {
-            InputSource::Provider(provider_def) => {
+    async fn create_input_stream(&self, input: &Input) -> Result<InputStream> {
+        match input {
+            Input::Provider(provider_def) => {
                 let stream = self
                     .create_provider_input_stream(&provider_def.provider)
                     .await?;
                 Ok(stream)
             }
-            InputSource::CacheSlot(_) => {
+            Input::CacheSlot(_) => {
                 // Cache inputs are resolved during cache slot resolution
                 // This shouldn't be called for cache inputs
                 Err(Error::Internal(
@@ -226,7 +254,8 @@ impl<'a> WorkflowCompiler<'a> {
         let creds = self.registry.get(params.credentials_id())?;
 
         let provider = params.clone().into_provider(creds.clone()).await?;
-        let stream = provider.read_stream(&self.ctx).await?;
+        let dal_ctx: nvisy_dal::core::Context = self.ctx.clone().into();
+        let stream = provider.read_stream(&dal_ctx).await?;
 
         // Map the stream to our Result type
         use futures::StreamExt;
@@ -236,18 +265,15 @@ impl<'a> WorkflowCompiler<'a> {
     }
 
     /// Creates an output stream from an output definition.
-    async fn create_output_stream(
-        &self,
-        output: &crate::definition::OutputDef,
-    ) -> Result<OutputStream> {
-        match &output.target {
-            OutputTarget::Provider(provider_def) => {
+    async fn create_output_stream(&self, output: &Output) -> Result<OutputStream> {
+        match output {
+            Output::Provider(provider_def) => {
                 let stream = self
                     .create_provider_output_stream(&provider_def.provider)
                     .await?;
                 Ok(stream)
             }
-            OutputTarget::Cache(_) => {
+            Output::Cache(_) => {
                 // Cache outputs are resolved during cache slot resolution
                 Err(Error::Internal(
                     "cache output nodes should be resolved before compilation".into(),
@@ -264,7 +290,8 @@ impl<'a> WorkflowCompiler<'a> {
         let creds = self.registry.get(params.credentials_id())?;
 
         let provider = params.clone().into_provider(creds.clone()).await?;
-        let sink = provider.write_sink(&self.ctx).await?;
+        let dal_ctx: nvisy_dal::core::Context = self.ctx.clone().into();
+        let sink = provider.write_sink(&dal_ctx).await?;
 
         Ok(OutputStream::new(sink))
     }

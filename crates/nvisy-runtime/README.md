@@ -7,77 +7,38 @@ data processing workflows as directed acyclic graphs (DAGs).
 
 ## Architecture
 
-Workflows are represented as graphs with four types of nodes:
-
-- **Input nodes**: Read or produce data (entry points)
-- **Transform nodes**: Process or transform data (intermediate)
-- **Output nodes**: Write or consume data (exit points)
-- **Switch nodes**: Route data conditionally based on properties
-
 ### Definition vs Compiled Types
 
 The crate separates workflow representation into two layers:
 
-- **Definition types** (`graph::definition`): JSON-serializable types for
-  storing, editing, and transmitting workflows. These include `WorkflowDefinition`,
-  `NodeDef`, `InputDef`, `OutputDef`, and `CacheSlot`.
+- **Definition types** (`definition`): JSON-serializable types for
+  storing, editing, and transmitting workflows. These include `Workflow`,
+  `Node`, `NodeKind`, `Input`, `Output`, and `CacheSlot`.
 
-- **Compiled types** (`graph::compiled`): Runtime-optimized types for execution.
+- **Compiled types** (`graph`): Runtime-optimized types for execution.
   These include `CompiledGraph`, `CompiledNode`, and processor types like
   `EmbeddingProcessor` and `EnrichProcessor`.
 
-Use the `graph::compiler` module to transform definitions into executable graphs.
+Use the `Engine` to compile definitions and execute workflows.
 
 ## Example
 
 ```rust,ignore
-use nvisy_runtime::graph::definition::{
-    InputDef, NodeDef, OutputDef, WorkflowDefinition,
+use nvisy_runtime::definition::{
+    Input, Node, NodeKind, Output, Workflow,
 };
-use nvisy_runtime::graph::compiler::compile;
 use nvisy_runtime::engine::Engine;
 use nvisy_runtime::provider::CredentialsRegistry;
 
 // Create a workflow definition
-let mut workflow = WorkflowDefinition::new();
+let mut workflow = Workflow::new();
 
 // Add input, transform, and output nodes...
 // Connect nodes with edges...
 
-// Compile the definition
+// Execute the workflow
+let engine = Engine::with_defaults();
 let registry = CredentialsRegistry::default();
 let ctx = nvisy_dal::core::Context::default();
-let compiled = compile(workflow, &registry, ctx).await?;
-
-// Execute the compiled graph
-let engine = Engine::with_defaults();
-let result = engine.execute_compiled(compiled, registry).await?;
+let result = engine.execute(workflow, registry, ctx).await?;
 ```
-
-## Node Types
-
-### Input Nodes
-Input nodes read data from external sources:
-- Amazon S3, Google Cloud Storage, Azure Blob Storage
-- PostgreSQL, MySQL databases
-
-### Transform Nodes
-- `Partition` - Extract elements from documents
-- `Chunk` - Split content into smaller chunks
-- `Embedding` - Generate vector embeddings
-- `Enrich` - Add metadata/descriptions using LLMs
-- `Extract` - Extract structured data or convert formats
-- `Derive` - Generate new content (summaries, titles)
-
-### Output Nodes
-Output nodes write data to external destinations:
-- Amazon S3, Google Cloud Storage, Azure Blob Storage
-- PostgreSQL, MySQL databases
-- Qdrant, Pinecone, Milvus, pgvector (vector databases)
-
-### Switch Nodes
-Route data based on conditions:
-- Content type (image, document, text, etc.)
-- File size thresholds
-- Metadata presence/values
-- File name patterns
