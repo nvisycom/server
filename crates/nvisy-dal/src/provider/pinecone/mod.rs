@@ -11,7 +11,7 @@ use pinecone_sdk::pinecone::PineconeClientConfig;
 use pinecone_sdk::pinecone::data::Index;
 use tokio::sync::Mutex;
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::{Error, Result};
 
 /// Pinecone provider for vector storage.
@@ -21,11 +21,11 @@ pub struct PineconeProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for PineconeProvider {
+impl Provider for PineconeProvider {
     type Credentials = PineconeCredentials;
     type Params = PineconeParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

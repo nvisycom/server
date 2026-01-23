@@ -1,165 +1,156 @@
 //! AI provider types and implementations.
+//!
+//! Re-exports types from nvisy_rig and provides wrapper enums for provider params.
 
 use derive_more::From;
-use nvisy_rig::provider::{CompletionProvider, EmbeddingProvider};
+use nvisy_core::Provider;
+use nvisy_rig::provider::{
+    AnthropicModel, CohereCompletionModel, CohereEmbeddingModel, CompletionCredentials,
+    CompletionModel, CompletionProvider, EmbeddingCredentials, EmbeddingModel, EmbeddingProvider,
+    GeminiCompletionModel, GeminiEmbeddingModel, OpenAiCompletionModel, OpenAiEmbeddingModel,
+    PerplexityModel,
+};
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 use uuid::Uuid;
 
-use super::ProviderCredentials;
-use super::backend::{
-    AnthropicCompletionParams, AnthropicCredentials, CohereCompletionParams, CohereCredentials,
-    CohereEmbeddingParams, GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParams,
-    IntoAiProvider as _, OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams,
-    PerplexityCompletionParams, PerplexityCredentials,
-};
 use crate::error::{Error, Result};
 
-/// Completion provider parameters.
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+// =============================================================================
+// Completion Provider Params
+// =============================================================================
+
+/// Completion provider parameters with credentials reference.
+#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize, IntoStaticStr)]
 #[serde(tag = "provider", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum CompletionProviderParams {
     /// OpenAI completion.
-    OpenAi(OpenAiCompletionParams),
+    OpenAi {
+        credentials_id: Uuid,
+        model: OpenAiCompletionModel,
+    },
     /// Anthropic completion.
-    Anthropic(AnthropicCompletionParams),
+    Anthropic {
+        credentials_id: Uuid,
+        model: AnthropicModel,
+    },
     /// Cohere completion.
-    Cohere(CohereCompletionParams),
+    Cohere {
+        credentials_id: Uuid,
+        model: CohereCompletionModel,
+    },
     /// Google Gemini completion.
-    Gemini(GeminiCompletionParams),
+    Gemini {
+        credentials_id: Uuid,
+        model: GeminiCompletionModel,
+    },
     /// Perplexity completion.
-    Perplexity(PerplexityCompletionParams),
+    Perplexity {
+        credentials_id: Uuid,
+        model: PerplexityModel,
+    },
 }
 
 impl CompletionProviderParams {
-    /// Returns the credentials ID for this provider.
+    /// Returns the credentials ID.
     pub fn credentials_id(&self) -> Uuid {
         match self {
-            Self::OpenAi(p) => p.credentials_id,
-            Self::Anthropic(p) => p.credentials_id,
-            Self::Cohere(p) => p.credentials_id,
-            Self::Gemini(p) => p.credentials_id,
-            Self::Perplexity(p) => p.credentials_id,
+            Self::OpenAi { credentials_id, .. }
+            | Self::Anthropic { credentials_id, .. }
+            | Self::Cohere { credentials_id, .. }
+            | Self::Gemini { credentials_id, .. }
+            | Self::Perplexity { credentials_id, .. } => *credentials_id,
         }
     }
 
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            Self::OpenAi(_) => "openai",
-            Self::Anthropic(_) => "anthropic",
-            Self::Cohere(_) => "cohere",
-            Self::Gemini(_) => "gemini",
-            Self::Perplexity(_) => "perplexity",
-        }
+    pub fn kind(&self) -> &'static str {
+        self.into()
     }
-}
 
-impl CompletionProviderParams {
-    /// Creates a completion provider from these params and credentials.
+    /// Creates a completion provider from params and credentials.
     pub async fn into_provider(
         self,
-        credentials: ProviderCredentials,
+        credentials: CompletionCredentials,
     ) -> Result<CompletionProvider> {
-        match (self, credentials) {
-            (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c).await,
-            (Self::Anthropic(p), ProviderCredentials::Anthropic(c)) => p.into_provider(c).await,
-            (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c).await,
-            (Self::Gemini(p), ProviderCredentials::Gemini(c)) => p.into_provider(c).await,
-            (Self::Perplexity(p), ProviderCredentials::Perplexity(c)) => p.into_provider(c).await,
-            (params, creds) => Err(Error::Internal(format!(
-                "credentials type mismatch: expected '{}', got '{}'",
-                params.kind(),
-                creds.kind()
-            ))),
-        }
+        let model = match self {
+            Self::OpenAi { model, .. } => CompletionModel::OpenAi(model),
+            Self::Anthropic { model, .. } => CompletionModel::Anthropic(model),
+            Self::Cohere { model, .. } => CompletionModel::Cohere(model),
+            Self::Gemini { model, .. } => CompletionModel::Gemini(model),
+            Self::Perplexity { model, .. } => CompletionModel::Perplexity(model),
+        };
+
+        CompletionProvider::connect(model, credentials)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }
 
-/// Embedding provider parameters.
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+// =============================================================================
+// Embedding Provider Params
+// =============================================================================
+
+/// Embedding provider parameters with credentials reference.
+#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize, IntoStaticStr)]
 #[serde(tag = "provider", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum EmbeddingProviderParams {
     /// OpenAI embedding.
-    OpenAi(OpenAiEmbeddingParams),
+    OpenAi {
+        credentials_id: Uuid,
+        model: OpenAiEmbeddingModel,
+    },
     /// Cohere embedding.
-    Cohere(CohereEmbeddingParams),
+    Cohere {
+        credentials_id: Uuid,
+        model: CohereEmbeddingModel,
+    },
     /// Google Gemini embedding.
-    Gemini(GeminiEmbeddingParams),
+    Gemini {
+        credentials_id: Uuid,
+        model: GeminiEmbeddingModel,
+    },
 }
 
 impl EmbeddingProviderParams {
-    /// Returns the credentials ID for this provider.
+    /// Returns the credentials ID.
     pub fn credentials_id(&self) -> Uuid {
         match self {
-            Self::OpenAi(p) => p.credentials_id,
-            Self::Cohere(p) => p.credentials_id,
-            Self::Gemini(p) => p.credentials_id,
+            Self::OpenAi { credentials_id, .. }
+            | Self::Cohere { credentials_id, .. }
+            | Self::Gemini { credentials_id, .. } => *credentials_id,
         }
     }
 
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            Self::OpenAi(_) => "openai",
-            Self::Cohere(_) => "cohere",
-            Self::Gemini(_) => "gemini",
-        }
+    pub fn kind(&self) -> &'static str {
+        self.into()
     }
 
-    /// Returns the embedding dimensions for this provider's model.
+    /// Returns the embedding dimensions for this model.
     pub fn dimensions(&self) -> usize {
         match self {
-            Self::OpenAi(p) => p.model.dimensions(),
-            Self::Cohere(p) => p.model.dimensions(),
-            Self::Gemini(p) => p.model.dimensions(),
+            Self::OpenAi { model, .. } => model.dimensions(),
+            Self::Cohere { model, .. } => model.dimensions(),
+            Self::Gemini { model, .. } => model.dimensions(),
         }
     }
-}
 
-impl EmbeddingProviderParams {
-    /// Creates an embedding provider from these params and credentials.
+    /// Creates an embedding provider from params and credentials.
     pub async fn into_provider(
         self,
-        credentials: ProviderCredentials,
+        credentials: EmbeddingCredentials,
     ) -> Result<EmbeddingProvider> {
-        match (self, credentials) {
-            (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c).await,
-            (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c).await,
-            (Self::Gemini(p), ProviderCredentials::Gemini(c)) => p.into_provider(c).await,
-            (params, creds) => Err(Error::Internal(format!(
-                "credentials type mismatch: expected '{}', got '{}'",
-                params.kind(),
-                creds.kind()
-            ))),
-        }
-    }
-}
+        let model = match self {
+            Self::OpenAi { model, .. } => EmbeddingModel::OpenAi(model),
+            Self::Cohere { model, .. } => EmbeddingModel::Cohere(model),
+            Self::Gemini { model, .. } => EmbeddingModel::Gemini(model),
+        };
 
-/// AI provider credentials (sensitive).
-#[derive(Debug, Clone, From, Serialize, Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case")]
-pub enum AiCredentials {
-    /// OpenAI credentials.
-    OpenAi(OpenAiCredentials),
-    /// Anthropic credentials.
-    Anthropic(AnthropicCredentials),
-    /// Cohere credentials.
-    Cohere(CohereCredentials),
-    /// Gemini credentials.
-    Gemini(GeminiCredentials),
-    /// Perplexity credentials.
-    Perplexity(PerplexityCredentials),
-}
-
-impl AiCredentials {
-    /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            Self::OpenAi(_) => "openai",
-            Self::Anthropic(_) => "anthropic",
-            Self::Cohere(_) => "cohere",
-            Self::Gemini(_) => "gemini",
-            Self::Perplexity(_) => "perplexity",
-        }
+        EmbeddingProvider::connect(model, credentials)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

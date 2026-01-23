@@ -7,4 +7,4 @@ mod provider;
 pub mod types;
 
 pub use error::{BoxedError, Error, ErrorKind, Result};
-pub use provider::IntoProvider;
+pub use provider::Provider;

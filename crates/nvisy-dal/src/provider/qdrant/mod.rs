@@ -15,7 +15,7 @@ use qdrant_client::qdrant::{
     VectorParamsBuilder,
 };
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::{Error, Result};
 
 /// Qdrant provider for vector storage.
@@ -25,11 +25,11 @@ pub struct QdrantProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for QdrantProvider {
+impl Provider for QdrantProvider {
     type Credentials = QdrantCredentials;
     type Params = QdrantParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

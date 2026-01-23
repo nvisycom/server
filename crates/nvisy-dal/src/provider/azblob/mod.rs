@@ -7,7 +7,7 @@ mod output;
 pub use config::{AzblobCredentials, AzblobParams};
 use opendal::{Operator, services};
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::Error;
 
 /// Azure Blob Storage provider for blob storage.
@@ -17,11 +17,11 @@ pub struct AzblobProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for AzblobProvider {
+impl Provider for AzblobProvider {
     type Credentials = AzblobCredentials;
     type Params = AzblobParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

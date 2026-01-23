@@ -12,7 +12,7 @@ use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::{Error, Result};
 
 /// pgvector provider for vector storage using PostgreSQL.
@@ -22,11 +22,11 @@ pub struct PgVectorProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for PgVectorProvider {
+impl Provider for PgVectorProvider {
     type Credentials = PgVectorCredentials;
     type Params = PgVectorParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

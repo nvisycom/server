@@ -1,37 +1,38 @@
 //! Provider params, credentials, and registry.
 //!
 //! This module separates provider configuration into:
-//! - [`ProviderCredentials`]: Sensitive credentials (stored per workspace)
-//! - [`AiCredentials`]: AI provider credentials (stored per workspace)
+//! - [`ProviderCredentials`]: All credentials (storage + AI, stored per workspace)
 //! - [`InputProviderConfig`] / [`OutputProviderConfig`]: Config with credentials reference + params
 //! - [`InputProviderParams`] / [`OutputProviderParams`]: Non-sensitive parameters (part of node definition)
 //! - [`CompletionProviderParams`] / [`EmbeddingProviderParams`]: AI provider parameters
 //! - [`CredentialsRegistry`]: In-memory registry for credentials lookup
-//!
-//! # Module Structure
-//!
-//! - [`backend`]: Re-exports from nvisy_dal + local AI provider implementations
 
 mod ai;
-pub mod backend;
 mod inputs;
 mod outputs;
 mod registry;
 pub mod runtime;
 
-pub use ai::{AiCredentials, CompletionProviderParams, EmbeddingProviderParams};
-use backend::{
-    AnthropicCredentials, AzblobCredentials, CohereCredentials, GcsCredentials, GeminiCredentials,
-    MilvusCredentials, MysqlCredentials, OpenAiCredentials, PerplexityCredentials,
-    PgVectorCredentials, PineconeCredentials, PostgresCredentials, QdrantCredentials,
-    S3Credentials,
-};
+pub use ai::{CompletionProviderParams, EmbeddingProviderParams};
 use derive_more::From;
 pub use inputs::{InputProvider, InputProviderConfig, InputProviderParams};
+// Re-export dal credentials
+pub use nvisy_dal::provider::{
+    AzblobCredentials, GcsCredentials, MilvusCredentials, MysqlCredentials, PgVectorCredentials,
+    PineconeCredentials, PostgresCredentials, QdrantCredentials, S3Credentials,
+};
+// Re-export rig types
+pub use nvisy_rig::provider::{
+    AnthropicModel, CohereCompletionModel, CohereEmbeddingModel, CompletionCredentials,
+    EmbeddingCredentials, GeminiCompletionModel, GeminiEmbeddingModel, OpenAiCompletionModel,
+    OpenAiEmbeddingModel, PerplexityModel,
+};
 pub use outputs::{OutputProvider, OutputProviderConfig, OutputProviderParams};
 pub use registry::CredentialsRegistry;
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
+
+use crate::error::{Error, Result};
 
 /// Provider credentials (sensitive).
 #[derive(Debug, Clone, From, Serialize, Deserialize, IntoStaticStr)]
@@ -60,22 +61,38 @@ pub enum ProviderCredentials {
     /// pgvector credentials.
     PgVector(PgVectorCredentials),
 
-    // AI providers
-    /// OpenAI credentials.
-    OpenAi(OpenAiCredentials),
-    /// Anthropic credentials.
-    Anthropic(AnthropicCredentials),
-    /// Cohere credentials.
-    Cohere(CohereCredentials),
-    /// Google Gemini credentials.
-    Gemini(GeminiCredentials),
-    /// Perplexity credentials.
-    Perplexity(PerplexityCredentials),
+    // AI providers (completion)
+    /// Completion provider credentials.
+    Completion(CompletionCredentials),
+    /// Embedding provider credentials.
+    Embedding(EmbeddingCredentials),
 }
 
 impl ProviderCredentials {
     /// Returns the provider kind as a string.
     pub fn kind(&self) -> &'static str {
         self.into()
+    }
+
+    /// Converts to completion credentials if applicable.
+    pub fn into_completion_credentials(self) -> Result<CompletionCredentials> {
+        match self {
+            Self::Completion(c) => Ok(c),
+            other => Err(Error::Internal(format!(
+                "expected completion credentials, got '{}'",
+                other.kind()
+            ))),
+        }
+    }
+
+    /// Converts to embedding credentials if applicable.
+    pub fn into_embedding_credentials(self) -> Result<EmbeddingCredentials> {
+        match self {
+            Self::Embedding(c) => Ok(c),
+            other => Err(Error::Internal(format!(
+                "expected embedding credentials, got '{}'",
+                other.kind()
+            ))),
+        }
     }
 }

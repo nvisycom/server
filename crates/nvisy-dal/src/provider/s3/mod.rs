@@ -7,7 +7,7 @@ mod output;
 pub use config::{S3Credentials, S3Params};
 use opendal::{Operator, services};
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::Error;
 
 /// Amazon S3 provider for blob storage.
@@ -17,11 +17,11 @@ pub struct S3Provider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for S3Provider {
+impl Provider for S3Provider {
     type Credentials = S3Credentials;
     type Params = S3Params;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

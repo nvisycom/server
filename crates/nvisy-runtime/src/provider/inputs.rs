@@ -1,13 +1,14 @@
 //! Input provider types and implementations.
 
 use derive_more::From;
-use nvisy_dal::core::IntoProvider as DalIntoProvider;
+use nvisy_core::Provider;
 use nvisy_dal::provider::{
     AzblobParams, AzblobProvider, GcsParams, GcsProvider, MysqlParams, MysqlProvider,
     PostgresParams, PostgresProvider, S3Params, S3Provider,
 };
 use nvisy_dal::{AnyDataValue, DataTypeId, ObjectContext, RelationalContext};
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 use uuid::Uuid;
 
 use super::ProviderCredentials;
@@ -33,7 +34,7 @@ impl InputProviderConfig {
     }
 
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         self.params.kind()
     }
 
@@ -49,8 +50,9 @@ impl InputProviderConfig {
 }
 
 /// Input provider parameters (storage backends only, no vector DBs).
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize, IntoStaticStr)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum InputProviderParams {
     /// Amazon S3 storage.
     S3(S3Params),
@@ -66,14 +68,8 @@ pub enum InputProviderParams {
 
 impl InputProviderParams {
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            Self::S3(_) => "s3",
-            Self::Gcs(_) => "gcs",
-            Self::Azblob(_) => "azblob",
-            Self::Postgres(_) => "postgres",
-            Self::Mysql(_) => "mysql",
-        }
+    pub fn kind(&self) -> &'static str {
+        self.into()
     }
 
     /// Returns the output data type for this provider.
@@ -88,27 +84,27 @@ impl InputProviderParams {
     pub async fn into_provider(self, credentials: ProviderCredentials) -> Result<InputProvider> {
         match (self, credentials) {
             (Self::S3(p), ProviderCredentials::S3(c)) => Ok(InputProvider::S3(
-                S3Provider::create(p, c)
+                S3Provider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Gcs(p), ProviderCredentials::Gcs(c)) => Ok(InputProvider::Gcs(
-                GcsProvider::create(p, c)
+                GcsProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Azblob(p), ProviderCredentials::Azblob(c)) => Ok(InputProvider::Azblob(
-                AzblobProvider::create(p, c)
+                AzblobProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Postgres(p), ProviderCredentials::Postgres(c)) => Ok(InputProvider::Postgres(
-                PostgresProvider::create(p, c)
+                PostgresProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Mysql(p), ProviderCredentials::Mysql(c)) => Ok(InputProvider::Mysql(
-                MysqlProvider::create(p, c)
+                MysqlProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),

@@ -7,7 +7,7 @@ mod output;
 pub use config::{MysqlCredentials, MysqlParams};
 use opendal::{Operator, services};
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::Error;
 
 /// MySQL provider for relational data.
@@ -17,11 +17,11 @@ pub struct MysqlProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for MysqlProvider {
+impl Provider for MysqlProvider {
     type Credentials = MysqlCredentials;
     type Params = MysqlParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

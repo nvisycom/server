@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use nvisy_core::IntoProvider;
+use nvisy_core::Provider;
 #[cfg(feature = "ollama")]
 use rig::client::Nothing;
 use rig::completion::{AssistantContent, CompletionError, CompletionModel as RigCompletionModel};
@@ -52,17 +52,17 @@ pub(crate) enum CompletionService {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for CompletionProvider {
+impl Provider for CompletionProvider {
     type Credentials = CompletionCredentials;
     type Params = CompletionModel;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
         let inner = match (credentials, params) {
-            (CompletionCredentials::OpenAi { api_key }, CompletionModel::OpenAi(m)) => {
-                let client = openai::Client::new(&api_key)
+            (CompletionCredentials::OpenAi(c), CompletionModel::OpenAi(m)) => {
+                let client = openai::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("openai", e.to_string()))?
                     .completions_api();
                 CompletionService::OpenAi {
@@ -70,32 +70,32 @@ impl IntoProvider for CompletionProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Anthropic { api_key }, CompletionModel::Anthropic(m)) => {
-                let client = anthropic::Client::new(&api_key)
+            (CompletionCredentials::Anthropic(c), CompletionModel::Anthropic(m)) => {
+                let client = anthropic::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("anthropic", e.to_string()))?;
                 CompletionService::Anthropic {
                     model: client.completion_model(m.as_ref()),
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Cohere { api_key }, CompletionModel::Cohere(m)) => {
-                let client = cohere::Client::new(&api_key)
+            (CompletionCredentials::Cohere(c), CompletionModel::Cohere(m)) => {
+                let client = cohere::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("cohere", e.to_string()))?;
                 CompletionService::Cohere {
                     model: client.completion_model(m.as_ref()),
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Gemini { api_key }, CompletionModel::Gemini(m)) => {
-                let client = gemini::Client::new(&api_key)
+            (CompletionCredentials::Gemini(c), CompletionModel::Gemini(m)) => {
+                let client = gemini::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("gemini", e.to_string()))?;
                 CompletionService::Gemini {
                     model: client.completion_model(m.as_ref()),
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Perplexity { api_key }, CompletionModel::Perplexity(m)) => {
-                let client = perplexity::Client::new(&api_key)
+            (CompletionCredentials::Perplexity(c), CompletionModel::Perplexity(m)) => {
+                let client = perplexity::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("perplexity", e.to_string()))?;
                 CompletionService::Perplexity {
                     model: client.completion_model(m.as_ref()),
@@ -103,10 +103,10 @@ impl IntoProvider for CompletionProvider {
                 }
             }
             #[cfg(feature = "ollama")]
-            (CompletionCredentials::Ollama { base_url }, CompletionModel::Ollama(model_name)) => {
+            (CompletionCredentials::Ollama(c), CompletionModel::Ollama(model_name)) => {
                 let client = ollama::Client::builder()
                     .api_key(Nothing)
-                    .base_url(&base_url)
+                    .base_url(&c.base_url)
                     .build()
                     .map_err(|e| Error::provider("ollama", e.to_string()))?;
                 CompletionService::Ollama {

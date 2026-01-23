@@ -7,7 +7,7 @@ mod output;
 pub use config::{GcsCredentials, GcsParams};
 use opendal::{Operator, services};
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::Error;
 
 /// Google Cloud Storage provider for blob storage.
@@ -17,11 +17,11 @@ pub struct GcsProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for GcsProvider {
+impl Provider for GcsProvider {
     type Credentials = GcsCredentials;
     type Params = GcsParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

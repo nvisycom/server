@@ -6,7 +6,7 @@ use std::task::{Context as TaskContext, Poll};
 
 use derive_more::From;
 use futures::Sink;
-use nvisy_dal::core::IntoProvider as DalIntoProvider;
+use nvisy_core::Provider;
 use nvisy_dal::provider::{
     AzblobParams, AzblobProvider, GcsParams, GcsProvider, MilvusParams, MilvusProvider,
     MysqlParams, MysqlProvider, PgVectorParams, PgVectorProvider, PineconeParams, PineconeProvider,
@@ -14,6 +14,7 @@ use nvisy_dal::provider::{
 };
 use nvisy_dal::{AnyDataValue, DataTypeId};
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -41,7 +42,7 @@ impl OutputProviderConfig {
     }
 
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         self.params.kind()
     }
 
@@ -57,8 +58,9 @@ impl OutputProviderConfig {
 }
 
 /// Output provider parameters (storage backends + vector DBs).
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize, IntoStaticStr)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum OutputProviderParams {
     /// Amazon S3 storage.
     S3(S3Params),
@@ -82,18 +84,8 @@ pub enum OutputProviderParams {
 
 impl OutputProviderParams {
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            Self::S3(_) => "s3",
-            Self::Gcs(_) => "gcs",
-            Self::Azblob(_) => "azblob",
-            Self::Postgres(_) => "postgres",
-            Self::Mysql(_) => "mysql",
-            Self::Qdrant(_) => "qdrant",
-            Self::Pinecone(_) => "pinecone",
-            Self::Milvus(_) => "milvus",
-            Self::PgVector(_) => "pgvector",
-        }
+    pub fn kind(&self) -> &'static str {
+        self.into()
     }
 
     /// Returns the output data type for this provider.
@@ -111,47 +103,47 @@ impl OutputProviderParams {
     pub async fn into_provider(self, credentials: ProviderCredentials) -> Result<OutputProvider> {
         match (self, credentials) {
             (Self::S3(p), ProviderCredentials::S3(c)) => Ok(OutputProvider::S3(
-                S3Provider::create(p, c)
+                S3Provider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Gcs(p), ProviderCredentials::Gcs(c)) => Ok(OutputProvider::Gcs(
-                GcsProvider::create(p, c)
+                GcsProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Azblob(p), ProviderCredentials::Azblob(c)) => Ok(OutputProvider::Azblob(
-                AzblobProvider::create(p, c)
+                AzblobProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Postgres(p), ProviderCredentials::Postgres(c)) => Ok(OutputProvider::Postgres(
-                PostgresProvider::create(p, c)
+                PostgresProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Mysql(p), ProviderCredentials::Mysql(c)) => Ok(OutputProvider::Mysql(
-                MysqlProvider::create(p, c)
+                MysqlProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Qdrant(p), ProviderCredentials::Qdrant(c)) => Ok(OutputProvider::Qdrant(
-                QdrantProvider::create(p, c)
+                QdrantProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Pinecone(p), ProviderCredentials::Pinecone(c)) => Ok(OutputProvider::Pinecone(
-                PineconeProvider::create(p, c)
+                PineconeProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::Milvus(p), ProviderCredentials::Milvus(c)) => Ok(OutputProvider::Milvus(
-                MilvusProvider::create(p, c)
+                MilvusProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
             (Self::PgVector(p), ProviderCredentials::PgVector(c)) => Ok(OutputProvider::PgVector(
-                PgVectorProvider::create(p, c)
+                PgVectorProvider::connect(p, c)
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),

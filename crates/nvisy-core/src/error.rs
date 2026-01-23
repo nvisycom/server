@@ -1,7 +1,6 @@
 //! Common error type definitions.
 
-use std::time::Duration;
-
+use strum::{AsRefStr, IntoStaticStr};
 use thiserror::Error;
 
 /// Type alias for boxed dynamic errors that can be sent across threads.
@@ -15,7 +14,8 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Categories of errors that can occur in nvisy-core operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum ErrorKind {
     /// Input validation failed.
     InvalidInput,
@@ -145,74 +145,13 @@ impl Error {
         Self::new(ErrorKind::Unknown)
     }
 
-    /// Returns true if this is a client error (4xx equivalent).
-    pub fn is_client_error(&self) -> bool {
-        matches!(
-            self.kind,
-            ErrorKind::InvalidInput
-                | ErrorKind::Authentication
-                | ErrorKind::Authorization
-                | ErrorKind::NotFound
-                | ErrorKind::RateLimited
-        )
+    /// Returns the error kind.
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
     }
 
-    /// Returns true if this is a server error (5xx equivalent).
-    pub fn is_server_error(&self) -> bool {
-        matches!(
-            self.kind,
-            ErrorKind::ServiceUnavailable
-                | ErrorKind::InternalError
-                | ErrorKind::ExternalError
-                | ErrorKind::Configuration
-                | ErrorKind::Timeout
-                | ErrorKind::Serialization
-                | ErrorKind::Unknown
-        )
-    }
-
-    /// Returns true if this error is potentially retryable.
-    pub fn is_retryable(&self) -> bool {
-        matches!(
-            self.kind,
-            ErrorKind::NetworkError
-                | ErrorKind::RateLimited
-                | ErrorKind::ServiceUnavailable
-                | ErrorKind::Timeout
-        )
-    }
-
-    /// Returns the recommended retry delay for this error.
-    pub fn retry_delay(&self) -> Option<Duration> {
-        match self.kind {
-            ErrorKind::RateLimited => Some(Duration::from_secs(60)),
-            ErrorKind::ServiceUnavailable => Some(Duration::from_secs(30)),
-            ErrorKind::NetworkError => Some(Duration::from_secs(5)),
-            ErrorKind::Timeout => Some(Duration::from_secs(10)),
-            _ => None,
-        }
-    }
-
-    /// Returns true if this is an authentication error.
-    pub fn is_auth_error(&self) -> bool {
-        matches!(
-            self.kind,
-            ErrorKind::Authentication | ErrorKind::Authorization
-        )
-    }
-
-    /// Returns true if this is a rate limiting error.
-    pub fn is_rate_limit_error(&self) -> bool {
-        matches!(self.kind, ErrorKind::RateLimited)
-    }
-
-    /// Returns true if this is a timeout error.
-    pub fn is_timeout_error(&self) -> bool {
-        matches!(self.kind, ErrorKind::Timeout)
-    }
-
-    /// Returns true if this is a network error.
-    pub fn is_network_error(&self) -> bool {
-        matches!(self.kind, ErrorKind::NetworkError)
+    /// Returns the error kind as a string.
+    pub fn kind_str(&self) -> &'static str {
+        self.kind.into()
     }
 }

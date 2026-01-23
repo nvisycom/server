@@ -27,14 +27,14 @@ use crate::Result;
 /// }
 /// ```
 #[async_trait::async_trait]
-pub trait IntoProvider: Send {
+pub trait Provider: Send {
     /// Non-sensitive parameters (bucket, prefix, table, model, etc.).
     type Params: Send;
     /// Sensitive credentials (API keys, secrets, etc.).
     type Credentials: Send;
 
     /// Creates a new provider from parameters and credentials.
-    async fn create(params: Self::Params, credentials: Self::Credentials) -> Result<Self>
+    async fn connect(params: Self::Params, credentials: Self::Credentials) -> Result<Self>
     where
         Self: Sized;
 }

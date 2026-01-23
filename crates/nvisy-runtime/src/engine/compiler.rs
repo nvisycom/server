@@ -377,8 +377,11 @@ impl<'a> WorkflowCompiler<'a> {
         &self,
         params: &EmbeddingProviderParams,
     ) -> Result<nvisy_rig::provider::EmbeddingProvider> {
-        let creds = self.registry.get(params.credentials_id())?;
-        params.clone().into_provider(creds.clone()).await
+        let creds = self.registry.get(params.credentials_id())?.clone();
+        params
+            .clone()
+            .into_provider(creds.into_embedding_credentials()?)
+            .await
     }
 
     /// Creates agents from completion provider parameters.
@@ -392,8 +395,11 @@ impl<'a> WorkflowCompiler<'a> {
         &self,
         params: &CompletionProviderParams,
     ) -> Result<CompletionProvider> {
-        let creds = self.registry.get(params.credentials_id())?;
-        params.clone().into_provider(creds.clone()).await
+        let creds = self.registry.get(params.credentials_id())?.clone();
+        params
+            .clone()
+            .into_provider(creds.into_completion_credentials()?)
+            .await
     }
 
     /// Builds the petgraph from compiled nodes and resolved edges.

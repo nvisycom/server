@@ -7,7 +7,7 @@ mod output;
 pub use config::{PostgresCredentials, PostgresParams};
 use opendal::{Operator, services};
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::Error;
 
 /// PostgreSQL provider for relational data.
@@ -17,11 +17,11 @@ pub struct PostgresProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for PostgresProvider {
+impl Provider for PostgresProvider {
     type Credentials = PostgresCredentials;
     type Params = PostgresParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

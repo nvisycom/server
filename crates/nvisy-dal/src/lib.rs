@@ -13,7 +13,7 @@ pub mod provider;
 mod error;
 
 pub use core::{
-    DataInput, DataOutput, InputStream, IntoProvider, ItemSink, ItemStream, ObjectContext,
+    DataInput, DataOutput, InputStream, Provider, ItemSink, ItemStream, ObjectContext,
     OutputStream, RelationalContext, VectorContext,
 };
 

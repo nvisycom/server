@@ -8,7 +8,7 @@ mod vector_context;
 
 pub use input_stream::{InputStream, ItemStream};
 // Re-export IntoProvider from nvisy-core
-pub use nvisy_core::IntoProvider;
+pub use nvisy_core::Provider;
 pub use object_context::ObjectContext;
 pub use output_stream::{ItemSink, OutputStream};
 pub use relational_context::RelationalContext;

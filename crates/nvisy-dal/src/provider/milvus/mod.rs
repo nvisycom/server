@@ -13,7 +13,7 @@ use milvus::index::{IndexParams, IndexType, MetricType};
 use milvus::schema::{CollectionSchemaBuilder, FieldSchema};
 use milvus::value::Value;
 
-use crate::core::IntoProvider;
+use crate::core::Provider;
 use crate::error::{Error, Result};
 
 /// Milvus provider for vector storage.
@@ -23,11 +23,11 @@ pub struct MilvusProvider {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for MilvusProvider {
+impl Provider for MilvusProvider {
     type Credentials = MilvusCredentials;
     type Params = MilvusParams;
 
-    async fn create(
+    async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {

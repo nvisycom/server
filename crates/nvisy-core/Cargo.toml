@@ -30,6 +30,9 @@ async-trait = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 
+# Derive macros
+strum = { workspace = true }
+
 # Observability
 tracing = { workspace = true }
 
