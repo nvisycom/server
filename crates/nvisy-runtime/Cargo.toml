@@ -44,6 +44,7 @@ async-trait = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["debug", "display", "from", "into"] }
 derive_builder = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
 
 # Data types
 uuid = { workspace = true, features = ["v7", "serde"] }

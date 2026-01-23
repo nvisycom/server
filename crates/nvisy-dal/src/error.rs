@@ -1,16 +1,21 @@
 //! Error types for data operations.
 
-use std::fmt;
+use thiserror::Error;
+
+/// Boxed error type for dynamic error handling.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Result type for data operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Error type for data operations.
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{kind}: {message}")]
 pub struct Error {
     kind: ErrorKind,
     message: String,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    #[source]
+    source: Option<BoxError>,
 }
 
 /// The kind of data error.
@@ -68,16 +73,13 @@ impl Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}: {}", self.kind, self.message)
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source
-            .as_ref()
-            .map(|e| e.as_ref() as &(dyn std::error::Error + 'static))
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connection => write!(f, "connection"),
+            Self::NotFound => write!(f, "not found"),
+            Self::InvalidInput => write!(f, "invalid input"),
+            Self::Provider => write!(f, "provider"),
+        }
     }
 }

@@ -12,13 +12,9 @@ pub mod provider;
 
 mod error;
 
-pub use core::{Context, DataInput, DataOutput, InputStream, ItemSink, ItemStream, OutputStream};
-
+pub use core::{
+    DataInput, DataOutput, InputStream, ItemSink, ItemStream, ObjectContext, OutputStream,
+    RelationalContext, VectorContext,
+};
 pub use datatype::{AnyDataValue, DataTypeId};
-pub use error::{Error, ErrorKind, Result};
-pub use provider::ProviderConfig;
-
-/// Alias for backwards compatibility with nvisy-opendal.
-pub type StorageError = Error;
-/// Alias for backwards compatibility.
-pub type StorageConfig = ProviderConfig;
+pub use error::{BoxError, Error, ErrorKind, Result};

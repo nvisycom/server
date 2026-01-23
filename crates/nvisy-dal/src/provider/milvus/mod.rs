@@ -1,27 +1,23 @@
 //! Milvus vector store provider.
 
 mod config;
+mod output;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use async_trait::async_trait;
 pub use config::MilvusConfig;
 use milvus::client::Client;
 use milvus::collection::SearchOption;
-use milvus::data::FieldColumn;
 use milvus::index::{IndexParams, IndexType, MetricType};
 use milvus::schema::{CollectionSchemaBuilder, FieldSchema};
-use milvus::value::{Value, ValueVec};
+use milvus::value::Value;
 
-use crate::core::{Context, DataInput, DataOutput, InputStream};
-use crate::datatype::Embedding;
 use crate::error::{Error, Result};
 
 /// Milvus provider for vector storage.
 pub struct MilvusProvider {
     client: Client,
-    #[allow(dead_code)]
     config: MilvusConfig,
 }
 
@@ -40,8 +36,13 @@ impl MilvusProvider {
         })
     }
 
+    /// Returns the configured collection name.
+    pub fn collection(&self) -> Option<&str> {
+        self.config.collection.as_deref()
+    }
+
     /// Ensures a collection exists, creating it if necessary.
-    async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
+    pub(crate) async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
         let exists = self
             .client
             .has_collection(name)
@@ -52,7 +53,6 @@ impl MilvusProvider {
             return Ok(());
         }
 
-        // Build the collection schema
         let mut builder = CollectionSchemaBuilder::new(name, "Vector collection");
         builder.add_field(FieldSchema::new_primary_int64("_id", "primary key", true));
         builder.add_field(FieldSchema::new_varchar("id", "string id", 256));
@@ -67,13 +67,11 @@ impl MilvusProvider {
             .build()
             .map_err(|e| Error::provider(e.to_string()))?;
 
-        // Create the collection
         self.client
             .create_collection(schema, None)
             .await
             .map_err(|e| Error::provider(e.to_string()))?;
 
-        // Create index on vector field
         let index_params = IndexParams::new(
             "vector_index".to_string(),
             IndexType::IvfFlat,
@@ -92,7 +90,6 @@ impl MilvusProvider {
             .await
             .map_err(|e| Error::provider(e.to_string()))?;
 
-        // Load collection into memory
         collection
             .load(1)
             .await
@@ -143,7 +140,6 @@ impl MilvusProvider {
 
                 let score = result.score.get(i).copied().unwrap_or(0.0);
 
-                // Extract metadata from fields
                 let metadata_str = result
                     .field
                     .iter()
@@ -158,7 +154,6 @@ impl MilvusProvider {
                     .and_then(|s| serde_json::from_str(&s).ok())
                     .unwrap_or_default();
 
-                // Get string id if available
                 let string_id = result
                     .field
                     .iter()
@@ -194,68 +189,6 @@ pub struct SearchResult {
     pub vector: Option<Vec<f32>>,
     /// Metadata associated with this vector.
     pub metadata: HashMap<String, serde_json::Value>,
-}
-
-#[async_trait]
-impl DataOutput<Embedding> for MilvusProvider {
-    async fn write(&self, ctx: &Context, items: Vec<Embedding>) -> Result<()> {
-        if items.is_empty() {
-            return Ok(());
-        }
-
-        let collection = ctx
-            .target
-            .as_deref()
-            .ok_or_else(|| Error::invalid_input("Collection name required in context.target"))?;
-
-        // Get the dimension from the first vector
-        let dim = items.first().map(|v| v.vector.len()).unwrap_or(0);
-
-        // Ensure collection exists
-        self.ensure_collection(collection, dim).await?;
-
-        let coll = self
-            .client
-            .get_collection(collection)
-            .await
-            .map_err(|e| Error::provider(e.to_string()))?;
-
-        let ids: Vec<String> = items.iter().map(|v| v.id.clone()).collect();
-        let embeddings: Vec<f32> = items
-            .iter()
-            .flat_map(|v| v.vector.iter().copied())
-            .collect();
-        let metadata: Vec<String> = items
-            .iter()
-            .map(|v| serde_json::to_string(&v.metadata).unwrap_or_default())
-            .collect();
-
-        // Create field schemas for columns
-        let id_schema = FieldSchema::new_varchar("id", "string id", 256);
-        let vector_schema = FieldSchema::new_float_vector("vector", "embedding vector", dim as i64);
-        let metadata_schema = FieldSchema::new_varchar("metadata", "json metadata", 65535);
-
-        let columns = vec![
-            FieldColumn::new(&id_schema, ValueVec::String(ids)),
-            FieldColumn::new(&vector_schema, ValueVec::Float(embeddings)),
-            FieldColumn::new(&metadata_schema, ValueVec::String(metadata)),
-        ];
-
-        coll.insert(columns, None)
-            .await
-            .map_err(|e| Error::provider(e.to_string()))?;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl DataInput<Embedding> for MilvusProvider {
-    async fn read(&self, _ctx: &Context) -> Result<InputStream<'static, Embedding>> {
-        // Vector stores are primarily write/search, not sequential read
-        let stream = futures::stream::empty();
-        Ok(InputStream::new(Box::pin(stream)))
-    }
 }
 
 impl std::fmt::Debug for MilvusProvider {

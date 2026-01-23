@@ -1,28 +1,25 @@
 //! Qdrant vector store provider.
 
 mod config;
+mod output;
 
 use std::collections::HashMap;
 
-use async_trait::async_trait;
 pub use config::QdrantConfig;
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::vectors_config::Config as VectorsConfig;
 use qdrant_client::qdrant::with_payload_selector::SelectorOptions;
 use qdrant_client::qdrant::with_vectors_selector::SelectorOptions as VectorsSelectorOptions;
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, Distance, Filter, PointId, PointStruct,
-    SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, Distance, Filter, PointId, SearchPointsBuilder,
+    VectorParamsBuilder,
 };
 
-use crate::core::{Context, DataInput, DataOutput, InputStream};
-use crate::datatype::Embedding;
 use crate::error::{Error, Result};
 
 /// Qdrant provider for vector storage.
 pub struct QdrantProvider {
     client: Qdrant,
-    #[allow(dead_code)]
     config: QdrantConfig,
 }
 
@@ -41,7 +38,7 @@ impl QdrantProvider {
     }
 
     /// Ensures a collection exists, creating it if necessary.
-    async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
+    pub(crate) async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
         let exists = self
             .client
             .collection_exists(name)
@@ -64,30 +61,9 @@ impl QdrantProvider {
         Ok(())
     }
 
-    /// Extracts vector data from Qdrant's VectorsOutput.
-    fn extract_vector(vectors: Option<qdrant_client::qdrant::VectorsOutput>) -> Option<Vec<f32>> {
-        use qdrant_client::qdrant::vectors_output::VectorsOptions;
-
-        vectors.and_then(|v| match v.vectors_options {
-            #[allow(deprecated)]
-            Some(VectorsOptions::Vector(vec)) => Some(vec.data),
-            _ => None,
-        })
-    }
-
-    /// Extracts point ID as a string.
-    fn extract_point_id(id: Option<PointId>) -> Option<String> {
-        use qdrant_client::qdrant::point_id::PointIdOptions;
-
-        match id {
-            Some(PointId {
-                point_id_options: Some(id),
-            }) => match id {
-                PointIdOptions::Num(n) => Some(n.to_string()),
-                PointIdOptions::Uuid(s) => Some(s),
-            },
-            _ => None,
-        }
+    /// Returns the configured collection name.
+    pub fn collection(&self) -> Option<&str> {
+        self.config.collection.as_deref()
     }
 
     /// Searches for similar vectors.
@@ -126,8 +102,8 @@ impl QdrantProvider {
             .result
             .into_iter()
             .map(|point| {
-                let id = Self::extract_point_id(point.id).unwrap_or_default();
-                let vector = Self::extract_vector(point.vectors);
+                let id = extract_point_id(point.id).unwrap_or_default();
+                let vector = extract_vector(point.vectors);
 
                 let metadata: HashMap<String, serde_json::Value> = point
                     .payload
@@ -161,66 +137,37 @@ pub struct SearchResult {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-#[async_trait]
-impl DataOutput<Embedding> for QdrantProvider {
-    async fn write(&self, ctx: &Context, items: Vec<Embedding>) -> Result<()> {
-        if items.is_empty() {
-            return Ok(());
-        }
-
-        let collection = ctx
-            .target
-            .as_deref()
-            .ok_or_else(|| Error::invalid_input("Collection name required in context.target"))?;
-
-        // Get dimensions from the first vector
-        let dimensions = items
-            .first()
-            .map(|v| v.vector.len())
-            .ok_or_else(|| Error::invalid_input("No embeddings provided"))?;
-
-        // Ensure collection exists
-        self.ensure_collection(collection, dimensions).await?;
-
-        let points: Vec<PointStruct> = items
-            .into_iter()
-            .map(|v| {
-                let payload: HashMap<String, qdrant_client::qdrant::Value> = v
-                    .metadata
-                    .into_iter()
-                    .map(|(k, v)| (k, json_to_qdrant_value(v)))
-                    .collect();
-
-                PointStruct::new(v.id, v.vector, payload)
-            })
-            .collect();
-
-        self.client
-            .upsert_points(UpsertPointsBuilder::new(collection, points))
-            .await
-            .map_err(|e| Error::provider(e.to_string()))?;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl DataInput<Embedding> for QdrantProvider {
-    async fn read(&self, _ctx: &Context) -> Result<InputStream<'static, Embedding>> {
-        // Vector stores are primarily write/search, not sequential read
-        let stream = futures::stream::empty();
-        Ok(InputStream::new(Box::pin(stream)))
-    }
-}
-
 impl std::fmt::Debug for QdrantProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QdrantProvider").finish()
     }
 }
 
-/// Converts JSON value to Qdrant value.
-fn json_to_qdrant_value(value: serde_json::Value) -> qdrant_client::qdrant::Value {
+fn extract_vector(vectors: Option<qdrant_client::qdrant::VectorsOutput>) -> Option<Vec<f32>> {
+    use qdrant_client::qdrant::vectors_output::VectorsOptions;
+
+    vectors.and_then(|v| match v.vectors_options {
+        #[allow(deprecated)]
+        Some(VectorsOptions::Vector(vec)) => Some(vec.data),
+        _ => None,
+    })
+}
+
+fn extract_point_id(id: Option<PointId>) -> Option<String> {
+    use qdrant_client::qdrant::point_id::PointIdOptions;
+
+    match id {
+        Some(PointId {
+            point_id_options: Some(id),
+        }) => match id {
+            PointIdOptions::Num(n) => Some(n.to_string()),
+            PointIdOptions::Uuid(s) => Some(s),
+        },
+        _ => None,
+    }
+}
+
+pub(crate) fn json_to_qdrant_value(value: serde_json::Value) -> qdrant_client::qdrant::Value {
     use qdrant_client::qdrant::value::Kind;
 
     let kind = match value {
@@ -253,7 +200,6 @@ fn json_to_qdrant_value(value: serde_json::Value) -> qdrant_client::qdrant::Valu
     qdrant_client::qdrant::Value { kind: Some(kind) }
 }
 
-/// Converts Qdrant value to JSON value.
 fn qdrant_value_to_json(value: qdrant_client::qdrant::Value) -> serde_json::Value {
     use qdrant_client::qdrant::value::Kind;
 
@@ -280,7 +226,6 @@ fn qdrant_value_to_json(value: qdrant_client::qdrant::Value) -> serde_json::Valu
     }
 }
 
-/// Parses a JSON filter into Qdrant conditions.
 fn parse_filter(filter: &serde_json::Value) -> Option<Vec<Condition>> {
     if let serde_json::Value::Object(obj) = filter {
         let conditions: Vec<Condition> = obj

@@ -1,18 +1,16 @@
 //! Pinecone vector store provider.
 
 mod config;
+mod output;
 
 use std::collections::{BTreeMap, HashMap};
 
-use async_trait::async_trait;
 pub use config::PineconeConfig;
-use pinecone_sdk::models::{Kind, Metadata, Namespace, Value as PineconeValue, Vector};
+use pinecone_sdk::models::{Kind, Metadata, Namespace, Value as PineconeValue};
 use pinecone_sdk::pinecone::PineconeClientConfig;
 use pinecone_sdk::pinecone::data::Index;
 use tokio::sync::Mutex;
 
-use crate::core::{Context, DataInput, DataOutput, InputStream};
-use crate::datatype::Embedding;
 use crate::error::{Error, Result};
 
 /// Pinecone provider for vector storage.
@@ -33,7 +31,6 @@ impl PineconeProvider {
             .client()
             .map_err(|e| Error::connection(e.to_string()))?;
 
-        // Describe the index to get its host
         let index_description = client
             .describe_index(&config.index)
             .await
@@ -41,7 +38,6 @@ impl PineconeProvider {
 
         let host = &index_description.host;
 
-        // Connect to the index
         let index = client
             .index(host)
             .await
@@ -53,7 +49,7 @@ impl PineconeProvider {
         })
     }
 
-    fn get_namespace(&self, collection: &str) -> Namespace {
+    pub(crate) fn get_namespace(&self, collection: &str) -> Namespace {
         if collection.is_empty() {
             self.config
                 .namespace
@@ -65,23 +61,9 @@ impl PineconeProvider {
         }
     }
 
-    /// Convert Pinecone Metadata to HashMap
-    fn metadata_to_hashmap(metadata: Metadata) -> HashMap<String, serde_json::Value> {
-        metadata
-            .fields
-            .into_iter()
-            .map(|(k, v)| (k, pinecone_value_to_json(v)))
-            .collect()
-    }
-
-    /// Convert HashMap to Pinecone Metadata
-    fn hashmap_to_metadata(map: HashMap<String, serde_json::Value>) -> Metadata {
-        let fields: BTreeMap<String, PineconeValue> = map
-            .into_iter()
-            .map(|(k, v)| (k, json_to_pinecone_value(v)))
-            .collect();
-
-        Metadata { fields }
+    /// Returns the configured namespace.
+    pub fn namespace(&self) -> Option<&str> {
+        self.config.namespace.as_deref()
     }
 
     /// Searches for similar vectors.
@@ -99,7 +81,7 @@ impl PineconeProvider {
         let filter_metadata: Option<Metadata> = filter.and_then(|f| {
             if let serde_json::Value::Object(obj) = f {
                 let map: HashMap<String, serde_json::Value> = obj.clone().into_iter().collect();
-                Some(Self::hashmap_to_metadata(map))
+                Some(hashmap_to_metadata(map))
             } else {
                 None
             }
@@ -109,7 +91,7 @@ impl PineconeProvider {
         let response = index
             .query_by_value(
                 query,
-                None, // sparse values
+                None,
                 limit as u32,
                 &namespace,
                 filter_metadata,
@@ -123,10 +105,7 @@ impl PineconeProvider {
             .matches
             .into_iter()
             .map(|m| {
-                let metadata = m
-                    .metadata
-                    .map(Self::metadata_to_hashmap)
-                    .unwrap_or_default();
+                let metadata = m.metadata.map(metadata_to_hashmap).unwrap_or_default();
 
                 SearchResult {
                     id: m.id,
@@ -154,56 +133,29 @@ pub struct SearchResult {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-#[async_trait]
-impl DataOutput<Embedding> for PineconeProvider {
-    async fn write(&self, ctx: &Context, items: Vec<Embedding>) -> Result<()> {
-        let collection = ctx.target.as_deref().unwrap_or("");
-        let namespace = self.get_namespace(collection);
-
-        let pinecone_vectors: Vec<Vector> = items
-            .into_iter()
-            .map(|v| {
-                let metadata = if v.metadata.is_empty() {
-                    None
-                } else {
-                    Some(Self::hashmap_to_metadata(v.metadata))
-                };
-
-                Vector {
-                    id: v.id,
-                    values: v.vector,
-                    sparse_values: None,
-                    metadata,
-                }
-            })
-            .collect();
-
-        let mut index = self.index.lock().await;
-        index
-            .upsert(&pinecone_vectors, &namespace)
-            .await
-            .map_err(|e| Error::provider(e.to_string()))?;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl DataInput<Embedding> for PineconeProvider {
-    async fn read(&self, _ctx: &Context) -> Result<InputStream<'static, Embedding>> {
-        // Vector stores are primarily write/search, not sequential read
-        let stream = futures::stream::empty();
-        Ok(InputStream::new(Box::pin(stream)))
-    }
-}
-
 impl std::fmt::Debug for PineconeProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PineconeProvider").finish()
     }
 }
 
-/// Convert Pinecone Value to serde_json::Value
+fn metadata_to_hashmap(metadata: Metadata) -> HashMap<String, serde_json::Value> {
+    metadata
+        .fields
+        .into_iter()
+        .map(|(k, v)| (k, pinecone_value_to_json(v)))
+        .collect()
+}
+
+pub(crate) fn hashmap_to_metadata(map: HashMap<String, serde_json::Value>) -> Metadata {
+    let fields: BTreeMap<String, PineconeValue> = map
+        .into_iter()
+        .map(|(k, v)| (k, json_to_pinecone_value(v)))
+        .collect();
+
+    Metadata { fields }
+}
+
 fn pinecone_value_to_json(value: PineconeValue) -> serde_json::Value {
     match value.kind {
         Some(Kind::NullValue(_)) => serde_json::Value::Null,
@@ -232,7 +184,6 @@ fn pinecone_value_to_json(value: PineconeValue) -> serde_json::Value {
     }
 }
 
-/// Convert serde_json::Value to Pinecone Value
 fn json_to_pinecone_value(value: serde_json::Value) -> PineconeValue {
     let kind = match value {
         serde_json::Value::Null => Some(Kind::NullValue(0)),

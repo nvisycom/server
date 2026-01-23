@@ -6,7 +6,6 @@ use std::task::{Context as TaskContext, Poll};
 
 use derive_more::From;
 use futures::Sink;
-use nvisy_dal::core::Context;
 use nvisy_dal::provider::{
     AzblobProvider, GcsProvider, MilvusProvider, MysqlProvider, PgVectorProvider, PineconeProvider,
     PostgresProvider, QdrantProvider, S3Provider,
@@ -163,23 +162,23 @@ impl OutputProvider {
     /// Creates a sink for streaming writes to the provider.
     ///
     /// The sink buffers items and writes them on flush/close.
-    pub async fn write_sink(self, ctx: &Context) -> Result<DataSink> {
-        let sink = ProviderSink::new(self, ctx.clone());
-        Ok(Box::pin(sink))
+    pub fn write_sink(self) -> DataSink {
+        let sink = ProviderSink::new(self);
+        Box::pin(sink)
     }
 
     /// Writes data to the provider, accepting type-erased values.
-    pub async fn write(&self, ctx: &Context, data: Vec<AnyDataValue>) -> Result<()> {
+    pub async fn write(&self, data: Vec<AnyDataValue>) -> Result<()> {
         match self {
-            Self::S3(p) => write_data!(p, ctx, data, Blob, into_blob),
-            Self::Gcs(p) => write_data!(p, ctx, data, Blob, into_blob),
-            Self::Azblob(p) => write_data!(p, ctx, data, Blob, into_blob),
-            Self::Postgres(p) => write_data!(p, ctx, data, Record, into_record),
-            Self::Mysql(p) => write_data!(p, ctx, data, Record, into_record),
-            Self::Qdrant(p) => write_data!(p, ctx, data, Embedding, into_embedding),
-            Self::Pinecone(p) => write_data!(p, ctx, data, Embedding, into_embedding),
-            Self::Milvus(p) => write_data!(p, ctx, data, Embedding, into_embedding),
-            Self::PgVector(p) => write_data!(p, ctx, data, Embedding, into_embedding),
+            Self::S3(p) => write_data!(p, data, Blob, into_blob),
+            Self::Gcs(p) => write_data!(p, data, Blob, into_blob),
+            Self::Azblob(p) => write_data!(p, data, Blob, into_blob),
+            Self::Postgres(p) => write_data!(p, data, Record, into_record),
+            Self::Mysql(p) => write_data!(p, data, Record, into_record),
+            Self::Qdrant(p) => write_data!(p, data, Embedding, into_embedding),
+            Self::Pinecone(p) => write_data!(p, data, Embedding, into_embedding),
+            Self::Milvus(p) => write_data!(p, data, Embedding, into_embedding),
+            Self::PgVector(p) => write_data!(p, data, Embedding, into_embedding),
         }
     }
 }
@@ -187,16 +186,14 @@ impl OutputProvider {
 /// A sink that buffers items and writes them to an output provider.
 struct ProviderSink {
     provider: Arc<OutputProvider>,
-    ctx: Context,
     buffer: Arc<Mutex<Vec<AnyDataValue>>>,
     flush_future: Option<Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>>,
 }
 
 impl ProviderSink {
-    fn new(provider: OutputProvider, ctx: Context) -> Self {
+    fn new(provider: OutputProvider) -> Self {
         Self {
             provider: Arc::new(provider),
-            ctx,
             buffer: Arc::new(Mutex::new(Vec::new())),
             flush_future: None,
         }
@@ -218,7 +215,6 @@ impl Sink<AnyDataValue> for ProviderSink {
         item: AnyDataValue,
     ) -> std::result::Result<(), Self::Error> {
         let buffer = self.buffer.clone();
-        // Use blocking lock since we're in a sync context
         if let Ok(mut guard) = buffer.try_lock() {
             guard.push(item);
             Ok(())
@@ -231,7 +227,6 @@ impl Sink<AnyDataValue> for ProviderSink {
         mut self: Pin<&mut Self>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<std::result::Result<(), Self::Error>> {
-        // If we have an in-progress flush, poll it
         if let Some(ref mut future) = self.flush_future {
             return match future.as_mut().poll(cx) {
                 Poll::Ready(result) => {
@@ -242,10 +237,8 @@ impl Sink<AnyDataValue> for ProviderSink {
             };
         }
 
-        // Take items from buffer and start write
         let buffer = self.buffer.clone();
         let provider = self.provider.clone();
-        let ctx = self.ctx.clone();
 
         let future = Box::pin(async move {
             let items = {
@@ -257,7 +250,7 @@ impl Sink<AnyDataValue> for ProviderSink {
                 return Ok(());
             }
 
-            provider.write(&ctx, items).await
+            provider.write(items).await
         });
 
         self.flush_future = Some(future);
@@ -274,14 +267,14 @@ impl Sink<AnyDataValue> for ProviderSink {
 
 /// Helper macro to write data to a provider from AnyDataValue.
 macro_rules! write_data {
-    ($provider:expr, $ctx:expr, $data:expr, $type:ident, $converter:ident) => {{
+    ($provider:expr, $data:expr, $type:ident, $converter:ident) => {{
         use nvisy_dal::core::DataOutput;
         use nvisy_dal::datatype::$type;
 
         let items: Vec<$type> = $data.into_iter().filter_map(|v| v.$converter()).collect();
 
         $provider
-            .write($ctx, items)
+            .write(items)
             .await
             .map_err(|e| Error::Internal(e.to_string()))
     }};

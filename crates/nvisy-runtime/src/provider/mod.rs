@@ -10,10 +10,6 @@
 //! # Module Structure
 //!
 //! - [`backend`]: Individual provider implementations (credentials + params)
-//! - `inputs`: Input provider types and read operations
-//! - `outputs`: Output provider types and write operations
-//! - `ai`: AI provider types (completion + embedding)
-//! - `registry`: Credentials registry for workflow execution
 
 mod ai;
 pub mod backend;
@@ -22,34 +18,25 @@ mod outputs;
 mod registry;
 pub mod runtime;
 
-// Storage backend exports
-// AI provider enum exports
 pub use ai::{AiCredentials, CompletionProviderParams, EmbeddingProviderParams};
-// AI provider exports
-pub use backend::{
-    AnthropicCompletionParams, AnthropicCredentials, CohereCompletionParams, CohereCredentials,
-    CohereEmbeddingParams, GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParams,
-    OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams, PerplexityCompletionParams,
-    PerplexityCredentials,
-};
-pub use backend::{
-    AzblobCredentials, AzblobParams, GcsCredentials, GcsParams, IntoProvider, MysqlCredentials,
-    MysqlParams, PostgresCredentials, PostgresParams, S3Credentials, S3Params,
-};
-// Vector database exports
-pub use backend::{
-    MilvusCredentials, MilvusParams, PgVectorCredentials, PgVectorParams, PineconeCredentials,
-    PineconeParams, QdrantCredentials, QdrantParams,
+pub use backend::IntoProvider;
+use backend::{
+    AnthropicCredentials, AzblobCredentials, CohereCredentials, GcsCredentials, GeminiCredentials,
+    MilvusCredentials, MysqlCredentials, OpenAiCredentials, PerplexityCredentials,
+    PgVectorCredentials, PineconeCredentials, PostgresCredentials, QdrantCredentials,
+    S3Credentials,
 };
 use derive_more::From;
 pub use inputs::{InputProvider, InputProviderParams};
 pub use outputs::{OutputProvider, OutputProviderParams};
 pub use registry::CredentialsRegistry;
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 /// Provider credentials (sensitive).
-#[derive(Debug, Clone, From, Serialize, Deserialize)]
+#[derive(Debug, Clone, From, Serialize, Deserialize, IntoStaticStr)]
 #[serde(tag = "provider", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ProviderCredentials {
     // Storage backends
     /// Amazon S3 credentials.
@@ -88,25 +75,7 @@ pub enum ProviderCredentials {
 
 impl ProviderCredentials {
     /// Returns the provider kind as a string.
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            // Storage backends
-            Self::S3(_) => "s3",
-            Self::Gcs(_) => "gcs",
-            Self::Azblob(_) => "azblob",
-            Self::Postgres(_) => "postgres",
-            Self::Mysql(_) => "mysql",
-            // Vector databases
-            Self::Qdrant(_) => "qdrant",
-            Self::Pinecone(_) => "pinecone",
-            Self::Milvus(_) => "milvus",
-            Self::PgVector(_) => "pgvector",
-            // AI providers
-            Self::OpenAi(_) => "openai",
-            Self::Anthropic(_) => "anthropic",
-            Self::Cohere(_) => "cohere",
-            Self::Gemini(_) => "gemini",
-            Self::Perplexity(_) => "perplexity",
-        }
+    pub fn kind(&self) -> &'static str {
+        self.into()
     }
 }

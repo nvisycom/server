@@ -1,10 +1,10 @@
 //! PostgreSQL pgvector provider.
 
 mod config;
+mod output;
 
 use std::collections::HashMap;
 
-use async_trait::async_trait;
 pub use config::{DistanceMetric, IndexType, PgVectorConfig};
 use diesel::prelude::*;
 use diesel::sql_types::{Float, Integer, Text};
@@ -12,8 +12,6 @@ use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
-use crate::core::{Context, DataInput, DataOutput, InputStream};
-use crate::datatype::Embedding;
 use crate::error::{Error, Result};
 
 /// pgvector provider for vector storage using PostgreSQL.
@@ -32,7 +30,6 @@ impl PgVectorProvider {
             .build()
             .map_err(|e| Error::connection(e.to_string()))?;
 
-        // Test connection and ensure pgvector extension exists
         {
             let mut conn = pool
                 .get()
@@ -53,7 +50,12 @@ impl PgVectorProvider {
         })
     }
 
-    async fn get_conn(
+    /// Returns the configured table name.
+    pub fn table(&self) -> &str {
+        &self.config.table
+    }
+
+    pub(crate) async fn get_conn(
         &self,
     ) -> Result<deadpool::managed::Object<AsyncDieselConnectionManager<AsyncPgConnection>>> {
         self.pool
@@ -62,15 +64,14 @@ impl PgVectorProvider {
             .map_err(|e| Error::connection(e.to_string()))
     }
 
-    fn distance_operator(&self) -> &'static str {
+    pub(crate) fn distance_operator(&self) -> &'static str {
         self.config.distance_metric.operator()
     }
 
     /// Ensures a collection (table) exists, creating it if necessary.
-    async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
+    pub(crate) async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
         let mut conn = self.get_conn().await?;
 
-        // Create the table
         let create_table = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
@@ -88,7 +89,6 @@ impl PgVectorProvider {
             .await
             .map_err(|e| Error::provider(e.to_string()))?;
 
-        // Create the index
         let index_name = format!("{}_vector_idx", name);
         let operator = self.distance_operator();
 
@@ -149,7 +149,6 @@ impl PgVectorProvider {
             ""
         };
 
-        // For cosine and inner product, convert distance to similarity
         let score_expr = match self.config.distance_metric {
             DistanceMetric::L2 => format!("vector {} $1::vector", operator),
             DistanceMetric::InnerProduct => format!("-(vector {} $1::vector)", operator),
@@ -211,80 +210,12 @@ pub struct SearchResult {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-#[async_trait]
-impl DataOutput<Embedding> for PgVectorProvider {
-    async fn write(&self, ctx: &Context, items: Vec<Embedding>) -> Result<()> {
-        if items.is_empty() {
-            return Ok(());
-        }
-
-        let collection = ctx
-            .target
-            .as_deref()
-            .ok_or_else(|| Error::invalid_input("Collection name required in context.target"))?;
-
-        // Get dimensions from the first vector
-        let dimensions = <[_]>::first(&items)
-            .map(|v| v.vector.len())
-            .ok_or_else(|| Error::invalid_input("No embeddings provided"))?;
-
-        // Ensure collection exists
-        self.ensure_collection(collection, dimensions).await?;
-
-        let mut conn = self.get_conn().await?;
-
-        for v in items {
-            let vector_str = format!(
-                "[{}]",
-                v.vector
-                    .iter()
-                    .map(|f| f.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            let metadata_json =
-                serde_json::to_string(&v.metadata).unwrap_or_else(|_| "{}".to_string());
-
-            let upsert_query = format!(
-                r#"
-                INSERT INTO {} (id, vector, metadata)
-                VALUES ($1, $2::vector, $3::jsonb)
-                ON CONFLICT (id) DO UPDATE SET
-                    vector = EXCLUDED.vector,
-                    metadata = EXCLUDED.metadata
-                "#,
-                collection
-            );
-
-            diesel::sql_query(&upsert_query)
-                .bind::<Text, _>(&v.id)
-                .bind::<Text, _>(&vector_str)
-                .bind::<Text, _>(&metadata_json)
-                .execute(&mut conn)
-                .await
-                .map_err(|e| Error::provider(e.to_string()))?;
-        }
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl DataInput<Embedding> for PgVectorProvider {
-    async fn read(&self, _ctx: &Context) -> Result<InputStream<'static, Embedding>> {
-        // Vector stores are primarily write/search, not sequential read
-        let stream = futures::stream::empty();
-        Ok(InputStream::new(Box::pin(stream)))
-    }
-}
-
 impl std::fmt::Debug for PgVectorProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PgVectorProvider").finish()
     }
 }
 
-/// Parse a vector string from PostgreSQL format.
 fn parse_vector(s: &str) -> Result<Vec<f32>> {
     let trimmed = s.trim_start_matches('[').trim_end_matches(']');
     trimmed

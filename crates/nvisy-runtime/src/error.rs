@@ -51,7 +51,7 @@ pub enum Error {
 
     /// Storage operation failed.
     #[error("storage error: {0}")]
-    Storage(#[from] nvisy_dal::StorageError),
+    Storage(#[from] nvisy_dal::Error),
 
     /// Serialization/deserialization error.
     #[error("serialization error: {0}")]

@@ -25,8 +25,8 @@ use crate::graph::{
     ExtractProcessor, InputStream, OutputStream, PartitionProcessor,
 };
 use crate::provider::{
-    CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProviderParams,
-    IntoProvider, OutputProviderParams,
+    CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProvider,
+    InputProviderParams, IntoProvider, OutputProviderParams,
 };
 
 /// Workflow compiler that transforms definitions into executable graphs.
@@ -252,16 +252,33 @@ impl<'a> WorkflowCompiler<'a> {
         params: &InputProviderParams,
     ) -> Result<InputStream> {
         let creds = self.registry.get(params.credentials_id())?;
-
         let provider = params.clone().into_provider(creds.clone()).await?;
-        let dal_ctx: nvisy_dal::core::Context = self.ctx.clone().into();
-        let stream = provider.read_stream(&dal_ctx).await?;
+
+        let stream = self.read_from_provider(&provider).await?;
 
         // Map the stream to our Result type
         use futures::StreamExt;
         let mapped = stream.map(|r| r.map_err(|e| Error::Internal(e.to_string())));
 
         Ok(InputStream::new(Box::pin(mapped)))
+    }
+
+    /// Reads from an input provider using the appropriate context type.
+    async fn read_from_provider(
+        &self,
+        provider: &InputProvider,
+    ) -> Result<futures::stream::BoxStream<'static, nvisy_dal::Result<nvisy_dal::AnyDataValue>>>
+    {
+        match provider {
+            InputProvider::S3(_) | InputProvider::Gcs(_) | InputProvider::Azblob(_) => {
+                let ctx = self.ctx.to_object_context();
+                provider.read_object_stream(&ctx).await
+            }
+            InputProvider::Postgres(_) | InputProvider::Mysql(_) => {
+                let ctx = self.ctx.to_relational_context();
+                provider.read_relational_stream(&ctx).await
+            }
+        }
     }
 
     /// Creates an output stream from an output definition.
@@ -288,10 +305,8 @@ impl<'a> WorkflowCompiler<'a> {
         params: &OutputProviderParams,
     ) -> Result<OutputStream> {
         let creds = self.registry.get(params.credentials_id())?;
-
         let provider = params.clone().into_provider(creds.clone()).await?;
-        let dal_ctx: nvisy_dal::core::Context = self.ctx.clone().into();
-        let sink = provider.write_sink(&dal_ctx).await?;
+        let sink = provider.write_sink();
 
         Ok(OutputStream::new(sink))
     }

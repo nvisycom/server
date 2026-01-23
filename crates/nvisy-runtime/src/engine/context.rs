@@ -15,6 +15,8 @@ pub struct Context {
     pub target: Option<String>,
     /// Cursor for pagination (provider-specific format).
     pub cursor: Option<String>,
+    /// Tiebreaker for pagination conflicts.
+    pub tiebreaker: Option<String>,
     /// Maximum number of items to read.
     pub limit: Option<usize>,
 }
@@ -34,6 +36,12 @@ impl Context {
     /// Sets the cursor for pagination.
     pub fn with_cursor(mut self, cursor: impl Into<String>) -> Self {
         self.cursor = Some(cursor.into());
+        self
+    }
+
+    /// Sets the tiebreaker for pagination.
+    pub fn with_tiebreaker(mut self, tiebreaker: impl Into<String>) -> Self {
+        self.tiebreaker = Some(tiebreaker.into());
         self
     }
 
@@ -57,31 +65,38 @@ impl Context {
     pub fn limit(&self) -> Option<usize> {
         self.limit
     }
-}
 
-impl From<Context> for nvisy_dal::core::Context {
-    fn from(ctx: Context) -> Self {
-        let mut dal_ctx = nvisy_dal::core::Context::new();
-        if let Some(target) = ctx.target {
-            dal_ctx = dal_ctx.with_target(target);
+    /// Converts to an ObjectContext for object storage providers.
+    pub fn to_object_context(&self) -> nvisy_dal::ObjectContext {
+        let mut ctx = nvisy_dal::ObjectContext::new();
+        if let Some(ref prefix) = self.target {
+            ctx = ctx.with_prefix(prefix.clone());
         }
-        if let Some(cursor) = ctx.cursor {
-            dal_ctx = dal_ctx.with_cursor(cursor);
+        if let Some(ref token) = self.cursor {
+            ctx = ctx.with_token(token.clone());
         }
-        if let Some(limit) = ctx.limit {
-            dal_ctx = dal_ctx.with_limit(limit);
+        if let Some(limit) = self.limit {
+            ctx = ctx.with_limit(limit);
         }
-        dal_ctx
+        ctx
     }
-}
 
-impl From<nvisy_dal::core::Context> for Context {
-    fn from(ctx: nvisy_dal::core::Context) -> Self {
-        Self {
-            target: ctx.target,
-            cursor: ctx.cursor,
-            limit: ctx.limit,
+    /// Converts to a RelationalContext for relational database providers.
+    pub fn to_relational_context(&self) -> nvisy_dal::RelationalContext {
+        let mut ctx = nvisy_dal::RelationalContext::new();
+        if let Some(ref table) = self.target {
+            ctx = ctx.with_table(table.clone());
         }
+        if let Some(ref cursor) = self.cursor {
+            ctx = ctx.with_cursor(cursor.clone());
+        }
+        if let Some(ref tiebreaker) = self.tiebreaker {
+            ctx = ctx.with_tiebreaker(tiebreaker.clone());
+        }
+        if let Some(limit) = self.limit {
+            ctx = ctx.with_limit(limit);
+        }
+        ctx
     }
 }
 

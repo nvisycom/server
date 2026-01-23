@@ -1,11 +1,10 @@
 //! Input provider types and implementations.
 
 use derive_more::From;
-use nvisy_dal::core::Context;
 use nvisy_dal::provider::{
     AzblobProvider, GcsProvider, MysqlProvider, PostgresProvider, S3Provider,
 };
-use nvisy_dal::{AnyDataValue, DataTypeId};
+use nvisy_dal::{AnyDataValue, DataTypeId, ObjectContext, RelationalContext};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -113,30 +112,55 @@ impl InputProvider {
         }
     }
 
-    /// Reads data from the provider as a stream.
-    ///
-    /// Returns a boxed stream of type-erased values that can be processed incrementally.
-    pub async fn read_stream(
+    /// Reads data from the provider as a stream using object context.
+    pub async fn read_object_stream(
         &self,
-        ctx: &Context,
+        ctx: &ObjectContext,
     ) -> Result<futures::stream::BoxStream<'static, nvisy_dal::Result<AnyDataValue>>> {
         match self {
             Self::S3(p) => read_stream!(p, ctx, Blob),
             Self::Gcs(p) => read_stream!(p, ctx, Blob),
             Self::Azblob(p) => read_stream!(p, ctx, Blob),
-            Self::Postgres(p) => read_stream!(p, ctx, Record),
-            Self::Mysql(p) => read_stream!(p, ctx, Record),
+            _ => Err(Error::Internal(
+                "Provider does not support ObjectContext".into(),
+            )),
         }
     }
 
-    /// Reads data from the provider, returning type-erased values.
-    pub async fn read(&self, ctx: &Context) -> Result<Vec<AnyDataValue>> {
+    /// Reads data from the provider as a stream using relational context.
+    pub async fn read_relational_stream(
+        &self,
+        ctx: &RelationalContext,
+    ) -> Result<futures::stream::BoxStream<'static, nvisy_dal::Result<AnyDataValue>>> {
+        match self {
+            Self::Postgres(p) => read_stream!(p, ctx, Record),
+            Self::Mysql(p) => read_stream!(p, ctx, Record),
+            _ => Err(Error::Internal(
+                "Provider does not support RelationalContext".into(),
+            )),
+        }
+    }
+
+    /// Reads data from the provider using object context.
+    pub async fn read_object(&self, ctx: &ObjectContext) -> Result<Vec<AnyDataValue>> {
         match self {
             Self::S3(p) => read_data!(p, ctx, Blob),
             Self::Gcs(p) => read_data!(p, ctx, Blob),
             Self::Azblob(p) => read_data!(p, ctx, Blob),
+            _ => Err(Error::Internal(
+                "Provider does not support ObjectContext".into(),
+            )),
+        }
+    }
+
+    /// Reads data from the provider using relational context.
+    pub async fn read_relational(&self, ctx: &RelationalContext) -> Result<Vec<AnyDataValue>> {
+        match self {
             Self::Postgres(p) => read_data!(p, ctx, Record),
             Self::Mysql(p) => read_data!(p, ctx, Record),
+            _ => Err(Error::Internal(
+                "Provider does not support RelationalContext".into(),
+            )),
         }
     }
 }
