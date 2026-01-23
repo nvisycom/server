@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use nvisy_core::IntoProvider;
 #[cfg(feature = "ollama")]
 use rig::client::Nothing;
 use rig::embeddings::{Embedding, EmbeddingModel as RigEmbeddingModel};
@@ -14,7 +15,7 @@ use super::credentials::EmbeddingCredentials;
 use super::model::EmbeddingModel;
 #[cfg(feature = "ollama")]
 use super::model::OllamaEmbeddingModel;
-use crate::{Error, Result};
+use crate::Error;
 
 /// Default maximum documents per embedding request.
 ///
@@ -48,17 +49,18 @@ pub(crate) enum EmbeddingService {
     },
 }
 
-impl EmbeddingProvider {
-    /// Returns a reference to the inner provider.
-    pub(crate) fn inner(&self) -> &EmbeddingService {
-        &self.0
-    }
+#[async_trait::async_trait]
+impl IntoProvider for EmbeddingProvider {
+    type Credentials = EmbeddingCredentials;
+    type Params = EmbeddingModel;
 
-    /// Creates a new embedding provider from credentials and model.
-    pub fn new(credentials: &EmbeddingCredentials, model: &EmbeddingModel) -> Result<Self> {
-        let inner = match (credentials, model) {
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let inner = match (credentials, params) {
             (EmbeddingCredentials::OpenAi { api_key }, EmbeddingModel::OpenAi(m)) => {
-                let client = openai::Client::new(api_key)
+                let client = openai::Client::new(&api_key)
                     .map_err(|e| Error::provider("openai", e.to_string()))?;
                 EmbeddingService::OpenAi {
                     model: client.embedding_model_with_ndims(m.as_ref(), m.dimensions()),
@@ -66,7 +68,7 @@ impl EmbeddingProvider {
                 }
             }
             (EmbeddingCredentials::Cohere { api_key }, EmbeddingModel::Cohere(m)) => {
-                let client = cohere::Client::new(api_key)
+                let client = cohere::Client::new(&api_key)
                     .map_err(|e| Error::provider("cohere", e.to_string()))?;
                 EmbeddingService::Cohere {
                     model: client.embedding_model_with_ndims(
@@ -78,7 +80,7 @@ impl EmbeddingProvider {
                 }
             }
             (EmbeddingCredentials::Gemini { api_key }, EmbeddingModel::Gemini(m)) => {
-                let client = gemini::Client::new(api_key)
+                let client = gemini::Client::new(&api_key)
                     .map_err(|e| Error::provider("gemini", e.to_string()))?;
                 EmbeddingService::Gemini {
                     model: client.embedding_model_with_ndims(m.as_ref(), m.dimensions()),
@@ -89,7 +91,7 @@ impl EmbeddingProvider {
             (EmbeddingCredentials::Ollama { base_url }, EmbeddingModel::Ollama(m)) => {
                 let client = ollama::Client::builder()
                     .api_key(Nothing)
-                    .base_url(base_url)
+                    .base_url(&base_url)
                     .build()
                     .map_err(|e| Error::provider("ollama", e.to_string()))?;
                 EmbeddingService::Ollama {
@@ -99,14 +101,21 @@ impl EmbeddingProvider {
                 }
             }
             #[allow(unreachable_patterns)]
-            _ => return Err(Error::config("mismatched credentials and model provider")),
+            _ => return Err(Error::config("mismatched credentials and model provider").into()),
         };
         Ok(Self(Arc::new(inner)))
+    }
+}
+
+impl EmbeddingProvider {
+    /// Returns a reference to the inner provider.
+    pub(crate) fn inner(&self) -> &EmbeddingService {
+        &self.0
     }
 
     /// Creates an Ollama embedding provider (convenience for local development).
     #[cfg(feature = "ollama")]
-    pub fn ollama(base_url: &str, model: OllamaEmbeddingModel) -> Result<Self> {
+    pub fn ollama(base_url: &str, model: OllamaEmbeddingModel) -> nvisy_core::Result<Self> {
         let client = ollama::Client::builder()
             .api_key(Nothing)
             .base_url(base_url)
@@ -144,10 +153,10 @@ impl EmbeddingProvider {
     /// Embed a single text document.
     ///
     /// This is a convenience method that delegates to the trait implementation.
-    pub async fn embed_text(&self, text: &str) -> Result<Embedding> {
+    pub async fn embed_text(&self, text: &str) -> nvisy_core::Result<Embedding> {
         RigEmbeddingModel::embed_text(self, text)
             .await
-            .map_err(|e| Error::provider(self.provider_name(), e.to_string()))
+            .map_err(|e| Error::provider(self.provider_name(), e.to_string()).into())
     }
 
     /// Embed multiple text documents.
@@ -156,10 +165,10 @@ impl EmbeddingProvider {
     pub async fn embed_texts(
         &self,
         texts: impl IntoIterator<Item = String> + Send,
-    ) -> Result<Vec<Embedding>> {
+    ) -> nvisy_core::Result<Vec<Embedding>> {
         RigEmbeddingModel::embed_texts(self, texts)
             .await
-            .map_err(|e| Error::provider(self.provider_name(), e.to_string()))
+            .map_err(|e| Error::provider(self.provider_name(), e.to_string()).into())
     }
 }
 

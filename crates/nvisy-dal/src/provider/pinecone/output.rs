@@ -15,7 +15,7 @@ impl DataOutput for PineconeProvider {
     async fn write(&self, items: Vec<Embedding>) -> Result<()> {
         let namespace = self
             .namespace()
-            .map(|ns| pinecone_sdk::models::Namespace::from(ns))
+            .map(pinecone_sdk::models::Namespace::from)
             .unwrap_or_default();
 
         let pinecone_vectors: Vec<Vector> = items

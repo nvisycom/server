@@ -79,7 +79,11 @@ impl Indexer {
         let chunk_count = texts.len();
 
         tracing::debug!(chunk_count, "embedding chunks");
-        let embeddings = self.provider.embed_texts(texts).await?;
+        let embeddings = self
+            .provider
+            .embed_texts(texts)
+            .await
+            .map_err(|e| Error::provider("embedding", e.to_string()))?;
 
         if embeddings.len() != chunk_count {
             return Err(Error::config(format!(

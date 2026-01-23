@@ -12,11 +12,11 @@
 
 use std::collections::HashMap;
 
-use super::context::Context;
 use nvisy_rig::agent::Agents;
 use nvisy_rig::provider::CompletionProvider;
 use petgraph::graph::{DiGraph, NodeIndex};
 
+use super::context::Context;
 use crate::definition::{Input, NodeId, NodeKind, Output, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{
@@ -26,7 +26,7 @@ use crate::graph::{
 };
 use crate::provider::{
     CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProvider,
-    InputProviderParams, IntoProvider, OutputProviderParams,
+    InputProviderConfig, OutputProviderConfig,
 };
 
 /// Workflow compiler that transforms definitions into executable graphs.
@@ -246,13 +246,13 @@ impl<'a> WorkflowCompiler<'a> {
         }
     }
 
-    /// Creates an input stream from provider parameters.
+    /// Creates an input stream from provider configuration.
     async fn create_provider_input_stream(
         &self,
-        params: &InputProviderParams,
+        config: &InputProviderConfig,
     ) -> Result<InputStream> {
-        let creds = self.registry.get(params.credentials_id())?;
-        let provider = params.clone().into_provider(creds.clone()).await?;
+        let creds = self.registry.get(config.credentials_id)?;
+        let provider = config.params.clone().into_provider(creds.clone()).await?;
 
         let stream = self.read_from_provider(&provider).await?;
 
@@ -299,13 +299,13 @@ impl<'a> WorkflowCompiler<'a> {
         }
     }
 
-    /// Creates an output stream from provider parameters.
+    /// Creates an output stream from provider configuration.
     async fn create_provider_output_stream(
         &self,
-        params: &OutputProviderParams,
+        config: &OutputProviderConfig,
     ) -> Result<OutputStream> {
-        let creds = self.registry.get(params.credentials_id())?;
-        let provider = params.clone().into_provider(creds.clone()).await?;
+        let creds = self.registry.get(config.credentials_id)?;
+        let provider = config.params.clone().into_provider(creds.clone()).await?;
         let sink = provider.write_sink();
 
         Ok(OutputStream::new(sink))

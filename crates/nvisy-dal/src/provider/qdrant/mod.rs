@@ -5,7 +5,7 @@ mod output;
 
 use std::collections::HashMap;
 
-pub use config::QdrantConfig;
+pub use config::{QdrantCredentials, QdrantParams};
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::vectors_config::Config as VectorsConfig;
 use qdrant_client::qdrant::with_payload_selector::SelectorOptions;
@@ -15,28 +15,34 @@ use qdrant_client::qdrant::{
     VectorParamsBuilder,
 };
 
+use crate::core::IntoProvider;
 use crate::error::{Error, Result};
 
 /// Qdrant provider for vector storage.
 pub struct QdrantProvider {
     client: Qdrant,
-    config: QdrantConfig,
+    params: QdrantParams,
 }
 
-impl QdrantProvider {
-    /// Creates a new Qdrant provider.
-    pub async fn new(config: &QdrantConfig) -> Result<Self> {
-        let client = Qdrant::from_url(&config.url)
-            .api_key(config.api_key.clone())
+#[async_trait::async_trait]
+impl IntoProvider for QdrantProvider {
+    type Credentials = QdrantCredentials;
+    type Params = QdrantParams;
+
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let client = Qdrant::from_url(&credentials.url)
+            .api_key(credentials.api_key)
             .build()
             .map_err(|e| Error::connection(e.to_string()))?;
 
-        Ok(Self {
-            client,
-            config: config.clone(),
-        })
+        Ok(Self { client, params })
     }
+}
 
+impl QdrantProvider {
     /// Ensures a collection exists, creating it if necessary.
     pub(crate) async fn ensure_collection(&self, name: &str, dimensions: usize) -> Result<()> {
         let exists = self
@@ -62,8 +68,8 @@ impl QdrantProvider {
     }
 
     /// Returns the configured collection name.
-    pub fn collection(&self) -> Option<&str> {
-        self.config.collection.as_deref()
+    pub fn collection(&self) -> &str {
+        &self.params.collection
     }
 
     /// Searches for similar vectors.

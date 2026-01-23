@@ -4,11 +4,11 @@ mod config;
 mod input;
 mod output;
 
-pub use config::MysqlConfig;
-
+pub use config::{MysqlCredentials, MysqlParams};
 use opendal::{Operator, services};
 
-use crate::error::{Error, Result};
+use crate::core::IntoProvider;
+use crate::error::Error;
 
 /// MySQL provider for relational data.
 #[derive(Clone)]
@@ -16,17 +16,21 @@ pub struct MysqlProvider {
     operator: Operator,
 }
 
-impl MysqlProvider {
-    /// Creates a new MySQL provider.
-    pub fn new(config: &MysqlConfig) -> Result<Self> {
-        let mut builder = services::Mysql::default().connection_string(&config.connection_string);
+#[async_trait::async_trait]
+impl IntoProvider for MysqlProvider {
+    type Credentials = MysqlCredentials;
+    type Params = MysqlParams;
 
-        if let Some(ref table) = config.table {
-            builder = builder.table(table);
-        }
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let mut builder = services::Mysql::default()
+            .connection_string(&credentials.connection_string)
+            .table(&params.table);
 
-        if let Some(ref root) = config.database {
-            builder = builder.root(root);
+        if let Some(ref database) = params.database {
+            builder = builder.root(database);
         }
 
         let operator = Operator::new(builder)

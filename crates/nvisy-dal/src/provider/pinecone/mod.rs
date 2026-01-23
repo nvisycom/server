@@ -5,25 +5,32 @@ mod output;
 
 use std::collections::{BTreeMap, HashMap};
 
-pub use config::PineconeConfig;
+pub use config::{PineconeCredentials, PineconeParams};
 use pinecone_sdk::models::{Kind, Metadata, Namespace, Value as PineconeValue};
 use pinecone_sdk::pinecone::PineconeClientConfig;
 use pinecone_sdk::pinecone::data::Index;
 use tokio::sync::Mutex;
 
+use crate::core::IntoProvider;
 use crate::error::{Error, Result};
 
 /// Pinecone provider for vector storage.
 pub struct PineconeProvider {
     index: Mutex<Index>,
-    config: PineconeConfig,
+    params: PineconeParams,
 }
 
-impl PineconeProvider {
-    /// Creates a new Pinecone provider.
-    pub async fn new(config: &PineconeConfig) -> Result<Self> {
+#[async_trait::async_trait]
+impl IntoProvider for PineconeProvider {
+    type Credentials = PineconeCredentials;
+    type Params = PineconeParams;
+
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
         let client_config = PineconeClientConfig {
-            api_key: Some(config.api_key.clone()),
+            api_key: Some(credentials.api_key),
             ..Default::default()
         };
 
@@ -32,7 +39,7 @@ impl PineconeProvider {
             .map_err(|e| Error::connection(e.to_string()))?;
 
         let index_description = client
-            .describe_index(&config.index)
+            .describe_index(&params.index)
             .await
             .map_err(|e| Error::connection(format!("Failed to describe index: {}", e)))?;
 
@@ -45,13 +52,15 @@ impl PineconeProvider {
 
         Ok(Self {
             index: Mutex::new(index),
-            config: config.clone(),
+            params,
         })
     }
+}
 
+impl PineconeProvider {
     pub(crate) fn get_namespace(&self, collection: &str) -> Namespace {
         if collection.is_empty() {
-            self.config
+            self.params
                 .namespace
                 .as_ref()
                 .map(|ns| Namespace::from(ns.as_str()))
@@ -63,7 +72,7 @@ impl PineconeProvider {
 
     /// Returns the configured namespace.
     pub fn namespace(&self) -> Option<&str> {
-        self.config.namespace.as_deref()
+        self.params.namespace.as_deref()
     }
 
     /// Searches for similar vectors.

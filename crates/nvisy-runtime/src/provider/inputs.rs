@@ -1,18 +1,52 @@
 //! Input provider types and implementations.
 
 use derive_more::From;
+use nvisy_dal::core::IntoProvider as DalIntoProvider;
 use nvisy_dal::provider::{
-    AzblobProvider, GcsProvider, MysqlProvider, PostgresProvider, S3Provider,
+    AzblobParams, AzblobProvider, GcsParams, GcsProvider, MysqlParams, MysqlProvider,
+    PostgresParams, PostgresProvider, S3Params, S3Provider,
 };
 use nvisy_dal::{AnyDataValue, DataTypeId, ObjectContext, RelationalContext};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::ProviderCredentials;
-use super::backend::{
-    AzblobParams, GcsParams, IntoProvider, MysqlParams, PostgresParams, S3Params,
-};
 use crate::error::{Error, Result};
+
+/// Input provider configuration (credentials reference + params).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InputProviderConfig {
+    /// Reference to stored credentials.
+    pub credentials_id: Uuid,
+    /// Provider-specific parameters.
+    #[serde(flatten)]
+    pub params: InputProviderParams,
+}
+
+impl InputProviderConfig {
+    /// Creates a new input provider configuration.
+    pub fn new(credentials_id: Uuid, params: InputProviderParams) -> Self {
+        Self {
+            credentials_id,
+            params,
+        }
+    }
+
+    /// Returns the provider kind as a string.
+    pub const fn kind(&self) -> &'static str {
+        self.params.kind()
+    }
+
+    /// Returns the output data type for this provider.
+    pub const fn output_type(&self) -> DataTypeId {
+        self.params.output_type()
+    }
+
+    /// Creates an input provider from this configuration and credentials.
+    pub async fn into_provider(self, credentials: ProviderCredentials) -> Result<InputProvider> {
+        self.params.into_provider(credentials).await
+    }
+}
 
 /// Input provider parameters (storage backends only, no vector DBs).
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
@@ -31,17 +65,6 @@ pub enum InputProviderParams {
 }
 
 impl InputProviderParams {
-    /// Returns the credentials ID for this provider.
-    pub fn credentials_id(&self) -> Uuid {
-        match self {
-            Self::S3(p) => p.credentials_id,
-            Self::Gcs(p) => p.credentials_id,
-            Self::Azblob(p) => p.credentials_id,
-            Self::Postgres(p) => p.credentials_id,
-            Self::Mysql(p) => p.credentials_id,
-        }
-    }
-
     /// Returns the provider kind as a string.
     pub const fn kind(&self) -> &'static str {
         match self {
@@ -60,30 +83,35 @@ impl InputProviderParams {
             Self::Postgres(_) | Self::Mysql(_) => DataTypeId::Record,
         }
     }
-}
 
-#[async_trait::async_trait]
-impl IntoProvider for InputProviderParams {
-    type Credentials = ProviderCredentials;
-    type Output = InputProvider;
-
-    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
+    /// Creates an input provider from these params and credentials.
+    pub async fn into_provider(self, credentials: ProviderCredentials) -> Result<InputProvider> {
         match (self, credentials) {
-            (Self::S3(p), ProviderCredentials::S3(c)) => {
-                Ok(InputProvider::S3(p.into_provider(c).await?))
-            }
-            (Self::Gcs(p), ProviderCredentials::Gcs(c)) => {
-                Ok(InputProvider::Gcs(p.into_provider(c).await?))
-            }
-            (Self::Azblob(p), ProviderCredentials::Azblob(c)) => {
-                Ok(InputProvider::Azblob(p.into_provider(c).await?))
-            }
-            (Self::Postgres(p), ProviderCredentials::Postgres(c)) => {
-                Ok(InputProvider::Postgres(p.into_provider(c).await?))
-            }
-            (Self::Mysql(p), ProviderCredentials::Mysql(c)) => {
-                Ok(InputProvider::Mysql(p.into_provider(c).await?))
-            }
+            (Self::S3(p), ProviderCredentials::S3(c)) => Ok(InputProvider::S3(
+                S3Provider::create(p, c)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?,
+            )),
+            (Self::Gcs(p), ProviderCredentials::Gcs(c)) => Ok(InputProvider::Gcs(
+                GcsProvider::create(p, c)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?,
+            )),
+            (Self::Azblob(p), ProviderCredentials::Azblob(c)) => Ok(InputProvider::Azblob(
+                AzblobProvider::create(p, c)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?,
+            )),
+            (Self::Postgres(p), ProviderCredentials::Postgres(c)) => Ok(InputProvider::Postgres(
+                PostgresProvider::create(p, c)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?,
+            )),
+            (Self::Mysql(p), ProviderCredentials::Mysql(c)) => Ok(InputProvider::Mysql(
+                MysqlProvider::create(p, c)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?,
+            )),
             (params, creds) => Err(Error::Internal(format!(
                 "credentials type mismatch: expected '{}', got '{}'",
                 params.kind(),

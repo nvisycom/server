@@ -3,13 +3,14 @@
 //! This module separates provider configuration into:
 //! - [`ProviderCredentials`]: Sensitive credentials (stored per workspace)
 //! - [`AiCredentials`]: AI provider credentials (stored per workspace)
+//! - [`InputProviderConfig`] / [`OutputProviderConfig`]: Config with credentials reference + params
 //! - [`InputProviderParams`] / [`OutputProviderParams`]: Non-sensitive parameters (part of node definition)
 //! - [`CompletionProviderParams`] / [`EmbeddingProviderParams`]: AI provider parameters
 //! - [`CredentialsRegistry`]: In-memory registry for credentials lookup
 //!
 //! # Module Structure
 //!
-//! - [`backend`]: Individual provider implementations (credentials + params)
+//! - [`backend`]: Re-exports from nvisy_dal + local AI provider implementations
 
 mod ai;
 pub mod backend;
@@ -19,7 +20,6 @@ mod registry;
 pub mod runtime;
 
 pub use ai::{AiCredentials, CompletionProviderParams, EmbeddingProviderParams};
-pub use backend::IntoProvider;
 use backend::{
     AnthropicCredentials, AzblobCredentials, CohereCredentials, GcsCredentials, GeminiCredentials,
     MilvusCredentials, MysqlCredentials, OpenAiCredentials, PerplexityCredentials,
@@ -27,8 +27,8 @@ use backend::{
     S3Credentials,
 };
 use derive_more::From;
-pub use inputs::{InputProvider, InputProviderParams};
-pub use outputs::{OutputProvider, OutputProviderParams};
+pub use inputs::{InputProvider, InputProviderConfig, InputProviderParams};
+pub use outputs::{OutputProvider, OutputProviderConfig, OutputProviderParams};
 pub use registry::CredentialsRegistry;
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;

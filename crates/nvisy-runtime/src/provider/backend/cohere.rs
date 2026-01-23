@@ -1,12 +1,13 @@
 //! Cohere provider.
 
+use nvisy_core::IntoProvider;
 use nvisy_rig::provider::{
     CohereCompletionModel, CohereEmbeddingModel, CompletionProvider, EmbeddingProvider,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::IntoProvider;
+use super::IntoAiProvider;
 use crate::error::{Error, Result};
 
 /// Cohere credentials.
@@ -36,7 +37,7 @@ impl CohereCompletionParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for CohereCompletionParams {
+impl IntoAiProvider for CohereCompletionParams {
     type Credentials = CohereCredentials;
     type Output = CompletionProvider;
 
@@ -45,7 +46,9 @@ impl IntoProvider for CohereCompletionParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::Cohere(self.model);
-        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        CompletionProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }
 
@@ -69,7 +72,7 @@ impl CohereEmbeddingParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for CohereEmbeddingParams {
+impl IntoAiProvider for CohereEmbeddingParams {
     type Credentials = CohereCredentials;
     type Output = EmbeddingProvider;
 
@@ -78,6 +81,8 @@ impl IntoProvider for CohereEmbeddingParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::EmbeddingModel::Cohere(self.model);
-        EmbeddingProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        EmbeddingProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

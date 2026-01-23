@@ -1,10 +1,11 @@
 //! Perplexity provider.
 
+use nvisy_core::IntoProvider;
 use nvisy_rig::provider::{CompletionProvider, PerplexityModel};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::IntoProvider;
+use super::IntoAiProvider;
 use crate::error::{Error, Result};
 
 /// Perplexity credentials.
@@ -34,7 +35,7 @@ impl PerplexityCompletionParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for PerplexityCompletionParams {
+impl IntoAiProvider for PerplexityCompletionParams {
     type Credentials = PerplexityCredentials;
     type Output = CompletionProvider;
 
@@ -43,6 +44,8 @@ impl IntoProvider for PerplexityCompletionParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::Perplexity(self.model);
-        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        CompletionProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

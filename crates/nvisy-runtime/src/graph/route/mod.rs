@@ -5,7 +5,6 @@ mod language;
 
 pub use file_category::FileCategoryEvaluator;
 pub use language::LanguageEvaluator;
-
 use nvisy_dal::AnyDataValue;
 
 use crate::definition::SwitchDef;

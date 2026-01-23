@@ -4,11 +4,11 @@ mod config;
 mod input;
 mod output;
 
-pub use config::PostgresConfig;
-
+pub use config::{PostgresCredentials, PostgresParams};
 use opendal::{Operator, services};
 
-use crate::error::{Error, Result};
+use crate::core::IntoProvider;
+use crate::error::Error;
 
 /// PostgreSQL provider for relational data.
 #[derive(Clone)]
@@ -16,18 +16,21 @@ pub struct PostgresProvider {
     operator: Operator,
 }
 
-impl PostgresProvider {
-    /// Creates a new PostgreSQL provider.
-    pub fn new(config: &PostgresConfig) -> Result<Self> {
-        let mut builder =
-            services::Postgresql::default().connection_string(&config.connection_string);
+#[async_trait::async_trait]
+impl IntoProvider for PostgresProvider {
+    type Credentials = PostgresCredentials;
+    type Params = PostgresParams;
 
-        if let Some(ref table) = config.table {
-            builder = builder.table(table);
-        }
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let mut builder = services::Postgresql::default()
+            .connection_string(&credentials.connection_string)
+            .table(&params.table);
 
-        if let Some(ref root) = config.schema {
-            builder = builder.root(root);
+        if let Some(ref schema) = params.schema {
+            builder = builder.root(schema);
         }
 
         let operator = Operator::new(builder)

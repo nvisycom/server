@@ -1,7 +1,5 @@
 //! Error types for data operations.
 
-use thiserror::Error;
-
 /// Boxed error type for dynamic error handling.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -9,7 +7,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Error type for data operations.
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[error("{kind}: {message}")]
 pub struct Error {
     kind: ErrorKind,
@@ -81,5 +79,20 @@ impl std::fmt::Display for ErrorKind {
             Self::InvalidInput => write!(f, "invalid input"),
             Self::Provider => write!(f, "provider"),
         }
+    }
+}
+
+impl From<Error> for nvisy_core::Error {
+    fn from(err: Error) -> Self {
+        let kind = match err.kind {
+            ErrorKind::Connection => nvisy_core::ErrorKind::NetworkError,
+            ErrorKind::NotFound => nvisy_core::ErrorKind::NotFound,
+            ErrorKind::InvalidInput => nvisy_core::ErrorKind::InvalidInput,
+            ErrorKind::Provider => nvisy_core::ErrorKind::ExternalError,
+        };
+
+        nvisy_core::Error::new(kind)
+            .with_message(&err.message)
+            .with_source(err)
     }
 }

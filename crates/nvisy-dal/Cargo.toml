@@ -21,6 +21,9 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+# Internal crates
+nvisy-core = { workspace = true, features = [] }
+
 # Async runtime
 tokio = { workspace = true, features = ["rt", "sync"] }
 futures = { workspace = true, features = [] }

@@ -6,39 +6,45 @@ mod output;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-pub use config::MilvusConfig;
+pub use config::{MilvusCredentials, MilvusParams};
 use milvus::client::Client;
 use milvus::collection::SearchOption;
 use milvus::index::{IndexParams, IndexType, MetricType};
 use milvus::schema::{CollectionSchemaBuilder, FieldSchema};
 use milvus::value::Value;
 
+use crate::core::IntoProvider;
 use crate::error::{Error, Result};
 
 /// Milvus provider for vector storage.
 pub struct MilvusProvider {
     client: Client,
-    config: MilvusConfig,
+    params: MilvusParams,
 }
 
-impl MilvusProvider {
-    /// Creates a new Milvus provider.
-    pub async fn new(config: &MilvusConfig) -> Result<Self> {
-        let url = format!("http://{}:{}", config.host, config.port);
+#[async_trait::async_trait]
+impl IntoProvider for MilvusProvider {
+    type Credentials = MilvusCredentials;
+    type Params = MilvusParams;
+
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let url = format!("http://{}:{}", credentials.host, credentials.port);
 
         let client = Client::new(url)
             .await
             .map_err(|e| Error::connection(e.to_string()))?;
 
-        Ok(Self {
-            client,
-            config: config.clone(),
-        })
+        Ok(Self { client, params })
     }
+}
 
+impl MilvusProvider {
     /// Returns the configured collection name.
-    pub fn collection(&self) -> Option<&str> {
-        self.config.collection.as_deref()
+    pub fn collection(&self) -> &str {
+        &self.params.collection
     }
 
     /// Ensures a collection exists, creating it if necessary.

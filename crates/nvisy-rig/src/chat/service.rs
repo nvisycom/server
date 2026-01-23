@@ -6,11 +6,11 @@ use nvisy_nats::NatsClient;
 use uuid::Uuid;
 
 use super::ChatStream;
-use crate::Result;
 use crate::provider::{CompletionModel, EmbeddingProvider};
 use crate::session::{CreateSession, Session, SessionStore};
 use crate::tool::ToolRegistry;
 use crate::tool::edit::ApplyResult;
+use crate::{Error, Result};
 
 /// Inner state for [`ChatService`].
 struct ChatServiceInner {
@@ -137,7 +137,12 @@ impl ChatService {
 
     /// Generates embeddings for text.
     pub async fn embed(&self, text: &str) -> Result<Vec<f64>> {
-        let embedding = self.inner.embedding_provider.embed_text(text).await?;
+        let embedding = self
+            .inner
+            .embedding_provider
+            .embed_text(text)
+            .await
+            .map_err(|e| Error::provider("embedding", e.to_string()))?;
         Ok(embedding.vec)
     }
 

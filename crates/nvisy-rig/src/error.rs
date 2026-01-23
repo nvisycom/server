@@ -78,3 +78,25 @@ impl Error {
         matches!(self, Self::Provider { .. })
     }
 }
+
+impl From<Error> for nvisy_core::Error {
+    fn from(err: Error) -> Self {
+        let (kind, message) = match &err {
+            Error::Provider { provider, message } => (
+                nvisy_core::ErrorKind::ExternalError,
+                format!("{}: {}", provider, message),
+            ),
+            Error::Session(msg) => (nvisy_core::ErrorKind::InvalidInput, msg.clone()),
+            Error::Retrieval(msg) => (nvisy_core::ErrorKind::ExternalError, msg.clone()),
+            Error::Embedding(_) => (nvisy_core::ErrorKind::ExternalError, err.to_string()),
+            Error::Completion(_) => (nvisy_core::ErrorKind::ExternalError, err.to_string()),
+            Error::Prompt(_) => (nvisy_core::ErrorKind::InvalidInput, err.to_string()),
+            Error::Config(msg) => (nvisy_core::ErrorKind::Configuration, msg.clone()),
+            Error::Parse(msg) => (nvisy_core::ErrorKind::Serialization, msg.clone()),
+        };
+
+        nvisy_core::Error::new(kind)
+            .with_message(message)
+            .with_source(err)
+    }
+}

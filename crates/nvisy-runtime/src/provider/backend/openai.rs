@@ -1,12 +1,13 @@
 //! OpenAI provider.
 
+use nvisy_core::IntoProvider;
 use nvisy_rig::provider::{
     CompletionProvider, EmbeddingProvider, OpenAiCompletionModel, OpenAiEmbeddingModel,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::IntoProvider;
+use super::IntoAiProvider;
 use crate::error::{Error, Result};
 
 /// OpenAI credentials.
@@ -36,7 +37,7 @@ impl OpenAiCompletionParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for OpenAiCompletionParams {
+impl IntoAiProvider for OpenAiCompletionParams {
     type Credentials = OpenAiCredentials;
     type Output = CompletionProvider;
 
@@ -45,7 +46,9 @@ impl IntoProvider for OpenAiCompletionParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::OpenAi(self.model);
-        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        CompletionProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }
 
@@ -69,7 +72,7 @@ impl OpenAiEmbeddingParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for OpenAiEmbeddingParams {
+impl IntoAiProvider for OpenAiEmbeddingParams {
     type Credentials = OpenAiCredentials;
     type Output = EmbeddingProvider;
 
@@ -78,6 +81,8 @@ impl IntoProvider for OpenAiEmbeddingParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::EmbeddingModel::OpenAi(self.model);
-        EmbeddingProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        EmbeddingProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

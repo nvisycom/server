@@ -4,11 +4,11 @@ mod config;
 mod input;
 mod output;
 
-pub use config::GcsConfig;
-
+pub use config::{GcsCredentials, GcsParams};
 use opendal::{Operator, services};
 
-use crate::error::{Error, Result};
+use crate::core::IntoProvider;
+use crate::error::Error;
 
 /// Google Cloud Storage provider for blob storage.
 #[derive(Clone)]
@@ -16,16 +16,20 @@ pub struct GcsProvider {
     operator: Operator,
 }
 
-impl GcsProvider {
-    /// Creates a new GCS provider.
-    pub fn new(config: &GcsConfig) -> Result<Self> {
-        let mut builder = services::Gcs::default().bucket(&config.bucket);
+#[async_trait::async_trait]
+impl IntoProvider for GcsProvider {
+    type Credentials = GcsCredentials;
+    type Params = GcsParams;
 
-        if let Some(ref credentials) = config.credentials {
-            builder = builder.credential(credentials);
-        }
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let mut builder = services::Gcs::default()
+            .bucket(&params.bucket)
+            .credential(&credentials.credentials_json);
 
-        if let Some(ref prefix) = config.prefix {
+        if let Some(ref prefix) = params.prefix {
             builder = builder.root(prefix);
         }
 

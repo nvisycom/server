@@ -5,26 +5,33 @@ mod output;
 
 use std::collections::HashMap;
 
-pub use config::{DistanceMetric, IndexType, PgVectorConfig};
+pub use config::{DistanceMetric, IndexType, PgVectorCredentials, PgVectorParams};
 use diesel::prelude::*;
 use diesel::sql_types::{Float, Integer, Text};
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
+use crate::core::IntoProvider;
 use crate::error::{Error, Result};
 
 /// pgvector provider for vector storage using PostgreSQL.
 pub struct PgVectorProvider {
     pool: Pool<AsyncPgConnection>,
-    config: PgVectorConfig,
+    params: PgVectorParams,
 }
 
-impl PgVectorProvider {
-    /// Creates a new pgvector provider.
-    pub async fn new(config: &PgVectorConfig) -> Result<Self> {
+#[async_trait::async_trait]
+impl IntoProvider for PgVectorProvider {
+    type Credentials = PgVectorCredentials;
+    type Params = PgVectorParams;
+
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
         let manager =
-            AsyncDieselConnectionManager::<AsyncPgConnection>::new(&config.connection_url);
+            AsyncDieselConnectionManager::<AsyncPgConnection>::new(&credentials.connection_url);
 
         let pool = Pool::builder(manager)
             .build()
@@ -44,15 +51,14 @@ impl PgVectorProvider {
                 })?;
         }
 
-        Ok(Self {
-            pool,
-            config: config.clone(),
-        })
+        Ok(Self { pool, params })
     }
+}
 
+impl PgVectorProvider {
     /// Returns the configured table name.
     pub fn table(&self) -> &str {
-        &self.config.table
+        &self.params.table
     }
 
     pub(crate) async fn get_conn(
@@ -65,7 +71,7 @@ impl PgVectorProvider {
     }
 
     pub(crate) fn distance_operator(&self) -> &'static str {
-        self.config.distance_metric.operator()
+        self.params.distance_metric.operator()
     }
 
     /// Ensures a collection (table) exists, creating it if necessary.
@@ -92,7 +98,7 @@ impl PgVectorProvider {
         let index_name = format!("{}_vector_idx", name);
         let operator = self.distance_operator();
 
-        let create_index = match self.config.index_type {
+        let create_index = match self.params.index_type {
             IndexType::IvfFlat => {
                 format!(
                     r#"
@@ -149,7 +155,7 @@ impl PgVectorProvider {
             ""
         };
 
-        let score_expr = match self.config.distance_metric {
+        let score_expr = match self.params.distance_metric {
             DistanceMetric::L2 => format!("vector {} $1::vector", operator),
             DistanceMetric::InnerProduct => format!("-(vector {} $1::vector)", operator),
             DistanceMetric::Cosine => format!("1 - (vector {} $1::vector)", operator),

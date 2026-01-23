@@ -10,8 +10,8 @@ use crate::error::{Error, Result};
 
 #[async_trait]
 impl DataInput for GcsProvider {
-    type Item = Blob;
     type Context = ObjectContext;
+    type Item = Blob;
 
     async fn read(&self, ctx: &ObjectContext) -> Result<InputStream<Blob>> {
         let prefix = ctx.prefix.as_deref().unwrap_or("");

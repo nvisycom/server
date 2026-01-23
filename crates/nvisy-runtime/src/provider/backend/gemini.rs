@@ -1,12 +1,13 @@
 //! Google Gemini provider.
 
+use nvisy_core::IntoProvider;
 use nvisy_rig::provider::{
     CompletionProvider, EmbeddingProvider, GeminiCompletionModel, GeminiEmbeddingModel,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::IntoProvider;
+use super::IntoAiProvider;
 use crate::error::{Error, Result};
 
 /// Gemini credentials.
@@ -36,7 +37,7 @@ impl GeminiCompletionParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for GeminiCompletionParams {
+impl IntoAiProvider for GeminiCompletionParams {
     type Credentials = GeminiCredentials;
     type Output = CompletionProvider;
 
@@ -45,7 +46,9 @@ impl IntoProvider for GeminiCompletionParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::Gemini(self.model);
-        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        CompletionProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }
 
@@ -69,7 +72,7 @@ impl GeminiEmbeddingParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for GeminiEmbeddingParams {
+impl IntoAiProvider for GeminiEmbeddingParams {
     type Credentials = GeminiCredentials;
     type Output = EmbeddingProvider;
 
@@ -78,6 +81,8 @@ impl IntoProvider for GeminiEmbeddingParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::EmbeddingModel::Gemini(self.model);
-        EmbeddingProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        EmbeddingProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

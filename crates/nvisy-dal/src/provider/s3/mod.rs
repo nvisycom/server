@@ -4,11 +4,11 @@ mod config;
 mod input;
 mod output;
 
-pub use config::S3Config;
-
+pub use config::{S3Credentials, S3Params};
 use opendal::{Operator, services};
 
-use crate::error::{Error, Result};
+use crate::core::IntoProvider;
+use crate::error::Error;
 
 /// Amazon S3 provider for blob storage.
 #[derive(Clone)]
@@ -16,26 +16,26 @@ pub struct S3Provider {
     operator: Operator,
 }
 
-impl S3Provider {
-    /// Creates a new S3 provider.
-    pub fn new(config: &S3Config) -> Result<Self> {
-        let mut builder = services::S3::default()
-            .bucket(&config.bucket)
-            .region(&config.region);
+#[async_trait::async_trait]
+impl IntoProvider for S3Provider {
+    type Credentials = S3Credentials;
+    type Params = S3Params;
 
-        if let Some(ref endpoint) = config.endpoint {
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let mut builder = services::S3::default()
+            .bucket(&params.bucket)
+            .region(&credentials.region)
+            .access_key_id(&credentials.access_key_id)
+            .secret_access_key(&credentials.secret_access_key);
+
+        if let Some(ref endpoint) = credentials.endpoint {
             builder = builder.endpoint(endpoint);
         }
 
-        if let Some(ref access_key_id) = config.access_key_id {
-            builder = builder.access_key_id(access_key_id);
-        }
-
-        if let Some(ref secret_access_key) = config.secret_access_key {
-            builder = builder.secret_access_key(secret_access_key);
-        }
-
-        if let Some(ref prefix) = config.prefix {
+        if let Some(ref prefix) = params.prefix {
             builder = builder.root(prefix);
         }
 

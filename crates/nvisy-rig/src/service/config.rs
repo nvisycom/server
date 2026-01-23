@@ -5,8 +5,6 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ollama")]
-use crate::Result;
-#[cfg(feature = "ollama")]
 use crate::provider::{EmbeddingProvider, OllamaEmbeddingModel};
 
 /// Configuration for AI services (chat and RAG).
@@ -62,7 +60,7 @@ impl Default for RigConfig {
 #[cfg(feature = "ollama")]
 impl RigConfig {
     /// Creates an Ollama embedding provider from this configuration.
-    pub(crate) fn embedding_provider(&self) -> Result<EmbeddingProvider> {
+    pub(crate) fn embedding_provider(&self) -> nvisy_core::Result<EmbeddingProvider> {
         let model = OllamaEmbeddingModel::new(
             &self.ollama_embedding_model,
             self.ollama_embedding_dimensions,

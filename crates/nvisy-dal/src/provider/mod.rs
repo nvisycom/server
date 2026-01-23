@@ -10,12 +10,17 @@ mod postgres;
 mod qdrant;
 mod s3;
 
-pub use azblob::{AzblobConfig, AzblobProvider};
-pub use gcs::{GcsConfig, GcsProvider};
-pub use milvus::{MilvusConfig, MilvusProvider};
-pub use mysql::{MysqlConfig, MysqlProvider};
-pub use pgvector::{DistanceMetric, IndexType, PgVectorConfig, PgVectorProvider};
-pub use pinecone::{PineconeConfig, PineconeProvider};
-pub use postgres::{PostgresConfig, PostgresProvider};
-pub use qdrant::{QdrantConfig, QdrantProvider};
-pub use s3::{S3Config, S3Provider};
+// Object storage providers
+pub use azblob::{AzblobCredentials, AzblobParams, AzblobProvider};
+pub use gcs::{GcsCredentials, GcsParams, GcsProvider};
+// Vector database providers
+pub use milvus::{MilvusCredentials, MilvusParams, MilvusProvider};
+// Relational database providers
+pub use mysql::{MysqlCredentials, MysqlParams, MysqlProvider};
+pub use pgvector::{
+    DistanceMetric, IndexType, PgVectorCredentials, PgVectorParams, PgVectorProvider,
+};
+pub use pinecone::{PineconeCredentials, PineconeParams, PineconeProvider};
+pub use postgres::{PostgresCredentials, PostgresParams, PostgresProvider};
+pub use qdrant::{QdrantCredentials, QdrantParams, QdrantProvider};
+pub use s3::{S3Credentials, S3Params, S3Provider};

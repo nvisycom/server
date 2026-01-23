@@ -24,6 +24,9 @@ default = []
 schema = ["dep:schemars"]
 
 [dependencies]
+# Async
+async-trait = { workspace = true }
+
 # Error handling
 thiserror = { workspace = true }
 

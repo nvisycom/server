@@ -2,13 +2,12 @@
 
 use std::sync::Arc;
 
-use super::context::Context;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::Semaphore;
 
 use super::EngineConfig;
 use super::compiler::WorkflowCompiler;
-use super::context::ExecutionContext;
+use super::context::{Context, ExecutionContext};
 use crate::definition::{NodeId, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};

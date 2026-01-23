@@ -3,13 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::route::CacheSlot;
-use crate::provider::OutputProviderParams;
+use crate::provider::OutputProviderConfig;
 
 /// Output provider definition for workflow nodes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutputProvider {
-    /// Provider parameters (contains credentials_id).
-    pub provider: OutputProviderParams,
+    /// Provider configuration (credentials_id + params).
+    #[serde(flatten)]
+    pub provider: OutputProviderConfig,
 }
 
 /// Output node definition - destination for workflow data.
@@ -23,8 +24,8 @@ pub enum Output {
 }
 
 impl Output {
-    /// Creates a new output from a provider.
-    pub fn from_provider(provider: OutputProviderParams) -> Self {
+    /// Creates a new output from a provider configuration.
+    pub fn from_provider(provider: OutputProviderConfig) -> Self {
         Self::Provider(OutputProvider { provider })
     }
 

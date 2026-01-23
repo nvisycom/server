@@ -12,8 +12,8 @@ use crate::error::{Error, Result};
 
 #[async_trait]
 impl DataInput for PostgresProvider {
-    type Item = Record;
     type Context = RelationalContext;
+    type Item = Record;
 
     async fn read(&self, ctx: &RelationalContext) -> Result<InputStream<Record>> {
         let prefix = ctx.table.as_deref().unwrap_or("");

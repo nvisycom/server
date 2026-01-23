@@ -1,21 +1,22 @@
 //! Backend provider implementations.
 //!
-//! Each provider file contains credentials and params for a specific backend:
+//! Storage and vector database providers are re-exported from `nvisy_dal`.
+//! AI providers are defined locally in this module.
 //!
-//! ## Storage backends
+//! ## Storage backends (from nvisy_dal)
 //! - `s3` - Amazon S3
 //! - `gcs` - Google Cloud Storage
 //! - `azblob` - Azure Blob Storage
 //! - `postgres` - PostgreSQL
 //! - `mysql` - MySQL
 //!
-//! ## Vector databases
+//! ## Vector databases (from nvisy_dal)
 //! - `qdrant` - Qdrant vector database
 //! - `pinecone` - Pinecone vector database
 //! - `milvus` - Milvus vector database
 //! - `pgvector` - pgvector (PostgreSQL extension)
 //!
-//! ## AI providers
+//! ## AI providers (local)
 //! - `openai` - OpenAI (completion + embedding)
 //! - `anthropic` - Anthropic (completion only)
 //! - `cohere` - Cohere (completion + embedding)
@@ -24,47 +25,58 @@
 
 use crate::error::Result;
 
-// Storage backends
-mod azblob;
-mod gcs;
-mod mysql;
-mod postgres;
-mod s3;
-
-// Vector databases
-mod milvus;
-mod pgvector;
-mod pinecone;
-mod qdrant;
-
-// AI providers
+// AI providers (local implementations)
 mod anthropic;
 mod cohere;
 mod gemini;
 mod openai;
 mod perplexity;
 
-// Storage backend exports
+// Re-export storage backend types from nvisy_dal
 // AI provider exports
 pub use anthropic::{AnthropicCompletionParams, AnthropicCredentials};
-pub use azblob::{AzblobCredentials, AzblobParams};
 pub use cohere::{CohereCompletionParams, CohereCredentials, CohereEmbeddingParams};
-pub use gcs::{GcsCredentials, GcsParams};
 pub use gemini::{GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParams};
-// Vector database exports
-pub use milvus::{MilvusCredentials, MilvusParams};
-pub use mysql::{MysqlCredentials, MysqlParams};
+pub use nvisy_dal::provider::{
+    // Object storage
+    AzblobCredentials,
+    AzblobParams,
+    AzblobProvider,
+    GcsCredentials,
+    GcsParams,
+    GcsProvider,
+    // Vector databases
+    MilvusCredentials,
+    MilvusParams,
+    MilvusProvider,
+    // Relational databases
+    MysqlCredentials,
+    MysqlParams,
+    MysqlProvider,
+    PgVectorCredentials,
+    PgVectorParams,
+    PgVectorProvider,
+    PineconeCredentials,
+    PineconeParams,
+    PineconeProvider,
+    PostgresCredentials,
+    PostgresParams,
+    PostgresProvider,
+    QdrantCredentials,
+    QdrantParams,
+    QdrantProvider,
+    S3Credentials,
+    S3Params,
+    S3Provider,
+};
 pub use openai::{OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams};
 pub use perplexity::{PerplexityCompletionParams, PerplexityCredentials};
-pub use pgvector::{PgVectorCredentials, PgVectorParams};
-pub use pinecone::{PineconeCredentials, PineconeParams};
-pub use postgres::{PostgresCredentials, PostgresParams};
-pub use qdrant::{QdrantCredentials, QdrantParams};
-pub use s3::{S3Credentials, S3Params};
 
-/// Trait for provider parameters that can be combined with credentials to create a provider.
+/// Trait for AI provider parameters that can be combined with credentials to create a provider.
+///
+/// This is distinct from `nvisy_dal::IntoProvider` which is for storage/vector providers.
 #[async_trait::async_trait]
-pub trait IntoProvider {
+pub trait IntoAiProvider {
     /// The credentials type required by this provider.
     type Credentials: Send;
     /// The output type (provider instance).

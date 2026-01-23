@@ -9,7 +9,7 @@ use super::ProviderCredentials;
 use super::backend::{
     AnthropicCompletionParams, AnthropicCredentials, CohereCompletionParams, CohereCredentials,
     CohereEmbeddingParams, GeminiCompletionParams, GeminiCredentials, GeminiEmbeddingParams,
-    IntoProvider, OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams,
+    IntoAiProvider as _, OpenAiCompletionParams, OpenAiCredentials, OpenAiEmbeddingParams,
     PerplexityCompletionParams, PerplexityCredentials,
 };
 use crate::error::{Error, Result};
@@ -54,12 +54,12 @@ impl CompletionProviderParams {
     }
 }
 
-#[async_trait::async_trait]
-impl IntoProvider for CompletionProviderParams {
-    type Credentials = ProviderCredentials;
-    type Output = CompletionProvider;
-
-    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
+impl CompletionProviderParams {
+    /// Creates a completion provider from these params and credentials.
+    pub async fn into_provider(
+        self,
+        credentials: ProviderCredentials,
+    ) -> Result<CompletionProvider> {
         match (self, credentials) {
             (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c).await,
             (Self::Anthropic(p), ProviderCredentials::Anthropic(c)) => p.into_provider(c).await,
@@ -116,12 +116,12 @@ impl EmbeddingProviderParams {
     }
 }
 
-#[async_trait::async_trait]
-impl IntoProvider for EmbeddingProviderParams {
-    type Credentials = ProviderCredentials;
-    type Output = EmbeddingProvider;
-
-    async fn into_provider(self, credentials: Self::Credentials) -> Result<Self::Output> {
+impl EmbeddingProviderParams {
+    /// Creates an embedding provider from these params and credentials.
+    pub async fn into_provider(
+        self,
+        credentials: ProviderCredentials,
+    ) -> Result<EmbeddingProvider> {
         match (self, credentials) {
             (Self::OpenAi(p), ProviderCredentials::OpenAi(c)) => p.into_provider(c).await,
             (Self::Cohere(p), ProviderCredentials::Cohere(c)) => p.into_provider(c).await,

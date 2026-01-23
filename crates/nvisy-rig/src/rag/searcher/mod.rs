@@ -60,7 +60,11 @@ impl Searcher {
 
     /// Searches for relevant chunks without loading content.
     pub async fn query(&self, query: &str, limit: u32) -> Result<Vec<RetrievedChunk>> {
-        let embedding = self.provider.embed_text(query).await?;
+        let embedding = self
+            .provider
+            .embed_text(query)
+            .await
+            .map_err(|e| Error::provider("embedding", e.to_string()))?;
 
         let query_vector: Vector = embedding
             .vec

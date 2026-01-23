@@ -4,11 +4,11 @@ mod config;
 mod input;
 mod output;
 
-pub use config::AzblobConfig;
-
+pub use config::{AzblobCredentials, AzblobParams};
 use opendal::{Operator, services};
 
-use crate::error::{Error, Result};
+use crate::core::IntoProvider;
+use crate::error::Error;
 
 /// Azure Blob Storage provider for blob storage.
 #[derive(Clone)]
@@ -16,22 +16,28 @@ pub struct AzblobProvider {
     operator: Operator,
 }
 
-impl AzblobProvider {
-    /// Creates a new Azure Blob provider.
-    pub fn new(config: &AzblobConfig) -> Result<Self> {
-        let mut builder = services::Azblob::default()
-            .account_name(&config.account_name)
-            .container(&config.container);
+#[async_trait::async_trait]
+impl IntoProvider for AzblobProvider {
+    type Credentials = AzblobCredentials;
+    type Params = AzblobParams;
 
-        if let Some(ref account_key) = config.account_key {
+    async fn create(
+        params: Self::Params,
+        credentials: Self::Credentials,
+    ) -> nvisy_core::Result<Self> {
+        let mut builder = services::Azblob::default()
+            .account_name(&credentials.account_name)
+            .container(&params.container);
+
+        if let Some(ref account_key) = credentials.account_key {
             builder = builder.account_key(account_key);
         }
 
-        if let Some(ref sas_token) = config.sas_token {
+        if let Some(ref sas_token) = credentials.sas_token {
             builder = builder.sas_token(sas_token);
         }
 
-        if let Some(ref prefix) = config.prefix {
+        if let Some(ref prefix) = params.prefix {
             builder = builder.root(prefix);
         }
 

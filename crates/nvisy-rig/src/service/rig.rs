@@ -6,9 +6,9 @@ use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 
 use super::RigConfig;
-use crate::Result;
 use crate::chat::ChatService;
 use crate::rag::{RagConfig, RagService};
+use crate::{Error, Result};
 
 /// Inner state for [`RigService`].
 struct RigServiceInner {
@@ -25,7 +25,9 @@ pub struct RigService {
 impl RigService {
     /// Creates a new RigService from configuration.
     pub async fn new(config: RigConfig, db: PgClient, nats: NatsClient) -> Result<Self> {
-        let embedding_provider = config.embedding_provider()?;
+        let embedding_provider = config
+            .embedding_provider()
+            .map_err(|e| Error::config(e.to_string()))?;
 
         let rag_config = RagConfig::default();
         let rag = RagService::new(rag_config, embedding_provider.clone(), db, nats.clone()).await?;

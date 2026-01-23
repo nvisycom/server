@@ -19,9 +19,7 @@ impl DataOutput for QdrantProvider {
             return Ok(());
         }
 
-        let collection = self
-            .collection()
-            .ok_or_else(|| Error::invalid_input("Collection name required in provider config"))?;
+        let collection = self.collection();
 
         let dimensions = items
             .first()

@@ -39,8 +39,7 @@ pub struct Pipeline {
 impl Pipeline {
     /// Creates a new instance of [`Pipeline`] from the database model.
     pub fn from_model(pipeline: model::Pipeline) -> Self {
-        let definition: Workflow =
-            serde_json::from_value(pipeline.definition).unwrap_or_default();
+        let definition: Workflow = serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {
             pipeline_id: pipeline.id,
             workspace_id: pipeline.workspace_id,

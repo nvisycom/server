@@ -1,10 +1,11 @@
 //! Anthropic provider.
 
+use nvisy_core::IntoProvider;
 use nvisy_rig::provider::{AnthropicModel, CompletionProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::IntoProvider;
+use super::IntoAiProvider;
 use crate::error::{Error, Result};
 
 /// Anthropic credentials.
@@ -34,7 +35,7 @@ impl AnthropicCompletionParams {
 }
 
 #[async_trait::async_trait]
-impl IntoProvider for AnthropicCompletionParams {
+impl IntoAiProvider for AnthropicCompletionParams {
     type Credentials = AnthropicCredentials;
     type Output = CompletionProvider;
 
@@ -43,6 +44,8 @@ impl IntoProvider for AnthropicCompletionParams {
             api_key: credentials.api_key,
         };
         let model = nvisy_rig::provider::CompletionModel::Anthropic(self.model);
-        CompletionProvider::new(&rig_creds, &model).map_err(|e| Error::Internal(e.to_string()))
+        CompletionProvider::create(model, rig_creds)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
     }
 }

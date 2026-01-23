@@ -3,13 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::route::CacheSlot;
-use crate::provider::InputProviderParams;
+use crate::provider::InputProviderConfig;
 
 /// Input provider definition for workflow nodes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputProvider {
-    /// Provider parameters (contains credentials_id).
-    pub provider: InputProviderParams,
+    /// Provider configuration (credentials_id + params).
+    #[serde(flatten)]
+    pub provider: InputProviderConfig,
 }
 
 /// Input node definition - source of data for the workflow.
@@ -23,8 +24,8 @@ pub enum Input {
 }
 
 impl Input {
-    /// Creates a new input from a provider.
-    pub fn from_provider(provider: InputProviderParams) -> Self {
+    /// Creates a new input from a provider configuration.
+    pub fn from_provider(provider: InputProviderConfig) -> Self {
         Self::Provider(InputProvider { provider })
     }
 
