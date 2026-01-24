@@ -2,10 +2,13 @@
 
 use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::tool::{JsonResponse, JsonSchemaTool, ScratchpadTool};
+use crate::Result;
 use crate::provider::CompletionProvider;
-use crate::{Error, Result};
 
 const NAME: &str = "StructuredOutputAgent";
 const DESCRIPTION: &str =
@@ -31,67 +34,79 @@ Schema:
 Only output valid JSON that conforms to the schema, no explanation.
 If a field cannot be determined from the text, use null.";
 
+/// Generic structured output schema for validation.
+///
+/// This is a flexible schema that accepts any valid JSON structure.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StructuredOutput {
+    /// The extracted data as a JSON value.
+    #[serde(flatten)]
+    pub data: Value,
+}
+
 /// Agent for structured output tasks.
 ///
 /// Handles tasks that convert text to structured JSON:
 /// - Free-form JSON conversion
 /// - Schema-based structured extraction
+///
+/// When `with_tools` is enabled, the agent has access to:
+/// - `ScratchpadTool` - For drafting complex extractions iteratively
+/// - `JsonSchemaTool` - For validating output against schemas
 pub struct StructuredOutputAgent {
     agent: Agent<CompletionProvider>,
+    model_name: String,
 }
 
 impl StructuredOutputAgent {
     /// Creates a new structured output agent with the given completion provider.
-    pub fn new(provider: CompletionProvider) -> Self {
-        let agent = AgentBuilder::new(provider)
+    ///
+    /// # Arguments
+    /// * `provider` - The completion provider to use
+    /// * `with_tools` - Whether to enable tool usage (scratchpad, schema validation)
+    pub fn new(provider: CompletionProvider, with_tools: bool) -> Self {
+        let model_name = provider.model_name().to_string();
+        let builder = AgentBuilder::new(provider)
             .name(NAME)
             .description(DESCRIPTION)
-            .preamble(PREAMBLE)
-            .build();
-        Self { agent }
+            .preamble(PREAMBLE);
+
+        let agent = if with_tools {
+            builder
+                .tool(ScratchpadTool::new())
+                .tool(JsonSchemaTool::<StructuredOutput>::new())
+                .build()
+        } else {
+            builder.build()
+        };
+
+        Self { agent, model_name }
     }
 
     /// Converts text to JSON format.
     ///
     /// Attempts to extract structured information from free-form text
     /// and represent it as JSON.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn to_json(&self, text: &str) -> Result<Value> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_TO_JSON, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let value: Value = JsonResponse::parse(&response)?;
+        tracing::debug!("to_json completed");
+        Ok(value)
     }
 
     /// Converts text to JSON matching a specific schema.
     ///
     /// Extracts information from text and structures it according to
     /// the provided JSON schema.
+    #[tracing::instrument(skip(self, text, schema), fields(agent = NAME, model = %self.model_name, text_len = text.len(), schema_len = schema.len()))]
     pub async fn to_structured_json(&self, text: &str, schema: &str) -> Result<Value> {
         let base_prompt = PROMPT_TO_STRUCTURED_JSON.replace("{}", schema);
         let prompt = format!("{}\n\nText:\n{}", base_prompt, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let value: Value = JsonResponse::parse(&response)?;
+        tracing::debug!("to_structured_json completed");
+        Ok(value)
     }
-}
-
-/// Parses JSON from LLM response, handling markdown code blocks.
-fn parse_json(response: &str) -> Result<Value> {
-    // Try to extract JSON from markdown code block if present
-    let json_str = if response.contains("```json") {
-        response
-            .split("```json")
-            .nth(1)
-            .and_then(|s| s.split("```").next())
-            .map(|s| s.trim())
-            .unwrap_or(response.trim())
-    } else if response.contains("```") {
-        response
-            .split("```")
-            .nth(1)
-            .map(|s| s.trim())
-            .unwrap_or(response.trim())
-    } else {
-        response.trim()
-    };
-
-    serde_json::from_str(json_str).map_err(|e| Error::parse(format!("invalid JSON: {e}")))
 }

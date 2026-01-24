@@ -1,7 +1,7 @@
 //! Enrich processor.
 
 use nvisy_dal::AnyDataValue;
-use nvisy_rig::agent::Agents;
+use nvisy_rig::agent::{TableAgent, VisionAgent};
 
 use super::Process;
 use crate::definition::EnrichTask;
@@ -9,8 +9,10 @@ use crate::error::Result;
 
 /// Processor for enriching elements with metadata/descriptions.
 pub struct EnrichProcessor {
-    /// Agents for enrichment tasks.
-    agents: Agents,
+    /// Agent for vision/image tasks.
+    vision_agent: VisionAgent,
+    /// Agent for table processing.
+    table_agent: TableAgent,
     /// The enrichment task to perform.
     task: EnrichTask,
     /// Optional prompt override.
@@ -19,9 +21,15 @@ pub struct EnrichProcessor {
 
 impl EnrichProcessor {
     /// Creates a new enrich processor.
-    pub fn new(agents: Agents, task: EnrichTask, override_prompt: Option<String>) -> Self {
+    pub fn new(
+        vision_agent: VisionAgent,
+        table_agent: TableAgent,
+        task: EnrichTask,
+        override_prompt: Option<String>,
+    ) -> Self {
         Self {
-            agents,
+            vision_agent,
+            table_agent,
             task,
             override_prompt,
         }
@@ -41,9 +49,9 @@ impl EnrichProcessor {
 impl Process for EnrichProcessor {
     async fn process(&self, input: Vec<AnyDataValue>) -> Result<Vec<AnyDataValue>> {
         // TODO: Implement enrichment using agents
-        // Use self.agents.vision_agent for image tasks
-        // Use self.agents.table_agent for table tasks
-        let _ = &self.agents; // Suppress unused warning
+        // Use self.vision_agent for image tasks
+        // Use self.table_agent for table tasks
+        let _ = (&self.vision_agent, &self.table_agent); // Suppress unused warning
         Ok(input)
     }
 }

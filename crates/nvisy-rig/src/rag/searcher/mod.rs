@@ -59,6 +59,7 @@ impl Searcher {
     }
 
     /// Searches for relevant chunks without loading content.
+    #[tracing::instrument(skip(self, query), fields(query_len = query.len(), limit, scope = ?self.scope))]
     pub async fn query(&self, query: &str, limit: u32) -> Result<Vec<RetrievedChunk>> {
         let embedding = self
             .provider
@@ -98,7 +99,7 @@ impl Searcher {
         }
         .map_err(|e| Error::retrieval(format!("vector search failed: {e}")))?;
 
-        let chunks = scored_chunks
+        let chunks: Vec<RetrievedChunk> = scored_chunks
             .into_iter()
             .map(|scored| {
                 let chunk = scored.chunk;
@@ -107,17 +108,21 @@ impl Searcher {
             })
             .collect();
 
+        tracing::debug!(result_count = chunks.len(), "query completed");
         Ok(chunks)
     }
 
     /// Searches for relevant chunks and loads their content.
+    #[tracing::instrument(skip(self, query), fields(query_len = query.len(), limit))]
     pub async fn query_with_content(&self, query: &str, limit: u32) -> Result<Vec<RetrievedChunk>> {
         let mut chunks = self.query(query, limit).await?;
         self.load_content(&mut chunks).await?;
+        tracing::debug!(result_count = chunks.len(), "query_with_content completed");
         Ok(chunks)
     }
 
     /// Loads content for retrieved chunks from NATS.
+    #[tracing::instrument(skip(self, chunks), fields(chunk_count = chunks.len()))]
     pub async fn load_content(&self, chunks: &mut [RetrievedChunk]) -> Result<()> {
         let mut by_file: HashMap<Uuid, Vec<usize>> = HashMap::new();
         for (idx, chunk) in chunks.iter().enumerate() {
@@ -126,11 +131,14 @@ impl Searcher {
             }
         }
 
+        let file_count = by_file.len();
+        tracing::debug!(file_count, "loading content from files");
+
         for (file_id, indices) in by_file {
             let file_content = match self.fetch_file(file_id).await {
                 Ok(content) => content,
                 Err(e) => {
-                    tracing::warn!(file_id = %file_id, error = %e, "Failed to fetch file");
+                    tracing::warn!(file_id = %file_id, error = %e, "failed to fetch file");
                     continue;
                 }
             };
@@ -149,6 +157,7 @@ impl Searcher {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(%file_id))]
     async fn fetch_file(&self, file_id: Uuid) -> Result<Vec<u8>> {
         let key = FileKey::from_parts(Uuid::nil(), file_id);
 
@@ -166,6 +175,7 @@ impl Searcher {
             .await
             .map_err(|e| Error::retrieval(format!("failed to read file: {e}")))?;
 
+        tracing::debug!(content_len = content.len(), "file fetched");
         Ok(content)
     }
 }

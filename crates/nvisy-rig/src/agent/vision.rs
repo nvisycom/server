@@ -3,6 +3,7 @@
 use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
 
+use super::tool::ScratchpadTool;
 use crate::Result;
 use crate::provider::CompletionProvider;
 
@@ -46,42 +47,69 @@ Format as a JSON array.";
 /// - Generative OCR (text extraction from images)
 /// - Object detection
 /// - VLM-based document partitioning
+///
+/// When `with_tools` is enabled, the agent has access to:
+/// - `ScratchpadTool` - For drafting and refining descriptions iteratively
 pub struct VisionAgent {
     agent: Agent<CompletionProvider>,
+    model_name: String,
 }
 
 impl VisionAgent {
     /// Creates a new vision agent with the given completion provider.
-    pub fn new(provider: CompletionProvider) -> Self {
-        let agent = AgentBuilder::new(provider)
+    ///
+    /// # Arguments
+    /// * `provider` - The completion provider to use
+    /// * `with_tools` - Whether to enable tool usage (scratchpad for drafting)
+    pub fn new(provider: CompletionProvider, with_tools: bool) -> Self {
+        let model_name = provider.model_name().to_string();
+        let builder = AgentBuilder::new(provider)
             .name(NAME)
             .description(DESCRIPTION)
-            .preamble(PREAMBLE)
-            .build();
-        Self { agent }
+            .preamble(PREAMBLE);
+
+        let agent = if with_tools {
+            builder.tool(ScratchpadTool::new()).build()
+        } else {
+            builder.build()
+        };
+
+        Self { agent, model_name }
     }
 
     /// Generates a brief description of an image.
+    #[tracing::instrument(skip(self, image_base64), fields(agent = NAME, model = %self.model_name, image_len = image_base64.len()))]
     pub async fn describe(&self, image_base64: &str) -> Result<String> {
         let prompt = format!("{}\n\n[Image: {}]", PROMPT_DESCRIBE, image_base64);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(response_len = response.len(), "describe completed");
+        Ok(response)
     }
 
     /// Generates a detailed description of an image.
+    #[tracing::instrument(skip(self, image_base64), fields(agent = NAME, model = %self.model_name, image_len = image_base64.len()))]
     pub async fn describe_detailed(&self, image_base64: &str) -> Result<String> {
         let prompt = format!("{}\n\n[Image: {}]", PROMPT_DESCRIBE_DETAILED, image_base64);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(response_len = response.len(), "describe_detailed completed");
+        Ok(response)
     }
 
     /// Extracts text from an image using generative OCR.
+    #[tracing::instrument(skip(self, image_base64), fields(agent = NAME, model = %self.model_name, image_len = image_base64.len()))]
     pub async fn extract_text(&self, image_base64: &str) -> Result<String> {
         let prompt = format!("{}\n\n[Image: {}]", PROMPT_EXTRACT_TEXT, image_base64);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(response_len = response.len(), "extract_text completed");
+        Ok(response)
     }
 
     /// Detects and lists objects in an image.
+    #[tracing::instrument(skip(self, image_base64), fields(agent = NAME, model = %self.model_name, image_len = image_base64.len()))]
     pub async fn detect_objects(&self, image_base64: &str) -> Result<String> {
         let prompt = format!("{}\n\n[Image: {}]", PROMPT_DETECT_OBJECTS, image_base64);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(response_len = response.len(), "detect_objects completed");
+        Ok(response)
     }
 }

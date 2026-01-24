@@ -3,6 +3,7 @@
 use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
 
+use super::tool::ScratchpadTool;
 use crate::Result;
 use crate::provider::CompletionProvider;
 
@@ -39,37 +40,59 @@ Only output the context statement, no explanation.";
 /// - Summarization
 /// - Title generation
 /// - Contextual chunking (adding context to chunks)
+///
+/// When `with_tools` is enabled, the agent has access to:
+/// - `ScratchpadTool` - For drafting and refining content iteratively
 pub struct TextGenerationAgent {
     agent: Agent<CompletionProvider>,
+    model_name: String,
 }
 
 impl TextGenerationAgent {
     /// Creates a new text generation agent with the given completion provider.
-    pub fn new(provider: CompletionProvider) -> Self {
-        let agent = AgentBuilder::new(provider)
+    ///
+    /// # Arguments
+    /// * `provider` - The completion provider to use
+    /// * `with_tools` - Whether to enable tool usage (scratchpad for drafting)
+    pub fn new(provider: CompletionProvider, with_tools: bool) -> Self {
+        let model_name = provider.model_name().to_string();
+        let builder = AgentBuilder::new(provider)
             .name(NAME)
             .description(DESCRIPTION)
-            .preamble(PREAMBLE)
-            .build();
-        Self { agent }
+            .preamble(PREAMBLE);
+
+        let agent = if with_tools {
+            builder.tool(ScratchpadTool::new()).build()
+        } else {
+            builder.build()
+        };
+
+        Self { agent, model_name }
     }
 
     /// Generates a summary of the text.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn summarize(&self, text: &str) -> Result<String> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_SUMMARIZE, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(response_len = response.len(), "summarize completed");
+        Ok(response)
     }
 
     /// Generates a title for the text.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn generate_title(&self, text: &str) -> Result<String> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_GENERATE_TITLE, text);
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(title = %response, "generate_title completed");
+        Ok(response)
     }
 
     /// Generates contextual information for a chunk.
     ///
     /// This is used for contextual chunking, where each chunk is enriched
     /// with context about how it fits into the larger document.
+    #[tracing::instrument(skip(self, chunk, document_summary), fields(agent = NAME, model = %self.model_name, chunk_len = chunk.len(), summary_len = document_summary.len()))]
     pub async fn generate_chunk_context(
         &self,
         chunk: &str,
@@ -79,6 +102,11 @@ impl TextGenerationAgent {
             "{}\n\nDocument Summary:\n{}\n\nChunk:\n{}",
             PROMPT_GENERATE_CHUNK_CONTEXT, document_summary, chunk
         );
-        Ok(self.agent.prompt(&prompt).await?)
+        let response = self.agent.prompt(&prompt).await?;
+        tracing::debug!(
+            response_len = response.len(),
+            "generate_chunk_context completed"
+        );
+        Ok(response)
     }
 }

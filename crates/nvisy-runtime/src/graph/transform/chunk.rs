@@ -1,7 +1,7 @@
 //! Chunk processor.
 
 use nvisy_dal::AnyDataValue;
-use nvisy_rig::agent::Agents;
+use nvisy_rig::agent::TextGenerationAgent;
 
 use super::Process;
 use crate::definition::ChunkStrategy;
@@ -13,8 +13,8 @@ pub struct ChunkProcessor {
     strategy: ChunkStrategy,
     /// Whether to use LLM-powered contextual chunking.
     contextual_chunking: bool,
-    /// Agents for contextual chunking (if enabled).
-    agents: Option<Agents>,
+    /// Agent for contextual chunking (if enabled).
+    agent: Option<TextGenerationAgent>,
 }
 
 impl ChunkProcessor {
@@ -23,16 +23,16 @@ impl ChunkProcessor {
         Self {
             strategy,
             contextual_chunking: false,
-            agents: None,
+            agent: None,
         }
     }
 
     /// Creates a new chunk processor with contextual chunking enabled.
-    pub fn with_contextual_chunking(strategy: ChunkStrategy, agents: Agents) -> Self {
+    pub fn with_contextual_chunking(strategy: ChunkStrategy, agent: TextGenerationAgent) -> Self {
         Self {
             strategy,
             contextual_chunking: true,
-            agents: Some(agents),
+            agent: Some(agent),
         }
     }
 
@@ -60,7 +60,7 @@ impl std::fmt::Debug for ChunkProcessor {
         f.debug_struct("ChunkProcessor")
             .field("strategy", &self.strategy)
             .field("contextual_chunking", &self.contextual_chunking)
-            .field("has_agents", &self.agents.is_some())
+            .field("has_agent", &self.agent.is_some())
             .finish()
     }
 }

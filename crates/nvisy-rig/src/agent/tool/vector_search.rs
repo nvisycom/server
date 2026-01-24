@@ -115,9 +115,13 @@ impl<S: VectorSearcher + 'static> Tool for VectorSearchTool<S> {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(tool = Self::NAME, query_len = args.query.len(), limit = args.limit, threshold = ?args.threshold))]
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        self.searcher
+        let results = self
+            .searcher
             .search(&args.query, args.limit, args.threshold)
-            .await
+            .await?;
+        tracing::debug!(result_count = results.len(), "vector_search completed");
+        Ok(results)
     }
 }

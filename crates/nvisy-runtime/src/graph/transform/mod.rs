@@ -45,6 +45,8 @@ pub trait Process: Send + Sync {
 ///
 /// Each variant wraps a dedicated processor that encapsulates
 /// the transform logic and any required external dependencies.
+///
+/// Large processor variants are boxed to avoid enum size bloat.
 #[derive(Debug)]
 pub enum CompiledTransform {
     /// Partition documents into elements.
@@ -54,9 +56,9 @@ pub enum CompiledTransform {
     /// Generate vector embeddings.
     Embedding(EmbeddingProcessor),
     /// Enrich elements with metadata/descriptions.
-    Enrich(EnrichProcessor),
+    Enrich(Box<EnrichProcessor>),
     /// Extract structured data or convert formats.
-    Extract(ExtractProcessor),
+    Extract(Box<ExtractProcessor>),
     /// Generate new content from input.
     Derive(DeriveProcessor),
 }

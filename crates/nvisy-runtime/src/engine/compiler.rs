@@ -12,7 +12,9 @@
 
 use std::collections::HashMap;
 
-use nvisy_rig::agent::Agents;
+use nvisy_rig::agent::{
+    StructuredOutputAgent, TableAgent, TextAnalysisAgent, TextGenerationAgent, VisionAgent,
+};
 use nvisy_rig::provider::CompletionProvider;
 use petgraph::graph::{DiGraph, NodeIndex};
 
@@ -346,25 +348,34 @@ impl<'a> WorkflowCompiler<'a> {
                 )))
             }
             Transformer::Enrich(e) => {
-                let agents = self.create_agents(&e.provider).await?;
-                Ok(CompiledTransform::Enrich(EnrichProcessor::new(
-                    agents,
+                let provider = self.create_completion_provider(&e.provider).await?;
+                let vision_agent = VisionAgent::new(provider.clone(), false);
+                let table_agent = TableAgent::new(provider, false);
+                Ok(CompiledTransform::Enrich(Box::new(EnrichProcessor::new(
+                    vision_agent,
+                    table_agent,
                     e.task.clone(),
                     e.override_prompt.clone(),
-                )))
+                ))))
             }
             Transformer::Extract(e) => {
-                let agents = self.create_agents(&e.provider).await?;
-                Ok(CompiledTransform::Extract(ExtractProcessor::new(
-                    agents,
+                let provider = self.create_completion_provider(&e.provider).await?;
+                let text_analysis_agent = TextAnalysisAgent::new(provider.clone(), false);
+                let table_agent = TableAgent::new(provider.clone(), false);
+                let structured_output_agent = StructuredOutputAgent::new(provider, false);
+                Ok(CompiledTransform::Extract(Box::new(ExtractProcessor::new(
+                    text_analysis_agent,
+                    table_agent,
+                    structured_output_agent,
                     e.task.clone(),
                     e.override_prompt.clone(),
-                )))
+                ))))
             }
             Transformer::Derive(d) => {
-                let agents = self.create_agents(&d.provider).await?;
+                let provider = self.create_completion_provider(&d.provider).await?;
+                let agent = TextGenerationAgent::new(provider, false);
                 Ok(CompiledTransform::Derive(DeriveProcessor::new(
-                    agents,
+                    agent,
                     d.task,
                     d.override_prompt.clone(),
                 )))
@@ -382,12 +393,6 @@ impl<'a> WorkflowCompiler<'a> {
             .clone()
             .into_provider(creds.into_embedding_credentials()?)
             .await
-    }
-
-    /// Creates agents from completion provider parameters.
-    async fn create_agents(&self, params: &CompletionProviderParams) -> Result<Agents> {
-        let provider = self.create_completion_provider(params).await?;
-        Ok(Agents::new(provider))
     }
 
     /// Creates a completion provider from parameters.

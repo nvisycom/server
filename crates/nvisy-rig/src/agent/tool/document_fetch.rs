@@ -101,18 +101,21 @@ impl<F: DocumentFetcher + 'static> Tool for DocumentFetchTool<F> {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(tool = Self::NAME, id = ?args.id, ids_count = args.ids.as_ref().map(|v| v.len())))]
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        match (args.id, args.ids) {
+        let results = match (args.id, args.ids) {
             (Some(id), _) => {
                 let doc = self
                     .fetcher
                     .fetch(&id)
                     .await?
                     .ok_or(DocumentFetchError::NotFound(id))?;
-                Ok(vec![doc])
+                vec![doc]
             }
-            (None, Some(ids)) => self.fetcher.fetch_many(&ids).await,
-            (None, None) => Ok(vec![]),
-        }
+            (None, Some(ids)) => self.fetcher.fetch_many(&ids).await?,
+            (None, None) => vec![],
+        };
+        tracing::debug!(result_count = results.len(), "document_fetch completed");
+        Ok(results)
     }
 }

@@ -15,10 +15,6 @@ pub enum Error {
     #[error("provider error: {provider}: {message}")]
     Provider { provider: String, message: String },
 
-    /// Session error (not found, expired, etc.)
-    #[error("session error: {0}")]
-    Session(String),
-
     /// RAG retrieval error.
     #[error("retrieval error: {0}")]
     Retrieval(String),
@@ -53,11 +49,6 @@ impl Error {
         }
     }
 
-    /// Creates a session error.
-    pub fn session(message: impl fmt::Display) -> Self {
-        Self::Session(message.to_string())
-    }
-
     /// Creates a retrieval error.
     pub fn retrieval(message: impl fmt::Display) -> Self {
         Self::Retrieval(message.to_string())
@@ -86,7 +77,6 @@ impl From<Error> for nvisy_core::Error {
                 nvisy_core::ErrorKind::ExternalError,
                 format!("{}: {}", provider, message),
             ),
-            Error::Session(msg) => (nvisy_core::ErrorKind::InvalidInput, msg.clone()),
             Error::Retrieval(msg) => (nvisy_core::ErrorKind::ExternalError, msg.clone()),
             Error::Embedding(_) => (nvisy_core::ErrorKind::ExternalError, err.to_string()),
             Error::Completion(_) => (nvisy_core::ErrorKind::ExternalError, err.to_string()),

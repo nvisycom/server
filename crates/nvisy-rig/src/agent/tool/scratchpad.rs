@@ -3,103 +3,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-/// Trait for scratchpad implementations.
-#[async_trait]
-pub trait Scratchpad: Send + Sync {
-    /// Write to the scratchpad.
-    async fn write(&self, content: &str) -> Result<(), ScratchpadError>;
-
-    /// Append to the scratchpad.
-    async fn append(&self, content: &str) -> Result<(), ScratchpadError>;
-
-    /// Read the scratchpad content.
-    async fn read(&self) -> Result<String, ScratchpadError>;
-
-    /// Clear the scratchpad.
-    async fn clear(&self) -> Result<(), ScratchpadError>;
-
-    /// Get a named section from the scratchpad.
-    async fn get_section(&self, name: &str) -> Result<Option<String>, ScratchpadError>;
-
-    /// Set a named section in the scratchpad.
-    async fn set_section(&self, name: &str, content: &str) -> Result<(), ScratchpadError>;
-}
-
-/// In-memory scratchpad implementation.
-pub struct InMemoryScratchpad {
-    content: RwLock<String>,
-    sections: RwLock<HashMap<String, String>>,
-}
-
-impl InMemoryScratchpad {
-    /// Creates a new empty scratchpad.
-    pub fn new() -> Self {
-        Self {
-            content: RwLock::new(String::new()),
-            sections: RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl Default for InMemoryScratchpad {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl Scratchpad for InMemoryScratchpad {
-    async fn write(&self, content: &str) -> Result<(), ScratchpadError> {
-        let mut guard = self.content.write().await;
-        *guard = content.to_string();
-        Ok(())
-    }
-
-    async fn append(&self, content: &str) -> Result<(), ScratchpadError> {
-        let mut guard = self.content.write().await;
-        guard.push_str(content);
-        Ok(())
-    }
-
-    async fn read(&self) -> Result<String, ScratchpadError> {
-        let guard = self.content.read().await;
-        Ok(guard.clone())
-    }
-
-    async fn clear(&self) -> Result<(), ScratchpadError> {
-        let mut guard = self.content.write().await;
-        guard.clear();
-        let mut sections = self.sections.write().await;
-        sections.clear();
-        Ok(())
-    }
-
-    async fn get_section(&self, name: &str) -> Result<Option<String>, ScratchpadError> {
-        let guard = self.sections.read().await;
-        Ok(guard.get(name).cloned())
-    }
-
-    async fn set_section(&self, name: &str, content: &str) -> Result<(), ScratchpadError> {
-        let mut guard = self.sections.write().await;
-        guard.insert(name.to_string(), content.to_string());
-        Ok(())
-    }
-}
-
 /// Error type for scratchpad operations.
 #[derive(Debug, thiserror::Error)]
-pub enum ScratchpadError {
-    #[error("write failed: {0}")]
-    Write(String),
-    #[error("read failed: {0}")]
-    Read(String),
-}
+#[error("scratchpad error")]
+pub struct ScratchpadError;
 
 /// The operation to perform on the scratchpad.
 #[derive(Debug, Deserialize)]
@@ -139,33 +51,77 @@ pub struct ScratchpadResult {
     pub message: Option<String>,
 }
 
-/// Tool for temporary working storage.
-pub struct ScratchpadTool<S> {
-    scratchpad: Arc<S>,
+/// In-memory scratchpad storage.
+struct InMemoryScratchpad {
+    content: RwLock<String>,
+    sections: RwLock<HashMap<String, String>>,
 }
 
-impl<S> ScratchpadTool<S> {
-    /// Creates a new scratchpad tool.
-    pub fn new(scratchpad: S) -> Self {
+impl InMemoryScratchpad {
+    fn new() -> Self {
         Self {
-            scratchpad: Arc::new(scratchpad),
+            content: RwLock::new(String::new()),
+            sections: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Creates a new scratchpad tool from an Arc.
-    pub fn from_arc(scratchpad: Arc<S>) -> Self {
-        Self { scratchpad }
+    async fn write(&self, content: &str) {
+        let mut guard = self.content.write().await;
+        *guard = content.to_string();
+    }
+
+    async fn append(&self, content: &str) {
+        let mut guard = self.content.write().await;
+        guard.push_str(content);
+    }
+
+    async fn read(&self) -> String {
+        let guard = self.content.read().await;
+        guard.clone()
+    }
+
+    async fn clear(&self) {
+        let mut guard = self.content.write().await;
+        guard.clear();
+        let mut sections = self.sections.write().await;
+        sections.clear();
+    }
+
+    async fn get_section(&self, name: &str) -> Option<String> {
+        let guard = self.sections.read().await;
+        guard.get(name).cloned()
+    }
+
+    async fn set_section(&self, name: &str, content: &str) {
+        let mut guard = self.sections.write().await;
+        guard.insert(name.to_string(), content.to_string());
     }
 }
 
-impl ScratchpadTool<InMemoryScratchpad> {
+/// Tool for temporary working storage.
+///
+/// Provides a scratchpad for agents to draft, edit, and organize content
+/// during multi-step reasoning tasks.
+pub struct ScratchpadTool {
+    scratchpad: Arc<InMemoryScratchpad>,
+}
+
+impl ScratchpadTool {
     /// Creates a new scratchpad tool with in-memory storage.
-    pub fn in_memory() -> Self {
-        Self::new(InMemoryScratchpad::new())
+    pub fn new() -> Self {
+        Self {
+            scratchpad: Arc::new(InMemoryScratchpad::new()),
+        }
     }
 }
 
-impl<S: Scratchpad + 'static> Tool for ScratchpadTool<S> {
+impl Default for ScratchpadTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Tool for ScratchpadTool {
     type Args = ScratchpadArgs;
     type Error = ScratchpadError;
     type Output = ScratchpadResult;
@@ -252,56 +208,64 @@ impl<S: Scratchpad + 'static> Tool for ScratchpadTool<S> {
         }
     }
 
+    #[tracing::instrument(skip(self, args), fields(tool = Self::NAME, operation = ?std::mem::discriminant(&args.operation)))]
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        match args.operation {
+        let result = match args.operation {
             ScratchpadOperation::Write { content } => {
-                self.scratchpad.write(&content).await?;
-                Ok(ScratchpadResult {
+                tracing::debug!(content_len = content.len(), "scratchpad write");
+                self.scratchpad.write(&content).await;
+                ScratchpadResult {
                     success: true,
                     content: None,
                     message: Some("Content written to scratchpad".to_string()),
-                })
+                }
             }
             ScratchpadOperation::Append { content } => {
-                self.scratchpad.append(&content).await?;
-                Ok(ScratchpadResult {
+                tracing::debug!(content_len = content.len(), "scratchpad append");
+                self.scratchpad.append(&content).await;
+                ScratchpadResult {
                     success: true,
                     content: None,
                     message: Some("Content appended to scratchpad".to_string()),
-                })
+                }
             }
             ScratchpadOperation::Read => {
-                let content = self.scratchpad.read().await?;
-                Ok(ScratchpadResult {
+                let content = self.scratchpad.read().await;
+                tracing::debug!(content_len = content.len(), "scratchpad read");
+                ScratchpadResult {
                     success: true,
                     content: Some(content),
                     message: None,
-                })
+                }
             }
             ScratchpadOperation::Clear => {
-                self.scratchpad.clear().await?;
-                Ok(ScratchpadResult {
+                tracing::debug!("scratchpad clear");
+                self.scratchpad.clear().await;
+                ScratchpadResult {
                     success: true,
                     content: None,
                     message: Some("Scratchpad cleared".to_string()),
-                })
+                }
             }
             ScratchpadOperation::GetSection { name } => {
-                let content = self.scratchpad.get_section(&name).await?;
-                Ok(ScratchpadResult {
+                let content = self.scratchpad.get_section(&name).await;
+                tracing::debug!(section = %name, found = content.is_some(), "scratchpad get_section");
+                ScratchpadResult {
                     success: content.is_some(),
                     content,
                     message: None,
-                })
+                }
             }
             ScratchpadOperation::SetSection { name, content } => {
-                self.scratchpad.set_section(&name, &content).await?;
-                Ok(ScratchpadResult {
+                tracing::debug!(section = %name, content_len = content.len(), "scratchpad set_section");
+                self.scratchpad.set_section(&name, &content).await;
+                ScratchpadResult {
                     success: true,
                     content: None,
                     message: Some(format!("Section '{name}' updated")),
-                })
+                }
             }
-        }
+        };
+        Ok(result)
     }
 }

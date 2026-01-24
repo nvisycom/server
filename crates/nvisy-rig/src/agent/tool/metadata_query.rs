@@ -170,9 +170,13 @@ impl<Q: MetadataQuerier + 'static> Tool for MetadataQueryTool<Q> {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(tool = Self::NAME, filter_count = args.filters.len(), limit = args.limit, offset = args.offset))]
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        self.querier
+        let results = self
+            .querier
             .query(&args.filters, args.limit, args.offset)
-            .await
+            .await?;
+        tracing::debug!(result_count = results.len(), "metadata_query completed");
+        Ok(results)
     }
 }

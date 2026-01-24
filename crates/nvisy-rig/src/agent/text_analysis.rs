@@ -4,13 +4,15 @@ use std::collections::HashMap;
 
 use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::tool::{JsonResponse, JsonSchemaTool, ScratchpadTool};
+use crate::Result;
 use crate::provider::CompletionProvider;
-use crate::{Error, Result};
 
 /// A named entity extracted from text.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Entity {
     /// The text of the entity.
     pub text: String,
@@ -23,7 +25,7 @@ pub struct Entity {
 }
 
 /// Classification result with labels and confidence scores.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Classification {
     /// The matched category labels.
     pub labels: Vec<String>,
@@ -32,7 +34,7 @@ pub struct Classification {
 }
 
 /// Sentiment analysis result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Sentiment {
     /// The overall sentiment: "positive", "negative", "neutral", or "mixed".
     pub sentiment: String,
@@ -44,7 +46,7 @@ pub struct Sentiment {
 }
 
 /// A relationship between two entities.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Relationship {
     /// The first entity in the relationship.
     pub subject: String,
@@ -52,6 +54,26 @@ pub struct Relationship {
     pub predicate: String,
     /// The second entity in the relationship.
     pub object: String,
+}
+
+/// Combined schema for text analysis outputs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TextAnalysisOutput {
+    /// Extracted entities.
+    #[serde(default)]
+    pub entities: Option<Vec<Entity>>,
+    /// Extracted keywords.
+    #[serde(default)]
+    pub keywords: Option<Vec<String>>,
+    /// Classification result.
+    #[serde(default)]
+    pub classification: Option<Classification>,
+    /// Sentiment analysis result.
+    #[serde(default)]
+    pub sentiment: Option<Sentiment>,
+    /// Extracted relationships.
+    #[serde(default)]
+    pub relationships: Option<Vec<Relationship>>,
 }
 
 const NAME: &str = "TextAnalysisAgent";
@@ -106,78 +128,92 @@ Format as a JSON array with objects containing:
 /// - Classification
 /// - Sentiment analysis
 /// - Relationship extraction
+///
+/// When `with_tools` is enabled, the agent has access to:
+/// - `ScratchpadTool` - For drafting and refining extractions
+/// - `JsonSchemaTool` - For validating output against schemas
 pub struct TextAnalysisAgent {
     agent: Agent<CompletionProvider>,
+    model_name: String,
 }
 
 impl TextAnalysisAgent {
     /// Creates a new text analysis agent with the given completion provider.
-    pub fn new(provider: CompletionProvider) -> Self {
-        let agent = AgentBuilder::new(provider)
+    ///
+    /// # Arguments
+    /// * `provider` - The completion provider to use
+    /// * `with_tools` - Whether to enable tool usage (scratchpad, schema validation)
+    pub fn new(provider: CompletionProvider, with_tools: bool) -> Self {
+        let model_name = provider.model_name().to_string();
+        let builder = AgentBuilder::new(provider)
             .name(NAME)
             .description(DESCRIPTION)
-            .preamble(PREAMBLE)
-            .build();
-        Self { agent }
+            .preamble(PREAMBLE);
+
+        let agent = if with_tools {
+            builder
+                .tool(ScratchpadTool::new())
+                .tool(JsonSchemaTool::<TextAnalysisOutput>::new())
+                .build()
+        } else {
+            builder.build()
+        };
+
+        Self { agent, model_name }
     }
 
     /// Extracts named entities from text.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn extract_entities(&self, text: &str) -> Result<Vec<Entity>> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_EXTRACT_ENTITIES, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let entities: Vec<Entity> = JsonResponse::parse(&response)?;
+        tracing::debug!(entity_count = entities.len(), "extract_entities completed");
+        Ok(entities)
     }
 
     /// Extracts keywords from text.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn extract_keywords(&self, text: &str) -> Result<Vec<String>> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_EXTRACT_KEYWORDS, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let keywords: Vec<String> = JsonResponse::parse(&response)?;
+        tracing::debug!(keyword_count = keywords.len(), "extract_keywords completed");
+        Ok(keywords)
     }
 
     /// Classifies text into provided categories.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len(), label_count = labels.len()))]
     pub async fn classify(&self, text: &str, labels: &[String]) -> Result<Classification> {
         let labels_str = labels.join(", ");
         let base_prompt = PROMPT_CLASSIFY.replace("{}", &labels_str);
         let prompt = format!("{}\n\nText:\n{}", base_prompt, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let classification: Classification = JsonResponse::parse(&response)?;
+        tracing::debug!(matched_labels = ?classification.labels, "classify completed");
+        Ok(classification)
     }
 
     /// Analyzes sentiment of text.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn analyze_sentiment(&self, text: &str) -> Result<Sentiment> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_ANALYZE_SENTIMENT, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let sentiment: Sentiment = JsonResponse::parse(&response)?;
+        tracing::debug!(sentiment = %sentiment.sentiment, confidence = %sentiment.confidence, "analyze_sentiment completed");
+        Ok(sentiment)
     }
 
     /// Extracts relationships between entities in text.
+    #[tracing::instrument(skip(self, text), fields(agent = NAME, model = %self.model_name, text_len = text.len()))]
     pub async fn extract_relationships(&self, text: &str) -> Result<Vec<Relationship>> {
         let prompt = format!("{}\n\nText:\n{}", PROMPT_EXTRACT_RELATIONSHIPS, text);
         let response = self.agent.prompt(&prompt).await?;
-        parse_json(&response)
+        let relationships: Vec<Relationship> = JsonResponse::parse(&response)?;
+        tracing::debug!(
+            relationship_count = relationships.len(),
+            "extract_relationships completed"
+        );
+        Ok(relationships)
     }
-}
-
-/// Parses JSON from LLM response, handling markdown code blocks.
-fn parse_json<T: serde::de::DeserializeOwned>(response: &str) -> Result<T> {
-    // Try to extract JSON from markdown code block if present
-    let json_str = if response.contains("```json") {
-        response
-            .split("```json")
-            .nth(1)
-            .and_then(|s| s.split("```").next())
-            .map(|s| s.trim())
-            .unwrap_or(response.trim())
-    } else if response.contains("```") {
-        response
-            .split("```")
-            .nth(1)
-            .map(|s| s.trim())
-            .unwrap_or(response.trim())
-    } else {
-        response.trim()
-    };
-
-    serde_json::from_str(json_str).map_err(|e| Error::parse(format!("invalid JSON: {e}")))
 }

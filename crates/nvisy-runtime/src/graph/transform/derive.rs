@@ -1,7 +1,7 @@
 //! Derive processor.
 
 use nvisy_dal::AnyDataValue;
-use nvisy_rig::agent::Agents;
+use nvisy_rig::agent::TextGenerationAgent;
 
 use super::Process;
 use crate::definition::DeriveTask;
@@ -9,8 +9,8 @@ use crate::error::Result;
 
 /// Processor for generating new content from input.
 pub struct DeriveProcessor {
-    /// Agents for derivation tasks.
-    agents: Agents,
+    /// Agent for text generation (summarization, titles).
+    agent: TextGenerationAgent,
     /// The derivation task to perform.
     task: DeriveTask,
     /// Optional prompt override.
@@ -19,9 +19,13 @@ pub struct DeriveProcessor {
 
 impl DeriveProcessor {
     /// Creates a new derive processor.
-    pub fn new(agents: Agents, task: DeriveTask, override_prompt: Option<String>) -> Self {
+    pub fn new(
+        agent: TextGenerationAgent,
+        task: DeriveTask,
+        override_prompt: Option<String>,
+    ) -> Self {
         Self {
-            agents,
+            agent,
             task,
             override_prompt,
         }
@@ -40,9 +44,9 @@ impl DeriveProcessor {
 
 impl Process for DeriveProcessor {
     async fn process(&self, input: Vec<AnyDataValue>) -> Result<Vec<AnyDataValue>> {
-        // TODO: Implement derivation using agents
-        // Use self.agents.text_generation_agent for summarization and title generation
-        let _ = &self.agents; // Suppress unused warning
+        // TODO: Implement derivation using agent
+        // Use self.agent for summarization and title generation
+        let _ = &self.agent;
         Ok(input)
     }
 }

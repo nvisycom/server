@@ -8,10 +8,21 @@
 //! - [`TextGenerationAgent`] - Text generation (summarization, titles)
 //! - [`StructuredOutputAgent`] - JSON conversion (structured extraction)
 //!
-//! Use [`Agents`] to create all agents from a single provider.
+//! # Tool Support
+//!
+//! Each agent can optionally be created with tools enabled via the `with_tools`
+//! parameter. When enabled, agents have access to relevant tools:
+//!
+//! | Agent | Tools |
+//! |-------|-------|
+//! | `VisionAgent` | `ScratchpadTool` |
+//! | `TextAnalysisAgent` | `ScratchpadTool`, `JsonSchemaTool` |
+//! | `TextGenerationAgent` | `ScratchpadTool` |
+//! | `TableAgent` | `ScratchpadTool`, `JsonSchemaTool` |
+//! | `StructuredOutputAgent` | `ScratchpadTool`, `JsonSchemaTool` |
 
 pub mod memory;
-pub mod tools;
+mod tool;
 
 mod structured_output;
 mod table;
@@ -19,44 +30,10 @@ mod text_analysis;
 mod text_generation;
 mod vision;
 
-pub use structured_output::StructuredOutputAgent;
-pub use table::TableAgent;
-pub use text_analysis::{Classification, Entity, Relationship, Sentiment, TextAnalysisAgent};
+pub use structured_output::{StructuredOutput, StructuredOutputAgent};
+pub use table::{ColumnDescription, TableAgent};
+pub use text_analysis::{
+    Classification, Entity, Relationship, Sentiment, TextAnalysisAgent, TextAnalysisOutput,
+};
 pub use text_generation::TextGenerationAgent;
 pub use vision::VisionAgent;
-
-use crate::provider::CompletionProvider;
-
-/// Collection of all specialized agents.
-///
-/// Provides convenient access to all agents created from a single completion provider.
-///
-/// # Example
-///
-/// ```ignore
-/// let provider = CompletionProvider::new(...);
-/// let agents = Agents::new(provider);
-///
-/// let summary = agents.text_generation().summarize("...").await?;
-/// let entities = agents.text_analysis().extract_entities("...").await?;
-/// ```
-pub struct Agents {
-    pub structured_output_agent: StructuredOutputAgent,
-    pub table_agent: TableAgent,
-    pub text_analysis_agent: TextAnalysisAgent,
-    pub text_generation_agent: TextGenerationAgent,
-    pub vision_agent: VisionAgent,
-}
-
-impl Agents {
-    /// Creates all agents from a completion provider.
-    pub fn new(provider: CompletionProvider) -> Self {
-        Self {
-            structured_output_agent: StructuredOutputAgent::new(provider.clone()),
-            table_agent: TableAgent::new(provider.clone()),
-            text_analysis_agent: TextAnalysisAgent::new(provider.clone()),
-            text_generation_agent: TextGenerationAgent::new(provider.clone()),
-            vision_agent: VisionAgent::new(provider),
-        }
-    }
-}
