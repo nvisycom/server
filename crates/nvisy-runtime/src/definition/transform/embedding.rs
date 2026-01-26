@@ -1,17 +1,35 @@
 //! Embedding transform definition.
 
+use nvisy_core::Provider;
+use nvisy_rig::provider::{EmbeddingCredentials, EmbeddingModel, EmbeddingProvider};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::provider::EmbeddingProviderParams;
+use crate::error::{Error, Result};
 
 /// Embedding transform for generating vector embeddings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Embedding {
-    /// Embedding provider parameters (includes credentials_id and model).
+    /// Reference to stored credentials.
+    pub credentials_id: Uuid,
+
+    /// Embedding model to use.
     #[serde(flatten)]
-    pub provider: EmbeddingProviderParams,
+    pub model: EmbeddingModel,
 
     /// Whether to L2-normalize the output embeddings.
     #[serde(default)]
     pub normalize: bool,
+}
+
+impl Embedding {
+    /// Creates an embedding provider from these parameters and credentials.
+    pub async fn into_provider(
+        self,
+        credentials: EmbeddingCredentials,
+    ) -> Result<EmbeddingProvider> {
+        EmbeddingProvider::connect(self.model, credentials)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
+    }
 }

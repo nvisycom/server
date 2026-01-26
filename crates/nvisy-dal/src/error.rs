@@ -96,3 +96,9 @@ impl From<Error> for nvisy_core::Error {
             .with_source(err)
     }
 }
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error::new(ErrorKind::InvalidInput, err.to_string())
+    }
+}

@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use nvisy_rig::agent::{
     StructuredOutputAgent, TableAgent, TextAnalysisAgent, TextGenerationAgent, VisionAgent,
 };
-use nvisy_rig::provider::CompletionProvider;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use super::context::Context;
+use super::credentials::CredentialsRegistry;
 use crate::definition::{Input, NodeId, NodeKind, Output, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{
@@ -26,16 +26,13 @@ use crate::graph::{
     CompiledTransform, DeriveProcessor, EdgeData, EmbeddingProcessor, EnrichProcessor,
     ExtractProcessor, InputStream, OutputStream, PartitionProcessor,
 };
-use crate::provider::{
-    CompletionProviderParams, CredentialsRegistry, EmbeddingProviderParams, InputProvider,
-    InputProviderConfig, OutputProviderConfig,
-};
 
 /// Workflow compiler that transforms definitions into executable graphs.
 pub struct WorkflowCompiler<'a> {
     /// Credentials registry for resolving provider credentials.
     registry: &'a CredentialsRegistry,
     /// Execution context for provider initialization.
+    #[allow(dead_code)]
     ctx: Context,
 }
 
@@ -212,11 +209,11 @@ impl<'a> WorkflowCompiler<'a> {
     async fn compile_node(&self, def: &NodeKind) -> Result<CompiledNode> {
         match def {
             NodeKind::Input(input) => {
-                let stream = self.create_input_stream(input).await?;
+                let stream = self.create_input_stream(input)?;
                 Ok(CompiledNode::Input(CompiledInput::new(stream)))
             }
             NodeKind::Output(output) => {
-                let stream = self.create_output_stream(output).await?;
+                let stream = self.create_output_stream(output)?;
                 Ok(CompiledNode::Output(CompiledOutput::new(stream)))
             }
             NodeKind::Transform(transformer) => {
@@ -230,14 +227,8 @@ impl<'a> WorkflowCompiler<'a> {
     }
 
     /// Creates an input stream from an input definition.
-    async fn create_input_stream(&self, input: &Input) -> Result<InputStream> {
+    fn create_input_stream(&self, input: &Input) -> Result<InputStream> {
         match input {
-            Input::Provider(provider_def) => {
-                let stream = self
-                    .create_provider_input_stream(&provider_def.provider)
-                    .await?;
-                Ok(stream)
-            }
             Input::CacheSlot(_) => {
                 // Cache inputs are resolved during cache slot resolution
                 // This shouldn't be called for cache inputs
@@ -248,50 +239,9 @@ impl<'a> WorkflowCompiler<'a> {
         }
     }
 
-    /// Creates an input stream from provider configuration.
-    async fn create_provider_input_stream(
-        &self,
-        config: &InputProviderConfig,
-    ) -> Result<InputStream> {
-        let creds = self.registry.get(config.credentials_id)?;
-        let provider = config.params.clone().into_provider(creds.clone()).await?;
-
-        let stream = self.read_from_provider(&provider).await?;
-
-        // Map the stream to our Result type
-        use futures::StreamExt;
-        let mapped = stream.map(|r| r.map_err(|e| Error::Internal(e.to_string())));
-
-        Ok(InputStream::new(Box::pin(mapped)))
-    }
-
-    /// Reads from an input provider using the appropriate context type.
-    async fn read_from_provider(
-        &self,
-        provider: &InputProvider,
-    ) -> Result<futures::stream::BoxStream<'static, nvisy_dal::Result<nvisy_dal::AnyDataValue>>>
-    {
-        match provider {
-            InputProvider::S3(_) | InputProvider::Gcs(_) | InputProvider::Azblob(_) => {
-                let ctx = self.ctx.to_object_context();
-                provider.read_object_stream(&ctx).await
-            }
-            InputProvider::Postgres(_) | InputProvider::Mysql(_) => {
-                let ctx = self.ctx.to_relational_context();
-                provider.read_relational_stream(&ctx).await
-            }
-        }
-    }
-
     /// Creates an output stream from an output definition.
-    async fn create_output_stream(&self, output: &Output) -> Result<OutputStream> {
+    fn create_output_stream(&self, output: &Output) -> Result<OutputStream> {
         match output {
-            Output::Provider(provider_def) => {
-                let stream = self
-                    .create_provider_output_stream(&provider_def.provider)
-                    .await?;
-                Ok(stream)
-            }
             Output::Cache(_) => {
                 // Cache outputs are resolved during cache slot resolution
                 Err(Error::Internal(
@@ -299,18 +249,6 @@ impl<'a> WorkflowCompiler<'a> {
                 ))
             }
         }
-    }
-
-    /// Creates an output stream from provider configuration.
-    async fn create_provider_output_stream(
-        &self,
-        config: &OutputProviderConfig,
-    ) -> Result<OutputStream> {
-        let creds = self.registry.get(config.credentials_id)?;
-        let provider = config.params.clone().into_provider(creds.clone()).await?;
-        let sink = provider.write_sink();
-
-        Ok(OutputStream::new(sink))
     }
 
     /// Creates a processor from a transformer definition.
@@ -326,29 +264,26 @@ impl<'a> WorkflowCompiler<'a> {
                 p.include_page_breaks,
                 p.discard_unsupported,
             ))),
-            Transformer::Chunk(c) => {
-                if c.contextual_chunking {
-                    // Need completion provider for contextual chunking
-                    // For now, we don't have provider params in chunk definition
-                    // So contextual chunking won't have agents
-                    Ok(CompiledTransform::Chunk(ChunkProcessor::new(
-                        c.chunk_strategy.clone(),
-                    )))
-                } else {
-                    Ok(CompiledTransform::Chunk(ChunkProcessor::new(
-                        c.chunk_strategy.clone(),
-                    )))
-                }
-            }
+            Transformer::Chunk(c) => Ok(CompiledTransform::Chunk(ChunkProcessor::new(
+                c.chunk_strategy.clone(),
+            ))),
             Transformer::Embedding(e) => {
-                let provider = self.create_embedding_provider(&e.provider).await?;
+                let creds = self.registry.get(e.credentials_id)?.clone();
+                let provider = e
+                    .clone()
+                    .into_provider(creds.into_embedding_credentials()?)
+                    .await?;
                 Ok(CompiledTransform::Embedding(EmbeddingProcessor::new(
                     provider,
                     e.normalize,
                 )))
             }
             Transformer::Enrich(e) => {
-                let provider = self.create_completion_provider(&e.provider).await?;
+                let creds = self.registry.get(e.credentials_id)?.clone();
+                let provider = e
+                    .clone()
+                    .into_provider(creds.into_completion_credentials()?)
+                    .await?;
                 let vision_agent = VisionAgent::new(provider.clone(), false);
                 let table_agent = TableAgent::new(provider, false);
                 Ok(CompiledTransform::Enrich(Box::new(EnrichProcessor::new(
@@ -359,7 +294,11 @@ impl<'a> WorkflowCompiler<'a> {
                 ))))
             }
             Transformer::Extract(e) => {
-                let provider = self.create_completion_provider(&e.provider).await?;
+                let creds = self.registry.get(e.credentials_id)?.clone();
+                let provider = e
+                    .clone()
+                    .into_provider(creds.into_completion_credentials()?)
+                    .await?;
                 let text_analysis_agent = TextAnalysisAgent::new(provider.clone(), false);
                 let table_agent = TableAgent::new(provider.clone(), false);
                 let structured_output_agent = StructuredOutputAgent::new(provider, false);
@@ -372,7 +311,11 @@ impl<'a> WorkflowCompiler<'a> {
                 ))))
             }
             Transformer::Derive(d) => {
-                let provider = self.create_completion_provider(&d.provider).await?;
+                let creds = self.registry.get(d.credentials_id)?.clone();
+                let provider = d
+                    .clone()
+                    .into_provider(creds.into_completion_credentials()?)
+                    .await?;
                 let agent = TextGenerationAgent::new(provider, false);
                 Ok(CompiledTransform::Derive(DeriveProcessor::new(
                     agent,
@@ -381,30 +324,6 @@ impl<'a> WorkflowCompiler<'a> {
                 )))
             }
         }
-    }
-
-    /// Creates an embedding provider from parameters.
-    async fn create_embedding_provider(
-        &self,
-        params: &EmbeddingProviderParams,
-    ) -> Result<nvisy_rig::provider::EmbeddingProvider> {
-        let creds = self.registry.get(params.credentials_id())?.clone();
-        params
-            .clone()
-            .into_provider(creds.into_embedding_credentials()?)
-            .await
-    }
-
-    /// Creates a completion provider from parameters.
-    async fn create_completion_provider(
-        &self,
-        params: &CompletionProviderParams,
-    ) -> Result<CompletionProvider> {
-        let creds = self.registry.get(params.credentials_id())?.clone();
-        params
-            .clone()
-            .into_provider(creds.into_completion_credentials()?)
-            .await
     }
 
     /// Builds the petgraph from compiled nodes and resolved edges.

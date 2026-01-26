@@ -103,7 +103,7 @@ impl Searcher {
             .into_iter()
             .map(|scored| {
                 let chunk = scored.chunk;
-                let metadata = ChunkMetadata::from_json(&chunk.metadata, chunk.chunk_index);
+                let metadata = ChunkMetadata::from_json(&chunk.metadata, chunk.chunk_index as u32);
                 RetrievedChunk::new(chunk.id, chunk.file_id, scored.score, metadata)
             })
             .collect();

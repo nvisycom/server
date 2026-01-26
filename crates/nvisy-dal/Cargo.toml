@@ -44,20 +44,13 @@ bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 
-# Storage (OpenDAL)
-opendal = { workspace = true, features = ["services-s3", "services-gcs", "services-azblob", "services-postgresql", "services-mysql"] }
+# Python interop
+pyo3 = { workspace = true, features = ["auto-initialize"] }
+pyo3-async-runtimes = { workspace = true, features = ["tokio-runtime"] }
+async-stream = { workspace = true }
 
-# Vector store clients
-qdrant-client = { workspace = true, features = [] }
-pinecone-sdk = { workspace = true, features = [] }
-
-prost-types = { workspace = true, features = [] }
-
-# Database (for pgvector)
-diesel = { workspace = true, features = ["postgres"] }
-diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
-pgvector = { workspace = true, features = ["diesel"] }
-deadpool = { workspace = true, features = [] }
+[features]
+default = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

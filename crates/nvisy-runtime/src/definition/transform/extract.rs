@@ -1,15 +1,21 @@
 //! Extract transform definition.
 
+use nvisy_core::Provider;
+use nvisy_rig::provider::{CompletionCredentials, CompletionModel, CompletionProvider};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::provider::CompletionProviderParams;
+use crate::error::{Error, Result};
 
 /// Extract transform for extracting structured data or converting formats.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Extract {
-    /// Completion provider parameters (includes credentials_id and model).
+    /// Reference to stored credentials.
+    pub credentials_id: Uuid,
+
+    /// Completion model to use.
     #[serde(flatten)]
-    pub provider: CompletionProviderParams,
+    pub model: CompletionModel,
 
     /// The extraction task to perform.
     #[serde(flatten)]
@@ -18,6 +24,18 @@ pub struct Extract {
     /// Optional prompt override for the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_prompt: Option<String>,
+}
+
+impl Extract {
+    /// Creates a completion provider from these parameters and credentials.
+    pub async fn into_provider(
+        self,
+        credentials: CompletionCredentials,
+    ) -> Result<CompletionProvider> {
+        CompletionProvider::connect(self.model, credentials)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
+    }
 }
 
 /// Tasks for extracting structured data or converting formats.

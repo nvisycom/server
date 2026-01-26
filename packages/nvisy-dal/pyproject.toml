@@ -6,13 +6,13 @@ requires-python = ">=3.12"
 dependencies = ["pydantic>=2.10"]
 
 [project.optional-dependencies]
-s3 = ["boto3>=1.35", "types-boto3"]
+s3 = ["boto3>=1.35", "boto3-stubs[s3]"]
 gcs = ["google-cloud-storage>=2.18"]
 azure = ["azure-storage-blob>=12.23"]
-postgres = ["asyncpg>=0.30"]
+postgres = ["asyncpg>=0.30", "asyncpg-stubs>=0.30"]
 mysql = ["aiomysql>=0.2"]
 qdrant = ["qdrant-client>=1.12"]
-pinecone = ["pinecone-client>=5.0"]
+pinecone = ["pinecone>=5.0"]
 all = ["nvisy-dal[s3,gcs,azure,postgres,mysql,qdrant,pinecone]"]
 dev = ["nvisy-dal[all]", "pytest>=8.0", "pytest-asyncio>=0.24", "moto>=5.0"]
 
@@ -37,6 +37,8 @@ known-first-party = ["nvisy_dal"]
 [tool.basedpyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
+# Third-party libraries (boto3, pinecone) have incomplete type stubs with **kwargs: Unknown
+reportUnknownMemberType = "warning"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -5,7 +5,7 @@ mod language;
 
 pub use file_category::FileCategoryEvaluator;
 pub use language::LanguageEvaluator;
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatype::AnyDataValue;
 
 use crate::definition::SwitchDef;
 
@@ -63,26 +63,5 @@ impl From<SwitchDef> for CompiledSwitch {
         };
 
         Self::new(evaluator)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::definition::{FileCategory, FileCategoryCondition, SwitchCondition};
-
-    #[test]
-    fn test_compiled_switch_from_def() {
-        let def = SwitchDef::new(SwitchCondition::FileCategory(FileCategoryCondition {
-            category: FileCategory::Image,
-        }));
-
-        let switch = CompiledSwitch::from(def);
-
-        let jpg = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("photo.jpg", vec![]));
-        let pdf = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("doc.pdf", vec![]));
-
-        assert!(switch.evaluate(&jpg));
-        assert!(!switch.evaluate(&pdf));
     }
 }

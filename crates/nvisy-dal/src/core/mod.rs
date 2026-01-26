@@ -1,18 +1,13 @@
 //! Core types and traits for data operations.
 
-mod input_stream;
-mod object_context;
-mod output_stream;
-mod relational_context;
-mod vector_context;
+mod contexts;
+mod params;
+mod streams;
 
-pub use input_stream::{InputStream, ItemStream};
-// Re-export IntoProvider from nvisy-core
+pub use contexts::{AnyContext, ObjectContext, RelationalContext, VectorContext};
 pub use nvisy_core::Provider;
-pub use object_context::ObjectContext;
-pub use output_stream::{ItemSink, OutputStream};
-pub use relational_context::RelationalContext;
-pub use vector_context::VectorContext;
+pub use params::{DistanceMetric, ObjectParams, RelationalParams, VectorParams};
+pub use streams::{InputStream, ItemSink, ItemStream, OutputStream};
 
 use crate::Result;
 

@@ -17,7 +17,7 @@ pub use derive::DeriveProcessor;
 pub use embedding::EmbeddingProcessor;
 pub use enrich::EnrichProcessor;
 pub use extract::ExtractProcessor;
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatype::AnyDataValue;
 pub use partition::PartitionProcessor;
 
 use crate::error::Result;

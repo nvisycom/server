@@ -1,7 +1,7 @@
 """Error types for provider operations."""
 
 from enum import StrEnum
-from typing import final
+from typing import final, override
 
 
 class ErrorKind(StrEnum):
@@ -23,6 +23,7 @@ class DalError(Exception):
     def __init__(
         self,
         message: str,
+        *,
         kind: ErrorKind = ErrorKind.PROVIDER,
         source: BaseException | None = None,
     ) -> None:
@@ -31,5 +32,6 @@ class DalError(Exception):
         self.kind = kind
         self.source = source
 
+    @override
     def __repr__(self) -> str:
         return f"DalError({self.message!r}, kind={self.kind!r})"

@@ -8,10 +8,10 @@ use tokio::sync::Semaphore;
 use super::EngineConfig;
 use super::compiler::WorkflowCompiler;
 use super::context::{Context, ExecutionContext};
+use super::credentials::CredentialsRegistry;
 use crate::definition::{NodeId, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};
-use crate::provider::CredentialsRegistry;
 
 /// Tracing target for engine operations.
 const TRACING_TARGET: &str = "nvisy_workflow::engine";

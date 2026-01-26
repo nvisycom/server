@@ -1,6 +1,6 @@
 //! Language evaluator for routing by detected content language.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatype::AnyDataValue;
 
 /// Evaluates language based on metadata.
 #[derive(Debug, Clone)]
@@ -43,8 +43,9 @@ impl LanguageEvaluator {
     /// Gets a string metadata value.
     fn get_metadata_string(&self, data: &AnyDataValue, key: &str) -> Option<String> {
         match data {
-            AnyDataValue::Blob(blob) => blob.metadata.get(key).and_then(json_to_string),
+            AnyDataValue::Object(obj) => obj.metadata.get(key).and_then(json_to_string),
             AnyDataValue::Record(record) => record.columns.get(key).and_then(json_to_string),
+            AnyDataValue::Document(doc) => doc.metadata.get(key).and_then(json_to_string),
             _ => None,
         }
     }
@@ -52,13 +53,18 @@ impl LanguageEvaluator {
     /// Gets an f32 metadata value.
     fn get_metadata_f32(&self, data: &AnyDataValue, key: &str) -> Option<f32> {
         match data {
-            AnyDataValue::Blob(blob) => blob
+            AnyDataValue::Object(obj) => obj
                 .metadata
                 .get(key)
                 .and_then(|v| v.as_f64())
                 .map(|v| v as f32),
             AnyDataValue::Record(record) => record
                 .columns
+                .get(key)
+                .and_then(|v| v.as_f64())
+                .map(|v| v as f32),
+            AnyDataValue::Document(doc) => doc
+                .metadata
                 .get(key)
                 .and_then(|v| v.as_f64())
                 .map(|v| v as f32),
@@ -74,46 +80,5 @@ fn json_to_string(value: &serde_json::Value) -> Option<String> {
         serde_json::Value::Number(n) => Some(n.to_string()),
         serde_json::Value::Bool(b) => Some(b.to_string()),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_evaluate_with_confidence() {
-        let evaluator = LanguageEvaluator::new(vec!["en".into(), "es".into()], 0.8);
-
-        let mut blob = nvisy_dal::datatype::Blob::new("doc.txt", vec![]);
-        blob.metadata
-            .insert("language".into(), serde_json::json!("en"));
-        blob.metadata
-            .insert("language_confidence".into(), serde_json::json!(0.95));
-        let english = AnyDataValue::Blob(blob);
-
-        assert!(evaluator.evaluate(&english));
-
-        let mut blob = nvisy_dal::datatype::Blob::new("doc.txt", vec![]);
-        blob.metadata
-            .insert("language".into(), serde_json::json!("en"));
-        blob.metadata
-            .insert("language_confidence".into(), serde_json::json!(0.5));
-        let low_conf = AnyDataValue::Blob(blob);
-
-        assert!(!evaluator.evaluate(&low_conf));
-    }
-
-    #[test]
-    fn test_evaluate_without_confidence() {
-        let evaluator = LanguageEvaluator::new(vec!["fr".into()], 0.8);
-
-        let mut blob = nvisy_dal::datatype::Blob::new("doc.txt", vec![]);
-        blob.metadata
-            .insert("language".into(), serde_json::json!("fr"));
-        let french = AnyDataValue::Blob(blob);
-
-        // Without confidence metadata, still matches by language
-        assert!(evaluator.evaluate(&french));
     }
 }

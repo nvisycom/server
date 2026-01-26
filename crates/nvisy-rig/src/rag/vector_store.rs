@@ -67,13 +67,13 @@ pub struct ChunkDocument {
     pub text: String,
     /// The file ID this chunk belongs to.
     pub file_id: Uuid,
-    /// The chunk index within the file.
-    pub chunk_index: u32,
+    /// The chunk index within the file (0-based).
+    pub index: u32,
     /// Start byte offset in the source file.
     pub start_offset: u32,
     /// End byte offset in the source file.
     pub end_offset: u32,
-    /// Optional page number.
+    /// Optional page number (1-indexed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,
 }
@@ -83,14 +83,14 @@ impl ChunkDocument {
     pub fn new(
         text: impl Into<String>,
         file_id: Uuid,
-        chunk_index: u32,
+        index: u32,
         start_offset: u32,
         end_offset: u32,
     ) -> Self {
         Self {
             text: text.into(),
             file_id,
-            chunk_index,
+            index,
             start_offset,
             end_offset,
             page: None,
@@ -191,7 +191,7 @@ impl InsertDocuments for PgVectorStore {
                     .get("file_id")
                     .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())?;
-                let chunk_index = json.get("chunk_index").and_then(|v| v.as_u64())? as i32;
+                let index = json.get("index").and_then(|v| v.as_u64())? as u32;
                 let start_offset = json.get("start_offset").and_then(|v| v.as_u64())? as u32;
                 let end_offset = json.get("end_offset").and_then(|v| v.as_u64())? as u32;
                 let page = json.get("page").and_then(|v| v.as_u64()).map(|p| p as u32);
@@ -205,7 +205,7 @@ impl InsertDocuments for PgVectorStore {
                 let content_size = content_bytes.len() as i32;
 
                 let metadata = serde_json::json!({
-                    "index": chunk_index,
+                    "index": index,
                     "start_offset": start_offset,
                     "end_offset": end_offset,
                     "page": page,
@@ -213,7 +213,7 @@ impl InsertDocuments for PgVectorStore {
 
                 Some(NewFileChunk {
                     file_id,
-                    chunk_index: Some(chunk_index),
+                    chunk_index: Some(index as i32),
                     content_sha256,
                     content_size: Some(content_size),
                     token_count: None,

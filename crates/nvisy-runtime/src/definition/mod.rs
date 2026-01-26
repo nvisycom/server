@@ -23,10 +23,10 @@ mod transform;
 mod util;
 
 pub use edge::Edge;
-pub use input::{Input, InputProvider};
+pub use input::Input;
 pub use metadata::WorkflowMetadata;
 pub use node::{Node, NodeId, NodeKind};
-pub use output::{Output, OutputProvider};
+pub use output::Output;
 pub use route::{
     CacheSlot, FileCategory, FileCategoryCondition, LanguageCondition, SwitchCondition, SwitchDef,
 };

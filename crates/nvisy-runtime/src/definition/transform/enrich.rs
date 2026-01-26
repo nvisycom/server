@@ -1,15 +1,21 @@
 //! Enrich transform definition.
 
+use nvisy_core::Provider;
+use nvisy_rig::provider::{CompletionCredentials, CompletionModel, CompletionProvider};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::provider::CompletionProviderParams;
+use crate::error::{Error, Result};
 
 /// Enrich transform for adding metadata/descriptions to elements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Enrich {
-    /// Completion provider parameters (includes credentials_id and model).
+    /// Reference to stored credentials.
+    pub credentials_id: Uuid,
+
+    /// Completion model to use.
     #[serde(flatten)]
-    pub provider: CompletionProviderParams,
+    pub model: CompletionModel,
 
     /// The enrichment task to perform.
     #[serde(flatten)]
@@ -18,6 +24,18 @@ pub struct Enrich {
     /// Optional prompt override for the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_prompt: Option<String>,
+}
+
+impl Enrich {
+    /// Creates a completion provider from these parameters and credentials.
+    pub async fn into_provider(
+        self,
+        credentials: CompletionCredentials,
+    ) -> Result<CompletionProvider> {
+        CompletionProvider::connect(self.model, credentials)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
+    }
 }
 
 /// Tasks for adding metadata/descriptions to elements.

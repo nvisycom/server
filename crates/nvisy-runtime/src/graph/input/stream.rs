@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatype::AnyDataValue;
 
 use crate::error::Result;
 

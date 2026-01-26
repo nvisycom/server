@@ -6,8 +6,8 @@ pub mod definition;
 pub mod engine;
 mod error;
 pub mod graph;
-pub mod provider;
 
+pub use engine::{CredentialsRegistry, ProviderCredentials};
 pub use error::{Error, Result};
 
 /// Tracing target for runtime operations.

@@ -24,42 +24,7 @@ pub struct Message {
     pub timestamp: Option<Timestamp>,
 }
 
-impl Message {
-    /// Creates a new message.
-    pub fn new(id: impl Into<String>, payload: impl Into<Bytes>) -> Self {
-        Self {
-            id: id.into(),
-            payload: payload.into(),
-            headers: HashMap::new(),
-            timestamp: None,
-        }
-    }
-
-    /// Sets a header.
-    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.headers.insert(key.into(), value.into());
-        self
-    }
-
-    /// Sets the timestamp.
-    pub fn with_timestamp(mut self, timestamp: Timestamp) -> Self {
-        self.timestamp = Some(timestamp);
-        self
-    }
-
-    /// Tries to deserialize the payload as JSON.
-    pub fn payload_json<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        serde_json::from_slice(&self.payload)
-    }
-}
-
-impl DataType for Message {
-    const TYPE_ID: &'static str = "message";
-
-    fn data_type_id() -> super::DataTypeId {
-        super::DataTypeId::Message
-    }
-}
+impl DataType for Message {}
 
 mod serde_bytes {
     use bytes::Bytes;

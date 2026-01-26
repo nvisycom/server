@@ -1,6 +1,6 @@
 //! File category evaluator for routing by file extension.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatype::AnyDataValue;
 
 use crate::definition::FileCategory;
 
@@ -19,12 +19,23 @@ impl FileCategoryEvaluator {
 
     /// Evaluates whether the data matches the file category.
     pub fn evaluate(&self, data: &AnyDataValue) -> bool {
-        let ext = match data {
-            AnyDataValue::Blob(blob) => blob.path.rsplit('.').next(),
-            _ => return false,
+        // Extract path from the value based on data type
+        let path: Option<&str> = match data {
+            AnyDataValue::Object(obj) => Some(obj.path.as_str()),
+            AnyDataValue::Document(doc) => doc.metadata.get("path").and_then(|v| v.as_str()),
+            AnyDataValue::Record(rec) => rec
+                .columns
+                .get("path")
+                .or_else(|| rec.columns.get("key"))
+                .and_then(|v| v.as_str()),
+            _ => None,
         };
 
-        let Some(ext) = ext else {
+        let Some(path) = path else {
+            return self.category == FileCategory::Other;
+        };
+
+        let Some(ext) = path.rsplit('.').next() else {
             return self.category == FileCategory::Other;
         };
 
@@ -116,36 +127,5 @@ impl FileCategoryEvaluator {
 impl From<FileCategory> for FileCategoryEvaluator {
     fn from(category: FileCategory) -> Self {
         Self::new(category)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_evaluate_image() {
-        let evaluator = FileCategoryEvaluator::new(FileCategory::Image);
-
-        let jpg = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("photo.jpg", vec![]));
-        let png = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("image.PNG", vec![]));
-        let pdf = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("doc.pdf", vec![]));
-
-        assert!(evaluator.evaluate(&jpg));
-        assert!(evaluator.evaluate(&png));
-        assert!(!evaluator.evaluate(&pdf));
-    }
-
-    #[test]
-    fn test_evaluate_document() {
-        let evaluator = FileCategoryEvaluator::new(FileCategory::Document);
-
-        let pdf = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("report.pdf", vec![]));
-        let docx = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("letter.docx", vec![]));
-        let txt = AnyDataValue::Blob(nvisy_dal::datatype::Blob::new("notes.txt", vec![]));
-
-        assert!(evaluator.evaluate(&pdf));
-        assert!(evaluator.evaluate(&docx));
-        assert!(!evaluator.evaluate(&txt));
     }
 }

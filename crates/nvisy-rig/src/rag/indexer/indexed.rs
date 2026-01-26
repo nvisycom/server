@@ -8,21 +8,21 @@ use uuid::Uuid;
 pub struct IndexedChunk {
     /// Database ID of the created chunk.
     pub id: Uuid,
-    /// Index of the chunk within the file.
-    pub chunk_index: i32,
+    /// Index of the chunk within the file (0-based).
+    pub index: u32,
     /// Size of the chunk content in bytes.
-    pub content_size: i32,
+    pub content_size: u32,
     /// Number of tokens in the chunk.
-    pub token_count: i32,
+    pub token_count: u32,
 }
 
 impl From<FileChunk> for IndexedChunk {
     fn from(chunk: FileChunk) -> Self {
         Self {
             id: chunk.id,
-            chunk_index: chunk.chunk_index,
-            content_size: chunk.content_size,
-            token_count: chunk.token_count,
+            index: chunk.chunk_index as u32,
+            content_size: chunk.content_size as u32,
+            token_count: chunk.token_count as u32,
         }
     }
 }

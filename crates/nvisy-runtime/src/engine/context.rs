@@ -3,7 +3,7 @@
 use derive_builder::Builder;
 use nvisy_dal::AnyDataValue;
 
-use crate::provider::CredentialsRegistry;
+use super::CredentialsRegistry;
 
 /// Context for provider operations during compilation and execution.
 ///
@@ -68,35 +68,20 @@ impl Context {
 
     /// Converts to an ObjectContext for object storage providers.
     pub fn to_object_context(&self) -> nvisy_dal::ObjectContext {
-        let mut ctx = nvisy_dal::ObjectContext::new();
-        if let Some(ref prefix) = self.target {
-            ctx = ctx.with_prefix(prefix.clone());
+        nvisy_dal::ObjectContext {
+            prefix: self.target.clone(),
+            token: self.cursor.clone(),
+            limit: self.limit,
         }
-        if let Some(ref token) = self.cursor {
-            ctx = ctx.with_token(token.clone());
-        }
-        if let Some(limit) = self.limit {
-            ctx = ctx.with_limit(limit);
-        }
-        ctx
     }
 
     /// Converts to a RelationalContext for relational database providers.
     pub fn to_relational_context(&self) -> nvisy_dal::RelationalContext {
-        let mut ctx = nvisy_dal::RelationalContext::new();
-        if let Some(ref table) = self.target {
-            ctx = ctx.with_table(table.clone());
+        nvisy_dal::RelationalContext {
+            cursor: self.cursor.clone(),
+            tiebreaker: self.tiebreaker.clone(),
+            limit: self.limit,
         }
-        if let Some(ref cursor) = self.cursor {
-            ctx = ctx.with_cursor(cursor.clone());
-        }
-        if let Some(ref tiebreaker) = self.tiebreaker {
-            ctx = ctx.with_tiebreaker(tiebreaker.clone());
-        }
-        if let Some(limit) = self.limit {
-            ctx = ctx.with_limit(limit);
-        }
-        ctx
     }
 }
 

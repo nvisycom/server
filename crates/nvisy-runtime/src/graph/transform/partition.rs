@@ -1,6 +1,6 @@
 //! Partition processor.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatype::AnyDataValue;
 
 use super::Process;
 use crate::definition::PartitionStrategy;

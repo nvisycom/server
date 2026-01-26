@@ -139,9 +139,7 @@ woothee = { version = "0.13", features = [] }
 # AI/ML frameworks
 rig-core = { version = "0.29", default-features = false, features = ["reqwest-rustls"] }
 
-# Storage abstractions and providers
-opendal = { version = "0.53", features = [] }
-qdrant-client = { version = "1.13", features = [] }
-pinecone-sdk = { version = "0.1", features = [] }
 
-prost-types = { version = "0.12", features = [] }
+# Python interop
+pyo3 = { version = "0.27", features = [] }
+pyo3-async-runtimes = { version = "0.27", features = [] }
