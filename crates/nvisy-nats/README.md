@@ -1,10 +1,9 @@
 # nvisy-nats
 
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+
 Task-focused NATS client for the Nvisy platform with comprehensive JetStream
 support and unified streaming infrastructure.
-
-[![Rust](https://img.shields.io/badge/Rust-1.89+-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![NATS](https://img.shields.io/badge/NATS-JetStream-000000?style=flat-square&logo=nats&logoColor=white)](https://nats.io/)
 
 ## Features
 
@@ -33,3 +32,18 @@ The crate provides specialized modules for common NATS use cases:
 
 All modules maintain type safety through generic parameters and provide access
 to the underlying NATS client for extensibility.
+
+## Changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
+
+## License
+
+Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
+
+## Support
+
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

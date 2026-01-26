@@ -11,7 +11,7 @@ High-performance backend server for the Nvisy document processing platform.
 - **High-Performance** - Async HTTP server with Axum and Tokio
 - **LLM Annotations** - AI-driven document edits via structured annotations
 - **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
-- **Real-Time Updates** - Live collaboration via NATS pub/sub and WebSocket
+- **Real-Time Updates** - AI streaming via SSE and job processing via NATS
 - **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
 
 ## Architecture
@@ -33,14 +33,13 @@ server/
 ## Quick Start
 
 ```bash
-# Install tools and generate keys
+# Install tools and make scripts executable
 make install-all
-make generate-keys
 
-# Run database migrations
-make generate-migrations
+# Generate keys, env and migration files
+make generate-all
 
-# Start the server
+# Start the server with dotenv feature
 cargo run --features dotenv
 ```
 
@@ -72,7 +71,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
 
 ## License
 
-MIT License - see [LICENSE.txt](LICENSE.txt)
+Apache 2.0 License - see [LICENSE.txt](LICENSE.txt)
 
 ## Support
 

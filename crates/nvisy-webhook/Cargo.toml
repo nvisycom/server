@@ -1,11 +1,15 @@
 [package]
 name = "nvisy-webhook"
+description = "Webhook delivery types and traits for nvisy services"
+readme = "./README.md"
+keywords = ["webhook", "http", "delivery", "notifications", "events"]
+categories = ["api-bindings", "network-programming"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }

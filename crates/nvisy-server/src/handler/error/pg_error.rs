@@ -27,13 +27,12 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspaceActivityLog(c) => c.into(),
             ConstraintViolation::WorkspaceIntegration(c) => c.into(),
             ConstraintViolation::WorkspaceIntegrationRun(c) => c.into(),
-            ConstraintViolation::Document(c) => c.into(),
-            ConstraintViolation::DocumentChunk(c) => c.into(),
-            ConstraintViolation::DocumentComment(c) => c.into(),
-            ConstraintViolation::DocumentAnnotation(c) => c.into(),
-            ConstraintViolation::DocumentFile(c) => c.into(),
-            ConstraintViolation::DocumentVersion(c) => c.into(),
             ConstraintViolation::WorkspaceWebhook(c) => c.into(),
+            ConstraintViolation::File(c) => c.into(),
+            ConstraintViolation::FileAnnotation(c) => c.into(),
+            ConstraintViolation::FileChunk(c) => c.into(),
+            ConstraintViolation::Pipeline(c) => c.into(),
+            ConstraintViolation::PipelineRun(c) => c.into(),
         }
     }
 }

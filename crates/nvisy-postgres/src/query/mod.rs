@@ -13,34 +13,35 @@
 //! [`CursorPagination`]: crate::types::CursorPagination
 //! [`OffsetPagination`]: crate::types::OffsetPagination
 
-pub mod account;
-pub mod account_action_token;
-pub mod account_api_token;
-pub mod account_notification;
+mod account;
+mod account_action_token;
+mod account_api_token;
+mod account_notification;
 
-pub mod document;
-pub mod document_annotation;
-pub mod document_chunk;
-pub mod document_comment;
-pub mod document_file;
+mod file;
+mod file_annotation;
+mod file_chunk;
 
-pub mod workspace;
-pub mod workspace_activity;
-pub mod workspace_integration;
-pub mod workspace_integration_run;
-pub mod workspace_invite;
-pub mod workspace_member;
-pub mod workspace_webhook;
+mod pipeline;
+mod pipeline_run;
+
+mod workspace;
+mod workspace_activity;
+mod workspace_integration;
+mod workspace_integration_run;
+mod workspace_invite;
+mod workspace_member;
+mod workspace_webhook;
 
 pub use account::AccountRepository;
 pub use account_action_token::AccountActionTokenRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
-pub use document::DocumentRepository;
-pub use document_annotation::DocumentAnnotationRepository;
-pub use document_chunk::DocumentChunkRepository;
-pub use document_comment::DocumentCommentRepository;
-pub use document_file::DocumentFileRepository;
+pub use file::FileRepository;
+pub use file_annotation::FileAnnotationRepository;
+pub use file_chunk::FileChunkRepository;
+pub use pipeline::PipelineRepository;
+pub use pipeline_run::PipelineRunRepository;
 pub use workspace::WorkspaceRepository;
 pub use workspace_activity::WorkspaceActivityRepository;
 pub use workspace_integration::WorkspaceIntegrationRepository;

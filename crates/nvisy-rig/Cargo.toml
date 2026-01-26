@@ -1,29 +1,35 @@
 [package]
 name = "nvisy-rig"
+description = "Rig AI framework integration for nvisy"
+readme = "./README.md"
+keywords = ["rig", "llm", "ai", "client", "rag"]
+categories = ["api-bindings", "web-programming::http-client"]
+
 version = { workspace = true }
-edition = { workspace = true }
 rust-version = { workspace = true }
+edition = { workspace = true }
 license = { workspace = true }
+publish = { workspace = true }
+
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = { workspace = true }
-publish = { workspace = true }
-
-description = "Rig AI framework integration for nvisy"
-keywords = ["rig", "llm", "ai", "client", "rag"]
-categories = ["api-bindings", "web-programming::http-client"]
 
 [features]
-## Default feature set (none for minimal dependencies)
-default = []
+## Default feature set includes Ollama for local development
+default = ["ollama"]
 
 ## CLI configuration support: enables clap derives for config types
 ## This allows config types to be used with command-line argument parsing
 config = ["dep:clap"]
 
+## Ollama local model support
+ollama = []
+
 [dependencies]
 # Internal crates
+nvisy-core = { workspace = true }
 nvisy-nats = { workspace = true }
 nvisy-postgres = { workspace = true }
 
@@ -39,12 +45,17 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+# Schema generation & validation
+schemars = { workspace = true }
+jsonschema = { workspace = true }
+
 # Error handling
 thiserror = { workspace = true }
 
 # Derive macros
 derive_builder = { workspace = true }
 derive_more = { workspace = true }
+strum = { workspace = true }
 
 # Observability
 tracing = { workspace = true }

@@ -7,7 +7,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::query::{DocumentAnnotationRepository, DocumentFileRepository};
+use nvisy_postgres::query::{FileAnnotationRepository, FileRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -24,8 +24,8 @@ const TRACING_TARGET: &str = "nvisy_server::handler::annotations";
 async fn find_annotation(
     conn: &mut nvisy_postgres::PgConn,
     annotation_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::DocumentAnnotation> {
-    conn.find_document_annotation_by_id(annotation_id)
+) -> Result<nvisy_postgres::model::FileAnnotation> {
+    conn.find_file_annotation_by_id(annotation_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -38,14 +38,12 @@ async fn find_annotation(
 async fn find_file(
     conn: &mut nvisy_postgres::PgConn,
     file_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::DocumentFile> {
-    conn.find_document_file_by_id(file_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("File not found")
-                .with_resource("file")
-        })
+) -> Result<nvisy_postgres::model::File> {
+    conn.find_file_by_id(file_id).await?.ok_or_else(|| {
+        ErrorKind::NotFound
+            .with_message("File not found")
+            .with_resource("file")
+    })
 }
 
 /// Creates a new annotation on a file.
@@ -68,11 +66,11 @@ async fn create_annotation(
     let file = find_file(&mut conn, path_params.file_id).await?;
 
     auth_state
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::CreateDocuments)
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::AnnotateFiles)
         .await?;
 
     let new_annotation = request.into_model(path_params.file_id, auth_state.account_id);
-    let annotation = conn.create_document_annotation(new_annotation).await?;
+    let annotation = conn.create_file_annotation(new_annotation).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -116,11 +114,11 @@ async fn list_annotations(
     let file = find_file(&mut conn, path_params.file_id).await?;
 
     auth_state
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewDocuments)
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewFiles)
         .await?;
 
     let page = conn
-        .cursor_list_file_document_annotations(path_params.file_id, pagination.into())
+        .cursor_list_file_annotations(path_params.file_id, pagination.into())
         .await?;
 
     let response = AnnotationsPage::from_cursor_page(page, Annotation::from_model);
@@ -160,10 +158,10 @@ async fn get_annotation(
 
     let mut conn = pg_client.get_connection().await?;
     let annotation = find_annotation(&mut conn, path_params.annotation_id).await?;
-    let file = find_file(&mut conn, annotation.document_file_id).await?;
+    let file = find_file(&mut conn, annotation.file_id).await?;
 
     auth_state
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewDocuments)
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewFiles)
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Annotation retrieved");
@@ -204,14 +202,14 @@ async fn update_annotation(
         return Err(ErrorKind::Forbidden.with_message("You can only update your own annotations"));
     }
 
-    let file = find_file(&mut conn, annotation.document_file_id).await?;
+    let file = find_file(&mut conn, annotation.file_id).await?;
 
     auth_state
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::CreateDocuments)
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::AnnotateFiles)
         .await?;
 
     let updated = conn
-        .update_document_annotation(path_params.annotation_id, request.into_model())
+        .update_file_annotation(path_params.annotation_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Annotation updated");
@@ -252,13 +250,13 @@ async fn delete_annotation(
         return Err(ErrorKind::Forbidden.with_message("You can only delete your own annotations"));
     }
 
-    let file = find_file(&mut conn, annotation.document_file_id).await?;
+    let file = find_file(&mut conn, annotation.file_id).await?;
 
     auth_state
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::CreateDocuments)
+        .authorize_workspace(&mut conn, file.workspace_id, Permission::AnnotateFiles)
         .await?;
 
-    conn.delete_document_annotation(path_params.annotation_id)
+    conn.delete_file_annotation(path_params.annotation_id)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Annotation deleted");

@@ -21,20 +21,20 @@ impl From<Error> for crate::Error {
         match err {
             Error::Reqwest(e) => {
                 if e.is_timeout() {
-                    crate::Error::timeout()
+                    crate::Error::new(crate::ErrorKind::Timeout)
                         .with_message(e.to_string())
                         .with_source(e)
                 } else if e.is_connect() {
-                    crate::Error::network_error()
+                    crate::Error::new(crate::ErrorKind::NetworkError)
                         .with_message("Connection failed")
                         .with_source(e)
                 } else {
-                    crate::Error::network_error()
+                    crate::Error::new(crate::ErrorKind::NetworkError)
                         .with_message(e.to_string())
                         .with_source(e)
                 }
             }
-            Error::Serde(e) => crate::Error::serialization()
+            Error::Serde(e) => crate::Error::new(crate::ErrorKind::Serialization)
                 .with_message(e.to_string())
                 .with_source(e),
         }

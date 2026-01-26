@@ -42,6 +42,8 @@ pub struct WorkspaceWebhook {
     pub events: Vec<Option<WebhookEvent>>,
     /// Custom headers to include in webhook requests.
     pub headers: serde_json::Value,
+    /// HMAC-SHA256 signing secret for webhook verification.
+    pub secret: String,
     /// Current status of the webhook.
     pub status: WebhookStatus,
     /// Timestamp of last webhook trigger.

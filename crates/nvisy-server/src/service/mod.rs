@@ -1,24 +1,23 @@
 //! Application state and dependency injection.
 
 mod cache;
-mod compression;
 mod config;
 mod integration;
 mod security;
+mod webhook;
 
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
-use nvisy_rig::RigService;
 use nvisy_webhook::WebhookService;
 
 use crate::Result;
 pub use crate::service::cache::HealthCache;
-pub use crate::service::compression::{ArchiveFormat, ArchiveService};
 pub use crate::service::config::ServiceConfig;
 pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
+pub use crate::service::webhook::WebhookEmitter;
 
 /// Application state.
 ///
@@ -33,17 +32,14 @@ pub struct ServiceState {
     pub nats: NatsClient,
     pub webhook: WebhookService,
 
-    // AI services:
-    pub rig: RigService,
-
     // Internal services:
     pub health_cache: HealthCache,
-    pub archive_service: ArchiveService,
     pub integration_provider: IntegrationProvider,
     pub password_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
+    pub webhook_emitter: WebhookEmitter,
 }
 
 impl ServiceState {
@@ -57,31 +53,20 @@ impl ServiceState {
         let postgres = service_config.connect_postgres().await?;
         let nats = service_config.connect_nats().await?;
 
-        // Initialize AI services
-        let rig = RigService::new(
-            service_config.rig_config.clone(),
-            postgres.clone(),
-            nats.clone(),
-        )
-        .await
-        .map_err(|e| {
-            crate::Error::internal("rig", "Failed to initialize rig service").with_source(e)
-        })?;
+        let webhook_emitter = WebhookEmitter::new(postgres.clone(), nats.clone());
 
         let service_state = Self {
             postgres,
             nats,
             webhook: webhook_service,
 
-            rig,
-
             health_cache: HealthCache::new(),
-            archive_service: ArchiveService::new(),
             integration_provider: IntegrationProvider::new(),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
             session_keys: service_config.load_session_keys().await?,
             user_agent_parser: UserAgentParser::new(),
+            webhook_emitter,
         };
 
         Ok(service_state)
@@ -103,14 +88,11 @@ impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
 
-// AI services:
-impl_di!(rig: RigService);
-
 // Internal services:
 impl_di!(health_cache: HealthCache);
-impl_di!(archive_service: ArchiveService);
 impl_di!(integration_provider: IntegrationProvider);
 impl_di!(password_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(session_keys: SessionKeys);
 impl_di!(user_agent_parser: UserAgentParser);
+impl_di!(webhook_emitter: WebhookEmitter);

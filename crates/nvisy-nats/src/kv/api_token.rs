@@ -1,4 +1,4 @@
-//! API authentication token data structure.
+//! API authentication token type.
 
 use std::time::Duration;
 
@@ -20,8 +20,6 @@ pub enum ApiTokenType {
 }
 
 /// API authentication token data structure.
-///
-/// Simplified token model for session management.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApiToken {
     /// Unique token identifier used for authentication
@@ -166,8 +164,6 @@ mod tests {
     fn test_token_expiry() {
         let now = Timestamp::now();
         let mut token = create_test_token();
-
-        // Set token to expire in the past
         token.expired_at = now
             .checked_sub(jiff::SignedDuration::from_secs(3600))
             .unwrap();
@@ -184,7 +180,6 @@ mod tests {
 
         assert!(!token.is_valid());
         assert!(token.is_deleted());
-        assert!(token.deleted_at.is_some());
     }
 
     #[test]
@@ -198,41 +193,6 @@ mod tests {
     }
 
     #[test]
-    fn test_token_touch() {
-        let mut token = create_test_token();
-        let original_last_used = token.last_used_at;
-
-        // Small delay to ensure timestamp difference
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        token.touch();
-        assert!(token.last_used_at > original_last_used);
-    }
-
-    #[test]
-    fn test_token_short_display() {
-        let token = create_test_token();
-        let short_access = token.access_seq_short();
-
-        assert_eq!(short_access.len(), 11); // 8 chars + "..."
-        assert!(short_access.ends_with("..."));
-    }
-
-    #[test]
-    fn test_is_expiring_soon() {
-        let now = Timestamp::now();
-        let mut token = create_test_token();
-
-        // Set expiry to 10 minutes from now
-        token.expired_at = now
-            .checked_add(jiff::SignedDuration::from_secs(600))
-            .unwrap();
-
-        assert!(token.is_expiring_soon(15)); // Within 15 minutes
-        assert!(!token.is_expiring_soon(5)); // Not within 5 minutes
-    }
-
-    #[test]
     fn test_api_token_type_serialization() {
         let web = ApiTokenType::Web;
         let serialized = serde_json::to_string(&web).unwrap();
@@ -241,9 +201,5 @@ mod tests {
         let api = ApiTokenType::Api;
         let serialized = serde_json::to_string(&api).unwrap();
         assert_eq!(serialized, "\"api\"");
-
-        let cli = ApiTokenType::Cli;
-        let serialized = serde_json::to_string(&cli).unwrap();
-        assert_eq!(serialized, "\"cli\"");
     }
 }

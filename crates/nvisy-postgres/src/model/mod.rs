@@ -3,23 +3,23 @@
 //! This module contains Diesel model definitions for all database tables,
 //! including structs for querying, inserting, and updating records.
 
-pub mod account;
-pub mod account_action_token;
-pub mod account_api_token;
-pub mod account_notification;
-pub mod document;
-pub mod document_annotation;
-pub mod document_chunk;
-pub mod document_comment;
-pub mod document_file;
+mod account;
+mod account_action_token;
+mod account_api_token;
+mod account_notification;
+mod file;
+mod file_annotation;
+mod file_chunk;
+mod pipeline;
+mod pipeline_run;
 
-pub mod workspace;
-pub mod workspace_activity;
-pub mod workspace_integration;
-pub mod workspace_integration_run;
-pub mod workspace_invite;
-pub mod workspace_member;
-pub mod workspace_webhook;
+mod workspace;
+mod workspace_activity;
+mod workspace_integration;
+mod workspace_integration_run;
+mod workspace_invite;
+mod workspace_member;
+mod workspace_webhook;
 
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
@@ -30,16 +30,13 @@ pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountAp
 pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
-// Document models
-pub use document::{Document, NewDocument, UpdateDocument};
-pub use document_annotation::{
-    DocumentAnnotation, NewDocumentAnnotation, UpdateDocumentAnnotation,
-};
-pub use document_chunk::{
-    DocumentChunk, NewDocumentChunk, ScoredDocumentChunk, UpdateDocumentChunk,
-};
-pub use document_comment::{DocumentComment, NewDocumentComment, UpdateDocumentComment};
-pub use document_file::{DocumentFile, NewDocumentFile, UpdateDocumentFile};
+// File models
+pub use file::{File, NewFile, UpdateFile};
+pub use file_annotation::{FileAnnotation, NewFileAnnotation, UpdateFileAnnotation};
+pub use file_chunk::{FileChunk, NewFileChunk, ScoredFileChunk, UpdateFileChunk};
+// Pipeline models
+pub use pipeline::{NewPipeline, Pipeline, UpdatePipeline};
+pub use pipeline_run::{NewPipelineRun, PipelineRun, UpdatePipelineRun};
 // Workspace models
 pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};
 pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};

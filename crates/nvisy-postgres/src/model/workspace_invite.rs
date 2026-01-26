@@ -5,8 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_invites;
-use crate::types::constants::invite;
-use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, WorkspaceRole};
+use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, RECENTLY_SENT_HOURS, WorkspaceRole};
 
 /// Workspace invitation model representing an invitation to join a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -122,7 +121,7 @@ impl WorkspaceInvite {
 
     /// Returns whether the invitation was sent recently.
     pub fn is_recently_sent(&self) -> bool {
-        self.was_created_within(jiff::Span::new().hours(invite::RECENTLY_SENT_HOURS))
+        self.was_created_within(jiff::Span::new().hours(RECENTLY_SENT_HOURS))
     }
 
     /// Returns the time remaining until expiration.

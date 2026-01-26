@@ -1,0 +1,64 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-runtime"
+description = "Workflow definitions and execution engine for Nvisy pipelines"
+readme = "./README.md"
+keywords = ["workflow", "runtime", "engine", "pipeline", "execution"]
+categories = ["development-tools", "algorithms"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+nvisy-core = { workspace = true }
+nvisy-dal = { workspace = true }
+nvisy-rig = { workspace = true }
+
+# Runtime crates
+nvisy-rt-core = { workspace = true }
+nvisy-rt-engine = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+futures = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Derive macros & utilities
+async-trait = { workspace = true, features = [] }
+thiserror = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["debug", "display", "from", "into"] }
+derive_builder = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
+
+# Data types
+uuid = { workspace = true, features = ["v7", "serde"] }
+jiff = { workspace = true, features = ["serde"] }
+
+# Graph data structures
+petgraph = { workspace = true, features = [] }
+
+# Versioning
+semver = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

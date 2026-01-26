@@ -5,7 +5,7 @@
 //! The trait is designed to be implemented by types that represent authenticated users.
 
 use nvisy_postgres::model::WorkspaceMember;
-use nvisy_postgres::query::{DocumentRepository, WorkspaceMemberRepository};
+use nvisy_postgres::query::{FileRepository, WorkspaceMemberRepository};
 use nvisy_postgres::{PgConn, PgError};
 use uuid::Uuid;
 
@@ -120,15 +120,15 @@ pub trait AuthProvider {
         }
     }
 
-    /// Checks if a user has permission to access a document.
+    /// Checks if a user has permission to access a file.
     ///
-    /// This method resolves the document's workspace and checks workspace-level permissions.
-    /// Document owners have special privileges for write operations.
+    /// This method resolves the file's workspace and checks workspace-level permissions.
+    /// File owners have special privileges for write operations.
     ///
     /// # Arguments
     ///
     /// * `conn` - Database connection
-    /// * `document_id` - Document to check access for
+    /// * `file_id` - File to check access for
     /// * `permission` - Required permission level
     ///
     /// # Returns
@@ -139,40 +139,40 @@ pub trait AuthProvider {
     ///
     /// Returns database errors if queries fail.
     #[allow(async_fn_in_trait)]
-    async fn check_document_permission(
+    async fn check_file_permission(
         &self,
         conn: &mut PgConn,
-        document_id: Uuid,
+        file_id: Uuid,
         permission: Permission,
     ) -> Result<AuthResult, PgError> {
-        // Get the document to find its workspace
-        let document = conn.find_document_by_id(document_id).await?;
+        // Get the file to find its workspace
+        let file = conn.find_file_by_id(file_id).await?;
 
-        let Some(document) = document else {
+        let Some(file) = file else {
             tracing::warn!(
                 target: TRACING_TARGET,
                 account_id = %self.account_id(),
-                document_id = %document_id,
-                "access denied: document not found"
+                file_id = %file_id,
+                "access denied: file not found"
             );
-            return Ok(AuthResult::denied("Document not found"));
+            return Ok(AuthResult::denied("File not found"));
         };
 
-        // Document owners have special privileges for destructive operations
-        let is_document_owner = document.account_id == self.account_id();
+        // File owners have special privileges for destructive operations
+        let is_file_owner = file.account_id == self.account_id();
         let requires_ownership = matches!(
             permission,
-            Permission::UpdateDocuments | Permission::DeleteDocuments
+            Permission::UpdateFiles | Permission::DeleteFiles
         );
 
-        if requires_ownership && !is_document_owner && !self.is_admin() {
+        if requires_ownership && !is_file_owner && !self.is_admin() {
             // Non-owners need explicit workspace-level permissions for destructive operations
             return self
-                .check_workspace_permission(conn, document.workspace_id, permission)
+                .check_workspace_permission(conn, file.workspace_id, permission)
                 .await;
         }
 
-        self.check_workspace_permission(conn, document.workspace_id, permission)
+        self.check_workspace_permission(conn, file.workspace_id, permission)
             .await
     }
 
@@ -274,17 +274,17 @@ pub trait AuthProvider {
         auth_result.into_result()
     }
 
-    /// Authorizes document access with ownership and workspace-level checks.
+    /// Authorizes file access with ownership and workspace-level checks.
     ///
-    /// This convenience method handles complex document authorization logic:
-    /// - Document owners have enhanced privileges for their own documents
+    /// This convenience method handles complex file authorization logic:
+    /// - File owners have enhanced privileges for their own files
     /// - All access requires at least workspace membership
     /// - Global administrators bypass all restrictions
     ///
     /// # Arguments
     ///
-    /// * `pg_client` - Database client for verification
-    /// * `document_id` - Target document identifier
+    /// * `conn` - Database connection for verification
+    /// * `file_id` - Target file identifier
     /// * `permission` - Required permission level
     ///
     /// # Returns
@@ -295,14 +295,14 @@ pub trait AuthProvider {
     ///
     /// Returns `Forbidden` error if access is denied, or propagates database errors.
     #[allow(async_fn_in_trait)]
-    async fn authorize_document(
+    async fn authorize_file(
         &self,
         conn: &mut PgConn,
-        document_id: Uuid,
+        file_id: Uuid,
         permission: Permission,
     ) -> Result<Option<WorkspaceMember>> {
         let auth_result = self
-            .check_document_permission(conn, document_id, permission)
+            .check_file_permission(conn, file_id, permission)
             .await?;
         auth_result.into_result()
     }

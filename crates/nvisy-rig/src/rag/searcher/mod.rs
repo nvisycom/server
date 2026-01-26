@@ -7,11 +7,10 @@ mod scope;
 
 use std::collections::HashMap;
 
-use nvisy_nats::object::{DocumentKey, DocumentStore, Files};
-use nvisy_postgres::model::ScoredDocumentChunk;
-use nvisy_postgres::query::DocumentChunkRepository;
+use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
+use nvisy_postgres::model::ScoredFileChunk;
+use nvisy_postgres::query::FileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
-use rig::embeddings::EmbeddingModel;
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
@@ -26,7 +25,7 @@ use crate::{Error, Result};
 pub struct Searcher {
     provider: EmbeddingProvider,
     db: PgClient,
-    files: DocumentStore<Files>,
+    files: ObjectStore<FilesBucket, FileKey>,
     scope: SearchScope,
     min_score: Option<f64>,
 }
@@ -36,7 +35,7 @@ impl Searcher {
     pub(crate) fn new(
         provider: EmbeddingProvider,
         db: PgClient,
-        files: DocumentStore<Files>,
+        files: ObjectStore<FilesBucket, FileKey>,
         scope: SearchScope,
     ) -> Self {
         Self {
@@ -60,12 +59,13 @@ impl Searcher {
     }
 
     /// Searches for relevant chunks without loading content.
+    #[tracing::instrument(skip(self, query), fields(query_len = query.len(), limit, scope = ?self.scope))]
     pub async fn query(&self, query: &str, limit: u32) -> Result<Vec<RetrievedChunk>> {
         let embedding = self
             .provider
             .embed_text(query)
             .await
-            .map_err(|e| Error::embedding(format!("failed to embed query: {e}")))?;
+            .map_err(|e| Error::provider("embedding", e.to_string()))?;
 
         let query_vector: Vector = embedding
             .vec
@@ -82,15 +82,15 @@ impl Searcher {
 
         let min_score = self.min_score.unwrap_or(0.0);
 
-        let scored_chunks: Vec<ScoredDocumentChunk> = match &self.scope {
+        let scored_chunks: Vec<ScoredFileChunk> = match &self.scope {
             SearchScope::Files(file_ids) => {
                 conn.search_scored_chunks_in_files(query_vector, file_ids, min_score, limit as i64)
                     .await
             }
-            SearchScope::Documents(doc_ids) => {
-                conn.search_scored_chunks_in_documents(
+            SearchScope::Workspace(workspace_id) => {
+                conn.search_scored_chunks_in_workspace(
                     query_vector,
-                    doc_ids,
+                    *workspace_id,
                     min_score,
                     limit as i64,
                 )
@@ -99,26 +99,30 @@ impl Searcher {
         }
         .map_err(|e| Error::retrieval(format!("vector search failed: {e}")))?;
 
-        let chunks = scored_chunks
+        let chunks: Vec<RetrievedChunk> = scored_chunks
             .into_iter()
             .map(|scored| {
                 let chunk = scored.chunk;
-                let metadata = ChunkMetadata::from_json(&chunk.metadata, chunk.chunk_index);
+                let metadata = ChunkMetadata::from_json(&chunk.metadata, chunk.chunk_index as u32);
                 RetrievedChunk::new(chunk.id, chunk.file_id, scored.score, metadata)
             })
             .collect();
 
+        tracing::debug!(result_count = chunks.len(), "query completed");
         Ok(chunks)
     }
 
     /// Searches for relevant chunks and loads their content.
+    #[tracing::instrument(skip(self, query), fields(query_len = query.len(), limit))]
     pub async fn query_with_content(&self, query: &str, limit: u32) -> Result<Vec<RetrievedChunk>> {
         let mut chunks = self.query(query, limit).await?;
         self.load_content(&mut chunks).await?;
+        tracing::debug!(result_count = chunks.len(), "query_with_content completed");
         Ok(chunks)
     }
 
     /// Loads content for retrieved chunks from NATS.
+    #[tracing::instrument(skip(self, chunks), fields(chunk_count = chunks.len()))]
     pub async fn load_content(&self, chunks: &mut [RetrievedChunk]) -> Result<()> {
         let mut by_file: HashMap<Uuid, Vec<usize>> = HashMap::new();
         for (idx, chunk) in chunks.iter().enumerate() {
@@ -127,11 +131,14 @@ impl Searcher {
             }
         }
 
+        let file_count = by_file.len();
+        tracing::debug!(file_count, "loading content from files");
+
         for (file_id, indices) in by_file {
             let file_content = match self.fetch_file(file_id).await {
                 Ok(content) => content,
                 Err(e) => {
-                    tracing::warn!(file_id = %file_id, error = %e, "Failed to fetch file");
+                    tracing::warn!(file_id = %file_id, error = %e, "failed to fetch file");
                     continue;
                 }
             };
@@ -150,8 +157,9 @@ impl Searcher {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(%file_id))]
     async fn fetch_file(&self, file_id: Uuid) -> Result<Vec<u8>> {
-        let key = DocumentKey::from_parts(Uuid::nil(), file_id);
+        let key = FileKey::from_parts(Uuid::nil(), file_id);
 
         let mut result = self
             .files
@@ -167,6 +175,7 @@ impl Searcher {
             .await
             .map_err(|e| Error::retrieval(format!("failed to read file: {e}")))?;
 
+        tracing::debug!(content_len = content.len(), "file fetched");
         Ok(content)
     }
 }

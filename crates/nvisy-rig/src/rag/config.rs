@@ -1,5 +1,7 @@
 //! RAG system configuration.
 
+use std::num::NonZeroU32;
+
 /// Configuration for the RAG system.
 #[derive(Debug, Clone)]
 pub struct RagConfig {
@@ -7,10 +9,10 @@ pub struct RagConfig {
     pub max_chunk_characters: u32,
 
     /// Number of characters to overlap between chunks.
-    pub chunk_overlap: u32,
+    pub chunk_overlap_characters: Option<NonZeroU32>,
 
     /// Whether to trim whitespace from chunks.
-    pub trim_chunks: bool,
+    pub trim_whitespace: bool,
 
     /// Maximum chunks to retrieve per query.
     pub max_results: u32,
@@ -23,8 +25,8 @@ impl Default for RagConfig {
     fn default() -> Self {
         Self {
             max_chunk_characters: 1000,
-            chunk_overlap: 0,
-            trim_chunks: true,
+            chunk_overlap_characters: None,
+            trim_whitespace: true,
             max_results: 5,
             min_score: None,
         }

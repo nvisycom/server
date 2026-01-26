@@ -14,6 +14,14 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+
 # Generated files
 *.pem
 *.backup
@@ -28,7 +36,6 @@ crates/nvisy-postgres/src/schema.rs.bak
 # Build output
 dist/
 build/
-output/
 
 # Environment files
 .env*
@@ -50,4 +57,4 @@ temp/
 .ignore*/
 LLM.md
 .claude
-pgtrgm/
+CLAUDE.md

@@ -71,6 +71,35 @@ impl Webhook {
     }
 }
 
+/// Webhook creation response that includes the secret (visible only once).
+///
+/// The secret is used for HMAC-SHA256 signature verification of webhook payloads.
+/// It is only returned when the webhook is first created and cannot be retrieved
+/// again. Store it securely.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookCreated {
+    /// The created webhook details.
+    #[serde(flatten)]
+    pub webhook: Webhook,
+    /// HMAC-SHA256 signing secret for webhook verification.
+    ///
+    /// **Important**: This is the only time the secret will be shown.
+    /// Store it securely as it cannot be retrieved again.
+    pub secret: String,
+}
+
+impl WebhookCreated {
+    pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
+        let secret = webhook.secret.clone();
+        Self {
+            webhook: Webhook::from_model(webhook),
+            secret,
+        }
+    }
+}
+
 /// Paginated response for workspace webhooks.
 pub type WebhooksPage = Page<Webhook>;
 

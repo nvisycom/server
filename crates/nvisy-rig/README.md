@@ -1,5 +1,7 @@
 # nvisy-rig
 
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+
 Agent-centric AI framework for document processing, built on [Rig](https://github.com/0xPlaygrounds/rig).
 
 ## Overview
@@ -44,6 +46,17 @@ let service = RigService::new(providers, tools, sessions);
 - `edit` - Proposed edit operations
 - `service` - High-level service API
 
+## Changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
+
 ## License
 
-MIT
+Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
+
+## Support
+
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

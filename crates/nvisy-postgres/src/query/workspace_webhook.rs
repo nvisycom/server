@@ -7,7 +7,9 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
-use crate::types::{Cursor, CursorPage, CursorPagination, OffsetPagination, WebhookStatus};
+use crate::types::{
+    Cursor, CursorPage, CursorPagination, OffsetPagination, WebhookEvent, WebhookStatus,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace webhook database operations.
@@ -82,6 +84,19 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
+
+    /// Finds all active webhooks for a workspace that are subscribed to a specific event.
+    ///
+    /// Returns webhooks where:
+    /// - The webhook belongs to the specified workspace
+    /// - The webhook status is Active
+    /// - The webhook's events array contains the specified event
+    /// - The webhook is not deleted
+    fn find_webhooks_for_event(
+        &mut self,
+        workspace_id: Uuid,
+        event: WebhookEvent,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
 }
 
 impl WorkspaceWebhookRepository for PgConnection {
@@ -312,5 +327,35 @@ impl WorkspaceWebhookRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(webhook)
+    }
+
+    async fn find_webhooks_for_event(
+        &mut self,
+        ws_id: Uuid,
+        event: WebhookEvent,
+    ) -> PgResult<Vec<WorkspaceWebhook>> {
+        use diesel::dsl::sql;
+        use diesel::sql_types::Bool;
+        use schema::workspace_webhooks::dsl::*;
+
+        // Query webhooks where the events array contains the target event.
+        // Uses PostgreSQL's `@>` (array contains) operator via raw SQL.
+        // The events column is Array<Nullable<WebhookEvent>>, so we check if
+        // the array contains the event value.
+        let event_str = format!("'{}'", event.to_string().replace('\'', "''"));
+        let contains_event =
+            sql::<Bool>(&format!("events @> ARRAY[{}]::WEBHOOK_EVENT[]", event_str));
+
+        let webhooks = workspace_webhooks
+            .filter(workspace_id.eq(ws_id))
+            .filter(status.eq(WebhookStatus::Active))
+            .filter(deleted_at.is_null())
+            .filter(contains_event)
+            .select(WorkspaceWebhook::as_select())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(webhooks)
     }
 }

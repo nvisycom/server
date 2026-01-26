@@ -2,12 +2,16 @@
 
 [package]
 name = "nvisy-server"
+description = "High-performance HTTP API server for the Nvisy document redaction platform"
+readme = "./README.md"
+keywords = ["http", "server", "api", "web", "axum"]
+categories = ["web-programming::http-server"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }
@@ -28,31 +32,31 @@ config = [
     "dep:clap",
     "nvisy-nats/config",
     "nvisy-postgres/config",
-    "nvisy-rig/config",
 ]
 
 [dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
-nvisy-rig = { workspace = true, features = [] }
+nvisy-runtime = { workspace = true, features = [] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
 tokio-util = { workspace = true, features = [] }
+tokio-stream = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
 # HTTP & Web server
-axum = { workspace = true, features = ["http2", "macros", "ws", "multipart"] }
+axum = { workspace = true, features = ["http2", "macros", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
 axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
 # OpenAPI/Documentation
-aide = { workspace = true, features = ["axum", "axum-query", "axum-form", "axum-json", "axum-ws", "axum-multipart", "axum-extra", "bytes", "http"] }
+aide = { workspace = true, features = ["axum", "axum-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
 schemars = { workspace = true, features = [] }
 
 # Observability
@@ -74,11 +78,6 @@ validator = { workspace = true, features = [] }
 # Text processing
 regex = { workspace = true, features = [] }
 woothee = { workspace = true, features = [] }
-
-# Archive/Compression
-tar = { workspace = true, features = [] }
-flate2 = { workspace = true, features = [] }
-zip = { workspace = true, features = [] }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }

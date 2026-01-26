@@ -5,9 +5,11 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
+    "./crates/nvisy-dal",
     "./crates/nvisy-nats",
     "./crates/nvisy-postgres",
     "./crates/nvisy-rig",
+    "./crates/nvisy-runtime",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
 ]
@@ -32,11 +34,19 @@ documentation = "https://docs.rs/nvisy-server"
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-dal = { path = "./crates/nvisy-dal", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
+nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
+
+# Runtime crates (from github.com/nvisycom/runtime)
+nvisy-rt-archive = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
+nvisy-rt-core = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
+nvisy-rt-document = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
+nvisy-rt-engine = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }
@@ -44,6 +54,7 @@ clap = { version = "4.5", features = [] }
 # Async runtime
 tokio = { version = "1.49", features = [] }
 tokio-util = { version = "0.7", features = ["io"] }
+tokio-stream = { version = "0.1", features = [] }
 futures = { version = "0.3", features = [] }
 futures-util = { version = "0.3", features = [] }
 async-stream = { version = "0.3", features = [] }
@@ -64,6 +75,7 @@ tower-http = { version = "0.6", features = ["full"] }
 # OpenAPI/Documentation
 aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
 schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
+jsonschema = { version = "0.29", features = [] }
 
 # Authentication & Security
 jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
@@ -115,6 +127,8 @@ uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
 ipnet = { version = "2.11", features = [] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 bytes = { version = "1.10", features = ["serde"] }
+petgraph = { version = "0.8", features = ["serde-1"] }
+semver = { version = "1.0", features = ["serde"] }
 url = { version = "2.5", features = [] }
 
 # Text processing
@@ -123,9 +137,9 @@ text-splitter = { version = "0.29", features = [] }
 woothee = { version = "0.13", features = [] }
 
 # AI/ML frameworks
-rig-core = { version = "0.12", default-features = false, features = ["reqwest-rustls"] }
+rig-core = { version = "0.29", default-features = false, features = ["reqwest-rustls"] }
 
-# Archive/Compression
-tar = { version = "0.4", features = [] }
-flate2 = { version = "1.1", features = [] }
-zip = { version = "7.1", features = [] }
+
+# Python interop
+pyo3 = { version = "0.27", features = [] }
+pyo3-async-runtimes = { version = "0.27", features = [] }

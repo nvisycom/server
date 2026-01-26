@@ -1,7 +1,7 @@
 //! Document annotation response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::DocumentAnnotation;
+use nvisy_postgres::model::FileAnnotation;
 use nvisy_postgres::types::AnnotationType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -33,10 +33,10 @@ pub struct Annotation {
 pub type AnnotationsPage = Page<Annotation>;
 
 impl Annotation {
-    pub fn from_model(annotation: DocumentAnnotation) -> Self {
+    pub fn from_model(annotation: FileAnnotation) -> Self {
         Self {
             id: annotation.id,
-            file_id: annotation.document_file_id,
+            file_id: annotation.file_id,
             account_id: annotation.account_id,
             content: annotation.content,
             annotation_type: annotation.annotation_type,

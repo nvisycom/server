@@ -162,18 +162,13 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Documents".into(),
-            description: Some("Document upload, processing, and retrieval".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
             name: "Files".into(),
             description: Some("File upload, download, and management".into()),
             ..Default::default()
         })
         .tag(Tag {
-            name: "Comments".into(),
-            description: Some("Document and file annotations".into()),
+            name: "Annotations".into(),
+            description: Some("File annotations".into()),
             ..Default::default()
         })
         .tag(Tag {
@@ -199,11 +194,6 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .tag(Tag {
             name: "Webhooks".into(),
             description: Some("Webhook configuration".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
-            name: "WebSocket".into(),
-            description: Some("Real-time communication".into()),
             ..Default::default()
         })
 }

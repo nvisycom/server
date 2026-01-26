@@ -1,7 +1,7 @@
-//! Generic object store wrapper for NATS JetStream.
+//! Generic object store for NATS JetStream.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_nats::jetstream;
 use async_nats::jetstream::context::ObjectStoreErrorKind;
@@ -9,65 +9,71 @@ use async_nats::jetstream::object_store::{self, ObjectInfo};
 use tokio::io::AsyncRead;
 
 use super::hashing_reader::HashingReader;
+use super::object_bucket::ObjectBucket;
 use super::object_data::{GetResult, PutResult};
+use super::object_key::ObjectKey;
 use crate::{Error, Result};
 
 /// Tracing target for object store operations.
 const TRACING_TARGET: &str = "nvisy_nats::object_store";
 
-/// A generic object store that manages files in NATS object storage.
+/// A type-safe object store that manages objects in NATS object storage.
 ///
 /// This store provides streaming upload capabilities with on-the-fly
 /// SHA-256 hash computation.
+///
+/// The store is generic over:
+/// - `B`: The bucket type (determines storage location and TTL)
+/// - `K`: The key type (determines how objects are addressed)
 #[derive(Clone)]
-pub struct ObjectStore {
+pub struct ObjectStore<B, K>
+where
+    B: ObjectBucket,
+    K: ObjectKey,
+{
     inner: Arc<object_store::ObjectStore>,
-    bucket: Arc<String>,
+    _marker: PhantomData<(B, K)>,
 }
 
-impl ObjectStore {
-    /// Creates a new object store for the specified bucket.
-    ///
-    /// If `max_age` is `None`, objects will not expire.
-    pub async fn new(
-        jetstream: &jetstream::Context,
-        bucket: impl Into<String>,
-        max_age: Option<Duration>,
-    ) -> Result<Self> {
-        let bucket = bucket.into();
-
+impl<B, K> ObjectStore<B, K>
+where
+    B: ObjectBucket,
+    K: ObjectKey,
+{
+    /// Creates a new object store for the specified bucket type.
+    pub(crate) async fn new(jetstream: &jetstream::Context) -> Result<Self> {
         tracing::debug!(
             target: TRACING_TARGET,
-            bucket = %bucket,
+            bucket = %B::NAME,
             "Initializing object store"
         );
 
-        let store = match jetstream.get_object_store(&bucket).await {
+        let store = match jetstream.get_object_store(B::NAME).await {
             Ok(store) => {
                 tracing::debug!(
                     target: TRACING_TARGET,
-                    bucket = %bucket,
+                    bucket = %B::NAME,
                     "Retrieved existing object store"
                 );
                 store
             }
             Err(e) if matches!(e.kind(), ObjectStoreErrorKind::GetStore) => {
                 let config = object_store::Config {
-                    bucket: bucket.clone(),
-                    max_age: max_age.unwrap_or_default(),
+                    bucket: B::NAME.to_string(),
+                    max_age: B::MAX_AGE.unwrap_or_default(),
                     ..Default::default()
                 };
 
                 tracing::info!(
                     target: TRACING_TARGET,
-                    bucket = %bucket,
+                    bucket = %B::NAME,
                     "Creating new object store"
                 );
 
                 jetstream.create_object_store(config).await.map_err(|e| {
                     tracing::error!(
                         target: TRACING_TARGET,
-                        bucket = %bucket,
+                        bucket = %B::NAME,
                         error = %e,
                         "Failed to create object store"
                     );
@@ -77,7 +83,7 @@ impl ObjectStore {
             Err(e) => {
                 tracing::error!(
                     target: TRACING_TARGET,
-                    bucket = %bucket,
+                    bucket = %B::NAME,
                     error = %e,
                     "Failed to get object store"
                 );
@@ -87,32 +93,35 @@ impl ObjectStore {
 
         Ok(Self {
             inner: Arc::new(store),
-            bucket: Arc::new(bucket),
+            _marker: PhantomData,
         })
     }
 
     /// Returns the bucket name.
-    pub fn bucket(&self) -> &str {
-        &self.bucket
+    #[inline]
+    pub fn bucket(&self) -> &'static str {
+        B::NAME
     }
 
     /// Streams data to the store while computing SHA-256 hash on-the-fly.
     ///
     /// This method does not buffer the entire content in memory, making it
     /// suitable for large file uploads.
-    pub async fn put<R>(&self, key: &str, reader: R) -> Result<PutResult>
+    pub async fn put<R>(&self, key: &K, reader: R) -> Result<PutResult>
     where
         R: AsyncRead + Unpin,
     {
+        let key_str = key.to_string();
+
         tracing::debug!(
             target: TRACING_TARGET,
-            key = %key,
-            bucket = %self.bucket,
+            key = %key_str,
+            bucket = %B::NAME,
             "Starting streaming upload"
         );
 
         let meta = object_store::ObjectMetadata {
-            name: key.to_string(),
+            name: key_str.clone(),
             ..Default::default()
         };
 
@@ -125,7 +134,7 @@ impl ObjectStore {
             .map_err(|e| {
                 tracing::error!(
                     target: TRACING_TARGET,
-                    key = %key,
+                    key = %key_str,
                     error = %e,
                     "Failed to upload object"
                 );
@@ -133,34 +142,29 @@ impl ObjectStore {
             })?;
 
         let sha256 = hashing_reader.finalize();
-        let sha256_hex = hex::encode(sha256);
 
         tracing::info!(
             target: TRACING_TARGET,
-            key = %key,
+            key = %key_str,
             size = info.size,
-            sha256 = %sha256_hex,
             nuid = %info.nuid,
             "Streaming upload complete"
         );
 
-        Ok(PutResult::new(
-            info.size as u64,
-            sha256.to_vec(),
-            sha256_hex,
-            info.nuid,
-        ))
+        Ok(PutResult::new(info.size as u64, sha256.to_vec(), info.nuid))
     }
 
     /// Gets an object from the store as a stream.
     ///
     /// Returns `None` if the object doesn't exist.
     /// The returned reader implements `AsyncRead` for streaming the content.
-    pub async fn get(&self, key: &str) -> Result<Option<GetResult>> {
+    pub async fn get(&self, key: &K) -> Result<Option<GetResult>> {
+        let key_str = key.to_string();
+
         tracing::debug!(
             target: TRACING_TARGET,
-            key = %key,
-            bucket = %self.bucket,
+            key = %key_str,
+            bucket = %B::NAME,
             "Getting object"
         );
 
@@ -170,11 +174,11 @@ impl ObjectStore {
             None => return Ok(None),
         };
 
-        match self.inner.get(key).await {
+        match self.inner.get(&key_str).await {
             Ok(reader) => {
                 tracing::debug!(
                     target: TRACING_TARGET,
-                    key = %key,
+                    key = %key_str,
                     size = info.size,
                     "Object stream opened"
                 );
@@ -186,14 +190,14 @@ impl ObjectStore {
                 if error_str.contains("not found") || error_str.contains("no message found") {
                     tracing::debug!(
                         target: TRACING_TARGET,
-                        key = %key,
+                        key = %key_str,
                         "Object not found"
                     );
                     Ok(None)
                 } else {
                     tracing::error!(
                         target: TRACING_TARGET,
-                        key = %key,
+                        key = %key_str,
                         error = %e,
                         "Failed to get object"
                     );
@@ -204,8 +208,10 @@ impl ObjectStore {
     }
 
     /// Gets object info without downloading the content.
-    pub async fn info(&self, key: &str) -> Result<Option<ObjectInfo>> {
-        match self.inner.info(key).await {
+    pub async fn info(&self, key: &K) -> Result<Option<ObjectInfo>> {
+        let key_str = key.to_string();
+
+        match self.inner.info(&key_str).await {
             Ok(info) => Ok(Some(info)),
             Err(e) => {
                 let error_str = e.to_string();
@@ -219,18 +225,20 @@ impl ObjectStore {
     }
 
     /// Deletes an object from the store.
-    pub async fn delete(&self, key: &str) -> Result<()> {
+    pub async fn delete(&self, key: &K) -> Result<()> {
+        let key_str = key.to_string();
+
         tracing::debug!(
             target: TRACING_TARGET,
-            key = %key,
-            bucket = %self.bucket,
+            key = %key_str,
+            bucket = %B::NAME,
             "Deleting object"
         );
 
-        self.inner.delete(key).await.map_err(|e| {
+        self.inner.delete(&key_str).await.map_err(|e| {
             tracing::error!(
                 target: TRACING_TARGET,
-                key = %key,
+                key = %key_str,
                 error = %e,
                 "Failed to delete object"
             );
@@ -239,7 +247,7 @@ impl ObjectStore {
 
         tracing::info!(
             target: TRACING_TARGET,
-            key = %key,
+            key = %key_str,
             "Object deleted"
         );
 
@@ -247,7 +255,7 @@ impl ObjectStore {
     }
 
     /// Checks if an object exists.
-    pub async fn exists(&self, key: &str) -> Result<bool> {
+    pub async fn exists(&self, key: &K) -> Result<bool> {
         Ok(self.info(key).await?.is_some())
     }
 }

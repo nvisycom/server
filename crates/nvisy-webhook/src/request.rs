@@ -9,11 +9,13 @@ use url::Url;
 use uuid::Uuid;
 
 /// A webhook delivery request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WebhookRequest {
     /// Unique identifier for this request.
     pub request_id: Uuid,
     /// The webhook endpoint URL.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub url: Url,
     /// The event type that triggered this webhook delivery.
     pub event: String,
@@ -24,7 +26,12 @@ pub struct WebhookRequest {
     /// Custom headers to include in the request.
     pub headers: HashMap<String, String>,
     /// Optional request timeout (uses client default if not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<u64>"))]
     pub timeout: Option<Duration>,
+    /// HMAC-SHA256 signing secret for request authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
 }
 
 impl WebhookRequest {
@@ -43,6 +50,7 @@ impl WebhookRequest {
             context,
             headers: HashMap::new(),
             timeout: None,
+            secret: None,
         }
     }
 
@@ -71,6 +79,12 @@ impl WebhookRequest {
     /// Sets multiple custom headers.
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.headers.extend(headers);
+        self
+    }
+
+    /// Sets the signing secret for HMAC-SHA256 authentication.
+    pub fn with_secret(mut self, secret: impl Into<String>) -> Self {
+        self.secret = Some(secret.into());
         self
     }
 
