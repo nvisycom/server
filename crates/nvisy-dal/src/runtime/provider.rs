@@ -7,9 +7,8 @@ use futures::Stream;
 use pyo3::prelude::*;
 
 use super::PyError;
-use super::loader::pyobject_to_json;
-use crate::Result;
-use crate::core::{DataInput, DataOutput, InputStream};
+use crate::streams::InputStream;
+use crate::{DataInput, DataOutput, Result};
 
 /// A wrapper around a Python provider instance.
 ///
@@ -192,7 +191,7 @@ where
             let result = coro.await.map_err(PyError::from)?;
 
             // Convert result to Rust type
-            let json_value = Python::attach(|py| pyobject_to_json(result.bind(py)))?;
+            let json_value = Python::attach(|py| super::loader::pyobject_to_json(result.bind(py)))?;
             let item: T = serde_json::from_value(json_value)
                 .map_err(|e| PyError::conversion(format!("Failed to deserialize item: {}", e)))?;
 

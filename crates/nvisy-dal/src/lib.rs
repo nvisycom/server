@@ -12,18 +12,34 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod core;
+mod core;
+mod error;
+mod runtime;
+
 pub mod provider;
 
-mod python;
+pub mod contexts {
+    //! Context types for pagination and filtering.
+    pub use crate::core::contexts::*;
+}
 
-mod error;
+pub mod datatypes {
+    //! Data types for storage operations.
+    pub use crate::core::datatypes::*;
+}
 
-pub use core::{
-    AnyContext, AnyDataValue, DataInput, DataOutput, DataType, Document, Edge, Embedding, Graph,
-    InputStream, ItemSink, ItemStream, Message, Metadata, Node, Object, ObjectContext,
-    OutputStream, Provider, Record, RelationalContext, VectorContext,
-};
+pub mod params {
+    //! Parameter types for provider configuration.
+    pub use crate::core::params::*;
+}
+
+pub mod streams {
+    //! Stream types for data input/output.
+    pub use crate::core::streams::*;
+}
+
+pub use core::{DataInput, DataOutput};
 
 pub use error::{BoxError, Error, ErrorKind, Result};
+pub use nvisy_core::Provider;
 pub use provider::{AnyCredentials, AnyParams, AnyProvider};

@@ -1,6 +1,6 @@
 //! File category evaluator for routing by file extension.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatypes::AnyDataValue;
 
 use crate::definition::FileCategory;
 

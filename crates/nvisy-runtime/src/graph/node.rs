@@ -1,21 +1,29 @@
 //! Compiled node types.
 
-use super::input::CompiledInput;
-use super::output::CompiledOutput;
+use derive_more::From;
+use nvisy_dal::datatypes::AnyDataValue;
+use nvisy_dal::streams;
+
 use super::route::CompiledSwitch;
 use super::transform::CompiledTransform;
+
+/// Type alias for input streams in the runtime.
+pub type InputStream = streams::InputStream<AnyDataValue>;
+
+/// Type alias for output streams in the runtime.
+pub type OutputStream = streams::OutputStream<AnyDataValue>;
 
 /// Compiled node enum for workflow execution.
 ///
 /// This is the runtime representation of a node after compilation.
 /// Cache slots are resolved during compilation, so compiled nodes
 /// only contain concrete processing types.
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum CompiledNode {
     /// Data input node - ready to stream data.
-    Input(CompiledInput),
+    Input(InputStream),
     /// Data output node - ready to receive data.
-    Output(CompiledOutput),
+    Output(OutputStream),
     /// Data transform node - ready to process data.
     /// Boxed to reduce enum size variance (transform processors are large).
     Transform(Box<CompiledTransform>),
@@ -44,22 +52,6 @@ impl CompiledNode {
         matches!(self, CompiledNode::Switch(_))
     }
 
-    /// Returns this node as an input, if it is one.
-    pub fn as_input(&self) -> Option<&CompiledInput> {
-        match self {
-            CompiledNode::Input(input) => Some(input),
-            _ => None,
-        }
-    }
-
-    /// Returns this node as an output, if it is one.
-    pub fn as_output(&self) -> Option<&CompiledOutput> {
-        match self {
-            CompiledNode::Output(output) => Some(output),
-            _ => None,
-        }
-    }
-
     /// Returns this node as a transform, if it is one.
     pub fn as_transform(&self) -> Option<&CompiledTransform> {
         match self {
@@ -75,66 +67,10 @@ impl CompiledNode {
             _ => None,
         }
     }
-
-    /// Consumes this node and returns the input, if it is one.
-    pub fn into_input(self) -> Option<CompiledInput> {
-        match self {
-            CompiledNode::Input(input) => Some(input),
-            _ => None,
-        }
-    }
-
-    /// Consumes this node and returns the output, if it is one.
-    pub fn into_output(self) -> Option<CompiledOutput> {
-        match self {
-            CompiledNode::Output(output) => Some(output),
-            _ => None,
-        }
-    }
-
-    /// Consumes this node and returns the transform, if it is one.
-    pub fn into_transform(self) -> Option<Box<CompiledTransform>> {
-        match self {
-            CompiledNode::Transform(transform) => Some(transform),
-            _ => None,
-        }
-    }
-
-    /// Consumes this node and returns the switch, if it is one.
-    pub fn into_switch(self) -> Option<CompiledSwitch> {
-        match self {
-            CompiledNode::Switch(switch) => Some(switch),
-            _ => None,
-        }
-    }
-}
-
-impl From<CompiledInput> for CompiledNode {
-    fn from(input: CompiledInput) -> Self {
-        CompiledNode::Input(input)
-    }
-}
-
-impl From<CompiledOutput> for CompiledNode {
-    fn from(output: CompiledOutput) -> Self {
-        CompiledNode::Output(output)
-    }
 }
 
 impl From<CompiledTransform> for CompiledNode {
     fn from(transform: CompiledTransform) -> Self {
         CompiledNode::Transform(Box::new(transform))
-    }
-}
-
-impl From<Box<CompiledTransform>> for CompiledNode {
-    fn from(transform: Box<CompiledTransform>) -> Self {
-        CompiledNode::Transform(transform)
-    }
-}
-
-impl From<CompiledSwitch> for CompiledNode {
-    fn from(switch: CompiledSwitch) -> Self {
-        CompiledNode::Switch(switch)
     }
 }

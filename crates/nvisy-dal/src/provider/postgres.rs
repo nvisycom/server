@@ -4,11 +4,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
-use crate::core::{
-    DataInput, DataOutput, InputStream, Provider, Record, RelationalContext, RelationalParams,
-};
-use crate::python::{self, PyDataInput, PyDataOutput, PyProvider};
+use crate::contexts::RelationalContext;
+use crate::datatypes::Record;
+use crate::params::RelationalParams;
+use crate::runtime::{self, PyDataInput, PyDataOutput, PyProvider};
+use crate::streams::InputStream;
+use crate::{DataInput, DataOutput, Provider, Result};
 
 /// Credentials for PostgreSQL connection.
 ///
@@ -20,7 +21,7 @@ pub struct PostgresCredentials {
 }
 
 /// Parameters for PostgreSQL operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostgresParams {
     /// Schema name (defaults to "public").
     #[serde(default = "default_schema")]
@@ -50,7 +51,7 @@ impl Provider for PostgresProvider {
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
-        let inner = python::connect("postgres", credentials, params).await?;
+        let inner = runtime::connect("postgres", credentials, params).await?;
         Ok(Self {
             input: inner.as_data_input(),
             output: inner.as_data_output(),

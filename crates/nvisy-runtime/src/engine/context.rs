@@ -1,89 +1,9 @@
 //! Context types for workflow execution.
 
 use derive_builder::Builder;
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatypes::AnyDataValue;
 
 use super::CredentialsRegistry;
-
-/// Context for provider operations during compilation and execution.
-///
-/// Provides configuration for read/write operations including target,
-/// pagination cursor, and limits.
-#[derive(Debug, Clone, Default)]
-pub struct Context {
-    /// Target collection, table, bucket, topic, etc.
-    pub target: Option<String>,
-    /// Cursor for pagination (provider-specific format).
-    pub cursor: Option<String>,
-    /// Tiebreaker for pagination conflicts.
-    pub tiebreaker: Option<String>,
-    /// Maximum number of items to read.
-    pub limit: Option<usize>,
-}
-
-impl Context {
-    /// Creates a new empty context.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Sets the target.
-    pub fn with_target(mut self, target: impl Into<String>) -> Self {
-        self.target = Some(target.into());
-        self
-    }
-
-    /// Sets the cursor for pagination.
-    pub fn with_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.cursor = Some(cursor.into());
-        self
-    }
-
-    /// Sets the tiebreaker for pagination.
-    pub fn with_tiebreaker(mut self, tiebreaker: impl Into<String>) -> Self {
-        self.tiebreaker = Some(tiebreaker.into());
-        self
-    }
-
-    /// Sets the limit.
-    pub fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = Some(limit);
-        self
-    }
-
-    /// Returns the target, if set.
-    pub fn target(&self) -> Option<&str> {
-        self.target.as_deref()
-    }
-
-    /// Returns the cursor, if set.
-    pub fn cursor(&self) -> Option<&str> {
-        self.cursor.as_deref()
-    }
-
-    /// Returns the limit, if set.
-    pub fn limit(&self) -> Option<usize> {
-        self.limit
-    }
-
-    /// Converts to an ObjectContext for object storage providers.
-    pub fn to_object_context(&self) -> nvisy_dal::ObjectContext {
-        nvisy_dal::ObjectContext {
-            prefix: self.target.clone(),
-            token: self.cursor.clone(),
-            limit: self.limit,
-        }
-    }
-
-    /// Converts to a RelationalContext for relational database providers.
-    pub fn to_relational_context(&self) -> nvisy_dal::RelationalContext {
-        nvisy_dal::RelationalContext {
-            cursor: self.cursor.clone(),
-            tiebreaker: self.tiebreaker.clone(),
-            limit: self.limit,
-        }
-    }
-}
 
 /// Execution context for a workflow run.
 ///

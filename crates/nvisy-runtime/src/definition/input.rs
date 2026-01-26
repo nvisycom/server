@@ -1,34 +1,48 @@
 //! Input node definition types.
 
+use nvisy_dal::provider::{AnyParams, PostgresParams, S3Params};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::route::CacheSlot;
 
 /// Input node definition - source of data for the workflow.
-///
-/// Storage provider inputs (S3, Postgres, etc.) are handled externally via Python.
-/// This enum only supports cache slots for internal workflow data flow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum Input {
+    /// Read from a storage provider.
+    Provider(ProviderInput),
     /// Read from named cache slot (resolved at compile time).
     CacheSlot(CacheSlot),
 }
 
-impl Input {
-    /// Creates a new input from a cache slot.
-    pub fn from_cache(slot: impl Into<String>) -> Self {
-        Self::CacheSlot(CacheSlot {
-            slot: slot.into(),
-            priority: None,
-        })
-    }
+/// Provider-based input configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderInput {
+    /// Credentials ID for the provider.
+    pub credentials_id: Uuid,
+    /// Provider-specific parameters.
+    #[serde(flatten)]
+    pub params: InputParams,
+}
 
-    /// Creates a new input from a cache slot with priority.
-    pub fn from_cache_with_priority(slot: impl Into<String>, priority: u32) -> Self {
-        Self::CacheSlot(CacheSlot {
-            slot: slot.into(),
-            priority: Some(priority),
-        })
+/// Type-erased parameters for input providers.
+///
+/// Only includes providers that support reading data (DataInput).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "provider", content = "params", rename_all = "snake_case")]
+pub enum InputParams {
+    /// PostgreSQL parameters.
+    Postgres(PostgresParams),
+    /// S3 parameters.
+    S3(S3Params),
+}
+
+impl From<InputParams> for AnyParams {
+    fn from(params: InputParams) -> Self {
+        match params {
+            InputParams::Postgres(p) => AnyParams::Postgres(p),
+            InputParams::S3(p) => AnyParams::S3(p),
+        }
     }
 }

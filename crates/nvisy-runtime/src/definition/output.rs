@@ -1,34 +1,41 @@
 //! Output node definition types.
 
+use nvisy_dal::provider::{PineconeParams, PostgresParams, S3Params};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::route::CacheSlot;
 
 /// Output node definition - destination for workflow data.
-///
-/// Storage provider outputs (S3, Qdrant, etc.) are handled externally via Python.
-/// This enum only supports cache slots for internal workflow data flow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "snake_case")]
 pub enum Output {
+    /// Write to a storage provider.
+    Provider(ProviderOutput),
     /// Write to named cache slot (resolved at compile time).
-    Cache(CacheSlot),
+    CacheSlot(CacheSlot),
 }
 
-impl Output {
-    /// Creates a new output from a cache slot.
-    pub fn from_cache(slot: impl Into<String>) -> Self {
-        Self::Cache(CacheSlot {
-            slot: slot.into(),
-            priority: None,
-        })
-    }
+/// Provider-based output configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderOutput {
+    /// Credentials ID for the provider.
+    pub credentials_id: Uuid,
+    /// Provider-specific parameters.
+    #[serde(flatten)]
+    pub params: OutputParams,
+}
 
-    /// Creates a new output from a cache slot with priority.
-    pub fn from_cache_with_priority(slot: impl Into<String>, priority: u32) -> Self {
-        Self::Cache(CacheSlot {
-            slot: slot.into(),
-            priority: Some(priority),
-        })
-    }
+/// Type-erased parameters for output providers.
+///
+/// Includes all providers that support writing data (DataOutput).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "provider", content = "params", rename_all = "snake_case")]
+pub enum OutputParams {
+    /// PostgreSQL parameters.
+    Postgres(PostgresParams),
+    /// S3 parameters.
+    S3(S3Params),
+    /// Pinecone parameters.
+    Pinecone(PineconeParams),
 }

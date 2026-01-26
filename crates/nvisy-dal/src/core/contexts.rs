@@ -72,4 +72,28 @@ impl AnyContext {
         }
         self
     }
+
+    /// Returns a reference to the object context if this is an object context.
+    pub fn as_object(&self) -> Option<&ObjectContext> {
+        match self {
+            Self::Object(ctx) => Some(ctx),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the relational context if this is a relational context.
+    pub fn as_relational(&self) -> Option<&RelationalContext> {
+        match self {
+            Self::Relational(ctx) => Some(ctx),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the vector context if this is a vector context.
+    pub fn as_vector(&self) -> Option<&VectorContext> {
+        match self {
+            Self::Vector(ctx) => Some(ctx),
+            _ => None,
+        }
+    }
 }

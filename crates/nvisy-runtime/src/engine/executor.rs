@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
+use nvisy_dal::Error as DalError;
 use tokio::sync::Semaphore;
 
 use super::EngineConfig;
 use super::compiler::WorkflowCompiler;
-use super::context::{Context, ExecutionContext};
+use super::context::ExecutionContext;
 use super::credentials::CredentialsRegistry;
 use crate::definition::{NodeId, Workflow};
 use crate::error::{Error, Result};
@@ -61,10 +62,9 @@ impl Engine {
         &self,
         definition: Workflow,
         credentials: CredentialsRegistry,
-        ctx: Context,
     ) -> Result<ExecutionContext> {
         // Compile the definition into an executable graph
-        let compiler = WorkflowCompiler::new(&credentials, ctx);
+        let compiler = WorkflowCompiler::new(&credentials);
         let graph = compiler.compile(definition).await?;
 
         self.execute_graph(graph, credentials).await
@@ -139,11 +139,11 @@ impl Engine {
         let mut input_streams: Vec<(NodeId, InputStream)> = Vec::new();
         for id in &input_ids {
             if let Some(node) = graph.node_mut(id)
-                && let CompiledNode::Input(compiled_input) = node
+                && let CompiledNode::Input(input_stream) = node
             {
                 // Create a placeholder stream and swap with the real one
                 let placeholder = InputStream::new(Box::pin(futures::stream::empty()));
-                let stream = std::mem::replace(compiled_input.stream_mut(), placeholder);
+                let stream = std::mem::replace(input_stream, placeholder);
                 input_streams.push((*id, stream));
             }
         }
@@ -151,12 +151,12 @@ impl Engine {
         // Take ownership of output streams
         let mut output_streams: Vec<(NodeId, OutputStream)> = Vec::new();
         for id in &output_ids {
-            if let Some(CompiledNode::Output(compiled_output)) = graph.node_mut(id) {
-                // Create a placeholder sink
+            if let Some(CompiledNode::Output(output_stream)) = graph.node_mut(id) {
+                // Create a placeholder sink (must use DalError to match OutputStream type)
                 let placeholder = OutputStream::new(Box::pin(futures::sink::drain().sink_map_err(
-                    |_: std::convert::Infallible| Error::Internal("drain sink error".into()),
+                    |_: std::convert::Infallible| DalError::provider("drain sink error"),
                 )));
-                let stream = std::mem::replace(compiled_output.stream_mut(), placeholder);
+                let stream = std::mem::replace(output_stream, placeholder);
                 output_streams.push((*id, stream));
             }
         }

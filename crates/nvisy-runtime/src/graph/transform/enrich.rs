@@ -1,6 +1,6 @@
 //! Enrich processor.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatypes::AnyDataValue;
 use nvisy_rig::agent::{TableAgent, VisionAgent};
 
 use super::Process;

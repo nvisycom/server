@@ -2,7 +2,6 @@
 
 use std::str::FromStr;
 
-use derive_builder::Builder;
 use derive_more::{Debug, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -27,24 +26,6 @@ impl NodeId {
     pub fn new() -> Self {
         Self(Uuid::now_v7())
     }
-
-    /// Creates a node ID from an existing UUID.
-    #[inline]
-    pub const fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Returns the underlying UUID.
-    #[inline]
-    pub const fn as_uuid(&self) -> Uuid {
-        self.0
-    }
-
-    /// Returns the UUID as bytes.
-    #[inline]
-    pub const fn as_bytes(&self) -> &[u8; 16] {
-        self.0.as_bytes()
-    }
 }
 
 impl Default for NodeId {
@@ -61,37 +42,17 @@ impl FromStr for NodeId {
     }
 }
 
-impl AsRef<Uuid> for NodeId {
-    fn as_ref(&self) -> &Uuid {
-        &self.0
-    }
-}
-
 /// A workflow node definition with metadata and kind.
-///
-/// Nodes are categorized by their role in data flow:
-/// - **Input**: Reads/produces data (entry points)
-/// - **Transform**: Processes/transforms data (intermediate)
-/// - **Output**: Writes/consumes data (exit points)
-/// - **Switch**: Routes data based on conditions
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
-#[builder(
-    name = "NodeBuilder",
-    pattern = "owned",
-    setter(into, strip_option, prefix = "with")
-)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     /// Display name of the node.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(default)]
     pub name: Option<String>,
     /// Description of what this node does.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(default)]
     pub description: Option<String>,
     /// Position in the visual editor.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(default)]
     pub position: Option<Position>,
     /// The node kind/type.
     #[serde(flatten)]
@@ -99,21 +60,6 @@ pub struct Node {
 }
 
 impl Node {
-    /// Creates a new node with the given kind.
-    pub fn new(kind: impl Into<NodeKind>) -> Self {
-        Self {
-            name: None,
-            description: None,
-            position: None,
-            kind: kind.into(),
-        }
-    }
-
-    /// Returns a builder for creating a node.
-    pub fn builder() -> NodeBuilder {
-        NodeBuilder::default()
-    }
-
     /// Returns whether this is an input node.
     pub const fn is_input(&self) -> bool {
         self.kind.is_input()

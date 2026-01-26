@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Common parameters for relational database operations.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RelationalParams {
     /// Target table name.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,7 +23,7 @@ pub struct RelationalParams {
 }
 
 /// Common parameters for object storage operations.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ObjectParams {
     /// Bucket name (S3 bucket, GCS bucket, Azure container).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,7 +37,7 @@ pub struct ObjectParams {
 }
 
 /// Common parameters for vector database operations.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VectorParams {
     /// Collection or index name (Pinecone index, Qdrant collection).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -54,7 +54,7 @@ pub struct VectorParams {
 }
 
 /// Distance metric for vector similarity search.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DistanceMetric {
     /// Cosine similarity (default).

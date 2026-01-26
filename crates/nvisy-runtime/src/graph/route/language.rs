@@ -1,6 +1,6 @@
 //! Language evaluator for routing by detected content language.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatypes::AnyDataValue;
 
 /// Evaluates language based on metadata.
 #[derive(Debug, Clone)]

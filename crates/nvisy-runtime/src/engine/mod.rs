@@ -13,6 +13,7 @@ mod credentials;
 mod executor;
 
 pub use config::EngineConfig;
-pub use context::{Context, ExecutionContext};
+pub use context::ExecutionContext;
 pub use credentials::{CredentialsRegistry, ProviderCredentials};
 pub use executor::Engine;
+pub use nvisy_dal::contexts::AnyContext;

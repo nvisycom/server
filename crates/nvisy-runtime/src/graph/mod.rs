@@ -15,16 +15,12 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 mod edge;
-mod input;
 mod node;
-mod output;
 mod route;
 mod transform;
 
 pub use edge::EdgeData;
-pub use input::{CompiledInput, DataStream, InputStream};
-pub use node::CompiledNode;
-pub use output::{CompiledOutput, DataSink, OutputStream};
+pub use node::{CompiledNode, InputStream, OutputStream};
 pub use route::{CompiledSwitch, FileCategoryEvaluator, LanguageEvaluator, SwitchEvaluator};
 pub use transform::{
     ChunkProcessor, CompiledTransform, DeriveProcessor, EmbeddingProcessor, EnrichProcessor,
@@ -115,18 +111,6 @@ impl CompiledGraph {
         self.node_indices
             .iter()
             .filter_map(|(id, &idx)| self.graph.node_weight(idx).map(|node| (id, node)))
-    }
-
-    /// Returns an iterator over input nodes.
-    pub fn input_nodes(&self) -> impl Iterator<Item = (&NodeId, &CompiledInput)> {
-        self.nodes()
-            .filter_map(|(id, node)| node.as_input().map(|input| (id, input)))
-    }
-
-    /// Returns an iterator over output nodes.
-    pub fn output_nodes(&self) -> impl Iterator<Item = (&NodeId, &CompiledOutput)> {
-        self.nodes()
-            .filter_map(|(id, node)| node.as_output().map(|output| (id, output)))
     }
 
     /// Returns the predecessors (incoming nodes) of a node.

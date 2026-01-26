@@ -4,9 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
-use crate::core::{DataInput, DataOutput, InputStream, Object, ObjectContext, Provider};
-use crate::python::{self, PyDataInput, PyDataOutput, PyProvider};
+use crate::contexts::ObjectContext;
+use crate::datatypes::Object;
+use crate::runtime::{self, PyDataInput, PyDataOutput, PyProvider};
+use crate::streams::InputStream;
+use crate::{DataInput, DataOutput, Provider, Result};
 
 /// Credentials for S3 connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,7 +25,7 @@ pub struct S3Credentials {
 }
 
 /// Parameters for S3 operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct S3Params {
     /// Target bucket name.
     pub bucket: String,
@@ -47,7 +49,7 @@ impl Provider for S3Provider {
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
-        let inner = python::connect("s3", credentials, params).await?;
+        let inner = runtime::connect("s3", credentials, params).await?;
         Ok(Self {
             input: inner.as_data_input(),
             output: inner.as_data_output(),

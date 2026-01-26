@@ -1,6 +1,6 @@
 //! Extract processor.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatypes::AnyDataValue;
 use nvisy_rig::agent::{StructuredOutputAgent, TableAgent, TextAnalysisAgent};
 
 use super::Process;

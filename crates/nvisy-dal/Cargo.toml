@@ -37,6 +37,7 @@ serde_json = { workspace = true, features = [] }
 # Derive macros & utilities
 async-trait = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["from"] }
+strum = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [] }
 
 # Data types

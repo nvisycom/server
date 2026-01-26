@@ -14,22 +14,6 @@ High-performance backend server for the Nvisy document processing platform.
 - **Real-Time Updates** - AI streaming via SSE and job processing via NATS
 - **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
 
-## Architecture
-
-```
-server/
-├── crates/
-│   ├── nvisy-cli/         # Server binary with CLI and configuration
-│   ├── nvisy-core/        # Shared types, errors, and utilities
-│   ├── nvisy-nats/        # NATS client (streams, KV, object storage, jobs)
-│   ├── nvisy-postgres/    # PostgreSQL database layer with Diesel ORM
-│   ├── nvisy-rig/         # AI services (chat, RAG, embeddings)
-│   ├── nvisy-server/      # HTTP handlers, middleware, pipeline, and OpenAPI
-│   └── nvisy-webhook/     # Webhook delivery with HTTP client
-├── migrations/            # PostgreSQL database migrations
-└── Cargo.toml             # Workspace configuration
-```
-
 ## Quick Start
 
 ```bash

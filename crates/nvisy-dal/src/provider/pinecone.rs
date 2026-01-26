@@ -4,9 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
-use crate::core::{DataOutput, Embedding, Provider};
-use crate::python::{self, PyDataOutput, PyProvider};
+use crate::datatypes::Embedding;
+use crate::runtime::{self, PyDataOutput, PyProvider};
+use crate::{DataOutput, Provider, Result};
 
 /// Credentials for Pinecone connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +16,7 @@ pub struct PineconeCredentials {
 }
 
 /// Parameters for Pinecone operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PineconeParams {
     /// Index name.
     pub index_name: String,
@@ -39,7 +39,7 @@ impl Provider for PineconeProvider {
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
-        let inner = python::connect("pinecone", credentials, params).await?;
+        let inner = runtime::connect("pinecone", credentials, params).await?;
         Ok(Self {
             output: inner.as_data_output(),
             inner,

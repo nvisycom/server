@@ -1,6 +1,6 @@
 //! Derive processor.
 
-use nvisy_dal::AnyDataValue;
+use nvisy_dal::datatypes::AnyDataValue;
 use nvisy_rig::agent::TextGenerationAgent;
 
 use super::Process;

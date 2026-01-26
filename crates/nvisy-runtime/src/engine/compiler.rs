@@ -12,34 +12,32 @@
 
 use std::collections::HashMap;
 
+use nvisy_dal::provider::{AnyParams, AnyProvider};
+use nvisy_dal::{DataInput, Provider};
 use nvisy_rig::agent::{
     StructuredOutputAgent, TableAgent, TextAnalysisAgent, TextGenerationAgent, VisionAgent,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use super::context::Context;
 use super::credentials::CredentialsRegistry;
 use crate::definition::{Input, NodeId, NodeKind, Output, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{
-    ChunkProcessor, CompiledGraph, CompiledInput, CompiledNode, CompiledOutput, CompiledSwitch,
-    CompiledTransform, DeriveProcessor, EdgeData, EmbeddingProcessor, EnrichProcessor,
-    ExtractProcessor, InputStream, OutputStream, PartitionProcessor,
+    ChunkProcessor, CompiledGraph, CompiledNode, CompiledSwitch, CompiledTransform,
+    DeriveProcessor, EdgeData, EmbeddingProcessor, EnrichProcessor, ExtractProcessor, InputStream,
+    OutputStream, PartitionProcessor,
 };
 
 /// Workflow compiler that transforms definitions into executable graphs.
 pub struct WorkflowCompiler<'a> {
     /// Credentials registry for resolving provider credentials.
     registry: &'a CredentialsRegistry,
-    /// Execution context for provider initialization.
-    #[allow(dead_code)]
-    ctx: Context,
 }
 
 impl<'a> WorkflowCompiler<'a> {
     /// Creates a new workflow compiler.
-    pub fn new(registry: &'a CredentialsRegistry, ctx: Context) -> Self {
-        Self { registry, ctx }
+    pub fn new(registry: &'a CredentialsRegistry) -> Self {
+        Self { registry }
     }
 
     /// Compiles a workflow definition into an executable graph.
@@ -107,7 +105,7 @@ impl<'a> WorkflowCompiler<'a> {
     fn is_cache_only_node(&self, def: &NodeKind) -> bool {
         match def {
             NodeKind::Input(input) => matches!(input, Input::CacheSlot(_)),
-            NodeKind::Output(output) => matches!(output, Output::Cache(_)),
+            NodeKind::Output(output) => matches!(output, Output::CacheSlot(_)),
             _ => false,
         }
     }
@@ -117,7 +115,7 @@ impl<'a> WorkflowCompiler<'a> {
         // Collect cache slot outputs (nodes that write to cache slots)
         let mut cache_outputs: HashMap<String, Vec<NodeId>> = HashMap::new();
         for (id, node) in &def.nodes {
-            if let NodeKind::Output(Output::Cache(slot)) = &node.kind {
+            if let NodeKind::Output(Output::CacheSlot(slot)) = &node.kind {
                 cache_outputs
                     .entry(slot.slot.clone())
                     .or_default()
@@ -209,12 +207,12 @@ impl<'a> WorkflowCompiler<'a> {
     async fn compile_node(&self, def: &NodeKind) -> Result<CompiledNode> {
         match def {
             NodeKind::Input(input) => {
-                let stream = self.create_input_stream(input)?;
-                Ok(CompiledNode::Input(CompiledInput::new(stream)))
+                let stream = self.create_input_stream(input).await?;
+                Ok(CompiledNode::Input(stream))
             }
             NodeKind::Output(output) => {
-                let stream = self.create_output_stream(output)?;
-                Ok(CompiledNode::Output(CompiledOutput::new(stream)))
+                let stream = self.create_output_stream(output).await?;
+                Ok(CompiledNode::Output(stream))
             }
             NodeKind::Transform(transformer) => {
                 let processor = self.create_processor(transformer).await?;
@@ -227,8 +225,27 @@ impl<'a> WorkflowCompiler<'a> {
     }
 
     /// Creates an input stream from an input definition.
-    fn create_input_stream(&self, input: &Input) -> Result<InputStream> {
+    async fn create_input_stream(&self, input: &Input) -> Result<InputStream> {
         match input {
+            Input::Provider(provider_input) => {
+                let params = AnyParams::from(provider_input.params.clone());
+                let (creds, ctx) = self
+                    .registry
+                    .get(provider_input.credentials_id)?
+                    .clone()
+                    .into_dal_credentials()?;
+
+                let provider = AnyProvider::connect(params, creds)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+
+                let stream = provider
+                    .read(&ctx)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+
+                Ok(stream)
+            }
             Input::CacheSlot(_) => {
                 // Cache inputs are resolved during cache slot resolution
                 // This shouldn't be called for cache inputs
@@ -240,9 +257,18 @@ impl<'a> WorkflowCompiler<'a> {
     }
 
     /// Creates an output stream from an output definition.
-    fn create_output_stream(&self, output: &Output) -> Result<OutputStream> {
+    async fn create_output_stream(&self, output: &Output) -> Result<OutputStream> {
         match output {
-            Output::Cache(_) => {
+            Output::Provider(_provider_output) => {
+                // Output streams require a different approach - we need to batch writes
+                // For now, return an error as this requires more architecture work
+                // TODO: Implement output stream batching with DataOutput::write
+                Err(Error::Internal(
+                    "provider output nodes are not yet implemented - requires batching support"
+                        .into(),
+                ))
+            }
+            Output::CacheSlot(_) => {
                 // Cache outputs are resolved during cache slot resolution
                 Err(Error::Internal(
                     "cache output nodes should be resolved before compilation".into(),
