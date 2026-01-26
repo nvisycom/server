@@ -7,7 +7,7 @@
 //! - Pre-resolved cache slots
 //! - Pre-instantiated providers and agents
 //!
-//! To create compiled types, use the [`crate::engine::compiler`] module.
+//! To create compiled types, use the [`crate::engine::Engine`].
 
 use std::collections::HashMap;
 

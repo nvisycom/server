@@ -50,7 +50,7 @@ opendal = { workspace = true, features = ["services-s3", "services-gcs", "servic
 # Vector store clients
 qdrant-client = { workspace = true, features = [] }
 pinecone-sdk = { workspace = true, features = [] }
-milvus-sdk-rust = { workspace = true, features = [] }
+
 prost-types = { workspace = true, features = [] }
 
 # Database (for pgvector)

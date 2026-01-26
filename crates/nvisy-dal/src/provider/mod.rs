@@ -2,7 +2,7 @@
 
 mod azblob;
 mod gcs;
-mod milvus;
+
 mod mysql;
 mod pgvector;
 mod pinecone;
@@ -14,7 +14,7 @@ mod s3;
 pub use azblob::{AzblobCredentials, AzblobParams, AzblobProvider};
 pub use gcs::{GcsCredentials, GcsParams, GcsProvider};
 // Vector database providers
-pub use milvus::{MilvusCredentials, MilvusParams, MilvusProvider};
+
 // Relational database providers
 pub use mysql::{MysqlCredentials, MysqlParams, MysqlProvider};
 pub use pgvector::{

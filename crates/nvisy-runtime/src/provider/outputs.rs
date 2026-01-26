@@ -8,9 +8,9 @@ use derive_more::From;
 use futures::Sink;
 use nvisy_core::Provider;
 use nvisy_dal::provider::{
-    AzblobParams, AzblobProvider, GcsParams, GcsProvider, MilvusParams, MilvusProvider,
-    MysqlParams, MysqlProvider, PgVectorParams, PgVectorProvider, PineconeParams, PineconeProvider,
-    PostgresParams, PostgresProvider, QdrantParams, QdrantProvider, S3Params, S3Provider,
+    AzblobParams, AzblobProvider, GcsParams, GcsProvider, MysqlParams, MysqlProvider,
+    PgVectorParams, PgVectorProvider, PineconeParams, PineconeProvider, PostgresParams,
+    PostgresProvider, QdrantParams, QdrantProvider, S3Params, S3Provider,
 };
 use nvisy_dal::{AnyDataValue, DataTypeId};
 use serde::{Deserialize, Serialize};
@@ -76,8 +76,6 @@ pub enum OutputProviderParams {
     Qdrant(QdrantParams),
     /// Pinecone vector database.
     Pinecone(PineconeParams),
-    /// Milvus vector database.
-    Milvus(MilvusParams),
     /// pgvector (PostgreSQL extension).
     PgVector(PgVectorParams),
 }
@@ -93,9 +91,7 @@ impl OutputProviderParams {
         match self {
             Self::S3(_) | Self::Gcs(_) | Self::Azblob(_) => DataTypeId::Blob,
             Self::Postgres(_) | Self::Mysql(_) => DataTypeId::Record,
-            Self::Qdrant(_) | Self::Pinecone(_) | Self::Milvus(_) | Self::PgVector(_) => {
-                DataTypeId::Embedding
-            }
+            Self::Qdrant(_) | Self::Pinecone(_) | Self::PgVector(_) => DataTypeId::Embedding,
         }
     }
 
@@ -127,21 +123,21 @@ impl OutputProviderParams {
                     .await
                     .map_err(|e| Error::Internal(e.to_string()))?,
             )),
-            (Self::Qdrant(p), ProviderCredentials::Qdrant(c)) => Ok(OutputProvider::Qdrant(
-                QdrantProvider::connect(p, c)
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?,
-            )),
-            (Self::Pinecone(p), ProviderCredentials::Pinecone(c)) => Ok(OutputProvider::Pinecone(
-                PineconeProvider::connect(p, c)
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?,
-            )),
-            (Self::Milvus(p), ProviderCredentials::Milvus(c)) => Ok(OutputProvider::Milvus(
-                MilvusProvider::connect(p, c)
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?,
-            )),
+            (Self::Qdrant(p), ProviderCredentials::Qdrant(c)) => {
+                Ok(OutputProvider::Qdrant(Box::new(
+                    QdrantProvider::connect(p, c)
+                        .await
+                        .map_err(|e| Error::Internal(e.to_string()))?,
+                )))
+            }
+            (Self::Pinecone(p), ProviderCredentials::Pinecone(c)) => {
+                Ok(OutputProvider::Pinecone(Box::new(
+                    PineconeProvider::connect(p, c)
+                        .await
+                        .map_err(|e| Error::Internal(e.to_string()))?,
+                )))
+            }
+
             (Self::PgVector(p), ProviderCredentials::PgVector(c)) => Ok(OutputProvider::PgVector(
                 PgVectorProvider::connect(p, c)
                     .await
@@ -164,9 +160,9 @@ pub enum OutputProvider {
     Azblob(AzblobProvider),
     Postgres(PostgresProvider),
     Mysql(MysqlProvider),
-    Qdrant(QdrantProvider),
-    Pinecone(PineconeProvider),
-    Milvus(MilvusProvider),
+    Qdrant(Box<QdrantProvider>),
+    Pinecone(Box<PineconeProvider>),
+
     PgVector(PgVectorProvider),
 }
 
@@ -176,9 +172,7 @@ impl OutputProvider {
         match self {
             Self::S3(_) | Self::Gcs(_) | Self::Azblob(_) => DataTypeId::Blob,
             Self::Postgres(_) | Self::Mysql(_) => DataTypeId::Record,
-            Self::Qdrant(_) | Self::Pinecone(_) | Self::Milvus(_) | Self::PgVector(_) => {
-                DataTypeId::Embedding
-            }
+            Self::Qdrant(_) | Self::Pinecone(_) | Self::PgVector(_) => DataTypeId::Embedding,
         }
     }
 
@@ -198,9 +192,9 @@ impl OutputProvider {
             Self::Azblob(p) => write_data!(p, data, Blob, into_blob),
             Self::Postgres(p) => write_data!(p, data, Record, into_record),
             Self::Mysql(p) => write_data!(p, data, Record, into_record),
-            Self::Qdrant(p) => write_data!(p, data, Embedding, into_embedding),
-            Self::Pinecone(p) => write_data!(p, data, Embedding, into_embedding),
-            Self::Milvus(p) => write_data!(p, data, Embedding, into_embedding),
+            Self::Qdrant(p) => write_data!(**p, data, Embedding, into_embedding),
+            Self::Pinecone(p) => write_data!(**p, data, Embedding, into_embedding),
+
             Self::PgVector(p) => write_data!(p, data, Embedding, into_embedding),
         }
     }

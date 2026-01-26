@@ -1,6 +1,6 @@
 //! Context for vector database operations.
 
-/// Context for vector database operations (Qdrant, Pinecone, Milvus, pgvector).
+/// Context for vector database operations (Qdrant, Pinecone, pgvector).
 #[derive(Debug, Clone, Default)]
 pub struct VectorContext {
     /// Target collection name.

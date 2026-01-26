@@ -1,7 +1,7 @@
 //! Workflow compiler for transforming definitions into executable graphs.
 //!
-//! The compiler takes a [`WorkflowDefinition`] and a [`CredentialsRegistry`]
-//! and produces a [`CompiledGraph`] that can be executed by the engine.
+//! The compiler takes workflow definitions and credentials registry
+//! and produces compiled graphs that can be executed by the engine.
 //!
 //! # Compilation Process
 //!

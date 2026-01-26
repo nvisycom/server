@@ -7,7 +7,7 @@
 //! - Storage in databases
 //!
 //! To execute a workflow, definitions must be compiled into runtime types
-//! using the [`crate::engine::compiler`] module.
+//! using the [`crate::engine::Engine`].
 
 use std::collections::HashMap;
 

@@ -18,8 +18,8 @@ use derive_more::From;
 pub use inputs::{InputProvider, InputProviderConfig, InputProviderParams};
 // Re-export dal credentials
 pub use nvisy_dal::provider::{
-    AzblobCredentials, GcsCredentials, MilvusCredentials, MysqlCredentials, PgVectorCredentials,
-    PineconeCredentials, PostgresCredentials, QdrantCredentials, S3Credentials,
+    AzblobCredentials, GcsCredentials, MysqlCredentials, PgVectorCredentials, PineconeCredentials,
+    PostgresCredentials, QdrantCredentials, S3Credentials,
 };
 // Re-export rig types
 pub use nvisy_rig::provider::{
@@ -56,8 +56,6 @@ pub enum ProviderCredentials {
     Qdrant(QdrantCredentials),
     /// Pinecone credentials.
     Pinecone(PineconeCredentials),
-    /// Milvus credentials.
-    Milvus(MilvusCredentials),
     /// pgvector credentials.
     PgVector(PgVectorCredentials),
 
