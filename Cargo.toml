@@ -74,7 +74,7 @@ tower-http = { version = "0.6", features = ["full"] }
 
 # OpenAPI/Documentation
 aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
-schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
+schemars = { version = "1.2", features = ["uuid1", "jiff02"] }
 jsonschema = { version = "0.29", features = [] }
 
 # Authentication & Security
