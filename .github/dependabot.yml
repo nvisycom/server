@@ -16,7 +16,6 @@ updates:
       prefix-development: "chore(deps-dev)"
     rebase-strategy: "auto"
     versioning-strategy: "auto"
-    # Group patch and minor updates together to reduce PR noise
     groups:
       rust-dependencies:
         patterns:
@@ -38,8 +37,50 @@ updates:
       - "chore"
     commit-message:
       prefix: "chore(actions)"
-    # Group all GitHub Actions updates together to reduce PR noise
     groups:
       github-actions:
         patterns:
           - "*"
+
+  # Version updates for Python packages
+  - package-ecosystem: "pip"
+    directory: "/packages/nvisy-dal"
+    schedule:
+      interval: "weekly"
+      timezone: "Europe/Berlin"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "chore"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "pip"
+    directory: "/packages/nvisy-rig"
+    schedule:
+      interval: "weekly"
+      timezone: "Europe/Berlin"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "chore"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
