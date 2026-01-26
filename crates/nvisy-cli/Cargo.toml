@@ -2,12 +2,16 @@
 
 [package]
 name = "nvisy-cli"
+description = "Command-line interface and HTTP server for the Nvisy platform"
+readme = "./README.md"
+keywords = ["cli", "server", "http", "nvisy", "document"]
+categories = ["command-line-utilities", "web-programming::http-server"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }

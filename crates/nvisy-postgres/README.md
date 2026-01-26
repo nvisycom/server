@@ -30,3 +30,18 @@ make generate-migrations
 
 The generated schema is located at `src/schema.rs` and provides type-safe table
 definitions for Diesel queries.
+
+## Changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
+
+## License
+
+Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
+
+## Support
+
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

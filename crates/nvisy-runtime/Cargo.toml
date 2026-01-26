@@ -2,12 +2,16 @@
 
 [package]
 name = "nvisy-runtime"
+description = "Workflow definitions and execution engine for Nvisy pipelines"
+readme = "./README.md"
+keywords = ["workflow", "runtime", "engine", "pipeline", "execution"]
+categories = ["development-tools", "algorithms"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }

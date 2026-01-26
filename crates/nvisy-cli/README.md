@@ -22,3 +22,18 @@ Command-line interface and HTTP server for the Nvisy platform.
 
 - **tls** - HTTPS support with rustls
 - **dotenv** - Load configuration from `.env` files
+
+## Changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
+
+## License
+
+Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
+
+## Support
+
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

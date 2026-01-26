@@ -2,12 +2,16 @@
 
 [package]
 name = "nvisy-server"
+description = "High-performance HTTP API server for the Nvisy document redaction platform"
+readme = "./README.md"
+keywords = ["http", "server", "api", "web", "axum"]
+categories = ["web-programming::http-server"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }

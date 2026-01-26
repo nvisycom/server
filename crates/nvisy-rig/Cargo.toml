@@ -1,18 +1,20 @@
 [package]
 name = "nvisy-rig"
+description = "Rig AI framework integration for nvisy"
+readme = "./README.md"
+keywords = ["rig", "llm", "ai", "client", "rag"]
+categories = ["api-bindings", "web-programming::http-client"]
+
 version = { workspace = true }
-edition = { workspace = true }
 rust-version = { workspace = true }
+edition = { workspace = true }
 license = { workspace = true }
+publish = { workspace = true }
+
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 documentation = { workspace = true }
-publish = { workspace = true }
-
-description = "Rig AI framework integration for nvisy"
-keywords = ["rig", "llm", "ai", "client", "rag"]
-categories = ["api-bindings", "web-programming::http-client"]
 
 [features]
 ## Default feature set includes Ollama for local development

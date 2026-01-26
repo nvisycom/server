@@ -1,11 +1,15 @@
 [package]
 name = "nvisy-core"
+description = "Core types and utilities shared across nvisy crates"
+readme = "./README.md"
+keywords = ["core", "types", "error", "utilities", "nvisy"]
+categories = ["rust-patterns", "development-tools"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }

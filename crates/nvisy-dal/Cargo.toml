@@ -4,6 +4,8 @@
 name = "nvisy-dal"
 description = "Data abstraction layer for workflow inputs and outputs"
 readme = "./README.md"
+keywords = ["dal", "storage", "database", "vector", "workflow"]
+categories = ["database", "api-bindings"]
 
 version = { workspace = true }
 rust-version = { workspace = true }

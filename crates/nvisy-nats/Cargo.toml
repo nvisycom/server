@@ -2,12 +2,16 @@
 
 [package]
 name = "nvisy-nats"
+description = "Task-focused NATS client for the Nvisy platform with comprehensive JetStream support"
+readme = "./README.md"
+keywords = ["nats", "messaging", "jetstream", "pubsub", "streaming"]
+categories = ["network-programming", "api-bindings"]
+
 version = { workspace = true }
 rust-version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 publish = { workspace = true }
-readme = "./README.md"
 
 authors = { workspace = true }
 repository = { workspace = true }

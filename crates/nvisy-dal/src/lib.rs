@@ -13,8 +13,8 @@ pub mod provider;
 mod error;
 
 pub use core::{
-    DataInput, DataOutput, InputStream, Provider, ItemSink, ItemStream, ObjectContext,
-    OutputStream, RelationalContext, VectorContext,
+    DataInput, DataOutput, InputStream, ItemSink, ItemStream, ObjectContext, OutputStream,
+    Provider, RelationalContext, VectorContext,
 };
 
 pub use datatype::{AnyDataValue, DataTypeId};
