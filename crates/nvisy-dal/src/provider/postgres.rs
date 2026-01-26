@@ -6,24 +6,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::Result;
 use crate::core::{
-    DataInput, DataOutput, InputStream, Provider, RelationalContext, RelationalParams,
+    DataInput, DataOutput, InputStream, Provider, Record, RelationalContext, RelationalParams,
 };
-use crate::datatype::Record;
-use crate::python::{PyDataInput, PyDataOutput, PyProvider, PyProviderLoader};
+use crate::python::{self, PyDataInput, PyDataOutput, PyProvider};
 
 /// Credentials for PostgreSQL connection.
+///
+/// Uses a connection string (DSN) format: `postgres://user:pass@host:port/database`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresCredentials {
-    /// Database host.
-    pub host: String,
-    /// Database port.
-    pub port: u16,
-    /// Database user.
-    pub user: String,
-    /// Database password.
-    pub password: String,
-    /// Database name.
-    pub database: String,
+    /// PostgreSQL connection string (DSN).
+    pub dsn: String,
 }
 
 /// Parameters for PostgreSQL operations.
@@ -48,13 +41,6 @@ pub struct PostgresProvider {
     output: PyDataOutput<Record>,
 }
 
-impl PostgresProvider {
-    /// Disconnects from the database.
-    pub async fn disconnect(self) -> Result<()> {
-        self.inner.disconnect().await
-    }
-}
-
 #[async_trait::async_trait]
 impl Provider for PostgresProvider {
     type Credentials = PostgresCredentials;
@@ -64,29 +50,23 @@ impl Provider for PostgresProvider {
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
-        let loader = PyProviderLoader::new().map_err(crate::Error::from)?;
-        let creds_json = serde_json::to_value(&credentials).map_err(crate::Error::from)?;
-        let params_json = serde_json::to_value(&params).map_err(crate::Error::from)?;
-
-        let inner = loader
-            .load("postgres", creds_json, params_json)
-            .await
-            .map_err(crate::Error::from)?;
-        let input = PyDataInput::new(PyProvider::new(inner.clone_py_object()));
-        let output = PyDataOutput::new(PyProvider::new(inner.clone_py_object()));
-
+        let inner = python::connect("postgres", credentials, params).await?;
         Ok(Self {
+            input: inner.as_data_input(),
+            output: inner.as_data_output(),
             inner,
-            input,
-            output,
         })
+    }
+
+    async fn disconnect(self) -> nvisy_core::Result<()> {
+        self.inner.disconnect().await.map_err(Into::into)
     }
 }
 
 #[async_trait::async_trait]
 impl DataInput for PostgresProvider {
-    type Item = Record;
     type Context = RelationalContext;
+    type Item = Record;
 
     async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
         self.input.read(ctx).await

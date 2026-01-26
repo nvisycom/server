@@ -5,8 +5,7 @@ use std::sync::OnceLock;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 
-use super::error::{PyError, PyResult};
-use super::provider::PyProvider;
+use super::{PyError, PyProvider, PyResult};
 
 /// Global reference to the nvisy_dal Python module.
 static NVISY_DAL_MODULE: OnceLock<Py<PyModule>> = OnceLock::new();
@@ -47,13 +46,13 @@ impl PyProviderLoader {
         })
     }
 
-    /// Loads a provider by name and connects with the given credentials.
+    /// Loads a provider by name and connects with pre-serialized JSON values.
     ///
     /// # Arguments
     ///
     /// * `name` - Provider name (e.g., "qdrant", "pinecone", "s3")
-    /// * `credentials` - JSON-serializable credentials
-    /// * `params` - JSON-serializable connection parameters
+    /// * `credentials` - JSON credentials
+    /// * `params` - JSON connection parameters
     pub async fn load(
         &self,
         name: &str,
@@ -101,7 +100,6 @@ impl PyProviderLoader {
         })?;
 
         let instance = coro.await.map_err(PyError::from)?;
-
         Ok(PyProvider::new(instance))
     }
 
@@ -120,7 +118,7 @@ impl Default for PyProviderLoader {
 }
 
 /// Converts a serde_json::Value to a Python dict.
-pub(super) fn json_to_pydict<'py>(
+pub fn json_to_pydict<'py>(
     py: Python<'py>,
     value: &serde_json::Value,
 ) -> PyResult<Bound<'py, PyDict>> {
@@ -138,7 +136,7 @@ pub(super) fn json_to_pydict<'py>(
 }
 
 /// Converts a serde_json::Value to a Python object.
-pub(super) fn json_to_pyobject<'py>(
+pub fn json_to_pyobject<'py>(
     py: Python<'py>,
     value: &serde_json::Value,
 ) -> PyResult<Bound<'py, PyAny>> {
@@ -183,7 +181,7 @@ pub(super) fn json_to_pyobject<'py>(
 }
 
 /// Converts a Python object to a serde_json::Value.
-pub(super) fn pyobject_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+pub fn pyobject_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if obj.is_none() {
         return Ok(serde_json::Value::Null);
     }

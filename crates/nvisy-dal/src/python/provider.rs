@@ -6,7 +6,7 @@ use async_stream::try_stream;
 use futures::Stream;
 use pyo3::prelude::*;
 
-use super::error::PyError;
+use super::PyError;
 use super::loader::pyobject_to_json;
 use crate::Result;
 use crate::core::{DataInput, DataOutput, InputStream};
@@ -28,6 +28,16 @@ impl PyProvider {
     /// Clones the underlying Python object reference.
     pub fn clone_py_object(&self) -> Py<PyAny> {
         Python::attach(|py| self.instance.clone_ref(py))
+    }
+
+    /// Creates a typed `DataInput` wrapper from this provider.
+    pub fn as_data_input<T, Ctx>(&self) -> PyDataInput<T, Ctx> {
+        PyDataInput::new(Self::new(self.clone_py_object()))
+    }
+
+    /// Creates a typed `DataOutput` wrapper from this provider.
+    pub fn as_data_output<T>(&self) -> PyDataOutput<T> {
+        PyDataOutput::new(Self::new(self.clone_py_object()))
     }
 
     /// Disconnects the provider.
@@ -77,8 +87,8 @@ where
     T: for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
     Ctx: serde::Serialize + Send + Sync,
 {
-    type Item = T;
     type Context = Ctx;
+    type Item = T;
 
     async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
         let ctx_json = serde_json::to_value(ctx)

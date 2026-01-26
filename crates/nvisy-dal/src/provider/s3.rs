@@ -5,9 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
-use crate::core::{DataInput, DataOutput, InputStream, ObjectContext, Provider};
-use crate::datatype::Object;
-use crate::python::{PyDataInput, PyDataOutput, PyProvider, PyProviderLoader};
+use crate::core::{DataInput, DataOutput, InputStream, Object, ObjectContext, Provider};
+use crate::python::{self, PyDataInput, PyDataOutput, PyProvider};
 
 /// Credentials for S3 connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,13 +38,6 @@ pub struct S3Provider {
     output: PyDataOutput<Object>,
 }
 
-impl S3Provider {
-    /// Disconnects from S3.
-    pub async fn disconnect(self) -> Result<()> {
-        self.inner.disconnect().await
-    }
-}
-
 #[async_trait::async_trait]
 impl Provider for S3Provider {
     type Credentials = S3Credentials;
@@ -55,29 +47,23 @@ impl Provider for S3Provider {
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
-        let loader = PyProviderLoader::new().map_err(crate::Error::from)?;
-        let creds_json = serde_json::to_value(&credentials).map_err(crate::Error::from)?;
-        let params_json = serde_json::to_value(&params).map_err(crate::Error::from)?;
-
-        let inner = loader
-            .load("s3", creds_json, params_json)
-            .await
-            .map_err(crate::Error::from)?;
-        let input = PyDataInput::new(PyProvider::new(inner.clone_py_object()));
-        let output = PyDataOutput::new(PyProvider::new(inner.clone_py_object()));
-
+        let inner = python::connect("s3", credentials, params).await?;
         Ok(Self {
+            input: inner.as_data_input(),
+            output: inner.as_data_output(),
             inner,
-            input,
-            output,
         })
+    }
+
+    async fn disconnect(self) -> nvisy_core::Result<()> {
+        self.inner.disconnect().await.map_err(Into::into)
     }
 }
 
 #[async_trait::async_trait]
 impl DataInput for S3Provider {
-    type Item = Object;
     type Context = ObjectContext;
+    type Item = Object;
 
     async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
         self.input.read(ctx).await

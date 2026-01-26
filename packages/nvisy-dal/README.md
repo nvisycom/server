@@ -1,5 +1,7 @@
 # nvisy-dal
 
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+
 Data abstraction layer for external integrations. Provides unified async interfaces for storage, databases, and vector stores.
 
 ## Installation
@@ -98,54 +100,17 @@ uv run pyright
 uv run ruff check .
 ```
 
-## TODO
+## Changelog
 
-- [x] Core protocols and error types
+See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
 
-### Relational Databases
-- [ ] PostgreSQL provider
-- [ ] MySQL provider
-- [ ] SQLite provider
-- [ ] SQL Server provider
-- [ ] Oracle provider
+## License
 
-### Object Storage
-- [ ] S3 provider
-- [ ] GCS provider
-- [ ] Azure Blob provider
-- [ ] MinIO provider
-- [ ] Cloudflare R2 provider
+Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
 
-### Vector Databases
-- [ ] Pinecone provider
-- [ ] Qdrant provider
-- [ ] Weaviate provider
-- [ ] Milvus provider
-- [ ] Chroma provider
-- [ ] pgvector provider
+## Support
 
-### Document Databases
-- [ ] MongoDB provider
-- [ ] DynamoDB provider
-- [ ] Firestore provider
-- [ ] CouchDB provider
-
-### Key-Value Stores
-- [ ] Redis provider
-- [ ] Memcached provider
-- [ ] etcd provider
-
-### Message Queues
-- [ ] Kafka provider
-- [ ] RabbitMQ provider
-- [ ] NATS provider
-- [ ] SQS provider
-
-### Graph Databases
-- [ ] Neo4j provider
-- [ ] Neptune provider
-
-### Search Engines
-- [ ] Elasticsearch provider
-- [ ] OpenSearch provider
-- [ ] Algolia provider
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

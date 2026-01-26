@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::{Sink, SinkExt};
-use nvisy_dal::datatype::AnyDataValue;
+use nvisy_dal::AnyDataValue;
 
 use crate::error::Error;
 

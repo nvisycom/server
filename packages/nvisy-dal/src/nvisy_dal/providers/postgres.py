@@ -18,13 +18,12 @@ except ImportError as e:
 
 
 class PostgresCredentials(BaseModel):
-    """Credentials for PostgreSQL connection."""
+    """Credentials for PostgreSQL connection.
 
-    host: str = "localhost"
-    port: int = 5432
-    user: str = "postgres"
-    password: str
-    database: str
+    Uses a connection string (DSN) format: postgres://user:pass@host:port/database
+    """
+
+    dsn: str
 
 
 class PostgresParams(BaseModel):
@@ -66,11 +65,7 @@ class PostgresProvider:
         """Establish connection pool to PostgreSQL."""
         try:
             pool = await asyncpg.create_pool(
-                host=credentials.host,
-                port=credentials.port,
-                user=credentials.user,
-                password=credentials.password,
-                database=credentials.database,
+                dsn=credentials.dsn,
                 min_size=1,
                 max_size=10,
             )

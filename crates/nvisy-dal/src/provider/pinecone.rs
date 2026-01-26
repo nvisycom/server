@@ -5,9 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
-use crate::core::{DataOutput, Provider};
-use crate::datatype::Embedding;
-use crate::python::{PyDataOutput, PyProvider, PyProviderLoader};
+use crate::core::{DataOutput, Embedding, Provider};
+use crate::python::{self, PyDataOutput, PyProvider};
 
 /// Credentials for Pinecone connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,13 +30,6 @@ pub struct PineconeProvider {
     output: PyDataOutput<Embedding>,
 }
 
-impl PineconeProvider {
-    /// Disconnects from Pinecone.
-    pub async fn disconnect(self) -> Result<()> {
-        self.inner.disconnect().await
-    }
-}
-
 #[async_trait::async_trait]
 impl Provider for PineconeProvider {
     type Credentials = PineconeCredentials;
@@ -47,17 +39,15 @@ impl Provider for PineconeProvider {
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
-        let loader = PyProviderLoader::new().map_err(crate::Error::from)?;
-        let creds_json = serde_json::to_value(&credentials).map_err(crate::Error::from)?;
-        let params_json = serde_json::to_value(&params).map_err(crate::Error::from)?;
+        let inner = python::connect("pinecone", credentials, params).await?;
+        Ok(Self {
+            output: inner.as_data_output(),
+            inner,
+        })
+    }
 
-        let inner = loader
-            .load("pinecone", creds_json, params_json)
-            .await
-            .map_err(crate::Error::from)?;
-        let output = PyDataOutput::new(PyProvider::new(inner.clone_py_object()));
-
-        Ok(Self { inner, output })
+    async fn disconnect(self) -> nvisy_core::Result<()> {
+        self.inner.disconnect().await.map_err(Into::into)
     }
 }
 

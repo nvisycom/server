@@ -37,4 +37,12 @@ pub trait Provider: Send {
     async fn connect(params: Self::Params, credentials: Self::Credentials) -> Result<Self>
     where
         Self: Sized;
+
+    /// Disconnects and cleans up the provider.
+    async fn disconnect(self) -> Result<()>
+    where
+        Self: Sized,
+    {
+        Ok(())
+    }
 }

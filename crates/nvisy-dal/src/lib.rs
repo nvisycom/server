@@ -13,7 +13,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod core;
-pub mod datatype;
 pub mod provider;
 
 mod python;
@@ -21,9 +20,10 @@ mod python;
 mod error;
 
 pub use core::{
-    AnyContext, DataInput, DataOutput, InputStream, ItemSink, ItemStream, ObjectContext,
-    OutputStream, Provider, RelationalContext, VectorContext,
+    AnyContext, AnyDataValue, DataInput, DataOutput, DataType, Document, Edge, Embedding, Graph,
+    InputStream, ItemSink, ItemStream, Message, Metadata, Node, Object, ObjectContext,
+    OutputStream, Provider, Record, RelationalContext, VectorContext,
 };
 
-pub use datatype::{AnyDataValue, DataType, Document, Embedding, Graph, Message, Object, Record};
 pub use error::{BoxError, Error, ErrorKind, Result};
+pub use provider::{AnyCredentials, AnyParams, AnyProvider};

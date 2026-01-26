@@ -1,10 +1,15 @@
 //! Core types and traits for data operations.
 
 mod contexts;
+mod datatypes;
 mod params;
 mod streams;
 
 pub use contexts::{AnyContext, ObjectContext, RelationalContext, VectorContext};
+pub use datatypes::{
+    AnyDataValue, DataType, Document, Edge, Embedding, Graph, Message, Metadata, Node, Object,
+    Record,
+};
 pub use nvisy_core::Provider;
 pub use params::{DistanceMetric, ObjectParams, RelationalParams, VectorParams};
 pub use streams::{InputStream, ItemSink, ItemStream, OutputStream};
