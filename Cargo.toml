@@ -97,7 +97,7 @@ pgvector = { version = "0.4", features = [] }
 pgtrgm = { version = "0.4", features = [] }
 
 # Messaging and object storage (NATS)
-async-nats = { version = "0.45", features = [] }
+async-nats = { version = "0.46", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }
