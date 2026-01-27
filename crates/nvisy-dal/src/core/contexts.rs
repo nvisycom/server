@@ -1,43 +1,44 @@
 //! Context types for data operations.
 //!
-//! Contexts carry state from previous runs to enable pagination and resumption.
+//! Contexts carry state needed to resume reading from a specific position.
+//! They only track *where* to resume, not *how much* to read (that's in Params).
 
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 
 /// Context for object storage operations (S3, GCS, Azure Blob).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// Uses marker-based pagination (last seen key) which is portable across
+/// S3, GCS, Azure Blob, and MinIO.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectContext {
     /// Path prefix for listing objects.
     pub prefix: Option<String>,
-    /// Continuation token for pagination.
+    /// Last seen object key (used as StartAfter/marker for resumption).
     pub token: Option<String>,
-    /// Maximum number of items to read.
-    pub limit: Option<usize>,
 }
 
 /// Context for relational database operations (Postgres, MySQL).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// Uses keyset pagination which is more efficient than offset-based
+/// pagination for large datasets and provides stable results.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelationalContext {
     /// Last seen cursor value (for keyset pagination).
     pub cursor: Option<String>,
     /// Tiebreaker value for resolving cursor conflicts.
     pub tiebreaker: Option<String>,
-    /// Maximum number of items to read.
-    pub limit: Option<usize>,
 }
 
 /// Context for vector database operations (Qdrant, Pinecone, pgvector).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VectorContext {
     /// Continuation token or offset for pagination.
     pub token: Option<String>,
-    /// Maximum number of items to read.
-    pub limit: Option<usize>,
 }
 
 /// Type-erased context for runtime dispatch.
-#[derive(Debug, Clone, Default, From, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, From, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum AnyContext {
     /// No context / empty state.
@@ -52,27 +53,6 @@ pub enum AnyContext {
 }
 
 impl AnyContext {
-    /// Returns the limit if set in any context type.
-    pub fn limit(&self) -> Option<usize> {
-        match self {
-            Self::None => None,
-            Self::Object(ctx) => ctx.limit,
-            Self::Relational(ctx) => ctx.limit,
-            Self::Vector(ctx) => ctx.limit,
-        }
-    }
-
-    /// Sets the limit on the inner context.
-    pub fn with_limit(mut self, limit: usize) -> Self {
-        match &mut self {
-            Self::None => {}
-            Self::Object(ctx) => ctx.limit = Some(limit),
-            Self::Relational(ctx) => ctx.limit = Some(limit),
-            Self::Vector(ctx) => ctx.limit = Some(limit),
-        }
-        self
-    }
-
     /// Returns a reference to the object context if this is an object context.
     pub fn as_object(&self) -> Option<&ObjectContext> {
         match self {

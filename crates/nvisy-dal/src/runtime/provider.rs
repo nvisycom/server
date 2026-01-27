@@ -4,11 +4,14 @@ use std::marker::PhantomData;
 
 use async_stream::try_stream;
 use futures::Stream;
-use pyo3::prelude::*;
+use pyo3::exceptions::PyStopAsyncIteration;
+use pyo3::types::PyAnyMethods;
+use pyo3::{Py, PyAny, Python};
 
 use super::PyError;
+use super::loader::{json_to_pydict, json_to_pyobject, pyobject_to_json};
 use crate::streams::InputStream;
-use crate::{DataInput, DataOutput, Result};
+use crate::{DataInput, DataOutput, Result, Resumable};
 
 /// A wrapper around a Python provider instance.
 ///
@@ -84,19 +87,22 @@ impl<T, Ctx> PyDataInput<T, Ctx> {
 impl<T, Ctx> DataInput for PyDataInput<T, Ctx>
 where
     T: for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
-    Ctx: serde::Serialize + Send + Sync,
+    Ctx: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + 'static,
 {
     type Context = Ctx;
-    type Item = T;
+    type Datatype = T;
 
-    async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
+    async fn read(
+        &self,
+        ctx: &Self::Context,
+    ) -> Result<InputStream<Resumable<Self::Datatype, Self::Context>>> {
         let ctx_json = serde_json::to_value(ctx)
             .map_err(|e| PyError::conversion(format!("Failed to serialize context: {}", e)))?;
 
         // Call Python read method which returns an async iterator
         let coro = Python::attach(|py| {
             let bound = self.provider.instance.bind(py);
-            let ctx_dict = super::loader::json_to_pydict(py, &ctx_json)?;
+            let ctx_dict = json_to_pydict(py, &ctx_json)?;
             let coro = bound
                 .call_method1("read", (ctx_dict,))
                 .map_err(|e| PyError::call_failed(format!("Failed to call read: {}", e)))?;
@@ -109,7 +115,8 @@ where
             .map_err(|e| PyError::call_failed(format!("Failed to call read: {}", e)))?;
 
         // Create a stream that pulls from the Python async iterator
-        let stream = py_async_iterator_to_stream::<T>(py_iterator);
+        // Python yields (item, context) tuples, we convert to Resumable
+        let stream = py_async_iterator_to_stream::<T, Ctx>(py_iterator);
         Ok(InputStream::new(Box::pin(stream)))
     }
 }
@@ -135,15 +142,15 @@ impl<T> DataOutput for PyDataOutput<T>
 where
     T: serde::Serialize + Send + Sync,
 {
-    type Item = T;
+    type Datatype = T;
 
-    async fn write(&self, items: Vec<Self::Item>) -> Result<()> {
+    async fn write(&self, items: Vec<Self::Datatype>) -> Result<()> {
         let items_json = serde_json::to_value(&items)
             .map_err(|e| PyError::conversion(format!("Failed to serialize items: {}", e)))?;
 
         let coro = Python::attach(|py| {
             let bound = self.provider.instance.bind(py);
-            let items_list = super::loader::json_to_pyobject(py, &items_json)?;
+            let items_list = json_to_pyobject(py, &items_json)?;
             let coro = bound
                 .call_method1("write", (items_list,))
                 .map_err(|e| PyError::call_failed(format!("Failed to call write: {}", e)))?;
@@ -158,10 +165,15 @@ where
     }
 }
 
-/// Converts a Python async iterator to a Rust Stream.
-fn py_async_iterator_to_stream<T>(iterator: Py<PyAny>) -> impl Stream<Item = Result<T>>
+/// Converts a Python async iterator to a Rust Stream of Resumable items.
+///
+/// Python yields `(data, context)` tuples which are converted to `Resumable<T, C>`.
+fn py_async_iterator_to_stream<T, C>(
+    iterator: Py<PyAny>,
+) -> impl Stream<Item = Result<Resumable<T, C>>>
 where
     T: for<'de> serde::Deserialize<'de> + Send + 'static,
+    C: for<'de> serde::Deserialize<'de> + Send + 'static,
 {
     try_stream! {
         loop {
@@ -174,7 +186,7 @@ where
                         Ok(Some(future))
                     }
                     Err(e) => {
-                        if e.is_instance_of::<pyo3::exceptions::PyStopAsyncIteration>(py) {
+                        if e.is_instance_of::<PyStopAsyncIteration>(py) {
                             Ok(None)
                         } else {
                             Err(PyError::from(e))
@@ -190,12 +202,12 @@ where
             // Await the coroutine
             let result = coro.await.map_err(PyError::from)?;
 
-            // Convert result to Rust type
-            let json_value = Python::attach(|py| super::loader::pyobject_to_json(result.bind(py)))?;
-            let item: T = serde_json::from_value(json_value)
+            // Convert Python (data, context) tuple to Resumable
+            let json_value = Python::attach(|py| pyobject_to_json(result.bind(py)))?;
+            let (data, context): (T, C) = serde_json::from_value(json_value)
                 .map_err(|e| PyError::conversion(format!("Failed to deserialize item: {}", e)))?;
 
-            yield item;
+            yield Resumable::new(data, context);
         }
     }
 }

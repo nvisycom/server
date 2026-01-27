@@ -72,7 +72,7 @@ use futures::StreamExt;
 use crate::contexts::AnyContext;
 use crate::datatypes::AnyDataValue;
 use crate::streams::InputStream;
-use crate::{DataInput, DataOutput, Error, Result};
+use crate::{DataInput, DataOutput, Error, Result, Resumable};
 
 #[async_trait::async_trait]
 impl crate::Provider for AnyProvider {
@@ -119,20 +119,37 @@ impl crate::Provider for AnyProvider {
 #[async_trait::async_trait]
 impl DataInput for AnyProvider {
     type Context = AnyContext;
-    type Item = AnyDataValue;
+    type Datatype = AnyDataValue;
 
-    async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
+    async fn read(
+        &self,
+        ctx: &Self::Context,
+    ) -> Result<InputStream<Resumable<Self::Datatype, Self::Context>>> {
         match self {
             Self::Postgres(provider) => {
                 let ctx = ctx.as_relational().cloned().unwrap_or_default();
                 let stream = provider.read(&ctx).await?;
-                let mapped = stream.map(|r| r.map(AnyDataValue::from));
+                let mapped = stream.map(|r| {
+                    r.map(|item| {
+                        Resumable::new(
+                            AnyDataValue::from(item.data),
+                            AnyContext::Relational(item.context),
+                        )
+                    })
+                });
                 Ok(InputStream::new(Box::pin(mapped)))
             }
             Self::S3(provider) => {
                 let ctx = ctx.as_object().cloned().unwrap_or_default();
                 let stream = provider.read(&ctx).await?;
-                let mapped = stream.map(|r| r.map(AnyDataValue::from));
+                let mapped = stream.map(|r| {
+                    r.map(|item| {
+                        Resumable::new(
+                            AnyDataValue::from(item.data),
+                            AnyContext::Object(item.context),
+                        )
+                    })
+                });
                 Ok(InputStream::new(Box::pin(mapped)))
             }
             Self::Pinecone(_) => Err(Error::invalid_input(
@@ -144,9 +161,9 @@ impl DataInput for AnyProvider {
 
 #[async_trait::async_trait]
 impl DataOutput for AnyProvider {
-    type Item = AnyDataValue;
+    type Datatype = AnyDataValue;
 
-    async fn write(&self, items: Vec<Self::Item>) -> Result<()> {
+    async fn write(&self, items: Vec<Self::Datatype>) -> Result<()> {
         match self {
             Self::Postgres(provider) => {
                 let records: Result<Vec<_>> = items

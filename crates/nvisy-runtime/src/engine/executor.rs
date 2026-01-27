@@ -170,10 +170,11 @@ impl Engine {
             );
 
             while let Some(result) = input_stream.next().await {
-                let item = result?;
+                let resumable = result?;
 
                 // Start with single input item
-                ctx.set_current_single(item);
+                // TODO: Store resumable.context for resumption on failure
+                ctx.set_current_single(resumable.data);
 
                 // Execute transforms in order
                 for transform_id in &transform_ids {

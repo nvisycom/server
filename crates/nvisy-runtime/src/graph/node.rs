@@ -1,14 +1,16 @@
 //! Compiled node types.
 
 use derive_more::From;
+use nvisy_dal::contexts::AnyContext;
 use nvisy_dal::datatypes::AnyDataValue;
-use nvisy_dal::streams;
+use nvisy_dal::{Resumable, streams};
 
 use super::route::CompiledSwitch;
 use super::transform::CompiledTransform;
 
 /// Type alias for input streams in the runtime.
-pub type InputStream = streams::InputStream<AnyDataValue>;
+/// Each item is paired with a context for resumption.
+pub type InputStream = streams::InputStream<Resumable<AnyDataValue, AnyContext>>;
 
 /// Type alias for output streams in the runtime.
 pub type OutputStream = streams::OutputStream<AnyDataValue>;

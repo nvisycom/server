@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::contexts::ObjectContext;
 use crate::datatypes::Object;
+use crate::params::ObjectParams;
 use crate::runtime::{self, PyDataInput, PyDataOutput, PyProvider};
 use crate::streams::InputStream;
-use crate::{DataInput, DataOutput, Provider, Result};
+use crate::{DataInput, DataOutput, Provider, Result, Resumable};
 
 /// Credentials for S3 connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,10 +28,16 @@ pub struct S3Credentials {
 /// Parameters for S3 operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct S3Params {
-    /// Target bucket name.
-    pub bucket: String,
-    /// Key prefix for all operations.
-    pub prefix: String,
+    /// Default content type for uploaded objects.
+    #[serde(default = "default_content_type")]
+    pub content_type: String,
+    /// Object storage parameters (bucket, prefix, batch_size).
+    #[serde(flatten)]
+    pub object: ObjectParams,
+}
+
+fn default_content_type() -> String {
+    "application/octet-stream".to_string()
 }
 
 /// S3 provider for object storage operations.
@@ -65,18 +72,21 @@ impl Provider for S3Provider {
 #[async_trait::async_trait]
 impl DataInput for S3Provider {
     type Context = ObjectContext;
-    type Item = Object;
+    type Datatype = Object;
 
-    async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
+    async fn read(
+        &self,
+        ctx: &Self::Context,
+    ) -> Result<InputStream<Resumable<Self::Datatype, Self::Context>>> {
         self.input.read(ctx).await
     }
 }
 
 #[async_trait::async_trait]
 impl DataOutput for S3Provider {
-    type Item = Object;
+    type Datatype = Object;
 
-    async fn write(&self, items: Vec<Self::Item>) -> Result<()> {
+    async fn write(&self, items: Vec<Self::Datatype>) -> Result<()> {
         self.output.write(items).await
     }
 }

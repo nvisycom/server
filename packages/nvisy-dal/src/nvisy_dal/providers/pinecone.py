@@ -87,7 +87,7 @@ class PineconeProvider:
             for i in range(0, len(records), batch_size):
                 batch = list(records[i : i + batch_size])
                 response = cast(
-                    UpsertResponse,
+                    "UpsertResponse",
                     self._index.upsert(  # pyright: ignore[reportUnknownMemberType]
                         vectors=batch,
                         namespace=self._params.namespace,

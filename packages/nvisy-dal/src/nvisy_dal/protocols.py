@@ -5,17 +5,22 @@ from typing import Protocol, Self, TypeVar, runtime_checkable
 
 T_co = TypeVar("T_co", covariant=True)
 T_contra = TypeVar("T_contra", contravariant=True)
+Ctx = TypeVar("Ctx")  # Invariant: used in both parameter and return positions
 Ctx_contra = TypeVar("Ctx_contra", contravariant=True)
 Cred_contra = TypeVar("Cred_contra", contravariant=True)
 Params_contra = TypeVar("Params_contra", contravariant=True)
 
 
 @runtime_checkable
-class DataInput(Protocol[T_co, Ctx_contra]):
+class DataInput(Protocol[T_co, Ctx]):
     """Protocol for reading data from external sources."""
 
-    async def read(self, ctx: Ctx_contra) -> AsyncIterator[T_co]:
-        """Yield items from the source based on context."""
+    async def read(self, ctx: Ctx) -> AsyncIterator[tuple[T_co, Ctx]]:
+        """Yield (item, context) tuples from the source.
+
+        Each yielded context can be used to resume reading from
+        the next item if the stream is interrupted.
+        """
         ...
 
 

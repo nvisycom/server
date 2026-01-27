@@ -53,9 +53,9 @@ impl Provider for PineconeProvider {
 
 #[async_trait::async_trait]
 impl DataOutput for PineconeProvider {
-    type Item = Embedding;
+    type Datatype = Embedding;
 
-    async fn write(&self, items: Vec<Self::Item>) -> Result<()> {
+    async fn write(&self, items: Vec<Self::Datatype>) -> Result<()> {
         self.output.write(items).await
     }
 }

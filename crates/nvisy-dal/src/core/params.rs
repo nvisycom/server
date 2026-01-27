@@ -6,11 +6,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Common parameters for relational database operations.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelationalParams {
     /// Target table name.
+    pub table: String,
+    /// Columns to select. If None, selects all columns.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub table: Option<String>,
+    pub columns: Option<Vec<String>>,
     /// Column to use for cursor-based pagination (e.g., "id", "created_at").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_column: Option<String>,
@@ -23,11 +25,10 @@ pub struct RelationalParams {
 }
 
 /// Common parameters for object storage operations.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ObjectParams {
     /// Bucket name (S3 bucket, GCS bucket, Azure container).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bucket: Option<String>,
+    pub bucket: String,
     /// Default prefix for object keys.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix: Option<String>,
@@ -37,11 +38,10 @@ pub struct ObjectParams {
 }
 
 /// Common parameters for vector database operations.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorParams {
     /// Collection or index name (Pinecone index, Qdrant collection).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub collection: Option<String>,
+    pub collection: String,
     /// Dimension of vectors (required for some providers).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dimension: Option<usize>,

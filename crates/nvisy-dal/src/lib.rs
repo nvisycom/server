@@ -38,7 +38,7 @@ pub mod streams {
     pub use crate::core::streams::*;
 }
 
-pub use core::{DataInput, DataOutput};
+pub use core::{DataInput, DataOutput, Resumable};
 
 pub use error::{BoxError, Error, ErrorKind, Result};
 pub use nvisy_core::Provider;

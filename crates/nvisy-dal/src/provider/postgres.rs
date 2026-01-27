@@ -9,7 +9,7 @@ use crate::datatypes::Record;
 use crate::params::RelationalParams;
 use crate::runtime::{self, PyDataInput, PyDataOutput, PyProvider};
 use crate::streams::InputStream;
-use crate::{DataInput, DataOutput, Provider, Result};
+use crate::{DataInput, DataOutput, Provider, Result, Resumable};
 
 /// Credentials for PostgreSQL connection.
 ///
@@ -67,18 +67,21 @@ impl Provider for PostgresProvider {
 #[async_trait::async_trait]
 impl DataInput for PostgresProvider {
     type Context = RelationalContext;
-    type Item = Record;
+    type Datatype = Record;
 
-    async fn read(&self, ctx: &Self::Context) -> Result<InputStream<Self::Item>> {
+    async fn read(
+        &self,
+        ctx: &Self::Context,
+    ) -> Result<InputStream<Resumable<Self::Datatype, Self::Context>>> {
         self.input.read(ctx).await
     }
 }
 
 #[async_trait::async_trait]
 impl DataOutput for PostgresProvider {
-    type Item = Record;
+    type Datatype = Record;
 
-    async fn write(&self, items: Vec<Self::Item>) -> Result<()> {
+    async fn write(&self, items: Vec<Self::Datatype>) -> Result<()> {
         self.output.write(items).await
     }
 }
