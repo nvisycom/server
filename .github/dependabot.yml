@@ -42,8 +42,8 @@ updates:
         patterns:
           - "*"
 
-  # Version updates for Python packages
-  - package-ecosystem: "pip"
+  # Version updates for Python packages (uv)
+  - package-ecosystem: "uv"
     directory: "/packages/nvisy-dal"
     schedule:
       interval: "weekly"
@@ -64,7 +64,7 @@ updates:
           - "minor"
           - "patch"
 
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/packages/nvisy-rig"
     schedule:
       interval: "weekly"

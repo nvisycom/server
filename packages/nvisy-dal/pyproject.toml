@@ -46,6 +46,7 @@ asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
 dev = [
+    "pip-audit>=2.9",
     "pyright>=1.1.408",
-    "ruff>=0.14.14",
+    "ruff>=0.14",
 ]

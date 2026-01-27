@@ -7,6 +7,7 @@ on:
       - "release"
     paths:
       - "crates/**"
+      - "packages/**"
       - "migrations/**"
       - "scripts/**"
       - "Cargo.toml"
@@ -18,6 +19,7 @@ on:
     branches: [main, release]
     paths:
       - "crates/**"
+      - "packages/**"
       - "migrations/**"
       - "scripts/**"
       - "Cargo.toml"
@@ -36,8 +38,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fmt:
-    name: Format
+  fmt-rs:
+    name: Format (Rust)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -51,8 +53,8 @@ jobs:
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
 
-  check:
-    name: Check & Clippy
+  check-rs:
+    name: Check & Clippy (Rust)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -72,10 +74,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features --workspace -- -D warnings
 
-  test:
-    name: Test
+  test-rs:
+    name: Test (Rust)
     runs-on: ubuntu-latest
-    needs: check
+    needs: check-rs
     env:
       POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
       NATS_URL: nats://localhost:4222
@@ -110,10 +112,10 @@ jobs:
         if: always()
         run: docker compose -f docker/docker-compose.dev.yml down -v
 
-  docs:
-    name: Docs
+  docs-rs:
+    name: Docs (Rust)
     runs-on: ubuntu-latest
-    needs: check
+    needs: check-rs
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -128,3 +130,55 @@ jobs:
         run: cargo doc --no-deps --all-features --workspace
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  lint-py:
+    name: Lint (Python)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [nvisy-dal]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        working-directory: packages/${{ matrix.package }}
+        run: uv sync
+
+      - name: Ruff check
+        working-directory: packages/${{ matrix.package }}
+        run: uv run ruff check src/
+
+      - name: Ruff format
+        working-directory: packages/${{ matrix.package }}
+        run: uv run ruff format --check src/
+
+  typecheck-py:
+    name: Typecheck (Python)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [nvisy-dal]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        working-directory: packages/${{ matrix.package }}
+        run: uv sync --all-extras
+
+      - name: Pyright
+        working-directory: packages/${{ matrix.package }}
+        run: uv run pyright src/
