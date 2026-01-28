@@ -74,26 +74,26 @@ pub enum ActivityType {
     #[serde(rename = "invite:canceled")]
     InviteCanceled,
 
-    // Integration activities
-    /// Integration was created
-    #[db_rename = "integration:created"]
-    #[serde(rename = "integration:created")]
-    IntegrationCreated,
+    // Connection activities
+    /// Connection was created
+    #[db_rename = "connection:created"]
+    #[serde(rename = "connection:created")]
+    ConnectionCreated,
 
-    /// Integration was updated
-    #[db_rename = "integration:updated"]
-    #[serde(rename = "integration:updated")]
-    IntegrationUpdated,
+    /// Connection was updated
+    #[db_rename = "connection:updated"]
+    #[serde(rename = "connection:updated")]
+    ConnectionUpdated,
 
-    /// Integration was deleted
-    #[db_rename = "integration:deleted"]
-    #[serde(rename = "integration:deleted")]
-    IntegrationDeleted,
+    /// Connection was deleted
+    #[db_rename = "connection:deleted"]
+    #[serde(rename = "connection:deleted")]
+    ConnectionDeleted,
 
-    /// Integration completed synchronization
-    #[db_rename = "integration:synced"]
-    #[serde(rename = "integration:synced")]
-    IntegrationSynced,
+    /// Connection completed synchronization
+    #[db_rename = "connection:synced"]
+    #[serde(rename = "connection:synced")]
+    ConnectionSynced,
 
     // Webhook activities
     /// Webhook was created
@@ -179,10 +179,10 @@ impl ActivityType {
             | ActivityType::InviteDeclined
             | ActivityType::InviteCanceled => ActivityCategory::Invite,
 
-            ActivityType::IntegrationCreated
-            | ActivityType::IntegrationUpdated
-            | ActivityType::IntegrationDeleted
-            | ActivityType::IntegrationSynced => ActivityCategory::Integration,
+            ActivityType::ConnectionCreated
+            | ActivityType::ConnectionUpdated
+            | ActivityType::ConnectionDeleted
+            | ActivityType::ConnectionSynced => ActivityCategory::Connection,
 
             ActivityType::WebhookCreated
             | ActivityType::WebhookUpdated
@@ -209,7 +209,7 @@ impl ActivityType {
             self,
             ActivityType::WorkspaceCreated
                 | ActivityType::InviteCreated
-                | ActivityType::IntegrationCreated
+                | ActivityType::ConnectionCreated
                 | ActivityType::WebhookCreated
                 | ActivityType::DocumentCreated
                 | ActivityType::CommentAdded
@@ -223,7 +223,7 @@ impl ActivityType {
             self,
             ActivityType::WorkspaceDeleted
                 | ActivityType::MemberDeleted
-                | ActivityType::IntegrationDeleted
+                | ActivityType::ConnectionDeleted
                 | ActivityType::WebhookDeleted
                 | ActivityType::DocumentDeleted
                 | ActivityType::CommentDeleted
@@ -249,8 +249,8 @@ pub enum ActivityCategory {
     Member,
     /// Invite-related activities
     Invite,
-    /// Integration-related activities
-    Integration,
+    /// Connection-related activities
+    Connection,
     /// Webhook-related activities
     Webhook,
     /// Document-related activities

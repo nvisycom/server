@@ -8,8 +8,8 @@ mod scope;
 use std::collections::HashMap;
 
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
-use nvisy_postgres::model::ScoredFileChunk;
-use nvisy_postgres::query::FileChunkRepository;
+use nvisy_postgres::model::ScoredWorkspaceFileChunk;
+use nvisy_postgres::query::WorkspaceFileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
@@ -82,13 +82,18 @@ impl Searcher {
 
         let min_score = self.min_score.unwrap_or(0.0);
 
-        let scored_chunks: Vec<ScoredFileChunk> = match &self.scope {
+        let scored_chunks: Vec<ScoredWorkspaceFileChunk> = match &self.scope {
             SearchScope::Files(file_ids) => {
-                conn.search_scored_chunks_in_files(query_vector, file_ids, min_score, limit as i64)
-                    .await
+                conn.search_scored_workspace_file_chunks_in_files(
+                    query_vector,
+                    file_ids,
+                    min_score,
+                    limit as i64,
+                )
+                .await
             }
             SearchScope::Workspace(workspace_id) => {
-                conn.search_scored_chunks_in_workspace(
+                conn.search_scored_workspace_file_chunks_in_workspace(
                     query_vector,
                     *workspace_id,
                     min_score,

@@ -1,4 +1,4 @@
-//! File chunk model for PostgreSQL database operations.
+//! Workspace file chunk model for PostgreSQL database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::schema::file_chunks;
 use crate::types::{HasCreatedAt, HasUpdatedAt};
 
-/// File chunk model representing a text segment from a file.
+/// Workspace file chunk model representing a text segment from a file.
 ///
 /// Chunks are used for semantic search via vector embeddings. Each chunk
 /// represents a portion of a file with its embedding vector for
@@ -16,7 +16,7 @@ use crate::types::{HasCreatedAt, HasUpdatedAt};
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = file_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct FileChunk {
+pub struct WorkspaceFileChunk {
     /// Unique chunk identifier.
     pub id: Uuid,
     /// Reference to the file this chunk belongs to.
@@ -41,11 +41,11 @@ pub struct FileChunk {
     pub updated_at: Timestamp,
 }
 
-/// Data for creating a new file chunk.
+/// Data for creating a new workspace file chunk.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = file_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewFileChunk {
+pub struct NewWorkspaceFileChunk {
     /// File ID (required).
     pub file_id: Uuid,
     /// Chunk index within the file.
@@ -64,11 +64,11 @@ pub struct NewFileChunk {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Data for updating a file chunk.
+/// Data for updating a workspace file chunk.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = file_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateFileChunk {
+pub struct UpdateWorkspaceFileChunk {
     /// Token count.
     pub token_count: Option<i32>,
     /// Vector embedding.
@@ -79,7 +79,7 @@ pub struct UpdateFileChunk {
     pub metadata: Option<serde_json::Value>,
 }
 
-impl FileChunk {
+impl WorkspaceFileChunk {
     /// Returns whether the chunk has custom metadata.
     pub fn has_metadata(&self) -> bool {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
@@ -91,32 +91,32 @@ impl FileChunk {
     }
 }
 
-impl HasCreatedAt for FileChunk {
+impl HasCreatedAt for WorkspaceFileChunk {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }
 }
 
-impl HasUpdatedAt for FileChunk {
+impl HasUpdatedAt for WorkspaceFileChunk {
     fn updated_at(&self) -> jiff::Timestamp {
         self.updated_at.into()
     }
 }
 
-/// A file chunk with its similarity score.
+/// A workspace file chunk with its similarity score.
 ///
 /// Returned from similarity search queries.
 #[derive(Debug, Clone)]
-pub struct ScoredFileChunk {
+pub struct ScoredWorkspaceFileChunk {
     /// The file chunk.
-    pub chunk: FileChunk,
+    pub chunk: WorkspaceFileChunk,
     /// Similarity score (0.0 to 1.0, higher is more similar).
     pub score: f64,
 }
 
-impl ScoredFileChunk {
+impl ScoredWorkspaceFileChunk {
     /// Returns a reference to the chunk.
-    pub fn chunk(&self) -> &FileChunk {
+    pub fn chunk(&self) -> &WorkspaceFileChunk {
         &self.chunk
     }
 
@@ -126,7 +126,7 @@ impl ScoredFileChunk {
     }
 
     /// Consumes self and returns the inner chunk.
-    pub fn into_chunk(self) -> FileChunk {
+    pub fn into_chunk(self) -> WorkspaceFileChunk {
         self.chunk
     }
 }

@@ -1,4 +1,4 @@
-//! File chunks repository for managing text segments and embeddings.
+//! Workspace file chunks repository for managing text segments and embeddings.
 
 use std::future::Future;
 
@@ -7,93 +7,100 @@ use diesel_async::RunQueryDsl;
 use pgvector::Vector;
 use uuid::Uuid;
 
-use crate::model::{FileChunk, NewFileChunk, ScoredFileChunk, UpdateFileChunk};
+use crate::model::{
+    NewWorkspaceFileChunk, ScoredWorkspaceFileChunk, UpdateWorkspaceFileChunk, WorkspaceFileChunk,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
-/// Repository for file chunk database operations.
+/// Repository for workspace file chunk database operations.
 ///
 /// Handles chunk lifecycle management including creation, embedding updates,
 /// and semantic similarity search via pgvector.
-pub trait FileChunkRepository {
-    /// Creates multiple file chunks in a single transaction.
-    fn create_file_chunks(
+pub trait WorkspaceFileChunkRepository {
+    /// Creates multiple workspace file chunks in a single transaction.
+    fn create_workspace_file_chunks(
         &mut self,
-        new_chunks: Vec<NewFileChunk>,
-    ) -> impl Future<Output = PgResult<Vec<FileChunk>>> + Send;
+        new_chunks: Vec<NewWorkspaceFileChunk>,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceFileChunk>>> + Send;
 
     /// Updates a chunk with new data.
-    fn update_file_chunk(
+    fn update_workspace_file_chunk(
         &mut self,
         chunk_id: Uuid,
-        updates: UpdateFileChunk,
-    ) -> impl Future<Output = PgResult<FileChunk>> + Send;
+        updates: UpdateWorkspaceFileChunk,
+    ) -> impl Future<Output = PgResult<WorkspaceFileChunk>> + Send;
 
     /// Deletes all chunks for a file.
-    fn delete_file_chunks(&mut self, file_id: Uuid)
-    -> impl Future<Output = PgResult<usize>> + Send;
-
-    /// Lists all chunks for a specific file ordered by chunk index.
-    fn list_file_chunks(
+    fn delete_workspace_file_chunks(
         &mut self,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<FileChunk>>> + Send;
+    ) -> impl Future<Output = PgResult<usize>> + Send;
+
+    /// Lists all chunks for a specific file ordered by chunk index.
+    fn list_workspace_file_chunks(
+        &mut self,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceFileChunk>>> + Send;
 
     /// Searches for similar chunks using cosine similarity.
     ///
     /// Returns chunks ordered by similarity (most similar first).
-    fn search_similar_chunks(
+    fn search_similar_workspace_file_chunks(
         &mut self,
         query_embedding: Vector,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<FileChunk>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceFileChunk>>> + Send;
 
     /// Searches for similar chunks within specific files.
-    fn search_similar_chunks_in_files(
+    fn search_similar_workspace_file_chunks_in_files(
         &mut self,
         query_embedding: Vector,
         file_ids: &[Uuid],
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<FileChunk>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceFileChunk>>> + Send;
 
     /// Searches for similar chunks within a workspace.
-    fn search_similar_chunks_in_workspace(
+    fn search_similar_workspace_file_chunks_in_workspace(
         &mut self,
         query_embedding: Vector,
         workspace_id: Uuid,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<FileChunk>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceFileChunk>>> + Send;
 
     /// Searches for similar chunks within specific files with score filtering.
     ///
     /// Returns chunks with similarity score >= min_score, ordered by similarity.
-    fn search_scored_chunks_in_files(
+    fn search_scored_workspace_file_chunks_in_files(
         &mut self,
         query_embedding: Vector,
         file_ids: &[Uuid],
         min_score: f64,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<ScoredFileChunk>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ScoredWorkspaceFileChunk>>> + Send;
 
     /// Searches for similar chunks within a workspace with score filtering.
     ///
     /// Returns chunks with similarity score >= min_score, ordered by similarity.
-    fn search_scored_chunks_in_workspace(
+    fn search_scored_workspace_file_chunks_in_workspace(
         &mut self,
         query_embedding: Vector,
         workspace_id: Uuid,
         min_score: f64,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<ScoredFileChunk>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ScoredWorkspaceFileChunk>>> + Send;
 
     /// Gets the total chunk count for a file.
-    fn count_file_chunks(&mut self, file_id: Uuid) -> impl Future<Output = PgResult<i64>> + Send;
+    fn count_workspace_file_chunks(
+        &mut self,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<i64>> + Send;
 }
 
-impl FileChunkRepository for PgConnection {
-    async fn create_file_chunks(
+impl WorkspaceFileChunkRepository for PgConnection {
+    async fn create_workspace_file_chunks(
         &mut self,
-        new_chunks: Vec<NewFileChunk>,
-    ) -> PgResult<Vec<FileChunk>> {
+        new_chunks: Vec<NewWorkspaceFileChunk>,
+    ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use schema::file_chunks;
 
         if new_chunks.is_empty() {
@@ -102,7 +109,7 @@ impl FileChunkRepository for PgConnection {
 
         let chunks = diesel::insert_into(file_chunks::table)
             .values(&new_chunks)
-            .returning(FileChunk::as_returning())
+            .returning(WorkspaceFileChunk::as_returning())
             .get_results(self)
             .await
             .map_err(PgError::from)?;
@@ -110,16 +117,16 @@ impl FileChunkRepository for PgConnection {
         Ok(chunks)
     }
 
-    async fn update_file_chunk(
+    async fn update_workspace_file_chunk(
         &mut self,
         chunk_id: Uuid,
-        updates: UpdateFileChunk,
-    ) -> PgResult<FileChunk> {
+        updates: UpdateWorkspaceFileChunk,
+    ) -> PgResult<WorkspaceFileChunk> {
         use schema::file_chunks::{self, dsl};
 
         let chunk = diesel::update(file_chunks::table.filter(dsl::id.eq(chunk_id)))
             .set(&updates)
-            .returning(FileChunk::as_returning())
+            .returning(WorkspaceFileChunk::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
@@ -127,7 +134,7 @@ impl FileChunkRepository for PgConnection {
         Ok(chunk)
     }
 
-    async fn delete_file_chunks(&mut self, file_id: Uuid) -> PgResult<usize> {
+    async fn delete_workspace_file_chunks(&mut self, file_id: Uuid) -> PgResult<usize> {
         use schema::file_chunks::{self, dsl};
 
         let affected = diesel::delete(file_chunks::table.filter(dsl::file_id.eq(file_id)))
@@ -138,13 +145,16 @@ impl FileChunkRepository for PgConnection {
         Ok(affected)
     }
 
-    async fn list_file_chunks(&mut self, file_id: Uuid) -> PgResult<Vec<FileChunk>> {
+    async fn list_workspace_file_chunks(
+        &mut self,
+        file_id: Uuid,
+    ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use schema::file_chunks::{self, dsl};
 
         let chunks = file_chunks::table
             .filter(dsl::file_id.eq(file_id))
             .order(dsl::chunk_index.asc())
-            .select(FileChunk::as_select())
+            .select(WorkspaceFileChunk::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -152,18 +162,18 @@ impl FileChunkRepository for PgConnection {
         Ok(chunks)
     }
 
-    async fn search_similar_chunks(
+    async fn search_similar_workspace_file_chunks(
         &mut self,
         query_embedding: Vector,
         limit: i64,
-    ) -> PgResult<Vec<FileChunk>> {
+    ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
 
         let chunks = file_chunks::table
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
-            .select(FileChunk::as_select())
+            .select(WorkspaceFileChunk::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -171,12 +181,12 @@ impl FileChunkRepository for PgConnection {
         Ok(chunks)
     }
 
-    async fn search_similar_chunks_in_files(
+    async fn search_similar_workspace_file_chunks_in_files(
         &mut self,
         query_embedding: Vector,
         file_ids: &[Uuid],
         limit: i64,
-    ) -> PgResult<Vec<FileChunk>> {
+    ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
 
@@ -188,7 +198,7 @@ impl FileChunkRepository for PgConnection {
             .filter(dsl::file_id.eq_any(file_ids))
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
-            .select(FileChunk::as_select())
+            .select(WorkspaceFileChunk::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -196,12 +206,12 @@ impl FileChunkRepository for PgConnection {
         Ok(chunks)
     }
 
-    async fn search_similar_chunks_in_workspace(
+    async fn search_similar_workspace_file_chunks_in_workspace(
         &mut self,
         query_embedding: Vector,
         workspace_id: Uuid,
         limit: i64,
-    ) -> PgResult<Vec<FileChunk>> {
+    ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
         use schema::workspace_files;
@@ -223,7 +233,7 @@ impl FileChunkRepository for PgConnection {
             .filter(dsl::file_id.eq_any(file_ids))
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
-            .select(FileChunk::as_select())
+            .select(WorkspaceFileChunk::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -231,13 +241,13 @@ impl FileChunkRepository for PgConnection {
         Ok(chunks)
     }
 
-    async fn search_scored_chunks_in_files(
+    async fn search_scored_workspace_file_chunks_in_files(
         &mut self,
         query_embedding: Vector,
         file_ids: &[Uuid],
         min_score: f64,
         limit: i64,
-    ) -> PgResult<Vec<ScoredFileChunk>> {
+    ) -> PgResult<Vec<ScoredWorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
 
@@ -249,7 +259,7 @@ impl FileChunkRepository for PgConnection {
         // Score = 1 - distance, so min_score threshold means max_distance = 1 - min_score
         let max_distance = 1.0 - min_score;
 
-        let chunks: Vec<(FileChunk, f64)> = file_chunks::table
+        let chunks: Vec<(WorkspaceFileChunk, f64)> = file_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
             .filter(
                 dsl::embedding
@@ -259,7 +269,7 @@ impl FileChunkRepository for PgConnection {
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
             .select((
-                FileChunk::as_select(),
+                WorkspaceFileChunk::as_select(),
                 (1.0.into_sql::<diesel::sql_types::Double>()
                     - dsl::embedding.cosine_distance(&query_embedding)),
             ))
@@ -269,17 +279,17 @@ impl FileChunkRepository for PgConnection {
 
         Ok(chunks
             .into_iter()
-            .map(|(chunk, score)| ScoredFileChunk { chunk, score })
+            .map(|(chunk, score)| ScoredWorkspaceFileChunk { chunk, score })
             .collect())
     }
 
-    async fn search_scored_chunks_in_workspace(
+    async fn search_scored_workspace_file_chunks_in_workspace(
         &mut self,
         query_embedding: Vector,
         workspace_id: Uuid,
         min_score: f64,
         limit: i64,
-    ) -> PgResult<Vec<ScoredFileChunk>> {
+    ) -> PgResult<Vec<ScoredWorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
         use schema::workspace_files;
@@ -299,7 +309,7 @@ impl FileChunkRepository for PgConnection {
 
         let max_distance = 1.0 - min_score;
 
-        let chunks: Vec<(FileChunk, f64)> = file_chunks::table
+        let chunks: Vec<(WorkspaceFileChunk, f64)> = file_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
             .filter(
                 dsl::embedding
@@ -309,7 +319,7 @@ impl FileChunkRepository for PgConnection {
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
             .select((
-                FileChunk::as_select(),
+                WorkspaceFileChunk::as_select(),
                 (1.0.into_sql::<diesel::sql_types::Double>()
                     - dsl::embedding.cosine_distance(&query_embedding)),
             ))
@@ -319,11 +329,11 @@ impl FileChunkRepository for PgConnection {
 
         Ok(chunks
             .into_iter()
-            .map(|(chunk, score)| ScoredFileChunk { chunk, score })
+            .map(|(chunk, score)| ScoredWorkspaceFileChunk { chunk, score })
             .collect())
     }
 
-    async fn count_file_chunks(&mut self, file_id: Uuid) -> PgResult<i64> {
+    async fn count_workspace_file_chunks(&mut self, file_id: Uuid) -> PgResult<i64> {
         use schema::file_chunks::{self, dsl};
 
         let count: i64 = file_chunks::table

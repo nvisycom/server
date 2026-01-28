@@ -1,4 +1,4 @@
-//! File annotation model for PostgreSQL database operations.
+//! Workspace file annotation model for PostgreSQL database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -7,11 +7,11 @@ use uuid::Uuid;
 use crate::schema::file_annotations;
 use crate::types::{AnnotationType, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
-/// File annotation model representing user annotations on file content.
+/// Workspace file annotation model representing user annotations on file content.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = file_annotations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct FileAnnotation {
+pub struct WorkspaceFileAnnotation {
     /// Unique annotation identifier.
     pub id: Uuid,
     /// Reference to the file this annotation belongs to.
@@ -32,11 +32,11 @@ pub struct FileAnnotation {
     pub deleted_at: Option<Timestamp>,
 }
 
-/// Data for creating a new file annotation.
+/// Data for creating a new workspace file annotation.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = file_annotations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewFileAnnotation {
+pub struct NewWorkspaceFileAnnotation {
     /// File ID.
     pub file_id: Uuid,
     /// Account ID.
@@ -49,11 +49,11 @@ pub struct NewFileAnnotation {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Data for updating a file annotation.
+/// Data for updating a workspace file annotation.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = file_annotations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateFileAnnotation {
+pub struct UpdateWorkspaceFileAnnotation {
     /// Annotation content.
     pub content: Option<String>,
     /// Annotation type.
@@ -64,7 +64,7 @@ pub struct UpdateFileAnnotation {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl FileAnnotation {
+impl WorkspaceFileAnnotation {
     /// Returns whether the annotation was created recently.
     pub fn is_recent(&self) -> bool {
         self.was_created_within(jiff::Span::new().hours(24))
@@ -106,19 +106,19 @@ impl FileAnnotation {
     }
 }
 
-impl HasCreatedAt for FileAnnotation {
+impl HasCreatedAt for WorkspaceFileAnnotation {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }
 }
 
-impl HasUpdatedAt for FileAnnotation {
+impl HasUpdatedAt for WorkspaceFileAnnotation {
     fn updated_at(&self) -> jiff::Timestamp {
         self.updated_at.into()
     }
 }
 
-impl HasDeletedAt for FileAnnotation {
+impl HasDeletedAt for WorkspaceFileAnnotation {
     fn deleted_at(&self) -> Option<jiff::Timestamp> {
         self.deleted_at.map(Into::into)
     }

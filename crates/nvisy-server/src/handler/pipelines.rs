@@ -10,7 +10,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{
-    PipelineArtifactRepository, PipelineRunRepository, WorkspacePipelineRepository,
+    WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
+    WorkspacePipelineRunRepository,
 };
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
@@ -172,7 +173,7 @@ async fn get_pipeline(
 
     // Fetch artifacts for all runs of this pipeline
     let artifacts = conn
-        .list_pipeline_artifacts(path_params.pipeline_id)
+        .list_workspace_pipeline_artifacts(path_params.pipeline_id)
         .await?;
 
     let response = Pipeline::from_model_with_artifacts(pipeline, artifacts);
@@ -341,7 +342,7 @@ async fn list_pipeline_runs(
         .await?;
 
     let page = conn
-        .cursor_list_pipeline_runs(path_params.pipeline_id, pagination.into(), None)
+        .cursor_list_workspace_pipeline_runs(path_params.pipeline_id, pagination.into(), None)
         .await?;
 
     tracing::debug!(
@@ -386,7 +387,7 @@ async fn get_pipeline_run(
     let mut conn = pg_client.get_connection().await?;
 
     let run = conn
-        .find_pipeline_run_by_id(path_params.run_id)
+        .find_workspace_pipeline_run_by_id(path_params.run_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -394,8 +395,18 @@ async fn get_pipeline_run(
                 .with_resource("pipeline_run")
         })?;
 
+    // Get workspace_id from the pipeline
+    let pipeline = conn
+        .find_workspace_pipeline_by_id(run.pipeline_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Pipeline not found")
+                .with_resource("pipeline")
+        })?;
+
     auth_state
-        .authorize_workspace(&mut conn, run.workspace_id, Permission::ViewPipelines)
+        .authorize_workspace(&mut conn, pipeline.workspace_id, Permission::ViewPipelines)
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");

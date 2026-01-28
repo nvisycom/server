@@ -2,7 +2,6 @@
 
 mod cache;
 mod config;
-mod integration;
 mod security;
 mod webhook;
 
@@ -13,7 +12,6 @@ use nvisy_webhook::WebhookService;
 use crate::Result;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::config::ServiceConfig;
-pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
@@ -34,7 +32,6 @@ pub struct ServiceState {
 
     // Internal services:
     pub health_cache: HealthCache,
-    pub integration_provider: IntegrationProvider,
     pub password_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
     pub session_keys: SessionKeys,
@@ -61,7 +58,6 @@ impl ServiceState {
             webhook: webhook_service,
 
             health_cache: HealthCache::new(),
-            integration_provider: IntegrationProvider::new(),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
             session_keys: service_config.load_session_keys().await?,
@@ -90,7 +86,6 @@ impl_di!(webhook: WebhookService);
 
 // Internal services:
 impl_di!(health_cache: HealthCache);
-impl_di!(integration_provider: IntegrationProvider);
 impl_di!(password_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(session_keys: SessionKeys);

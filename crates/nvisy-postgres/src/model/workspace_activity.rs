@@ -116,7 +116,7 @@ impl WorkspaceActivity {
     pub fn is_system_event(&self) -> bool {
         matches!(
             self.category(),
-            ActivityCategory::Workspace | ActivityCategory::Integration
+            ActivityCategory::Workspace | ActivityCategory::Connection
         )
     }
 

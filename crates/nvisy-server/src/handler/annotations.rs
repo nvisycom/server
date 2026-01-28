@@ -7,7 +7,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::query::{FileAnnotationRepository, WorkspaceFileRepository};
+use nvisy_postgres::query::{WorkspaceFileAnnotationRepository, WorkspaceFileRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -24,8 +24,8 @@ const TRACING_TARGET: &str = "nvisy_server::handler::annotations";
 async fn find_annotation(
     conn: &mut nvisy_postgres::PgConn,
     annotation_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::FileAnnotation> {
-    conn.find_file_annotation_by_id(annotation_id)
+) -> Result<nvisy_postgres::model::WorkspaceFileAnnotation> {
+    conn.find_workspace_file_annotation_by_id(annotation_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -72,7 +72,9 @@ async fn create_annotation(
         .await?;
 
     let new_annotation = request.into_model(path_params.file_id, auth_state.account_id);
-    let annotation = conn.create_file_annotation(new_annotation).await?;
+    let annotation = conn
+        .create_workspace_file_annotation(new_annotation)
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -120,7 +122,7 @@ async fn list_annotations(
         .await?;
 
     let page = conn
-        .cursor_list_file_annotations(path_params.file_id, pagination.into())
+        .cursor_list_workspace_file_annotations(path_params.file_id, pagination.into())
         .await?;
 
     let response = AnnotationsPage::from_cursor_page(page, Annotation::from_model);
@@ -211,7 +213,7 @@ async fn update_annotation(
         .await?;
 
     let updated = conn
-        .update_file_annotation(path_params.annotation_id, request.into_model())
+        .update_workspace_file_annotation(path_params.annotation_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Annotation updated");
@@ -258,7 +260,7 @@ async fn delete_annotation(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::AnnotateFiles)
         .await?;
 
-    conn.delete_file_annotation(path_params.annotation_id)
+    conn.delete_workspace_file_annotation(path_params.annotation_id)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Annotation deleted");

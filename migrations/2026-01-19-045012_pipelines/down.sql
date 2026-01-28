@@ -20,3 +20,5 @@ DROP TYPE IF EXISTS PIPELINE_STATUS;
 
 -- Workspace connections
 DROP TABLE IF EXISTS workspace_connections;
+
+DROP TYPE IF EXISTS SYNC_STATUS;

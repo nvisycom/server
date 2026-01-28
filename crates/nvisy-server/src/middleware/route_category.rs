@@ -22,8 +22,8 @@ pub enum RouteCategory {
     Documents,
     /// File operations routes (`/files/*`).
     Files,
-    /// Integration routes (`/integrations/*`).
-    Integrations,
+    /// Connection routes (`/connections/*`).
+    Connections,
     /// Webhook routes (`/webhooks/*`).
     Webhooks,
     /// Health and monitoring routes (`/monitors/*`).
@@ -49,8 +49,8 @@ impl RouteCategory {
             Self::Documents
         } else if path.starts_with("/files/") {
             Self::Files
-        } else if path.starts_with("/integrations/") {
-            Self::Integrations
+        } else if path.starts_with("/connections/") {
+            Self::Connections
         } else if path.starts_with("/webhooks/") {
             Self::Webhooks
         } else if path.starts_with("/monitors/") {
@@ -70,7 +70,7 @@ impl RouteCategory {
             Self::Workspaces => "workspaces",
             Self::Documents => "documents",
             Self::Files => "files",
-            Self::Integrations => "integrations",
+            Self::Connections => "connections",
             Self::Webhooks => "webhooks",
             Self::Monitors => "monitors",
             Self::Api => "api",

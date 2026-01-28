@@ -88,7 +88,7 @@ COMMENT ON COLUMN workspaces.deleted_at IS 'Timestamp when the workspace was sof
 -- Enum types for workspace_members table
 CREATE TYPE WORKSPACE_ROLE AS ENUM (
     'owner',        -- Full workspace ownership and management
-    'admin',        -- Can manage members, integrations, and settings
+    'admin',        -- Can manage members, connections, and settings
     'member',       -- Can edit content and manage files
     'guest'         -- Read-only access to workspace content
 );
@@ -250,11 +250,11 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'invite:declined',
     'invite:canceled',
 
-    -- Integration activities
-    'integration:created',
-    'integration:updated',
-    'integration:deleted',
-    'integration:synced',
+    -- Connection activities
+    'connection:created',
+    'connection:updated',
+    'connection:deleted',
+    'connection:synced',
 
     -- Webhook activities
     'webhook:created',
@@ -330,106 +330,6 @@ COMMENT ON COLUMN workspace_activities.ip_address IS 'IP address where activity 
 COMMENT ON COLUMN workspace_activities.user_agent IS 'User agent of the client';
 COMMENT ON COLUMN workspace_activities.created_at IS 'Timestamp when the activity occurred';
 
--- Enum types for workspace_integrations table
-CREATE TYPE INTEGRATION_STATUS AS ENUM (
-    'pending',      -- Integration is being set up
-    'running',      -- Integration is actively running
-    'cancelled'     -- Integration has been cancelled
-);
-
-COMMENT ON TYPE INTEGRATION_STATUS IS
-    'Defines the operational status of workspace integrations.';
-
-CREATE TYPE INTEGRATION_TYPE AS ENUM (
-    'storage',       -- Files/documents (Drive, S3, SharePoint, Dropbox)
-    'communication', -- Email, chat (Gmail, Slack, Teams)
-    'business',      -- CRM, finance, legal (Salesforce, QuickBooks)
-    'analytics',     -- Data platforms (Snowflake, Tableau, Looker)
-    'automation',    -- No-code automation (Zapier, Make)
-    'developer',     -- API/webhook integrations
-    'industry'       -- Specialized verticals (healthcare, insurance)
-);
-
-COMMENT ON TYPE INTEGRATION_TYPE IS
-    'Defines the functional category of workspace integrations.';
-
--- Workspace integrations table definition
-CREATE TABLE workspace_integrations (
-    -- Primary identifier
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- Reference
-    workspace_id       UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-
-    -- Integration details
-    integration_name TEXT             NOT NULL,
-    description      TEXT             NOT NULL DEFAULT '',
-    integration_type INTEGRATION_TYPE NOT NULL,
-
-    CONSTRAINT workspace_integrations_integration_name_not_empty CHECK (trim(integration_name) <> ''),
-    CONSTRAINT workspace_integrations_description_length_max CHECK (length(description) <= 500),
-
-    -- Configuration and credentials
-    metadata         JSONB            NOT NULL DEFAULT '{}',
-    credentials      JSONB            NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_integrations_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 8192),
-    CONSTRAINT workspace_integrations_credentials_size CHECK (length(credentials::TEXT) BETWEEN 2 AND 4096),
-
-    -- Integration status
-    is_active        BOOLEAN          NOT NULL DEFAULT TRUE,
-    last_sync_at     TIMESTAMPTZ      DEFAULT NULL,
-    sync_status      INTEGRATION_STATUS DEFAULT 'pending',
-
-    -- Audit tracking
-    created_by       UUID             NOT NULL REFERENCES accounts (id),
-
-    -- Lifecycle timestamps
-    created_at       TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    updated_at       TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-
-    CONSTRAINT workspace_integrations_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_integrations_last_sync_after_created CHECK (last_sync_at IS NULL OR last_sync_at >= created_at)
-);
-
--- Triggers for workspace_integrations table
-SELECT setup_updated_at('workspace_integrations');
-
--- Indexes for workspace_integrations table
-CREATE INDEX workspace_integrations_workspace_active_idx
-    ON workspace_integrations (workspace_id, is_active, integration_type);
-
-CREATE INDEX workspace_integrations_sync_status_idx
-    ON workspace_integrations (sync_status, last_sync_at)
-    WHERE is_active = TRUE;
-
--- Comments for workspace_integrations table
-COMMENT ON TABLE workspace_integrations IS
-    'External service integrations for workspaces with configuration and sync tracking.';
-
-COMMENT ON COLUMN workspace_integrations.id IS 'Unique integration identifier';
-COMMENT ON COLUMN workspace_integrations.workspace_id IS 'Reference to the workspace';
-COMMENT ON COLUMN workspace_integrations.integration_name IS 'Human-readable integration name';
-COMMENT ON COLUMN workspace_integrations.description IS 'Integration description (up to 500 chars)';
-COMMENT ON COLUMN workspace_integrations.integration_type IS 'Type/category of integration';
-COMMENT ON COLUMN workspace_integrations.metadata IS 'Integration configuration and metadata (JSON, 2B-8KB)';
-COMMENT ON COLUMN workspace_integrations.credentials IS 'Encrypted credentials (JSON, 2B-4KB)';
-COMMENT ON COLUMN workspace_integrations.is_active IS 'Integration active status';
-COMMENT ON COLUMN workspace_integrations.last_sync_at IS 'Timestamp of last synchronization';
-COMMENT ON COLUMN workspace_integrations.sync_status IS 'Current integration status (pending, running, cancelled)';
-COMMENT ON COLUMN workspace_integrations.created_by IS 'Account that created the integration';
-COMMENT ON COLUMN workspace_integrations.created_at IS 'Timestamp when integration was created';
-COMMENT ON COLUMN workspace_integrations.updated_at IS 'Timestamp when integration was last modified';
-
--- Webhook type enum
-CREATE TYPE WEBHOOK_TYPE AS ENUM (
-    'provided',     -- Webhook created manually by user
-    'integration'   -- Webhook created by an integration
-);
-
-COMMENT ON TYPE WEBHOOK_TYPE IS
-    'Defines the origin type of a workspace webhook.';
-
 -- Webhook status enum
 CREATE TYPE WEBHOOK_STATUS AS ENUM (
     'active',       -- Webhook is active and will receive events
@@ -457,12 +357,12 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'member:deleted',
     'member:updated',
 
-    -- Integration events
-    'integration:created',
-    'integration:updated',
-    'integration:deleted',
-    'integration:synced',
-    'integration:desynced'
+    -- Connection events
+    'connection:created',
+    'connection:updated',
+    'connection:deleted',
+    'connection:synced',
+    'connection:desynced'
 );
 
 COMMENT ON TYPE WEBHOOK_EVENT IS
@@ -475,15 +375,6 @@ CREATE TABLE workspace_webhooks (
 
     -- Reference
     workspace_id     UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-
-    -- Webhook type and integration reference
-    webhook_type     WEBHOOK_TYPE     NOT NULL DEFAULT 'provided',
-    integration_id   UUID             DEFAULT NULL REFERENCES workspace_integrations (id) ON DELETE CASCADE,
-
-    CONSTRAINT workspace_webhooks_integration_id_required CHECK (
-        (webhook_type = 'provided' AND integration_id IS NULL) OR
-        (webhook_type = 'integration' AND integration_id IS NOT NULL)
-    ),
 
     -- Webhook details
     display_name     TEXT             NOT NULL,
@@ -532,18 +423,12 @@ CREATE INDEX workspace_webhooks_events_idx
     ON workspace_webhooks USING gin (events)
     WHERE deleted_at IS NULL AND status = 'active';
 
-CREATE INDEX workspace_webhooks_integration_idx
-    ON workspace_webhooks (integration_id)
-    WHERE integration_id IS NOT NULL AND deleted_at IS NULL;
-
 -- Comments for workspace_webhooks table
 COMMENT ON TABLE workspace_webhooks IS
     'Webhook configurations for workspaces to receive event notifications.';
 
 COMMENT ON COLUMN workspace_webhooks.id IS 'Unique webhook identifier';
 COMMENT ON COLUMN workspace_webhooks.workspace_id IS 'Reference to the workspace';
-COMMENT ON COLUMN workspace_webhooks.webhook_type IS 'Origin type of the webhook (provided or integration)';
-COMMENT ON COLUMN workspace_webhooks.integration_id IS 'Reference to integration (required for integration type, CASCADE on delete)';
 COMMENT ON COLUMN workspace_webhooks.display_name IS 'Human-readable webhook name (1-128 chars)';
 COMMENT ON COLUMN workspace_webhooks.description IS 'Webhook description (up to 500 chars)';
 COMMENT ON COLUMN workspace_webhooks.url IS 'Webhook endpoint URL (must be HTTP/HTTPS)';
@@ -555,74 +440,6 @@ COMMENT ON COLUMN workspace_webhooks.created_by IS 'Account that created the web
 COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was created';
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
 COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft deletion timestamp';
-
--- Run type enum
-CREATE TYPE RUN_TYPE AS ENUM (
-    'manual',       -- Run triggered manually by a user
-    'scheduled',    -- Run triggered by a schedule
-    'triggered'     -- Run triggered by an external event or webhook
-);
-
-COMMENT ON TYPE RUN_TYPE IS
-    'Defines how an integration run was triggered.';
-
--- Workspace integration runs table definition
-CREATE TABLE workspace_integration_runs (
-    -- Primary identifier
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    workspace_id          UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    integration_id      UUID             DEFAULT NULL REFERENCES workspace_integrations (id) ON DELETE SET NULL,
-    account_id          UUID             DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
-
-    -- Run classification
-    run_type            RUN_TYPE         NOT NULL DEFAULT 'manual',
-
-    -- Run status and metadata
-    run_status          INTEGRATION_STATUS NOT NULL DEFAULT 'pending',
-    metadata            JSONB            NOT NULL DEFAULT '{}',
-    logs                JSONB            NOT NULL DEFAULT '[]',
-
-    CONSTRAINT workspace_integration_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 16384),
-    CONSTRAINT workspace_integration_runs_logs_size CHECK (length(logs::TEXT) BETWEEN 2 AND 65536),
-
-    -- Run timing
-    started_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    completed_at        TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT workspace_integration_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
-);
-
--- Indexes for workspace_integration_runs table
-CREATE INDEX workspace_integration_runs_workspace_recent_idx
-    ON workspace_integration_runs (workspace_id, started_at DESC);
-
-CREATE INDEX workspace_integration_runs_integration_idx
-    ON workspace_integration_runs (integration_id, run_status, started_at DESC)
-    WHERE integration_id IS NOT NULL;
-
-CREATE INDEX workspace_integration_runs_status_idx
-    ON workspace_integration_runs (run_status, workspace_id, started_at DESC);
-
-CREATE INDEX workspace_integration_runs_account_idx
-    ON workspace_integration_runs (account_id, started_at DESC)
-    WHERE account_id IS NOT NULL;
-
--- Comments for workspace_integration_runs table
-COMMENT ON TABLE workspace_integration_runs IS
-    'Integration run tracking and execution history for workspaces.';
-
-COMMENT ON COLUMN workspace_integration_runs.id IS 'Unique run identifier';
-COMMENT ON COLUMN workspace_integration_runs.workspace_id IS 'Reference to the workspace';
-COMMENT ON COLUMN workspace_integration_runs.integration_id IS 'Reference to the integration (NULL for manual runs)';
-COMMENT ON COLUMN workspace_integration_runs.account_id IS 'Account that triggered the run (NULL for automated runs)';
-COMMENT ON COLUMN workspace_integration_runs.run_type IS 'Type of run (manual, scheduled, triggered)';
-COMMENT ON COLUMN workspace_integration_runs.run_status IS 'Current run status (pending, running, cancelled)';
-COMMENT ON COLUMN workspace_integration_runs.metadata IS 'Run metadata, results, and error details (JSON, 2B-16KB)';
-COMMENT ON COLUMN workspace_integration_runs.logs IS 'Run execution logs (JSON array, 2B-64KB)';
-COMMENT ON COLUMN workspace_integration_runs.started_at IS 'Timestamp when run was started';
-COMMENT ON COLUMN workspace_integration_runs.completed_at IS 'Timestamp when run was completed';
 
 -- Create workspace member summary view
 CREATE VIEW workspace_member_summary AS
@@ -663,8 +480,6 @@ WHERE pi.invite_status = 'pending'
 
 COMMENT ON VIEW pending_workspace_invites IS
     'Active workspace invitations with workspace and inviter details.';
-
--- Function to check if user has specific permission on workspace
 
 -- Function to cleanup expired invites
 CREATE OR REPLACE FUNCTION cleanup_expired_invites()

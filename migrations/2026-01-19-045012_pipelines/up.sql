@@ -1,6 +1,16 @@
 -- Pipeline: Workflow definitions, connections, and execution tracking
 -- This migration creates tables for user-defined processing pipelines
 
+-- Sync status enum for connections
+CREATE TYPE SYNC_STATUS AS ENUM (
+    'pending',      -- Sync is pending
+    'running',      -- Sync is in progress
+    'cancelled'     -- Sync was cancelled
+);
+
+COMMENT ON TYPE SYNC_STATUS IS
+    'Status for connection sync operations.';
+
 -- Workspace connections table (encrypted provider credentials + context)
 CREATE TABLE workspace_connections (
     -- Primary identifier
@@ -23,6 +33,16 @@ CREATE TABLE workspace_connections (
     encrypted_data  BYTEA           NOT NULL,
 
     CONSTRAINT workspace_connections_data_size CHECK (length(encrypted_data) BETWEEN 1 AND 65536),
+
+    -- Sync status
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    last_sync_at    TIMESTAMPTZ     DEFAULT NULL,
+    sync_status     SYNC_STATUS     DEFAULT NULL,
+
+    -- Metadata (non-encrypted, for filtering/display)
+    metadata        JSONB           NOT NULL DEFAULT '{}',
+
+    CONSTRAINT workspace_connections_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
@@ -49,6 +69,10 @@ CREATE UNIQUE INDEX workspace_connections_name_unique_idx
     ON workspace_connections (workspace_id, lower(trim(name)))
     WHERE deleted_at IS NULL;
 
+CREATE INDEX workspace_connections_active_idx
+    ON workspace_connections (workspace_id, is_active)
+    WHERE deleted_at IS NULL AND is_active = TRUE;
+
 -- Comments
 COMMENT ON TABLE workspace_connections IS
     'Encrypted provider connections (credentials + context) scoped to workspaces.';
@@ -59,6 +83,10 @@ COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference
 COMMENT ON COLUMN workspace_connections.name IS 'Human-readable connection name (1-255 chars)';
 COMMENT ON COLUMN workspace_connections.provider IS 'Provider type (openai, postgres, s3, pinecone, etc.)';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with credentials and context';
+COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is active for syncing';
+COMMENT ON COLUMN workspace_connections.last_sync_at IS 'Last successful sync timestamp';
+COMMENT ON COLUMN workspace_connections.sync_status IS 'Current sync status';
+COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft deletion timestamp';
@@ -85,7 +113,7 @@ CREATE TYPE PIPELINE_RUN_STATUS AS ENUM (
 COMMENT ON TYPE PIPELINE_RUN_STATUS IS
     'Execution status for pipeline runs.';
 
--- Pipeline run trigger type enum
+-- Pipeline trigger type enum
 CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
     'manual',       -- Manually triggered by user
     'source',       -- Triggered by source connector (upload, webhook, etc.)
@@ -187,79 +215,60 @@ CREATE TABLE pipeline_runs (
 
     -- References
     pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
-    workspace_id    UUID                    NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    account_id      UUID                    REFERENCES accounts (id) ON DELETE SET NULL,
 
     -- Run attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
     status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'queued',
-
-    -- Input/output configuration for this run
-    input_config    JSONB                   NOT NULL DEFAULT '{}',
-    output_config   JSONB                   NOT NULL DEFAULT '{}',
-
-    CONSTRAINT pipeline_runs_input_config_size CHECK (length(input_config::TEXT) BETWEEN 2 AND 262144),
-    CONSTRAINT pipeline_runs_output_config_size CHECK (length(output_config::TEXT) BETWEEN 2 AND 262144),
 
     -- Snapshot of pipeline definition at run time (for reproducibility)
     definition_snapshot JSONB               NOT NULL DEFAULT '{}',
 
     CONSTRAINT pipeline_runs_definition_snapshot_size CHECK (length(definition_snapshot::TEXT) BETWEEN 2 AND 1048576),
 
-    -- Error details (if failed)
-    error           JSONB                   DEFAULT NULL,
+    -- Metadata (non-encrypted, for filtering/display)
+    metadata        JSONB                   NOT NULL DEFAULT '{}',
 
-    CONSTRAINT pipeline_runs_error_size CHECK (error IS NULL OR length(error::TEXT) <= 65536),
+    CONSTRAINT pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
-    -- Metrics
-    metrics         JSONB                   NOT NULL DEFAULT '{}',
+    -- Execution logs
+    logs            JSONB                   NOT NULL DEFAULT '[]',
 
-    CONSTRAINT pipeline_runs_metrics_size CHECK (length(metrics::TEXT) BETWEEN 2 AND 65536),
+    CONSTRAINT pipeline_runs_logs_size CHECK (length(logs::TEXT) BETWEEN 2 AND 1048576),
 
     -- Timing
-    started_at      TIMESTAMPTZ             DEFAULT NULL,
+    started_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
     completed_at    TIMESTAMPTZ             DEFAULT NULL,
-    created_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
 
-    CONSTRAINT pipeline_runs_started_after_created CHECK (started_at IS NULL OR started_at >= created_at),
-    CONSTRAINT pipeline_runs_completed_after_started CHECK (completed_at IS NULL OR (started_at IS NOT NULL AND completed_at >= started_at))
+    CONSTRAINT pipeline_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
 
 -- Indexes
 CREATE INDEX pipeline_runs_pipeline_idx
-    ON pipeline_runs (pipeline_id, created_at DESC);
-
-CREATE INDEX pipeline_runs_workspace_idx
-    ON pipeline_runs (workspace_id, created_at DESC);
+    ON pipeline_runs (pipeline_id, started_at DESC);
 
 CREATE INDEX pipeline_runs_account_idx
-    ON pipeline_runs (account_id, created_at DESC);
+    ON pipeline_runs (account_id, started_at DESC)
+    WHERE account_id IS NOT NULL;
 
 CREATE INDEX pipeline_runs_status_idx
-    ON pipeline_runs (status, created_at DESC)
+    ON pipeline_runs (status, started_at DESC)
     WHERE status IN ('queued', 'running');
-
-CREATE INDEX pipeline_runs_trigger_idx
-    ON pipeline_runs (trigger_type, workspace_id);
 
 -- Comments
 COMMENT ON TABLE pipeline_runs IS
-    'Pipeline execution instances with status tracking and metrics.';
+    'Pipeline execution instances with status tracking and logs.';
 
 COMMENT ON COLUMN pipeline_runs.id IS 'Unique run identifier';
 COMMENT ON COLUMN pipeline_runs.pipeline_id IS 'Reference to pipeline definition';
-COMMENT ON COLUMN pipeline_runs.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN pipeline_runs.account_id IS 'Account that triggered the run';
+COMMENT ON COLUMN pipeline_runs.account_id IS 'Account that triggered the run (optional)';
 COMMENT ON COLUMN pipeline_runs.trigger_type IS 'How the run was initiated';
 COMMENT ON COLUMN pipeline_runs.status IS 'Current execution status';
-COMMENT ON COLUMN pipeline_runs.input_config IS 'Runtime input configuration';
-COMMENT ON COLUMN pipeline_runs.output_config IS 'Runtime output configuration';
 COMMENT ON COLUMN pipeline_runs.definition_snapshot IS 'Pipeline definition snapshot at run time';
-COMMENT ON COLUMN pipeline_runs.error IS 'Error details if run failed';
-COMMENT ON COLUMN pipeline_runs.metrics IS 'Run metrics (duration, resources, etc.)';
+COMMENT ON COLUMN pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN pipeline_runs.logs IS 'Execution logs as JSON array';
 COMMENT ON COLUMN pipeline_runs.started_at IS 'When execution started';
 COMMENT ON COLUMN pipeline_runs.completed_at IS 'When execution completed';
-COMMENT ON COLUMN pipeline_runs.created_at IS 'When run was created/queued';
 
 -- View for active pipeline runs
 CREATE VIEW active_pipeline_runs AS
@@ -267,17 +276,16 @@ SELECT
     pr.id,
     pr.pipeline_id,
     p.name AS pipeline_name,
-    pr.workspace_id,
+    p.workspace_id,
     pr.account_id,
     pr.trigger_type,
     pr.status,
     pr.started_at,
-    pr.created_at,
     EXTRACT(EPOCH FROM (COALESCE(pr.completed_at, current_timestamp) - pr.started_at)) AS duration_seconds
 FROM pipeline_runs pr
     JOIN workspace_pipelines p ON pr.pipeline_id = p.id
 WHERE pr.status IN ('queued', 'running')
-ORDER BY pr.created_at DESC;
+ORDER BY pr.started_at DESC NULLS LAST;
 
 COMMENT ON VIEW active_pipeline_runs IS
     'Currently active pipeline runs with progress information.';
@@ -288,14 +296,12 @@ SELECT
     pr.id,
     pr.pipeline_id,
     p.name AS pipeline_name,
-    pr.workspace_id,
+    p.workspace_id,
     pr.trigger_type,
     pr.status,
     pr.started_at,
     pr.completed_at,
-    EXTRACT(EPOCH FROM (pr.completed_at - pr.started_at)) AS duration_seconds,
-    pr.error IS NOT NULL AS has_error,
-    pr.created_at
+    EXTRACT(EPOCH FROM (pr.completed_at - pr.started_at)) AS duration_seconds
 FROM pipeline_runs pr
     JOIN workspace_pipelines p ON pr.pipeline_id = p.id
 WHERE pr.status IN ('completed', 'failed', 'cancelled')

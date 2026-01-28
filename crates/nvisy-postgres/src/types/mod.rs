@@ -18,15 +18,13 @@ pub use constraint::{
     AccountNotificationConstraints, ConstraintCategory, ConstraintViolation,
     FileAnnotationConstraints, FileChunkConstraints, FileConstraints, PipelineArtifactConstraints,
     PipelineConstraints, PipelineRunConstraints, WorkspaceActivitiesConstraints,
-    WorkspaceConnectionConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
-    WorkspaceIntegrationRunConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
-    WorkspaceWebhookConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConstraints, WorkspaceInviteConstraints,
+    WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, AnnotationType, ApiTokenType, ArtifactType,
-    FileSource, IntegrationStatus, IntegrationType, InviteStatus, NotificationEvent,
-    PipelineRunStatus, PipelineStatus, PipelineTriggerType, RunType, WebhookEvent, WebhookStatus,
-    WebhookType, WorkspaceRole,
+    FileSource, InviteStatus, NotificationEvent, PipelineRunStatus, PipelineStatus,
+    PipelineTriggerType, SyncStatus, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{FileFilter, FileFormat, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};

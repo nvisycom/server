@@ -4,8 +4,8 @@
 //! implementations backed by PostgreSQL for document chunk storage and
 //! similarity search.
 
-use nvisy_postgres::model::NewFileChunk;
-use nvisy_postgres::query::FileChunkRepository;
+use nvisy_postgres::model::NewWorkspaceFileChunk;
+use nvisy_postgres::query::WorkspaceFileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
 use rig::embeddings::{Embedding, TextEmbedder};
 use rig::one_or_many::OneOrMany;
@@ -180,7 +180,7 @@ impl InsertDocuments for PgVectorStore {
 
         let model_name = self.provider.model_name();
 
-        let new_chunks: Vec<NewFileChunk> = documents
+        let new_chunks: Vec<NewWorkspaceFileChunk> = documents
             .into_iter()
             .filter_map(|(doc, embeddings)| {
                 // Serialize the document to extract fields
@@ -211,7 +211,7 @@ impl InsertDocuments for PgVectorStore {
                     "page": page,
                 });
 
-                Some(NewFileChunk {
+                Some(NewWorkspaceFileChunk {
                     file_id,
                     chunk_index: Some(index as i32),
                     content_sha256,
@@ -234,11 +234,13 @@ impl InsertDocuments for PgVectorStore {
             ))))
         })?;
 
-        conn.create_file_chunks(new_chunks).await.map_err(|e| {
-            VectorStoreError::DatastoreError(Box::new(std::io::Error::other(format!(
-                "failed to create chunks: {e}"
-            ))))
-        })?;
+        conn.create_workspace_file_chunks(new_chunks)
+            .await
+            .map_err(|e| {
+                VectorStoreError::DatastoreError(Box::new(std::io::Error::other(format!(
+                    "failed to create chunks: {e}"
+                ))))
+            })?;
 
         Ok(())
     }
@@ -278,11 +280,16 @@ impl VectorStoreIndex for PgVectorStore {
         // Use the scope to determine which search method to use
         let scored_chunks = match &self.scope {
             SearchScope::Files(file_ids) => {
-                conn.search_scored_chunks_in_files(query_vector, file_ids, min_score, limit)
-                    .await
+                conn.search_scored_workspace_file_chunks_in_files(
+                    query_vector,
+                    file_ids,
+                    min_score,
+                    limit,
+                )
+                .await
             }
             SearchScope::Workspace(workspace_id) => {
-                conn.search_scored_chunks_in_workspace(
+                conn.search_scored_workspace_file_chunks_in_workspace(
                     query_vector,
                     *workspace_id,
                     min_score,
@@ -349,11 +356,16 @@ impl VectorStoreIndex for PgVectorStore {
 
         let scored_chunks = match &self.scope {
             SearchScope::Files(file_ids) => {
-                conn.search_scored_chunks_in_files(query_vector, file_ids, min_score, limit)
-                    .await
+                conn.search_scored_workspace_file_chunks_in_files(
+                    query_vector,
+                    file_ids,
+                    min_score,
+                    limit,
+                )
+                .await
             }
             SearchScope::Workspace(workspace_id) => {
-                conn.search_scored_chunks_in_workspace(
+                conn.search_scored_workspace_file_chunks_in_workspace(
                     query_vector,
                     *workspace_id,
                     min_score,

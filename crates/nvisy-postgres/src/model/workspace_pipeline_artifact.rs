@@ -1,4 +1,4 @@
-//! Pipeline artifact model for PostgreSQL database operations.
+//! Workspace pipeline artifact model for PostgreSQL database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -7,11 +7,11 @@ use uuid::Uuid;
 use crate::schema::pipeline_artifacts;
 use crate::types::{ArtifactType, HasCreatedAt};
 
-/// Pipeline artifact model representing artifacts produced during pipeline runs.
+/// Workspace pipeline artifact model representing artifacts produced during pipeline runs.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = pipeline_artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct PipelineArtifact {
+pub struct WorkspacePipelineArtifact {
     /// Unique artifact identifier.
     pub id: Uuid,
     /// Reference to the pipeline run.
@@ -26,11 +26,11 @@ pub struct PipelineArtifact {
     pub created_at: Timestamp,
 }
 
-/// Data for creating a new pipeline artifact.
+/// Data for creating a new workspace pipeline artifact.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = pipeline_artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewPipelineArtifact {
+pub struct NewWorkspacePipelineArtifact {
     /// Pipeline run ID (required).
     pub run_id: Uuid,
     /// File ID referencing the stored artifact (required).
@@ -41,7 +41,7 @@ pub struct NewPipelineArtifact {
     pub metadata: Option<serde_json::Value>,
 }
 
-impl PipelineArtifact {
+impl WorkspacePipelineArtifact {
     /// Returns whether this is an input artifact.
     pub fn is_input(&self) -> bool {
         self.artifact_type.is_input()
@@ -58,7 +58,7 @@ impl PipelineArtifact {
     }
 }
 
-impl HasCreatedAt for PipelineArtifact {
+impl HasCreatedAt for WorkspacePipelineArtifact {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }

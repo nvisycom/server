@@ -1,6 +1,6 @@
 //! Indexed chunk result type.
 
-use nvisy_postgres::model::FileChunk;
+use nvisy_postgres::model::WorkspaceFileChunk;
 use uuid::Uuid;
 
 /// Result of indexing a single chunk.
@@ -16,8 +16,8 @@ pub struct IndexedChunk {
     pub token_count: u32,
 }
 
-impl From<FileChunk> for IndexedChunk {
-    fn from(chunk: FileChunk) -> Self {
+impl From<WorkspaceFileChunk> for IndexedChunk {
+    fn from(chunk: WorkspaceFileChunk) -> Self {
         Self {
             id: chunk.id,
             index: chunk.chunk_index as u32,

@@ -11,8 +11,6 @@ mod accounts;
 
 // Workspace-related constraint modules
 mod workspace_activities;
-mod workspace_integration_runs;
-mod workspace_integrations;
 mod workspace_invites;
 mod workspace_members;
 mod workspace_webhooks;
@@ -45,8 +43,6 @@ pub use self::pipeline_runs::PipelineRunConstraints;
 pub use self::pipelines::PipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_connections::WorkspaceConnectionConstraints;
-pub use self::workspace_integration_runs::WorkspaceIntegrationRunConstraints;
-pub use self::workspace_integrations::WorkspaceIntegrationConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
@@ -71,9 +67,7 @@ pub enum ConstraintViolation {
     WorkspaceMember(WorkspaceMemberConstraints),
     WorkspaceInvite(WorkspaceInviteConstraints),
     WorkspaceActivityLog(WorkspaceActivitiesConstraints),
-    WorkspaceIntegration(WorkspaceIntegrationConstraints),
     WorkspaceWebhook(WorkspaceWebhookConstraints),
-    WorkspaceIntegrationRun(WorkspaceIntegrationRunConstraints),
 
     // File-related constraints
     File(FileConstraints),
@@ -149,9 +143,7 @@ impl ConstraintViolation {
                 WorkspaceMemberConstraints::new => WorkspaceMember,
                 WorkspaceInviteConstraints::new => WorkspaceInvite,
                 WorkspaceActivitiesConstraints::new => WorkspaceActivityLog,
-                WorkspaceIntegrationConstraints::new => WorkspaceIntegration,
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
-                WorkspaceIntegrationRunConstraints::new => WorkspaceIntegrationRun,
                 WorkspaceConnectionConstraints::new => WorkspaceConnection,
             },
             "files" => try_parse!(FileConstraints::new => File),
@@ -184,9 +176,7 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceMember(_) => "workspace_members",
             ConstraintViolation::WorkspaceInvite(_) => "workspace_invites",
             ConstraintViolation::WorkspaceActivityLog(_) => "workspace_activities",
-            ConstraintViolation::WorkspaceIntegration(_) => "workspace_integrations",
             ConstraintViolation::WorkspaceWebhook(_) => "workspace_webhooks",
-            ConstraintViolation::WorkspaceIntegrationRun(_) => "workspace_integration_runs",
 
             // File-related tables
             ConstraintViolation::File(_) => "files",
@@ -215,9 +205,7 @@ impl ConstraintViolation {
             | ConstraintViolation::WorkspaceMember(_)
             | ConstraintViolation::WorkspaceInvite(_)
             | ConstraintViolation::WorkspaceActivityLog(_)
-            | ConstraintViolation::WorkspaceIntegration(_)
-            | ConstraintViolation::WorkspaceWebhook(_)
-            | ConstraintViolation::WorkspaceIntegrationRun(_) => "workspaces",
+            | ConstraintViolation::WorkspaceWebhook(_) => "workspaces",
 
             ConstraintViolation::File(_)
             | ConstraintViolation::FileAnnotation(_)
@@ -245,9 +233,7 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceMember(c) => c.categorize(),
             ConstraintViolation::WorkspaceInvite(c) => c.categorize(),
             ConstraintViolation::WorkspaceActivityLog(c) => c.categorize(),
-            ConstraintViolation::WorkspaceIntegration(c) => c.categorize(),
             ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
-            ConstraintViolation::WorkspaceIntegrationRun(c) => c.categorize(),
 
             ConstraintViolation::File(c) => c.categorize(),
             ConstraintViolation::FileAnnotation(c) => c.categorize(),
@@ -279,9 +265,7 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::WorkspaceMember(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceInvite(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceActivityLog(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceIntegration(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceIntegrationRun(c) => write!(f, "{}", c),
 
             ConstraintViolation::File(c) => write!(f, "{}", c),
             ConstraintViolation::FileAnnotation(c) => write!(f, "{}", c),

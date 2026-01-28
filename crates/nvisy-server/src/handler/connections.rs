@@ -34,7 +34,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
 /// Creates a new workspace connection.
 ///
 /// Returns the connection metadata (without encrypted data). Requires
-/// `ManageIntegrations` permission.
+/// `ManageConnections` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -56,7 +56,7 @@ async fn create_connection(
         .authorize_workspace(
             &mut conn,
             path_params.workspace_id,
-            Permission::ManageIntegrations,
+            Permission::ManageConnections,
         )
         .await?;
 
@@ -75,6 +75,8 @@ async fn create_connection(
         name: request.name,
         provider: request.provider,
         encrypted_data,
+        is_active: None,
+        metadata: None,
     };
 
     let connection = conn.create_workspace_connection(new_connection).await?;
@@ -108,7 +110,7 @@ fn create_connection_docs(op: TransformOperation) -> TransformOperation {
 /// Lists all connections for a workspace.
 ///
 /// Returns connection metadata (without encrypted data). Requires
-/// `ViewIntegrations` permission.
+/// `ViewConnections` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -131,7 +133,7 @@ async fn list_connections(
         .authorize_workspace(
             &mut conn,
             path_params.workspace_id,
-            Permission::ViewIntegrations,
+            Permission::ViewConnections,
         )
         .await?;
 
@@ -172,7 +174,7 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
 /// Retrieves a specific workspace connection.
 ///
 /// Returns connection metadata (without encrypted data). Requires
-/// `ViewIntegrations` permission.
+/// `ViewConnections` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -196,7 +198,7 @@ async fn read_connection(
         .authorize_workspace(
             &mut conn,
             connection.workspace_id,
-            Permission::ViewIntegrations,
+            Permission::ViewConnections,
         )
         .await?;
 
@@ -216,7 +218,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 
 /// Updates a workspace connection.
 ///
-/// Updates connection configuration. Requires `ManageIntegrations` permission.
+/// Updates connection configuration. Requires `ManageConnections` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -241,7 +243,7 @@ async fn update_connection(
         .authorize_workspace(
             &mut conn,
             existing.workspace_id,
-            Permission::ManageIntegrations,
+            Permission::ManageConnections,
         )
         .await?;
 
@@ -281,7 +283,7 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
 
 /// Deletes a workspace connection.
 ///
-/// Soft-deletes the connection. Requires `ManageIntegrations` permission.
+/// Soft-deletes the connection. Requires `ManageConnections` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -305,7 +307,7 @@ async fn delete_connection(
         .authorize_workspace(
             &mut conn,
             connection.workspace_id,
-            Permission::ManageIntegrations,
+            Permission::ManageConnections,
         )
         .await?;
 

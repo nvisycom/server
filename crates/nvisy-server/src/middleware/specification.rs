@@ -187,8 +187,8 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Integrations".into(),
-            description: Some("External service integrations".into()),
+            name: "Connections".into(),
+            description: Some("External provider connections".into()),
             ..Default::default()
         })
         .tag(Tag {

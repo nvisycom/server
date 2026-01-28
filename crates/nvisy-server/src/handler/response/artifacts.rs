@@ -1,7 +1,7 @@
 //! Pipeline artifact response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::PipelineArtifact;
+use nvisy_postgres::model::WorkspacePipelineArtifact;
 use nvisy_postgres::types::ArtifactType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ pub struct Artifact {
 
 impl Artifact {
     /// Creates an artifact response from the database model.
-    pub fn from_model(artifact: PipelineArtifact) -> Self {
+    pub fn from_model(artifact: WorkspacePipelineArtifact) -> Self {
         Self {
             id: artifact.id,
             run_id: artifact.run_id,

@@ -55,8 +55,6 @@ impl CreateWebhook {
 
         NewWorkspaceWebhook {
             workspace_id,
-            webhook_type: None, // Defaults to 'provided'
-            integration_id: None,
             display_name: self.display_name,
             description: self.description,
             url: self.url,

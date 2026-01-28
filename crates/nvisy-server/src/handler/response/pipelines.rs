@@ -60,7 +60,7 @@ impl Pipeline {
     /// Creates a pipeline response with artifacts.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
-        artifacts: Vec<model::PipelineArtifact>,
+        artifacts: Vec<model::WorkspacePipelineArtifact>,
     ) -> Self {
         let definition: Workflow = serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {

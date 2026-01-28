@@ -2,10 +2,11 @@
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
+use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_connections;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, SyncStatus};
 
 /// Workspace connection model representing encrypted provider connections.
 ///
@@ -28,6 +29,14 @@ pub struct WorkspaceConnection {
     /// Encrypted connection data (XChaCha20-Poly1305 encrypted JSON).
     /// Contains credentials and context for resumption.
     pub encrypted_data: Vec<u8>,
+    /// Whether the connection is active for syncing.
+    pub is_active: bool,
+    /// Timestamp of the last successful sync.
+    pub last_sync_at: Option<Timestamp>,
+    /// Current sync status.
+    pub sync_status: Option<SyncStatus>,
+    /// Non-encrypted metadata for filtering/display.
+    pub metadata: JsonValue,
     /// Timestamp when the connection was created.
     pub created_at: Timestamp,
     /// Timestamp when the connection was last updated.
@@ -51,6 +60,10 @@ pub struct NewWorkspaceConnection {
     pub provider: String,
     /// Encrypted connection data.
     pub encrypted_data: Vec<u8>,
+    /// Whether the connection is active for syncing.
+    pub is_active: Option<bool>,
+    /// Non-encrypted metadata for filtering/display.
+    pub metadata: Option<JsonValue>,
 }
 
 /// Data for updating a workspace connection.
@@ -64,6 +77,14 @@ pub struct UpdateWorkspaceConnection {
     pub provider: Option<String>,
     /// Encrypted connection data.
     pub encrypted_data: Option<Vec<u8>>,
+    /// Whether the connection is active for syncing.
+    pub is_active: Option<bool>,
+    /// Timestamp of the last successful sync.
+    pub last_sync_at: Option<Option<Timestamp>>,
+    /// Current sync status.
+    pub sync_status: Option<Option<SyncStatus>>,
+    /// Non-encrypted metadata for filtering/display.
+    pub metadata: Option<JsonValue>,
     /// Soft delete timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
 }
@@ -72,6 +93,16 @@ impl WorkspaceConnection {
     /// Returns whether the connection is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
+    }
+
+    /// Returns whether the connection is currently syncing.
+    pub fn is_syncing(&self) -> bool {
+        matches!(self.sync_status, Some(SyncStatus::Running))
+    }
+
+    /// Returns whether the connection has a pending sync.
+    pub fn has_pending_sync(&self) -> bool {
+        matches!(self.sync_status, Some(SyncStatus::Pending))
     }
 }
 

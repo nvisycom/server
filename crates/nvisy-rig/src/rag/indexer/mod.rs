@@ -2,8 +2,8 @@
 
 mod indexed;
 
-use nvisy_postgres::model::NewFileChunk;
-use nvisy_postgres::query::FileChunkRepository;
+use nvisy_postgres::model::NewWorkspaceFileChunk;
+use nvisy_postgres::query::WorkspaceFileChunkRepository;
 use nvisy_postgres::{PgClient, Vector};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -95,7 +95,7 @@ impl Indexer {
 
         let model_name = self.provider.model_name();
 
-        let new_chunks: Vec<NewFileChunk> = chunks
+        let new_chunks: Vec<NewWorkspaceFileChunk> = chunks
             .iter()
             .zip(embeddings.iter())
             .enumerate()
@@ -113,7 +113,7 @@ impl Indexer {
                     "page": chunk.metadata.page,
                 });
 
-                NewFileChunk {
+                NewWorkspaceFileChunk {
                     file_id: self.file_id,
                     chunk_index: Some(idx as i32),
                     content_sha256,
@@ -133,7 +133,7 @@ impl Indexer {
             .map_err(|e| Error::retrieval(format!("failed to get connection: {e}")))?;
 
         let created = conn
-            .create_file_chunks(new_chunks)
+            .create_workspace_file_chunks(new_chunks)
             .await
             .map_err(|e| Error::retrieval(format!("failed to create chunks: {e}")))?;
 
@@ -149,7 +149,7 @@ impl Indexer {
             .map_err(|e| Error::retrieval(format!("failed to get connection: {e}")))?;
 
         let deleted = conn
-            .delete_file_chunks(self.file_id)
+            .delete_workspace_file_chunks(self.file_id)
             .await
             .map_err(|e| Error::retrieval(format!("failed to delete chunks: {e}")))?;
 

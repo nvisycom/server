@@ -1,9 +1,8 @@
 //! Workspace-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceIntegrationConstraints,
-    WorkspaceIntegrationRunConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
-    WorkspaceWebhookConstraints,
+    WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceInviteConstraints,
+    WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -104,49 +103,6 @@ impl From<WorkspaceActivitiesConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspaceIntegrationConstraints> for Error<'static> {
-    fn from(c: WorkspaceIntegrationConstraints) -> Self {
-        let error = match c {
-            WorkspaceIntegrationConstraints::IntegrationNameNotEmpty => {
-                ErrorKind::BadRequest.with_message("Integration name cannot be empty")
-            }
-            WorkspaceIntegrationConstraints::DescriptionLengthMax => {
-                ErrorKind::BadRequest.with_message("Integration description is too long")
-            }
-            WorkspaceIntegrationConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Integration metadata size is invalid")
-            }
-            WorkspaceIntegrationConstraints::CredentialsSize => {
-                ErrorKind::BadRequest.with_message("Integration credentials size is invalid")
-            }
-            WorkspaceIntegrationConstraints::UpdatedAfterCreated
-            | WorkspaceIntegrationConstraints::LastSyncAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
-
-        error.with_resource("workspace_integration")
-    }
-}
-
-impl From<WorkspaceIntegrationRunConstraints> for Error<'static> {
-    fn from(c: WorkspaceIntegrationRunConstraints) -> Self {
-        let error = match c {
-            WorkspaceIntegrationRunConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Run metadata size is invalid")
-            }
-            WorkspaceIntegrationRunConstraints::LogsSize => {
-                ErrorKind::BadRequest.with_message("Run logs size is invalid")
-            }
-            WorkspaceIntegrationRunConstraints::CompletedAfterStarted => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
-
-        error.with_resource("workspace_integration_run")
-    }
-}
-
 impl From<WorkspaceWebhookConstraints> for Error<'static> {
     fn from(c: WorkspaceWebhookConstraints) -> Self {
         let error = match c {
@@ -169,9 +125,6 @@ impl From<WorkspaceWebhookConstraints> for Error<'static> {
             }
             WorkspaceWebhookConstraints::HeadersSize => {
                 ErrorKind::BadRequest.with_message("Webhook headers size is too large")
-            }
-            WorkspaceWebhookConstraints::IntegrationIdRequired => {
-                ErrorKind::BadRequest.with_message("Integration webhooks require an integration ID")
             }
             WorkspaceWebhookConstraints::FailureCountPositive
             | WorkspaceWebhookConstraints::MaxFailuresPositive => {
