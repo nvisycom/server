@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
-use crate::model::{NewPipeline, Pipeline, UpdatePipeline};
+use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 use crate::types::{CursorPage, CursorPagination, OffsetPagination, PipelineStatus};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -15,34 +15,34 @@ use crate::{PgConnection, PgError, PgResult, schema};
 ///
 /// Handles pipeline lifecycle management including creation, updates,
 /// status transitions, and queries.
-pub trait PipelineRepository {
+pub trait WorkspacePipelineRepository {
     /// Creates a new pipeline record.
-    fn create_pipeline(
+    fn create_workspace_pipeline(
         &mut self,
-        new_pipeline: NewPipeline,
-    ) -> impl Future<Output = PgResult<Pipeline>> + Send;
+        new_pipeline: NewWorkspacePipeline,
+    ) -> impl Future<Output = PgResult<WorkspacePipeline>> + Send;
 
     /// Finds a pipeline by its unique identifier.
-    fn find_pipeline_by_id(
+    fn find_workspace_pipeline_by_id(
         &mut self,
         pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspacePipeline>>> + Send;
 
     /// Finds a pipeline by ID within a specific workspace.
     ///
     /// Provides workspace-scoped access control at the database level.
-    fn find_workspace_pipeline(
+    fn find_pipeline_in_workspace(
         &mut self,
         workspace_id: Uuid,
         pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspacePipeline>>> + Send;
 
     /// Lists all pipelines in a workspace with offset pagination.
     fn offset_list_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspacePipeline>>> + Send;
 
     /// Lists all pipelines in a workspace with cursor pagination.
     fn cursor_list_workspace_pipelines(
@@ -51,30 +51,33 @@ pub trait PipelineRepository {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> impl Future<Output = PgResult<CursorPage<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WorkspacePipeline>>> + Send;
 
     /// Lists all pipelines created by an account with offset pagination.
     fn offset_list_account_pipelines(
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspacePipeline>>> + Send;
 
     /// Lists enabled pipelines in a workspace.
     fn list_enabled_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspacePipeline>>> + Send;
 
     /// Updates a pipeline with new data.
-    fn update_pipeline(
+    fn update_workspace_pipeline(
         &mut self,
         pipeline_id: Uuid,
-        updates: UpdatePipeline,
-    ) -> impl Future<Output = PgResult<Pipeline>> + Send;
+        updates: UpdateWorkspacePipeline,
+    ) -> impl Future<Output = PgResult<WorkspacePipeline>> + Send;
 
     /// Soft deletes a pipeline by setting the deletion timestamp.
-    fn delete_pipeline(&mut self, pipeline_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_workspace_pipeline(
+        &mut self,
+        pipeline_id: Uuid,
+    ) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Counts pipelines in a workspace by status.
     fn count_workspace_pipelines_by_status(
@@ -89,16 +92,19 @@ pub trait PipelineRepository {
         workspace_id: Uuid,
         search_term: &str,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<Pipeline>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<WorkspacePipeline>>> + Send;
 }
 
-impl PipelineRepository for PgConnection {
-    async fn create_pipeline(&mut self, new_pipeline: NewPipeline) -> PgResult<Pipeline> {
-        use schema::pipelines;
+impl WorkspacePipelineRepository for PgConnection {
+    async fn create_workspace_pipeline(
+        &mut self,
+        new_pipeline: NewWorkspacePipeline,
+    ) -> PgResult<WorkspacePipeline> {
+        use schema::workspace_pipelines;
 
-        let pipeline = diesel::insert_into(pipelines::table)
+        let pipeline = diesel::insert_into(workspace_pipelines::table)
             .values(&new_pipeline)
-            .returning(Pipeline::as_returning())
+            .returning(WorkspacePipeline::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
@@ -106,13 +112,16 @@ impl PipelineRepository for PgConnection {
         Ok(pipeline)
     }
 
-    async fn find_pipeline_by_id(&mut self, pipeline_id: Uuid) -> PgResult<Option<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    async fn find_workspace_pipeline_by_id(
+        &mut self,
+        pipeline_id: Uuid,
+    ) -> PgResult<Option<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipeline = pipelines::table
+        let pipeline = workspace_pipelines::table
             .filter(dsl::id.eq(pipeline_id))
             .filter(dsl::deleted_at.is_null())
-            .select(Pipeline::as_select())
+            .select(WorkspacePipeline::as_select())
             .first(self)
             .await
             .optional()
@@ -121,18 +130,18 @@ impl PipelineRepository for PgConnection {
         Ok(pipeline)
     }
 
-    async fn find_workspace_pipeline(
+    async fn find_pipeline_in_workspace(
         &mut self,
         workspace_id: Uuid,
         pipeline_id: Uuid,
-    ) -> PgResult<Option<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    ) -> PgResult<Option<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipeline = pipelines::table
+        let pipeline = workspace_pipelines::table
             .filter(dsl::id.eq(pipeline_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .select(Pipeline::as_select())
+            .select(WorkspacePipeline::as_select())
             .first(self)
             .await
             .optional()
@@ -145,16 +154,16 @@ impl PipelineRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    ) -> PgResult<Vec<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipelines = pipelines::table
+        let pipelines = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .select(Pipeline::as_select())
+            .select(WorkspacePipeline::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -168,11 +177,11 @@ impl PipelineRepository for PgConnection {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> PgResult<CursorPage<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    ) -> PgResult<CursorPage<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
         // Build base query with filters
-        let mut base_query = pipelines::table
+        let mut base_query = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
@@ -200,7 +209,7 @@ impl PipelineRepository for PgConnection {
         };
 
         // Rebuild query for fetching items
-        let mut query = pipelines::table
+        let mut query = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
@@ -215,7 +224,7 @@ impl PipelineRepository for PgConnection {
 
         let limit = pagination.limit + 1;
 
-        let items: Vec<Pipeline> = if let Some(cursor) = &pagination.after {
+        let items: Vec<WorkspacePipeline> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
             query
@@ -224,7 +233,7 @@ impl PipelineRepository for PgConnection {
                         .lt(&cursor_time)
                         .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
                 )
-                .select(Pipeline::as_select())
+                .select(WorkspacePipeline::as_select())
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(limit)
                 .load(self)
@@ -232,7 +241,7 @@ impl PipelineRepository for PgConnection {
                 .map_err(PgError::from)?
         } else {
             query
-                .select(Pipeline::as_select())
+                .select(WorkspacePipeline::as_select())
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(limit)
                 .load(self)
@@ -244,7 +253,7 @@ impl PipelineRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |p: &Pipeline| (p.created_at.into(), p.id),
+            |p: &WorkspacePipeline| (p.created_at.into(), p.id),
         ))
     }
 
@@ -252,16 +261,16 @@ impl PipelineRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    ) -> PgResult<Vec<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipelines = pipelines::table
+        let pipelines = workspace_pipelines::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)
-            .select(Pipeline::as_select())
+            .select(WorkspacePipeline::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -272,15 +281,15 @@ impl PipelineRepository for PgConnection {
     async fn list_enabled_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
-    ) -> PgResult<Vec<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    ) -> PgResult<Vec<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipelines = pipelines::table
+        let pipelines = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::status.eq(PipelineStatus::Enabled))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::name.asc())
-            .select(Pipeline::as_select())
+            .select(WorkspacePipeline::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -288,16 +297,16 @@ impl PipelineRepository for PgConnection {
         Ok(pipelines)
     }
 
-    async fn update_pipeline(
+    async fn update_workspace_pipeline(
         &mut self,
         pipeline_id: Uuid,
-        updates: UpdatePipeline,
-    ) -> PgResult<Pipeline> {
-        use schema::pipelines::{self, dsl};
+        updates: UpdateWorkspacePipeline,
+    ) -> PgResult<WorkspacePipeline> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipeline = diesel::update(pipelines::table.filter(dsl::id.eq(pipeline_id)))
+        let pipeline = diesel::update(workspace_pipelines::table.filter(dsl::id.eq(pipeline_id)))
             .set(&updates)
-            .returning(Pipeline::as_returning())
+            .returning(WorkspacePipeline::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
@@ -305,11 +314,11 @@ impl PipelineRepository for PgConnection {
         Ok(pipeline)
     }
 
-    async fn delete_pipeline(&mut self, pipeline_id: Uuid) -> PgResult<()> {
+    async fn delete_workspace_pipeline(&mut self, pipeline_id: Uuid) -> PgResult<()> {
         use diesel::dsl::now;
-        use schema::pipelines::{self, dsl};
+        use schema::workspace_pipelines::{self, dsl};
 
-        diesel::update(pipelines::table.filter(dsl::id.eq(pipeline_id)))
+        diesel::update(workspace_pipelines::table.filter(dsl::id.eq(pipeline_id)))
             .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
@@ -323,9 +332,9 @@ impl PipelineRepository for PgConnection {
         workspace_id: Uuid,
         status: PipelineStatus,
     ) -> PgResult<i64> {
-        use schema::pipelines::{self, dsl};
+        use schema::workspace_pipelines::{self, dsl};
 
-        let count = pipelines::table
+        let count = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::status.eq(status))
             .filter(dsl::deleted_at.is_null())
@@ -342,16 +351,16 @@ impl PipelineRepository for PgConnection {
         workspace_id: Uuid,
         search_term: &str,
         limit: i64,
-    ) -> PgResult<Vec<Pipeline>> {
-        use schema::pipelines::{self, dsl};
+    ) -> PgResult<Vec<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
 
-        let pipelines = pipelines::table
+        let pipelines = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::name.trgm_similar_to(search_term))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::name.asc())
             .limit(limit)
-            .select(Pipeline::as_select())
+            .select(WorkspacePipeline::as_select())
             .load(self)
             .await
             .map_err(PgError::from)?;

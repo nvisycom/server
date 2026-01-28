@@ -11,7 +11,7 @@ use thiserror::Error;
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Type alias for Results with our custom Error type.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Categories of errors that can occur in nvisy-core operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, IntoStaticStr)]

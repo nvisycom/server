@@ -1,6 +1,6 @@
 //! File request types.
 
-use nvisy_postgres::model::UpdateFile as UpdateFileModel;
+use nvisy_postgres::model::UpdateWorkspaceFile as UpdateFileModel;
 use nvisy_postgres::types::{FileFilter, FileFormat};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

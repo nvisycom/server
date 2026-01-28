@@ -7,7 +7,7 @@ pub mod engine;
 mod error;
 pub mod graph;
 
-pub use engine::{CredentialsRegistry, ProviderCredentials};
+pub use engine::{ConnectionRegistry, PgConnectionLoader, ProviderConnection};
 pub use error::{Error, Result};
 
 /// Tracing target for runtime operations.

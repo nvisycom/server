@@ -7,7 +7,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::query::{FileAnnotationRepository, FileRepository};
+use nvisy_postgres::query::{FileAnnotationRepository, WorkspaceFileRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -38,12 +38,14 @@ async fn find_annotation(
 async fn find_file(
     conn: &mut nvisy_postgres::PgConn,
     file_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::File> {
-    conn.find_file_by_id(file_id).await?.ok_or_else(|| {
-        ErrorKind::NotFound
-            .with_message("File not found")
-            .with_resource("file")
-    })
+) -> Result<nvisy_postgres::model::WorkspaceFile> {
+    conn.find_workspace_file_by_id(file_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("File not found")
+                .with_resource("file")
+        })
 }
 
 /// Creates a new annotation on a file.

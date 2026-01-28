@@ -5,8 +5,6 @@ use rig::completion::{
 };
 use rig::message::Message;
 use rig::one_or_many::OneOrMany;
-#[cfg(feature = "ollama")]
-use rig::prelude::CompletionClient;
 use rig::streaming::StreamingCompletionResponse;
 
 use super::provider::{CompletionProvider, CompletionService};
@@ -85,14 +83,6 @@ impl RigCompletionModel for CompletionProvider {
                 (resp.choice, resp.usage)
             }
             CompletionService::Perplexity { model, .. } => {
-                let resp = model
-                    .completion(build_request(&full_prompt, &chat_history, &request))
-                    .await?;
-                (resp.choice, resp.usage)
-            }
-            #[cfg(feature = "ollama")]
-            CompletionService::Ollama { client, model_name } => {
-                let model = client.completion_model(model_name);
                 let resp = model
                     .completion(build_request(&full_prompt, &chat_history, &request))
                     .await?;

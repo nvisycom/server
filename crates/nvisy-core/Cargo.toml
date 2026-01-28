@@ -27,25 +27,33 @@ default = []
 # JSON Schema support for API documentation
 schema = ["dep:schemars"]
 
+# Encryption support for sensitive data
+encryption = ["dep:chacha20poly1305", "dep:hkdf", "dep:sha2", "dep:rand", "dep:uuid"]
+
 [dependencies]
-# Async
-async-trait = { workspace = true }
+# Async runtime
+async-trait = { workspace = true, features = [] }
 
-# Error handling
-thiserror = { workspace = true }
-
-# Derive macros
-strum = { workspace = true }
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+strum = { workspace = true, features = [] }
 
 # Observability
-tracing = { workspace = true }
+tracing = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = [] }
 
-# Time
+# Datatypes
 jiff = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, optional = true, features = [] }
 
 # OpenAPI documentation (optional)
-schemars = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true, features = [] }
+
+# Encryption (optional)
+chacha20poly1305 = { workspace = true, optional = true, features = [] }
+hkdf = { workspace = true, optional = true, features = [] }
+sha2 = { workspace = true, optional = true, features = [] }
+rand = { workspace = true, optional = true, features = [] }

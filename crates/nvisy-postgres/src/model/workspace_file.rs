@@ -1,17 +1,17 @@
-//! File model for PostgreSQL database operations.
+//! Workspace file model for PostgreSQL database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::files;
+use crate::schema::workspace_files;
 use crate::types::{FileSource, HasCreatedAt, HasDeletedAt, HasUpdatedAt, RECENTLY_UPLOADED_HOURS};
 
-/// File model representing a file stored in the system.
+/// Workspace file model representing a file stored in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = files)]
+#[diesel(table_name = workspace_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct File {
+pub struct WorkspaceFile {
     /// Unique file identifier.
     pub id: Uuid,
     /// Reference to the workspace this file belongs to.
@@ -52,11 +52,11 @@ pub struct File {
     pub deleted_at: Option<Timestamp>,
 }
 
-/// Data for creating a new file.
+/// Data for creating a new workspace file.
 #[derive(Debug, Default, Clone, Insertable)]
-#[diesel(table_name = files)]
+#[diesel(table_name = workspace_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewFile {
+pub struct NewWorkspaceFile {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
     /// Account ID.
@@ -87,11 +87,11 @@ pub struct NewFile {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Data for updating a file.
+/// Data for updating a workspace file.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = files)]
+#[diesel(table_name = workspace_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateFile {
+pub struct UpdateWorkspaceFile {
     /// Display name.
     pub display_name: Option<String>,
     /// Parent file ID.
@@ -108,7 +108,7 @@ pub struct UpdateFile {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl File {
+impl WorkspaceFile {
     /// Returns whether the file was uploaded recently.
     pub fn is_recently_uploaded(&self) -> bool {
         self.was_created_within(jiff::Span::new().hours(RECENTLY_UPLOADED_HOURS))
@@ -188,24 +188,24 @@ impl File {
     }
 
     /// Returns whether this file is a newer version of another file.
-    pub fn is_version_of(&self, other: &File) -> bool {
+    pub fn is_version_of(&self, other: &WorkspaceFile) -> bool {
         self.parent_id == Some(other.id) && self.version_number > other.version_number
     }
 }
 
-impl HasCreatedAt for File {
+impl HasCreatedAt for WorkspaceFile {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }
 }
 
-impl HasUpdatedAt for File {
+impl HasUpdatedAt for WorkspaceFile {
     fn updated_at(&self) -> jiff::Timestamp {
         self.updated_at.into()
     }
 }
 
-impl HasDeletedAt for File {
+impl HasDeletedAt for WorkspaceFile {
     fn deleted_at(&self) -> Option<jiff::Timestamp> {
         self.deleted_at.map(Into::into)
     }

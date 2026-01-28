@@ -3,6 +3,7 @@
 mod accounts;
 mod annotations;
 mod authentications;
+mod connections;
 mod files;
 mod integrations;
 mod invites;
@@ -19,6 +20,7 @@ mod workspaces;
 pub use accounts::*;
 pub use annotations::*;
 pub use authentications::*;
+pub use connections::*;
 pub use files::*;
 pub use integrations::*;
 pub use invites::*;

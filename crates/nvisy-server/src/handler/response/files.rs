@@ -1,7 +1,7 @@
 //! File response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::File as FileModel;
+use nvisy_postgres::model::WorkspaceFile as FileModel;
 use nvisy_postgres::types::FileSource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

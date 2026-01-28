@@ -17,9 +17,6 @@ pub enum CompletionModel {
     Gemini(GeminiCompletionModel),
     /// Perplexity models.
     Perplexity(PerplexityModel),
-    /// Ollama local models (model name as string).
-    #[cfg(feature = "ollama")]
-    Ollama(String),
 }
 
 /// OpenAI completion models.
@@ -128,8 +125,6 @@ impl CompletionModel {
             Self::Cohere(m) => m.as_ref(),
             Self::Gemini(m) => m.as_ref(),
             Self::Perplexity(m) => m.as_ref(),
-            #[cfg(feature = "ollama")]
-            Self::Ollama(m) => m.as_str(),
         }
     }
 }

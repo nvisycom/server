@@ -410,25 +410,27 @@ dependencies = [
 requires-dist = [
     { name = "aiomysql", marker = "extra == 'mysql'", specifier = ">=0.2" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30" },
+    { name = "asyncpg-stubs", marker = "extra == 'postgres'", specifier = ">=0.30" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.23" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35" },
+    { name = "boto3-stubs", extras = ["s3"], marker = "extra == 's3'" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=2.18" },
     { name = "moto", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "nvisy-dal", extras = ["all"], marker = "extra == 'dev'" },
     { name = "nvisy-dal", extras = ["s3", "gcs", "azure", "postgres", "mysql", "qdrant", "pinecone"], marker = "extra == 'all'" },
-    { name = "pinecone-client", marker = "extra == 'pinecone'", specifier = ">=5.0" },
+    { name = "pinecone", marker = "extra == 'pinecone'", specifier = ">=5.0" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.12" },
-    { name = "types-boto3", marker = "extra == 's3'" },
 ]
 provides-extras = ["s3", "gcs", "azure", "postgres", "mysql", "qdrant", "pinecone", "all", "dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pip-audit", specifier = ">=2.9" },
     { name = "pyright", specifier = ">=1.1.408" },
-    { name = "ruff", specifier = ">=0.14.14" },
+    { name = "ruff", specifier = ">=0.14" },
 ]
 
 [[package]]

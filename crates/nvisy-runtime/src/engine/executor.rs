@@ -8,8 +8,8 @@ use tokio::sync::Semaphore;
 
 use super::EngineConfig;
 use super::compiler::WorkflowCompiler;
+use super::connection::ConnectionRegistry;
 use super::context::ExecutionContext;
-use super::credentials::CredentialsRegistry;
 use crate::definition::{NodeId, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{CompiledGraph, CompiledNode, InputStream, OutputStream, Process};
@@ -61,13 +61,13 @@ impl Engine {
     pub async fn execute(
         &self,
         definition: Workflow,
-        credentials: CredentialsRegistry,
+        connections: ConnectionRegistry,
     ) -> Result<ExecutionContext> {
         // Compile the definition into an executable graph
-        let compiler = WorkflowCompiler::new(&credentials);
+        let compiler = WorkflowCompiler::new(&connections);
         let graph = compiler.compile(definition).await?;
 
-        self.execute_graph(graph, credentials).await
+        self.execute_graph(graph, connections).await
     }
 
     /// Executes a pre-compiled workflow graph.
@@ -77,7 +77,7 @@ impl Engine {
     pub async fn execute_graph(
         &self,
         mut graph: CompiledGraph,
-        credentials: CredentialsRegistry,
+        connections: ConnectionRegistry,
     ) -> Result<ExecutionContext> {
         let _permit = self
             .semaphore
@@ -95,7 +95,7 @@ impl Engine {
             "Starting workflow execution"
         );
 
-        let mut ctx = ExecutionContext::new(credentials);
+        let mut ctx = ExecutionContext::new(connections);
 
         // Execute the compiled pipeline
         self.execute_pipeline(&mut graph, &order, &mut ctx).await?;

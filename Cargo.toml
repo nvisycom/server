@@ -77,20 +77,29 @@ aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
 schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
 jsonschema = { version = "0.29", features = [] }
 
-# Authentication & Security
+# Authentication
 jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
 argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
-base64 = { version = "0.22", features = [] }
-rand = { version = "0.10.0-rc.6", features = ["serde"] }
+zxcvbn = { version = "3.1", features = ["serde"] }
+
+# Encryption & Cryptography
+chacha20poly1305 = { version = "0.10", features = [] }
+hkdf = { version = "0.12", features = [] }
 sha2 = { version = "0.10", features = [] }
 hmac = { version = "0.12", features = [] }
+
+# Encoding
+base64 = { version = "0.22", features = [] }
 hex = { version = "0.4", features = [] }
-zxcvbn = { version = "3.1", features = ["serde"] }
+
+# Randomness
+rand = { version = "0.10.0-rc.6", features = ["serde"] }
 
 # Relational database (Postgres)
 diesel = { version = "2.3", features = [] }
 diesel_migrations = { version = "2.3", features = [] }
 diesel-async = { version = "0.7", features = [] }
+jiff-diesel = { version = "0.1.3", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
 deadpool = { version = "0.12", features = [] }
 pgvector = { version = "0.4", features = [] }
@@ -120,16 +129,17 @@ derive_builder = { version = "0.20", features = [] }
 anyhow = { version = "1.0", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
 
-# Data types
-jiff = { version = "0.2", features = ["serde"] }
-jiff-diesel = { version = "0.1.3", features = [] }
+# Primitive datatypes
 uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
-ipnet = { version = "2.11", features = [] }
-bigdecimal = { version = "0.4", features = ["serde"] }
 bytes = { version = "1.10", features = ["serde"] }
-petgraph = { version = "0.8", features = ["serde-1"] }
-semver = { version = "1.0", features = ["serde"] }
+bigdecimal = { version = "0.4", features = ["serde"] }
+jiff = { version = "0.2", features = ["serde"] }
+
+# Domain datatypes & data structures
+ipnet = { version = "2.11", features = [] }
 url = { version = "2.5", features = [] }
+semver = { version = "1.0", features = ["serde"] }
+petgraph = { version = "0.8", features = ["serde-1"] }
 
 # Text processing
 regex = { version = "1.0", features = [] }
@@ -138,7 +148,6 @@ woothee = { version = "0.13", features = [] }
 
 # AI/ML frameworks
 rig-core = { version = "0.29", default-features = false, features = ["reqwest-rustls"] }
-
 
 # Python interop
 pyo3 = { version = "0.27", features = [] }

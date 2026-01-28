@@ -17,8 +17,8 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{File as FileModel, NewFile};
-use nvisy_postgres::query::FileRepository;
+use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
+use nvisy_postgres::query::WorkspaceFileRepository;
 use uuid::Uuid;
 
 use crate::extract::{
@@ -40,11 +40,13 @@ type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<FileModel> {
-    conn.find_file_by_id(file_id).await?.ok_or_else(|| {
-        ErrorKind::NotFound
-            .with_message("File not found")
-            .with_resource("file")
-    })
+    conn.find_workspace_file_by_id(file_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("File not found")
+                .with_resource("file")
+        })
 }
 
 /// Lists files in a workspace with cursor-based pagination.
@@ -151,7 +153,7 @@ async fn process_single_file(
     );
 
     // Step 2: Create DB record with all storage info (Postgres generates its own id)
-    let file_record = NewFile {
+    let file_record = NewWorkspaceFile {
         workspace_id: ctx.workspace_id,
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
@@ -164,7 +166,7 @@ async fn process_single_file(
         ..Default::default()
     };
 
-    let created_file = conn.create_file(file_record).await?;
+    let created_file = conn.create_workspace_file(file_record).await?;
 
     // Step 3: Publish job to queue (use Postgres-generated file ID)
     let job = FileJob::new(created_file.id, file_key.to_string(), file_extension, ());
@@ -348,7 +350,7 @@ async fn update_file(
     let updates = request.into_model();
 
     let updated_file = conn
-        .update_file(path_params.file_id, updates)
+        .update_workspace_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
@@ -530,12 +532,14 @@ async fn delete_file(
         .authorize_workspace(&mut conn, file.workspace_id, Permission::DeleteFiles)
         .await?;
 
-    conn.delete_file(path_params.file_id).await.map_err(|err| {
-        tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
-        ErrorKind::InternalServerError
-            .with_message("Failed to delete file")
-            .with_context(format!("Database error: {}", err))
-    })?;
+    conn.delete_workspace_file(path_params.file_id)
+        .await
+        .map_err(|err| {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
+            ErrorKind::InternalServerError
+                .with_message("Failed to delete file")
+                .with_context(format!("Database error: {}", err))
+        })?;
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({

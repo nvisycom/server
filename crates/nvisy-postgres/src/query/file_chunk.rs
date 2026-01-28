@@ -204,13 +204,13 @@ impl FileChunkRepository for PgConnection {
     ) -> PgResult<Vec<FileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
-        use schema::files;
+        use schema::workspace_files;
 
         // Get all file IDs for the workspace
-        let file_ids: Vec<Uuid> = files::table
-            .filter(files::workspace_id.eq(workspace_id))
-            .filter(files::deleted_at.is_null())
-            .select(files::id)
+        let file_ids: Vec<Uuid> = workspace_files::table
+            .filter(workspace_files::workspace_id.eq(workspace_id))
+            .filter(workspace_files::deleted_at.is_null())
+            .select(workspace_files::id)
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -282,13 +282,13 @@ impl FileChunkRepository for PgConnection {
     ) -> PgResult<Vec<ScoredFileChunk>> {
         use pgvector::VectorExpressionMethods;
         use schema::file_chunks::{self, dsl};
-        use schema::files;
+        use schema::workspace_files;
 
         // Get all file IDs for the workspace
-        let file_ids: Vec<Uuid> = files::table
-            .filter(files::workspace_id.eq(workspace_id))
-            .filter(files::deleted_at.is_null())
-            .select(files::id)
+        let file_ids: Vec<Uuid> = workspace_files::table
+            .filter(workspace_files::workspace_id.eq(workspace_id))
+            .filter(workspace_files::deleted_at.is_null())
+            .select(workspace_files::id)
             .load(self)
             .await
             .map_err(PgError::from)?;

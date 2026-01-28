@@ -1,7 +1,7 @@
 //! Enrich transform definition.
 
 use nvisy_core::Provider;
-use nvisy_rig::provider::{CompletionCredentials, CompletionModel, CompletionProvider};
+use nvisy_rig::provider::{CompletionModel, CompletionProvider, Credentials};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -28,10 +28,7 @@ pub struct Enrich {
 
 impl Enrich {
     /// Creates a completion provider from these parameters and credentials.
-    pub async fn into_provider(
-        self,
-        credentials: CompletionCredentials,
-    ) -> Result<CompletionProvider> {
+    pub async fn into_provider(self, credentials: Credentials) -> Result<CompletionProvider> {
         CompletionProvider::connect(self.model, credentials)
             .await
             .map_err(|e| Error::Internal(e.to_string()))

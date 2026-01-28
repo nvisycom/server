@@ -25,10 +25,10 @@ class DataInput(Protocol[T_co, Ctx]):
 
 
 @runtime_checkable
-class DataOutput(Protocol[T_contra, Ctx_contra]):
+class DataOutput(Protocol[T_contra]):
     """Protocol for writing data to external sinks."""
 
-    async def write(self, ctx: Ctx_contra, items: Sequence[T_contra]) -> None:
+    async def write(self, items: Sequence[T_contra]) -> None:
         """Write a batch of items to the sink."""
         ...
 

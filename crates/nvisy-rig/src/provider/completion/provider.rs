@@ -3,17 +3,13 @@
 use std::sync::Arc;
 
 use nvisy_core::Provider;
-#[cfg(feature = "ollama")]
-use rig::client::Nothing;
 use rig::completion::{AssistantContent, CompletionError, CompletionModel as RigCompletionModel};
 use rig::message::Message;
 use rig::one_or_many::OneOrMany;
 use rig::prelude::CompletionClient;
-#[cfg(feature = "ollama")]
-use rig::providers::ollama;
 use rig::providers::{anthropic, cohere, gemini, openai, perplexity};
 
-use super::credentials::CompletionCredentials;
+use super::super::credentials::Credentials;
 use super::model::{AnthropicModel, CompletionModel};
 use crate::Error;
 
@@ -44,16 +40,11 @@ pub(crate) enum CompletionService {
         model: perplexity::CompletionModel,
         model_name: String,
     },
-    #[cfg(feature = "ollama")]
-    Ollama {
-        client: ollama::Client,
-        model_name: String,
-    },
 }
 
 #[async_trait::async_trait]
 impl Provider for CompletionProvider {
-    type Credentials = CompletionCredentials;
+    type Credentials = Credentials;
     type Params = CompletionModel;
 
     async fn connect(
@@ -61,7 +52,7 @@ impl Provider for CompletionProvider {
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
         let inner = match (credentials, params) {
-            (CompletionCredentials::OpenAi(c), CompletionModel::OpenAi(m)) => {
+            (Credentials::OpenAi(c), CompletionModel::OpenAi(m)) => {
                 let client = openai::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("openai", e.to_string()))?
                     .completions_api();
@@ -70,7 +61,7 @@ impl Provider for CompletionProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Anthropic(c), CompletionModel::Anthropic(m)) => {
+            (Credentials::Anthropic(c), CompletionModel::Anthropic(m)) => {
                 let client = anthropic::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("anthropic", e.to_string()))?;
                 CompletionService::Anthropic {
@@ -78,7 +69,7 @@ impl Provider for CompletionProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Cohere(c), CompletionModel::Cohere(m)) => {
+            (Credentials::Cohere(c), CompletionModel::Cohere(m)) => {
                 let client = cohere::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("cohere", e.to_string()))?;
                 CompletionService::Cohere {
@@ -86,7 +77,7 @@ impl Provider for CompletionProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Gemini(c), CompletionModel::Gemini(m)) => {
+            (Credentials::Gemini(c), CompletionModel::Gemini(m)) => {
                 let client = gemini::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("gemini", e.to_string()))?;
                 CompletionService::Gemini {
@@ -94,7 +85,7 @@ impl Provider for CompletionProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (CompletionCredentials::Perplexity(c), CompletionModel::Perplexity(m)) => {
+            (Credentials::Perplexity(c), CompletionModel::Perplexity(m)) => {
                 let client = perplexity::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("perplexity", e.to_string()))?;
                 CompletionService::Perplexity {
@@ -102,19 +93,6 @@ impl Provider for CompletionProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            #[cfg(feature = "ollama")]
-            (CompletionCredentials::Ollama(c), CompletionModel::Ollama(model_name)) => {
-                let client = ollama::Client::builder()
-                    .api_key(Nothing)
-                    .base_url(&c.base_url)
-                    .build()
-                    .map_err(|e| Error::provider("ollama", e.to_string()))?;
-                CompletionService::Ollama {
-                    client,
-                    model_name: model_name.clone(),
-                }
-            }
-            #[allow(unreachable_patterns)]
             _ => return Err(Error::config("mismatched credentials and model provider").into()),
         };
         Ok(Self(Arc::new(inner)))
@@ -125,20 +103,6 @@ impl CompletionProvider {
     /// Returns a reference to the inner provider.
     pub(crate) fn inner(&self) -> &CompletionService {
         &self.0
-    }
-
-    /// Creates an Ollama completion provider (convenience for local development).
-    #[cfg(feature = "ollama")]
-    pub fn ollama(base_url: &str, model_name: &str) -> nvisy_core::Result<Self> {
-        let client = ollama::Client::builder()
-            .api_key(Nothing)
-            .base_url(base_url)
-            .build()
-            .map_err(|e| Error::provider("ollama", e.to_string()))?;
-        Ok(Self(Arc::new(CompletionService::Ollama {
-            client,
-            model_name: model_name.to_string(),
-        })))
     }
 
     /// Creates an Anthropic completion provider with a specific model.
@@ -159,8 +123,6 @@ impl CompletionProvider {
             CompletionService::Cohere { model_name, .. } => model_name,
             CompletionService::Gemini { model_name, .. } => model_name,
             CompletionService::Perplexity { model_name, .. } => model_name,
-            #[cfg(feature = "ollama")]
-            CompletionService::Ollama { model_name, .. } => model_name,
         }
     }
 
@@ -172,8 +134,6 @@ impl CompletionProvider {
             CompletionService::Cohere { .. } => "cohere",
             CompletionService::Gemini { .. } => "gemini",
             CompletionService::Perplexity { .. } => "perplexity",
-            #[cfg(feature = "ollama")]
-            CompletionService::Ollama { .. } => "ollama",
         }
     }
 
@@ -224,17 +184,6 @@ impl CompletionProvider {
                 .await
                 .map(|r| extract_text_content(&r.choice))
                 .map_err(map_err),
-            #[cfg(feature = "ollama")]
-            CompletionService::Ollama { client, model_name } => {
-                let model = client.completion_model(model_name);
-                model
-                    .completion_request(prompt)
-                    .messages(chat_history)
-                    .send()
-                    .await
-                    .map(|r| extract_text_content(&r.choice))
-                    .map_err(map_err)
-            }
         }
     }
 }
@@ -272,11 +221,6 @@ impl std::fmt::Debug for CompletionProvider {
                 .finish(),
             CompletionService::Perplexity { model_name, .. } => f
                 .debug_struct("CompletionProvider::Perplexity")
-                .field("model", model_name)
-                .finish(),
-            #[cfg(feature = "ollama")]
-            CompletionService::Ollama { model_name, .. } => f
-                .debug_struct("CompletionProvider::Ollama")
                 .field("model", model_name)
                 .finish(),
         }

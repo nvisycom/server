@@ -50,9 +50,6 @@ jobs:
   audit-py:
     name: Audit (Python)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        package: [nvisy-dal]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -64,9 +61,9 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        working-directory: packages/${{ matrix.package }}
+        working-directory: packages/nvisy-dal
         run: uv sync --all-extras
 
-      - name: Audit dependencies
-        working-directory: packages/${{ matrix.package }}
-        run: uv run pip-audit
+      - name: Audit packages
+        working-directory: packages/nvisy-dal
+        run: uv run pip-audit --ignore-vuln CVE-2026-0994

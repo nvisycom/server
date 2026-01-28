@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from nvisy_dal.errors import DalError, ErrorKind
 from nvisy_dal.generated.contexts import ObjectContext
+from nvisy_dal.generated.datatypes import Object
 from nvisy_dal.generated.params import ObjectParams
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ except ImportError as e:
     raise ImportError(_msg) from e
 
 
-class S3Credentials(BaseModel):
+class S3Credentials(BaseModel, frozen=True):
     """Credentials for S3 connection."""
 
     access_key_id: str
@@ -40,16 +41,6 @@ class S3Params(ObjectParams, frozen=True):
 
     content_type: str = "application/octet-stream"
     """Default content type for uploaded objects."""
-
-
-class S3Object(BaseModel):
-    """Representation of an S3 object."""
-
-    key: str
-    size: int
-    last_modified: str
-    etag: str
-    content: bytes | None = None
 
 
 class S3Provider:
@@ -93,8 +84,8 @@ class S3Provider:
     async def disconnect(self) -> None:
         """Close the S3 client (no-op for boto3)."""
 
-    async def read(self, ctx: ObjectContext) -> AsyncIterator[tuple[S3Object, ObjectContext]]:
-        """List objects from S3.
+    async def read(self, ctx: ObjectContext) -> AsyncIterator[tuple[Object, ObjectContext]]:
+        """List and fetch objects from S3.
 
         Yields tuples of (object, context) where context can be used to resume
         reading from the next object if the stream is interrupted.
@@ -123,20 +114,23 @@ class S3Provider:
 
                 for obj in response.get("Contents", []):
                     obj_key = obj.get("Key")
-                    obj_size = obj.get("Size")
-                    obj_modified = obj.get("LastModified")
-                    obj_etag = obj.get("ETag")
-
-                    if not obj_key or obj_size is None or not obj_modified or not obj_etag:
+                    if not obj_key:
                         continue
 
                     last_key = obj_key
-                    s3_obj = S3Object(
-                        key=obj_key,
-                        size=obj_size,
-                        last_modified=obj_modified.isoformat(),
-                        etag=obj_etag.strip('"'),
-                        content=None,
+
+                    # Fetch object content
+                    get_response = self._client.get_object(
+                        Bucket=self._params.bucket,
+                        Key=obj_key,
+                    )
+                    content = get_response["Body"].read()
+                    content_type = get_response.get("ContentType")
+
+                    obj_data = Object(
+                        path=obj_key,
+                        data=content,
+                        content_type=content_type,
                     )
 
                     # Create context for resumption after this object
@@ -144,7 +138,7 @@ class S3Provider:
                         prefix=prefix,
                         token=obj_key,
                     )
-                    yield (s3_obj, resume_ctx)
+                    yield (obj_data, resume_ctx)
 
                 if not response.get("IsTruncated"):
                     break
@@ -153,19 +147,17 @@ class S3Provider:
             msg = f"Failed to read from S3: {e}"
             raise DalError(msg, source=e) from e
 
-    async def write(self, items: Sequence[S3Object]) -> None:
+    async def write(self, items: Sequence[Object]) -> None:
         """Write objects to S3."""
         try:
             for item in items:
-                if item.content is None:
-                    continue
-
-                key = self._resolve_key(item.key)
+                key = self._resolve_key(item.path)
+                content_type = item.content_type or self._params.content_type
                 _ = self._client.put_object(
                     Bucket=self._params.bucket,
                     Key=key,
-                    Body=item.content,
-                    ContentType=self._params.content_type,
+                    Body=item.data,
+                    ContentType=content_type,
                 )
         except ClientError as e:
             msg = f"Failed to write to S3: {e}"

@@ -1,8 +1,6 @@
 //! rig-core trait implementations for EmbeddingProvider.
 
 use rig::embeddings::{Embedding, EmbeddingError, EmbeddingModel as RigEmbeddingModel};
-#[cfg(feature = "ollama")]
-use rig::providers::ollama;
 
 use super::provider::{DEFAULT_MAX_DOCUMENTS, EmbeddingProvider, EmbeddingService};
 
@@ -21,8 +19,6 @@ impl RigEmbeddingModel for EmbeddingProvider {
             EmbeddingService::OpenAi { model, .. } => model.ndims(),
             EmbeddingService::Cohere { model, .. } => model.ndims(),
             EmbeddingService::Gemini { model, .. } => model.ndims(),
-            #[cfg(feature = "ollama")]
-            EmbeddingService::Ollama { ndims, .. } => *ndims,
         }
     }
 
@@ -34,15 +30,6 @@ impl RigEmbeddingModel for EmbeddingProvider {
             EmbeddingService::OpenAi { model, .. } => model.embed_texts(texts).await,
             EmbeddingService::Cohere { model, .. } => model.embed_texts(texts).await,
             EmbeddingService::Gemini { model, .. } => model.embed_texts(texts).await,
-            #[cfg(feature = "ollama")]
-            EmbeddingService::Ollama {
-                client,
-                model_name,
-                ndims,
-            } => {
-                let model = ollama::EmbeddingModel::new(client.clone(), model_name, *ndims);
-                model.embed_texts(texts).await
-            }
         }
     }
 }

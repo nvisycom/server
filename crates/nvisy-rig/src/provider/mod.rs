@@ -6,14 +6,12 @@ mod embedding;
 pub mod splitting;
 
 pub use completion::{
-    AnthropicModel, CohereCompletionModel, CompletionCredentials, CompletionModel,
-    CompletionProvider, GeminiCompletionModel, OpenAiCompletionModel, PerplexityModel,
+    AnthropicModel, CohereCompletionModel, CompletionModel, CompletionProvider,
+    GeminiCompletionModel, OpenAiCompletionModel, PerplexityModel,
 };
-pub use credentials::{ApiKeyCredentials, OllamaCredentials};
-#[cfg(feature = "ollama")]
-pub use embedding::OllamaEmbeddingModel;
+pub use credentials::{ApiKeyCredentials, Credentials};
 pub use embedding::{
-    CohereEmbeddingModel, EmbeddingCredentials, EmbeddingModel, EmbeddingProvider,
-    GeminiEmbeddingModel, OpenAiEmbeddingModel,
+    CohereEmbeddingModel, EmbeddingModel, EmbeddingProvider, GeminiEmbeddingModel,
+    OpenAiEmbeddingModel,
 };
 pub use splitting::{Chunk, ChunkMetadata, OwnedChunk, TextSplitter};

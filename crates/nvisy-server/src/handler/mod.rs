@@ -6,6 +6,7 @@
 mod accounts;
 mod annotations;
 mod authentication;
+mod connections;
 mod error;
 mod files;
 mod integrations;
@@ -15,7 +16,6 @@ mod monitors;
 mod pipelines;
 pub mod request;
 pub mod response;
-mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -44,8 +44,8 @@ fn private_routes(
         .merge(accounts::routes(service_state.clone()))
         .merge(tokens::routes())
         .merge(workspaces::routes())
+        .merge(connections::routes())
         .merge(integrations::routes())
-        .merge(runs::routes())
         .merge(invites::routes())
         .merge(members::routes())
         .merge(webhooks::routes())

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from nvisy_dal.errors import DalError, ErrorKind
 from nvisy_dal.generated.contexts import RelationalContext
+from nvisy_dal.generated.datatypes import JsonValue, Record
 from nvisy_dal.generated.params import RelationalParams
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ except ImportError as e:
     raise ImportError(_msg) from e
 
 
-class PostgresCredentials(BaseModel):
+class PostgresCredentials(BaseModel, frozen=True):
     """Credentials for PostgreSQL connection.
 
     Uses a connection string (DSN) format: postgres://user:pass@host:port/database
@@ -113,19 +114,19 @@ class PostgresProvider:
         else:
             conditions.append(f"{cursor_col} > ${len(params)}")
 
-    def _extract_context(self, record_dict: dict[str, object]) -> RelationalContext:
+    def _extract_context(self, columns: dict[str, JsonValue]) -> RelationalContext:
         """Extract resumption context from a record."""
-        cursor_val = record_dict.get(self._params.cursor_column, "")
+        cursor_val = columns.get(self._params.cursor_column, "")
         cursor_value = str(cursor_val) if cursor_val is not None else ""
         tiebreaker_value: str | None = None
         if self._params.tiebreaker_column:
-            tb_val = record_dict.get(self._params.tiebreaker_column, "")
+            tb_val = columns.get(self._params.tiebreaker_column, "")
             tiebreaker_value = str(tb_val) if tb_val is not None else ""
         return RelationalContext(cursor=cursor_value, tiebreaker=tiebreaker_value)
 
     async def read(
         self, ctx: RelationalContext
-    ) -> AsyncIterator[tuple[dict[str, object], RelationalContext]]:
+    ) -> AsyncIterator[tuple[Record, RelationalContext]]:
         """Read records from the database using keyset pagination.
 
         Yields tuples of (record, context) where context can be used to resume
@@ -159,21 +160,22 @@ class PostgresProvider:
                     query_parts.append(f"ORDER BY {cursor_col}")
 
                 query = " ".join(query_parts)
-                async for record in conn.cursor(query, *params):
-                    record_dict: dict[str, object] = dict(record)
-                    yield (record_dict, self._extract_context(record_dict))
+                async for row in conn.cursor(query, *params):
+                    columns_dict: dict[str, JsonValue] = dict(row)
+                    record = Record(columns=columns_dict)
+                    yield (record, self._extract_context(columns_dict))
         except Exception as e:
             msg = f"Failed to read from PostgreSQL: {e}"
             raise DalError(msg, source=e) from e
 
-    async def write(self, items: Sequence[dict[str, object]]) -> None:
+    async def write(self, items: Sequence[Record]) -> None:
         """Write records to the database."""
         if not items:
             return
 
-        columns = list(items[0].keys())
-        placeholders = ", ".join(f"${i + 1}" for i in range(len(columns)))
-        column_names = ", ".join(f'"{c}"' for c in columns)
+        column_names_list = list(items[0].columns.keys())
+        placeholders = ", ".join(f"${i + 1}" for i in range(len(column_names_list)))
+        column_names = ", ".join(f'"{c}"' for c in column_names_list)
         table = f'"{self._params.schema_name}"."{self._params.table}"'
         query = f"INSERT INTO {table} ({column_names}) VALUES ({placeholders})"  # noqa: S608
 
@@ -181,7 +183,9 @@ class PostgresProvider:
             async with self._pool.acquire() as conn:
                 for i in range(0, len(items), self._params.batch_size):
                     batch = items[i : i + self._params.batch_size]
-                    await conn.executemany(query, [tuple(item.values()) for item in batch])
+                    await conn.executemany(
+                        query, [tuple(item.columns.values()) for item in batch]
+                    )
         except Exception as e:
             msg = f"Failed to write to PostgreSQL: {e}"
             raise DalError(msg, source=e) from e
@@ -195,22 +199,24 @@ class PostgresProvider:
             msg = f"Failed to execute query: {e}"
             raise DalError(msg, source=e) from e
 
-    async def fetch_one(self, query: str, *args: object) -> dict[str, object] | None:
+    async def fetch_one(self, query: str, *args: object) -> Record | None:
         """Fetch a single record."""
         try:
             async with self._pool.acquire() as conn:
-                record = await conn.fetchrow(query, *args)
-                return dict(record) if record else None
+                row = await conn.fetchrow(query, *args)
+                if row is None:
+                    return None
+                return Record(columns=dict(row))
         except Exception as e:
             msg = f"Failed to fetch record: {e}"
             raise DalError(msg, source=e) from e
 
-    async def fetch_all(self, query: str, *args: object) -> list[dict[str, object]]:
+    async def fetch_all(self, query: str, *args: object) -> list[Record]:
         """Fetch all records."""
         try:
             async with self._pool.acquire() as conn:
-                records = await conn.fetch(query, *args)
-                return [dict(record) for record in records]
+                rows = await conn.fetch(query, *args)
+                return [Record(columns=dict(row)) for row in rows]
         except Exception as e:
             msg = f"Failed to fetch records: {e}"
             raise DalError(msg, source=e) from e

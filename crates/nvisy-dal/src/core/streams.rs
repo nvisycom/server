@@ -4,9 +4,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::stream::BoxStream;
-use futures::{Sink, Stream};
+use futures::{Sink, Stream, StreamExt};
 
-use crate::{Error, Result};
+use crate::contexts::AnyContext;
+use crate::datatypes::AnyDataValue;
+use crate::{Error, Result, Resumable};
 
 /// A boxed stream of items with a lifetime.
 pub type ItemStream<'a, T> = BoxStream<'a, Result<T>>;
@@ -91,5 +93,30 @@ impl<T> Sink<T> for OutputStream<T> {
 impl<T> std::fmt::Debug for OutputStream<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputStream").finish_non_exhaustive()
+    }
+}
+
+/// Extension trait for converting typed input streams to type-erased streams.
+pub trait InputStreamExt<T, C> {
+    /// Converts this stream to a type-erased stream with `AnyDataValue` and `AnyContext`.
+    fn into_any(self) -> InputStream<Resumable<AnyDataValue, AnyContext>>
+    where
+        T: Into<AnyDataValue> + 'static,
+        C: Into<AnyContext> + 'static;
+}
+
+impl<T, C> InputStreamExt<T, C> for InputStream<Resumable<T, C>>
+where
+    T: Send,
+    C: Send,
+{
+    fn into_any(self) -> InputStream<Resumable<AnyDataValue, AnyContext>>
+    where
+        T: Into<AnyDataValue> + 'static,
+        C: Into<AnyContext> + 'static,
+    {
+        let mapped =
+            self.map(move |r| r.map(|item| Resumable::new(item.data.into(), item.context.into())));
+        InputStream::new(Box::pin(mapped))
     }
 }

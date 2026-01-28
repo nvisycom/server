@@ -24,8 +24,10 @@ mod file_chunks;
 mod files;
 
 // Pipeline-related constraint modules
+mod pipeline_artifacts;
 mod pipeline_runs;
 mod pipelines;
+mod workspace_connections;
 
 use std::fmt;
 
@@ -38,9 +40,11 @@ pub use self::accounts::AccountConstraints;
 pub use self::file_annotations::FileAnnotationConstraints;
 pub use self::file_chunks::FileChunkConstraints;
 pub use self::files::FileConstraints;
+pub use self::pipeline_artifacts::PipelineArtifactConstraints;
 pub use self::pipeline_runs::PipelineRunConstraints;
 pub use self::pipelines::PipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
+pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_integration_runs::WorkspaceIntegrationRunConstraints;
 pub use self::workspace_integrations::WorkspaceIntegrationConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
@@ -79,6 +83,8 @@ pub enum ConstraintViolation {
     // Pipeline-related constraints
     Pipeline(PipelineConstraints),
     PipelineRun(PipelineRunConstraints),
+    PipelineArtifact(PipelineArtifactConstraints),
+    WorkspaceConnection(WorkspaceConnectionConstraints),
 }
 
 /// Categories of database constraint violations.
@@ -146,6 +152,7 @@ impl ConstraintViolation {
                 WorkspaceIntegrationConstraints::new => WorkspaceIntegration,
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
                 WorkspaceIntegrationRunConstraints::new => WorkspaceIntegrationRun,
+                WorkspaceConnectionConstraints::new => WorkspaceConnection,
             },
             "files" => try_parse!(FileConstraints::new => File),
             "file" => try_parse! {
@@ -153,7 +160,10 @@ impl ConstraintViolation {
                 FileChunkConstraints::new => FileChunk,
             },
             "pipelines" => try_parse!(PipelineConstraints::new => Pipeline),
-            "pipeline" => try_parse!(PipelineRunConstraints::new => PipelineRun),
+            "pipeline" => try_parse! {
+                PipelineRunConstraints::new => PipelineRun,
+                PipelineArtifactConstraints::new => PipelineArtifact,
+            },
             _ => None,
         }
     }
@@ -186,6 +196,8 @@ impl ConstraintViolation {
             // Pipeline-related tables
             ConstraintViolation::Pipeline(_) => "pipelines",
             ConstraintViolation::PipelineRun(_) => "pipeline_runs",
+            ConstraintViolation::PipelineArtifact(_) => "pipeline_artifacts",
+            ConstraintViolation::WorkspaceConnection(_) => "workspace_connections",
         }
     }
 
@@ -211,7 +223,11 @@ impl ConstraintViolation {
             | ConstraintViolation::FileAnnotation(_)
             | ConstraintViolation::FileChunk(_) => "files",
 
-            ConstraintViolation::Pipeline(_) | ConstraintViolation::PipelineRun(_) => "pipelines",
+            ConstraintViolation::Pipeline(_)
+            | ConstraintViolation::PipelineRun(_)
+            | ConstraintViolation::PipelineArtifact(_) => "pipelines",
+
+            ConstraintViolation::WorkspaceConnection(_) => "connections",
         }
     }
 
@@ -239,6 +255,8 @@ impl ConstraintViolation {
 
             ConstraintViolation::Pipeline(c) => c.categorize(),
             ConstraintViolation::PipelineRun(c) => c.categorize(),
+            ConstraintViolation::PipelineArtifact(c) => c.categorize(),
+            ConstraintViolation::WorkspaceConnection(c) => c.categorize(),
         }
     }
 
@@ -271,6 +289,8 @@ impl fmt::Display for ConstraintViolation {
 
             ConstraintViolation::Pipeline(c) => write!(f, "{}", c),
             ConstraintViolation::PipelineRun(c) => write!(f, "{}", c),
+            ConstraintViolation::PipelineArtifact(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceConnection(c) => write!(f, "{}", c),
         }
     }
 }

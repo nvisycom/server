@@ -1,7 +1,7 @@
 //! Embedding transform definition.
 
 use nvisy_core::Provider;
-use nvisy_rig::provider::{EmbeddingCredentials, EmbeddingModel, EmbeddingProvider};
+use nvisy_rig::provider::{Credentials, EmbeddingModel, EmbeddingProvider};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,10 +24,12 @@ pub struct Embedding {
 
 impl Embedding {
     /// Creates an embedding provider from these parameters and credentials.
-    pub async fn into_provider(
-        self,
-        credentials: EmbeddingCredentials,
-    ) -> Result<EmbeddingProvider> {
+    pub async fn into_provider(self, credentials: Credentials) -> Result<EmbeddingProvider> {
+        // Validate that credentials support embedding
+        credentials
+            .require_embedding_support()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
         EmbeddingProvider::connect(self.model, credentials)
             .await
             .map_err(|e| Error::Internal(e.to_string()))

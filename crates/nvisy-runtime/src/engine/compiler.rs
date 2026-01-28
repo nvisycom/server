@@ -12,15 +12,16 @@
 
 use std::collections::HashMap;
 
-use nvisy_dal::provider::{AnyParams, AnyProvider};
+use nvisy_dal::provider::{PostgresProvider, S3Provider};
+use nvisy_dal::streams::InputStreamExt;
 use nvisy_dal::{DataInput, Provider};
 use nvisy_rig::agent::{
     StructuredOutputAgent, TableAgent, TextAnalysisAgent, TextGenerationAgent, VisionAgent,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use super::credentials::CredentialsRegistry;
-use crate::definition::{Input, NodeId, NodeKind, Output, Workflow};
+use super::connection::{ConnectionRegistry, DalConnection};
+use crate::definition::{Input, InputParams, NodeId, NodeKind, Output, Workflow};
 use crate::error::{Error, Result};
 use crate::graph::{
     ChunkProcessor, CompiledGraph, CompiledNode, CompiledSwitch, CompiledTransform,
@@ -30,13 +31,13 @@ use crate::graph::{
 
 /// Workflow compiler that transforms definitions into executable graphs.
 pub struct WorkflowCompiler<'a> {
-    /// Credentials registry for resolving provider credentials.
-    registry: &'a CredentialsRegistry,
+    /// Connection registry for resolving provider connections.
+    registry: &'a ConnectionRegistry,
 }
 
 impl<'a> WorkflowCompiler<'a> {
     /// Creates a new workflow compiler.
-    pub fn new(registry: &'a CredentialsRegistry) -> Self {
+    pub fn new(registry: &'a ConnectionRegistry) -> Self {
         Self { registry }
     }
 
@@ -228,21 +229,15 @@ impl<'a> WorkflowCompiler<'a> {
     async fn create_input_stream(&self, input: &Input) -> Result<InputStream> {
         match input {
             Input::Provider(provider_input) => {
-                let params = AnyParams::from(provider_input.params.clone());
-                let (creds, ctx) = self
+                let dal_creds = self
                     .registry
                     .get(provider_input.credentials_id)?
                     .clone()
-                    .into_dal_credentials()?;
+                    .into_dal()?;
 
-                let provider = AnyProvider::connect(params, creds)
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?;
-
-                let stream = provider
-                    .read(&ctx)
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?;
+                let stream = self
+                    .connect_and_read(&provider_input.params, dal_creds)
+                    .await?;
 
                 Ok(stream)
             }
@@ -253,6 +248,55 @@ impl<'a> WorkflowCompiler<'a> {
                     "cache input nodes should be resolved before compilation".into(),
                 ))
             }
+        }
+    }
+
+    /// Connects to a provider and returns a read stream.
+    ///
+    /// Uses concrete provider types based on InputParams variant.
+    async fn connect_and_read(
+        &self,
+        params: &InputParams,
+        dal_conn: DalConnection,
+    ) -> Result<InputStream> {
+        match (params, dal_conn) {
+            (
+                InputParams::Postgres(p),
+                DalConnection::Postgres {
+                    credentials,
+                    context,
+                },
+            ) => {
+                let provider = PostgresProvider::connect(p.clone(), credentials)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+                let stream = provider
+                    .read(&context)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+                Ok(stream.into_any())
+            }
+            (
+                InputParams::S3(p),
+                DalConnection::S3 {
+                    credentials,
+                    context,
+                },
+            ) => {
+                let provider = S3Provider::connect(p.clone(), credentials)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+                let stream = provider
+                    .read(&context)
+                    .await
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+                Ok(stream.into_any())
+            }
+            (params, conn) => Err(Error::Internal(format!(
+                "mismatched params and connection: {:?} vs {:?}",
+                std::mem::discriminant(params),
+                std::mem::discriminant(&conn),
+            ))),
         }
     }
 

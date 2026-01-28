@@ -1,11 +1,13 @@
 """Pinecone vector database provider."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 from pydantic import BaseModel
 
 from nvisy_dal.errors import DalError, ErrorKind
+from nvisy_dal.generated.datatypes import Embedding
+from nvisy_dal.generated.params import VectorParams
 
 if TYPE_CHECKING:
     from pinecone import Pinecone
@@ -17,34 +19,29 @@ except ImportError as e:
     _msg = "pinecone is required for Pinecone support. Install with: uv add 'nvisy-dal[pinecone]'"
     raise ImportError(_msg) from e
 
-# Pinecone metadata value types
-type MetadataValue = str | int | float | list[str] | list[int] | list[float]
-type Metadata = Mapping[str, MetadataValue]
 
-
-class PineconeCredentials(BaseModel):
+class PineconeCredentials(BaseModel, frozen=True):
     """Credentials for Pinecone connection."""
 
     api_key: str
 
 
-class PineconeParams(BaseModel):
-    """Parameters for Pinecone operations."""
+class PineconeParams(VectorParams, frozen=True):
+    """Parameters for Pinecone operations.
 
-    index_name: str
+    Inherits `collection`, `dimension`, `metric`, and `batch_size` from VectorParams.
+    """
+
     namespace: str = ""
-
-
-class PineconeVector(BaseModel):
-    """Representation of a Pinecone vector."""
-
-    id: str
-    values: list[float]
-    metadata: dict[str, MetadataValue] | None = None
+    """Pinecone namespace for isolating vectors."""
 
 
 class PineconeProvider:
-    """Pinecone provider for vector upsert operations."""
+    """Pinecone provider for vector database operations.
+
+    Implements Provider[PineconeCredentials, PineconeParams] and
+    DataOutput[Embedding].
+    """
 
     __slots__: ClassVar[tuple[str, str, str]] = ("_client", "_index", "_params")
 
@@ -62,7 +59,7 @@ class PineconeProvider:
         """Create Pinecone client and connect to index."""
         try:
             client = Pinecone(api_key=credentials.api_key)
-            index = client.Index(params.index_name)  # pyright: ignore[reportUnknownMemberType]
+            index = client.Index(params.collection)  # pyright: ignore[reportUnknownMemberType]
             # Verify connection
             _ = index.describe_index_stats()  # pyright: ignore[reportUnknownMemberType]
         except Exception as e:
@@ -74,31 +71,29 @@ class PineconeProvider:
     async def disconnect(self) -> None:
         """Close the Pinecone client (no-op)."""
 
-    async def upsert(self, vectors: Sequence[PineconeVector]) -> int:
-        """Upsert vectors to Pinecone. Returns count of upserted vectors."""
-        if not vectors:
-            return 0
+    async def write(self, items: Sequence[Embedding]) -> None:
+        """Write embeddings to Pinecone."""
+        if not items:
+            return
 
         try:
-            records = [Vector(id=v.id, values=v.values, metadata=v.metadata) for v in vectors]
+            records = [
+                Vector(id=e.id, values=e.vector, metadata=e.metadata)  # pyright: ignore[reportArgumentType]
+                for e in items
+            ]
 
-            upserted = 0
-            batch_size = 100
-            for i in range(0, len(records), batch_size):
-                batch = list(records[i : i + batch_size])
-                response = cast(
+            for i in range(0, len(records), self._params.batch_size):
+                batch = list(records[i : i + self._params.batch_size])
+                _ = cast(
                     "UpsertResponse",
                     self._index.upsert(  # pyright: ignore[reportUnknownMemberType]
                         vectors=batch,
                         namespace=self._params.namespace,
                     ),
                 )
-                upserted += response.upserted_count or len(batch)
         except Exception as e:
-            msg = f"Failed to upsert to Pinecone: {e}"
+            msg = f"Failed to write to Pinecone: {e}"
             raise DalError(msg, source=e) from e
-        else:
-            return upserted
 
 
 Provider = PineconeProvider

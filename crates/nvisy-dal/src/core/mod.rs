@@ -5,6 +5,7 @@ pub mod datatypes;
 pub mod params;
 pub mod streams;
 
+pub use nvisy_core::Provider;
 use streams::InputStream;
 
 use crate::Result;

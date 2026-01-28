@@ -1,5 +1,67 @@
--- Pipeline: Workflow definitions and execution tracking
+-- Pipeline: Workflow definitions, connections, and execution tracking
 -- This migration creates tables for user-defined processing pipelines
+
+-- Workspace connections table (encrypted provider credentials + context)
+CREATE TABLE workspace_connections (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Core attributes
+    name            TEXT            NOT NULL,
+    provider        TEXT            NOT NULL,
+
+    CONSTRAINT workspace_connections_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
+
+    -- Encrypted connection data (XChaCha20-Poly1305 encrypted JSON)
+    -- Contains: {"type": "postgres", "credentials": {...}, "context": {...}}
+    -- The context includes resumption state (last cursor, offset, etc.)
+    encrypted_data  BYTEA           NOT NULL,
+
+    CONSTRAINT workspace_connections_data_size CHECK (length(encrypted_data) BETWEEN 1 AND 65536),
+
+    -- Lifecycle timestamps
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
+    deleted_at      TIMESTAMPTZ     DEFAULT NULL,
+
+    CONSTRAINT workspace_connections_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_connections_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
+);
+
+-- Triggers
+SELECT setup_updated_at('workspace_connections');
+
+-- Indexes
+CREATE INDEX workspace_connections_workspace_idx
+    ON workspace_connections (workspace_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX workspace_connections_provider_idx
+    ON workspace_connections (provider, workspace_id)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX workspace_connections_name_unique_idx
+    ON workspace_connections (workspace_id, lower(trim(name)))
+    WHERE deleted_at IS NULL;
+
+-- Comments
+COMMENT ON TABLE workspace_connections IS
+    'Encrypted provider connections (credentials + context) scoped to workspaces.';
+
+COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
+COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace reference';
+COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
+COMMENT ON COLUMN workspace_connections.name IS 'Human-readable connection name (1-255 chars)';
+COMMENT ON COLUMN workspace_connections.provider IS 'Provider type (openai, postgres, s3, pinecone, etc.)';
+COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with credentials and context';
+COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
+COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
+COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft deletion timestamp';
 
 -- Pipeline status enum
 CREATE TYPE PIPELINE_STATUS AS ENUM (
@@ -33,8 +95,8 @@ CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
 COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS
     'How a pipeline run was initiated.';
 
--- Pipeline definitions table
-CREATE TABLE pipelines (
+-- Workspace pipeline definitions table
+CREATE TABLE workspace_pipelines (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -47,64 +109,76 @@ CREATE TABLE pipelines (
     description     TEXT             DEFAULT NULL,
     status          PIPELINE_STATUS  NOT NULL DEFAULT 'draft',
 
-    CONSTRAINT pipelines_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
-    CONSTRAINT pipelines_description_length CHECK (description IS NULL OR length(description) <= 4096),
+    CONSTRAINT workspace_pipelines_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_pipelines_description_length CHECK (description IS NULL OR length(description) <= 4096),
 
     -- Pipeline definition (flexible JSONB structure)
     -- Contains: steps[], input_schema, output_schema, variables, etc.
-    definition      JSONB            NOT NULL DEFAULT '{"steps": []}',
+    definition      JSONB            NOT NULL,
 
-    CONSTRAINT pipelines_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
+    CONSTRAINT workspace_pipelines_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
 
     -- Configuration
     metadata        JSONB            NOT NULL DEFAULT '{}',
 
-    CONSTRAINT pipelines_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+    CONSTRAINT workspace_pipelines_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+
+    -- Scheduling (optional)
+    schedule_cron   TEXT             DEFAULT NULL,
+    schedule_tz     TEXT             DEFAULT 'UTC',
+    next_run_at     TIMESTAMPTZ      DEFAULT NULL,
+
+    CONSTRAINT workspace_pipelines_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
+    CONSTRAINT workspace_pipelines_schedule_tz_length CHECK (length(schedule_tz) BETWEEN 1 AND 64),
+    CONSTRAINT workspace_pipelines_schedule_requires_cron CHECK (next_run_at IS NULL OR schedule_cron IS NOT NULL),
 
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     deleted_at      TIMESTAMPTZ      DEFAULT NULL,
 
-    CONSTRAINT pipelines_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT pipelines_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
+    CONSTRAINT workspace_pipelines_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_pipelines_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 
 -- Triggers
-SELECT setup_updated_at('pipelines');
+SELECT setup_updated_at('workspace_pipelines');
 
 -- Indexes
-CREATE INDEX pipelines_workspace_idx
-    ON pipelines (workspace_id, created_at DESC)
+CREATE INDEX workspace_pipelines_workspace_idx
+    ON workspace_pipelines (workspace_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX pipelines_account_idx
-    ON pipelines (account_id, created_at DESC)
+CREATE INDEX workspace_pipelines_account_idx
+    ON workspace_pipelines (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX pipelines_status_idx
-    ON pipelines (status, workspace_id)
+CREATE INDEX workspace_pipelines_status_idx
+    ON workspace_pipelines (status, workspace_id)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX pipelines_name_trgm_idx
-    ON pipelines USING gin (name gin_trgm_ops)
+CREATE INDEX workspace_pipelines_name_trgm_idx
+    ON workspace_pipelines USING gin (name gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
 -- Comments
-COMMENT ON TABLE pipelines IS
+COMMENT ON TABLE workspace_pipelines IS
     'User-defined processing pipeline definitions with step configurations.';
 
-COMMENT ON COLUMN pipelines.id IS 'Unique pipeline identifier';
-COMMENT ON COLUMN pipelines.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN pipelines.account_id IS 'Creator account reference';
-COMMENT ON COLUMN pipelines.name IS 'Pipeline name (1-255 chars)';
-COMMENT ON COLUMN pipelines.description IS 'Pipeline description (up to 4096 chars)';
-COMMENT ON COLUMN pipelines.status IS 'Pipeline lifecycle status';
-COMMENT ON COLUMN pipelines.definition IS 'Pipeline definition JSON (steps, input/output schemas, etc.)';
-COMMENT ON COLUMN pipelines.metadata IS 'Extended metadata';
-COMMENT ON COLUMN pipelines.created_at IS 'Creation timestamp';
-COMMENT ON COLUMN pipelines.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN pipelines.deleted_at IS 'Soft deletion timestamp';
+COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
+COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Parent workspace reference';
+COMMENT ON COLUMN workspace_pipelines.account_id IS 'Creator account reference';
+COMMENT ON COLUMN workspace_pipelines.name IS 'Pipeline name (1-255 chars)';
+COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 4096 chars)';
+COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';
+COMMENT ON COLUMN workspace_pipelines.definition IS 'Pipeline definition JSON (steps, input/output schemas, etc.)';
+COMMENT ON COLUMN workspace_pipelines.metadata IS 'Extended metadata';
+COMMENT ON COLUMN workspace_pipelines.schedule_cron IS 'Cron expression for scheduled runs (e.g., "0 0 * * *")';
+COMMENT ON COLUMN workspace_pipelines.schedule_tz IS 'Timezone for schedule interpretation (default: UTC)';
+COMMENT ON COLUMN workspace_pipelines.next_run_at IS 'Next scheduled run time (computed from cron)';
+COMMENT ON COLUMN workspace_pipelines.created_at IS 'Creation timestamp';
+COMMENT ON COLUMN workspace_pipelines.updated_at IS 'Last modification timestamp';
+COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft deletion timestamp';
 
 -- Pipeline runs table (execution instances)
 CREATE TABLE pipeline_runs (
@@ -112,7 +186,7 @@ CREATE TABLE pipeline_runs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    pipeline_id     UUID                    NOT NULL REFERENCES pipelines (id) ON DELETE CASCADE,
+    pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
     workspace_id    UUID                    NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
@@ -201,7 +275,7 @@ SELECT
     pr.created_at,
     EXTRACT(EPOCH FROM (COALESCE(pr.completed_at, current_timestamp) - pr.started_at)) AS duration_seconds
 FROM pipeline_runs pr
-    JOIN pipelines p ON pr.pipeline_id = p.id
+    JOIN workspace_pipelines p ON pr.pipeline_id = p.id
 WHERE pr.status IN ('queued', 'running')
 ORDER BY pr.created_at DESC;
 
@@ -223,9 +297,58 @@ SELECT
     pr.error IS NOT NULL AS has_error,
     pr.created_at
 FROM pipeline_runs pr
-    JOIN pipelines p ON pr.pipeline_id = p.id
+    JOIN workspace_pipelines p ON pr.pipeline_id = p.id
 WHERE pr.status IN ('completed', 'failed', 'cancelled')
 ORDER BY pr.completed_at DESC;
 
 COMMENT ON VIEW pipeline_run_history IS
     'Completed pipeline runs for history and analytics.';
+
+-- Artifact type enum
+CREATE TYPE ARTIFACT_TYPE AS ENUM (
+    'input',        -- Input data for the run
+    'output',       -- Final output data
+    'intermediate'  -- Intermediate data between nodes
+);
+
+COMMENT ON TYPE ARTIFACT_TYPE IS
+    'Classification of pipeline run artifacts.';
+
+-- Pipeline artifacts table
+CREATE TABLE pipeline_artifacts (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    run_id          UUID            NOT NULL REFERENCES pipeline_runs (id) ON DELETE CASCADE,
+    file_id         UUID            NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
+
+    -- Artifact attributes
+    artifact_type   ARTIFACT_TYPE   NOT NULL,
+
+    -- Metadata
+    metadata        JSONB           NOT NULL DEFAULT '{}',
+
+    CONSTRAINT pipeline_artifacts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+
+    -- Timestamps
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp
+);
+
+-- Indexes
+CREATE INDEX pipeline_artifacts_run_idx
+    ON pipeline_artifacts (run_id, artifact_type);
+
+CREATE INDEX pipeline_artifacts_file_idx
+    ON pipeline_artifacts (file_id);
+
+-- Comments
+COMMENT ON TABLE pipeline_artifacts IS
+    'Artifacts produced during pipeline runs (inputs, outputs, intermediates).';
+
+COMMENT ON COLUMN pipeline_artifacts.id IS 'Unique artifact identifier';
+COMMENT ON COLUMN pipeline_artifacts.run_id IS 'Reference to pipeline run';
+COMMENT ON COLUMN pipeline_artifacts.file_id IS 'Reference to file storing the artifact data';
+COMMENT ON COLUMN pipeline_artifacts.artifact_type IS 'Type of artifact (input, output, intermediate)';
+COMMENT ON COLUMN pipeline_artifacts.metadata IS 'Extended metadata (checksums, counts, etc.)';
+COMMENT ON COLUMN pipeline_artifacts.created_at IS 'Creation timestamp';

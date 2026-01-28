@@ -3,18 +3,12 @@
 use std::sync::Arc;
 
 use nvisy_core::Provider;
-#[cfg(feature = "ollama")]
-use rig::client::Nothing;
 use rig::embeddings::{Embedding, EmbeddingModel as RigEmbeddingModel};
 use rig::prelude::EmbeddingsClient;
-#[cfg(feature = "ollama")]
-use rig::providers::ollama;
 use rig::providers::{cohere, gemini, openai};
 
-use super::credentials::EmbeddingCredentials;
+use super::super::credentials::Credentials;
 use super::model::EmbeddingModel;
-#[cfg(feature = "ollama")]
-use super::model::OllamaEmbeddingModel;
 use crate::Error;
 
 /// Default maximum documents per embedding request.
@@ -41,25 +35,22 @@ pub(crate) enum EmbeddingService {
         model: gemini::embedding::EmbeddingModel,
         model_name: String,
     },
-    #[cfg(feature = "ollama")]
-    Ollama {
-        client: ollama::Client,
-        model_name: String,
-        ndims: usize,
-    },
 }
 
 #[async_trait::async_trait]
 impl Provider for EmbeddingProvider {
-    type Credentials = EmbeddingCredentials;
+    type Credentials = Credentials;
     type Params = EmbeddingModel;
 
     async fn connect(
         params: Self::Params,
         credentials: Self::Credentials,
     ) -> nvisy_core::Result<Self> {
+        // Validate that credentials support embedding
+        credentials.require_embedding_support()?;
+
         let inner = match (credentials, params) {
-            (EmbeddingCredentials::OpenAi(c), EmbeddingModel::OpenAi(m)) => {
+            (Credentials::OpenAi(c), EmbeddingModel::OpenAi(m)) => {
                 let client = openai::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("openai", e.to_string()))?;
                 EmbeddingService::OpenAi {
@@ -67,7 +58,7 @@ impl Provider for EmbeddingProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (EmbeddingCredentials::Cohere(c), EmbeddingModel::Cohere(m)) => {
+            (Credentials::Cohere(c), EmbeddingModel::Cohere(m)) => {
                 let client = cohere::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("cohere", e.to_string()))?;
                 EmbeddingService::Cohere {
@@ -79,7 +70,7 @@ impl Provider for EmbeddingProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            (EmbeddingCredentials::Gemini(c), EmbeddingModel::Gemini(m)) => {
+            (Credentials::Gemini(c), EmbeddingModel::Gemini(m)) => {
                 let client = gemini::Client::new(&c.api_key)
                     .map_err(|e| Error::provider("gemini", e.to_string()))?;
                 EmbeddingService::Gemini {
@@ -87,20 +78,6 @@ impl Provider for EmbeddingProvider {
                     model_name: m.as_ref().to_string(),
                 }
             }
-            #[cfg(feature = "ollama")]
-            (EmbeddingCredentials::Ollama(c), EmbeddingModel::Ollama(m)) => {
-                let client = ollama::Client::builder()
-                    .api_key(Nothing)
-                    .base_url(&c.base_url)
-                    .build()
-                    .map_err(|e| Error::provider("ollama", e.to_string()))?;
-                EmbeddingService::Ollama {
-                    client,
-                    model_name: m.name.clone(),
-                    ndims: m.dimensions,
-                }
-            }
-            #[allow(unreachable_patterns)]
             _ => return Err(Error::config("mismatched credentials and model provider").into()),
         };
         Ok(Self(Arc::new(inner)))
@@ -113,29 +90,12 @@ impl EmbeddingProvider {
         &self.0
     }
 
-    /// Creates an Ollama embedding provider (convenience for local development).
-    #[cfg(feature = "ollama")]
-    pub fn ollama(base_url: &str, model: OllamaEmbeddingModel) -> nvisy_core::Result<Self> {
-        let client = ollama::Client::builder()
-            .api_key(Nothing)
-            .base_url(base_url)
-            .build()
-            .map_err(|e| Error::provider("ollama", e.to_string()))?;
-        Ok(Self(Arc::new(EmbeddingService::Ollama {
-            client,
-            model_name: model.name,
-            ndims: model.dimensions,
-        })))
-    }
-
     /// Returns the model name.
     pub fn model_name(&self) -> &str {
         match self.0.as_ref() {
             EmbeddingService::OpenAi { model_name, .. } => model_name,
             EmbeddingService::Cohere { model_name, .. } => model_name,
             EmbeddingService::Gemini { model_name, .. } => model_name,
-            #[cfg(feature = "ollama")]
-            EmbeddingService::Ollama { model_name, .. } => model_name,
         }
     }
 
@@ -145,8 +105,6 @@ impl EmbeddingProvider {
             EmbeddingService::OpenAi { .. } => "openai",
             EmbeddingService::Cohere { .. } => "cohere",
             EmbeddingService::Gemini { .. } => "gemini",
-            #[cfg(feature = "ollama")]
-            EmbeddingService::Ollama { .. } => "ollama",
         }
     }
 
@@ -189,14 +147,6 @@ impl std::fmt::Debug for EmbeddingProvider {
                 .debug_struct("EmbeddingProvider::Gemini")
                 .field("model", model_name)
                 .field("ndims", &model.ndims())
-                .finish(),
-            #[cfg(feature = "ollama")]
-            EmbeddingService::Ollama {
-                model_name, ndims, ..
-            } => f
-                .debug_struct("EmbeddingProvider::Ollama")
-                .field("model", model_name)
-                .field("ndims", ndims)
                 .finish(),
         }
     }

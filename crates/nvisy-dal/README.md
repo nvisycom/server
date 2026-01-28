@@ -4,50 +4,43 @@
 
 Data Abstraction Layer for workflow inputs and outputs.
 
-## Overview
+This crate provides a unified interface for reading and writing data
+across various storage backends.
 
-This crate provides a unified interface for reading and writing data across various storage backends. It supports blob storage, relational databases, and vector databases.
+## Architecture
+
+The DAL is split into two parts:
+- **Rust**: Streaming, observability, unified interface, server integration
+- **Python**: Provider implementations, client libraries, external integrations
 
 ## Modules
 
-- **`context`** - Context types for data operations (target, cursor, limit)
-- **`datatype`** - Data types that flow through the DAL (Blob, Document, Embedding, Record, Graph, Message)
-- **`provider`** - Storage and database providers
-- **`stream`** - Stream types (`InputStream`, `OutputStream`) wrapping `BoxStream`
-- **`traits`** - Core traits (`DataInput`, `DataOutput`)
+- **`contexts`** - Pagination context types for resumable streaming
+- **`datatypes`** - Data types that flow through providers
+- **`params`** - Provider parameters for read/write operations
+- **`streams`** - Async stream types for input/output
+- **`provider`** - Storage and database provider implementations
 
 ## Data Types
 
 All types implement the `DataType` marker trait:
 
-- **Blob** - Binary data with path and optional content type
-- **Document** - Structured documents with title, content, and metadata
-- **Embedding** - Vector embeddings with metadata for similarity search
-- **Record** - Tabular data as key-value maps
-- **Graph** - Graph structures with nodes and edges
-- **Message** - Messages for queue-based systems
+- **Object** - Binary data with path and content type
+- **Document** - JSON content with metadata
+- **Embedding** - Vector with metadata
+- **Record** - Key-value column map
+- **Message** - Payload with headers
+- **Graph** - Nodes and edges
 
-## Streams
+## Core Traits
 
-The DAL uses wrapped stream types for better ergonomics with pagination support and streaming I/O operations.
+- **`DataInput`** - Async read operations returning streams of resumable items
+- **`DataOutput`** - Async write operations for batches
+- **`Provider`** - Connection lifecycle management (from `nvisy-core`)
 
-## Usage
+## Resumable Streaming
 
-The DAL provides a consistent interface across all provider types. Create a provider with appropriate credentials and configuration, then use the `DataInput` and `DataOutput` traits for reading and writing data with proper context and stream handling.
-
-## Traits
-
-### DataInput
-
-Provides async read operations that return paginated streams of data.
-
-### DataOutput
-
-Provides async write operations for batches of data items.
-
-## Context
-
-The `Context` struct provides configuration for read/write operations including target specification (collection, table, bucket prefix), pagination cursors, and data limits.
+Each read item is paired with a context for resumption, enabling efficient recovery if streaming is interrupted.
 
 ## Changelog
 

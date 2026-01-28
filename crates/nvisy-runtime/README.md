@@ -30,7 +30,7 @@ use nvisy_runtime::definition::{
     Input, Node, NodeKind, Output, Workflow,
 };
 use nvisy_runtime::engine::Engine;
-use nvisy_runtime::provider::CredentialsRegistry;
+use nvisy_runtime::ConnectionRegistry;
 
 // Create a workflow definition
 let mut workflow = Workflow::new();
@@ -40,9 +40,8 @@ let mut workflow = Workflow::new();
 
 // Execute the workflow
 let engine = Engine::with_defaults();
-let registry = CredentialsRegistry::default();
-let ctx = nvisy_dal::core::Context::default();
-let result = engine.execute(workflow, registry, ctx).await?;
+let registry = ConnectionRegistry::default();
+let result = engine.execute(workflow, registry).await?;
 ```
 
 ## Changelog

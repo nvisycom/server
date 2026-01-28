@@ -6,7 +6,7 @@
 //! Data types for input/output are in the `core` module:
 //! - `Record` for PostgreSQL rows
 //! - `Object` for S3 objects
-//! - `Embedding` for Pinecone vectors
+//! - `Embedding` for vector databases
 //!
 //! Context types for pagination are in the `core` module:
 //! - `RelationalContext` for relational databases
@@ -17,18 +17,27 @@
 //! - `postgres`: PostgreSQL relational database
 //! - `s3`: AWS S3 / MinIO object storage
 //! - `pinecone`: Pinecone vector database
+//! - `qdrant`: Qdrant vector database
+//! - `milvus`: Milvus vector database
+//! - `weaviate`: Weaviate vector database
 
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
 
+mod milvus;
 mod pinecone;
 mod postgres;
+mod qdrant;
 mod s3;
+mod weaviate;
 
+pub use self::milvus::{MilvusCredentials, MilvusParams, MilvusProvider};
 pub use self::pinecone::{PineconeCredentials, PineconeParams, PineconeProvider};
 pub use self::postgres::{PostgresCredentials, PostgresParams, PostgresProvider};
+pub use self::qdrant::{QdrantCredentials, QdrantParams, QdrantProvider};
 pub use self::s3::{S3Credentials, S3Params, S3Provider};
+pub use self::weaviate::{WeaviateCredentials, WeaviateParams, WeaviateProvider};
 
 /// Type-erased credentials for any provider.
 #[derive(Debug, Clone, From, AsRefStr, Serialize, Deserialize)]
@@ -41,6 +50,12 @@ pub enum AnyCredentials {
     S3(S3Credentials),
     /// Pinecone credentials.
     Pinecone(PineconeCredentials),
+    /// Qdrant credentials.
+    Qdrant(QdrantCredentials),
+    /// Milvus credentials.
+    Milvus(MilvusCredentials),
+    /// Weaviate credentials.
+    Weaviate(WeaviateCredentials),
 }
 
 /// Type-erased parameters for any provider.
@@ -54,6 +69,12 @@ pub enum AnyParams {
     S3(S3Params),
     /// Pinecone parameters.
     Pinecone(PineconeParams),
+    /// Qdrant parameters.
+    Qdrant(QdrantParams),
+    /// Milvus parameters.
+    Milvus(MilvusParams),
+    /// Weaviate parameters.
+    Weaviate(WeaviateParams),
 }
 
 /// Type-erased provider instance.
@@ -65,14 +86,13 @@ pub enum AnyProvider {
     S3(S3Provider),
     /// Pinecone provider.
     Pinecone(PineconeProvider),
+    /// Qdrant provider.
+    Qdrant(QdrantProvider),
+    /// Milvus provider.
+    Milvus(MilvusProvider),
+    /// Weaviate provider.
+    Weaviate(WeaviateProvider),
 }
-
-use futures::StreamExt;
-
-use crate::contexts::AnyContext;
-use crate::datatypes::AnyDataValue;
-use crate::streams::InputStream;
-use crate::{DataInput, DataOutput, Error, Result, Resumable};
 
 #[async_trait::async_trait]
 impl crate::Provider for AnyProvider {
@@ -96,6 +116,18 @@ impl crate::Provider for AnyProvider {
                 let provider = PineconeProvider::connect(params, credentials).await?;
                 Ok(Self::Pinecone(provider))
             }
+            (AnyParams::Qdrant(params), AnyCredentials::Qdrant(credentials)) => {
+                let provider = QdrantProvider::connect(params, credentials).await?;
+                Ok(Self::Qdrant(provider))
+            }
+            (AnyParams::Milvus(params), AnyCredentials::Milvus(credentials)) => {
+                let provider = MilvusProvider::connect(params, credentials).await?;
+                Ok(Self::Milvus(provider))
+            }
+            (AnyParams::Weaviate(params), AnyCredentials::Weaviate(credentials)) => {
+                let provider = WeaviateProvider::connect(params, credentials).await?;
+                Ok(Self::Weaviate(provider))
+            }
             (params, credentials) => Err(nvisy_core::Error::new(
                 nvisy_core::ErrorKind::InvalidInput,
             )
@@ -112,98 +144,9 @@ impl crate::Provider for AnyProvider {
             Self::Postgres(provider) => provider.disconnect().await,
             Self::S3(provider) => provider.disconnect().await,
             Self::Pinecone(provider) => provider.disconnect().await,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DataInput for AnyProvider {
-    type Context = AnyContext;
-    type Datatype = AnyDataValue;
-
-    async fn read(
-        &self,
-        ctx: &Self::Context,
-    ) -> Result<InputStream<Resumable<Self::Datatype, Self::Context>>> {
-        match self {
-            Self::Postgres(provider) => {
-                let ctx = ctx.as_relational().cloned().unwrap_or_default();
-                let stream = provider.read(&ctx).await?;
-                let mapped = stream.map(|r| {
-                    r.map(|item| {
-                        Resumable::new(
-                            AnyDataValue::from(item.data),
-                            AnyContext::Relational(item.context),
-                        )
-                    })
-                });
-                Ok(InputStream::new(Box::pin(mapped)))
-            }
-            Self::S3(provider) => {
-                let ctx = ctx.as_object().cloned().unwrap_or_default();
-                let stream = provider.read(&ctx).await?;
-                let mapped = stream.map(|r| {
-                    r.map(|item| {
-                        Resumable::new(
-                            AnyDataValue::from(item.data),
-                            AnyContext::Object(item.context),
-                        )
-                    })
-                });
-                Ok(InputStream::new(Box::pin(mapped)))
-            }
-            Self::Pinecone(_) => Err(Error::invalid_input(
-                "Pinecone provider does not support reading",
-            )),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DataOutput for AnyProvider {
-    type Datatype = AnyDataValue;
-
-    async fn write(&self, items: Vec<Self::Datatype>) -> Result<()> {
-        match self {
-            Self::Postgres(provider) => {
-                let records: Result<Vec<_>> = items
-                    .into_iter()
-                    .map(|item| match item {
-                        AnyDataValue::Record(r) => Ok(r),
-                        other => Err(Error::invalid_input(format!(
-                            "expected Record, got {:?}",
-                            std::mem::discriminant(&other)
-                        ))),
-                    })
-                    .collect();
-                provider.write(records?).await
-            }
-            Self::S3(provider) => {
-                let objects: Result<Vec<_>> = items
-                    .into_iter()
-                    .map(|item| match item {
-                        AnyDataValue::Object(o) => Ok(o),
-                        other => Err(Error::invalid_input(format!(
-                            "expected Object, got {:?}",
-                            std::mem::discriminant(&other)
-                        ))),
-                    })
-                    .collect();
-                provider.write(objects?).await
-            }
-            Self::Pinecone(provider) => {
-                let embeddings: Result<Vec<_>> = items
-                    .into_iter()
-                    .map(|item| match item {
-                        AnyDataValue::Embedding(e) => Ok(e),
-                        other => Err(Error::invalid_input(format!(
-                            "expected Embedding, got {:?}",
-                            std::mem::discriminant(&other)
-                        ))),
-                    })
-                    .collect();
-                provider.write(embeddings?).await
-            }
+            Self::Qdrant(provider) => provider.disconnect().await,
+            Self::Milvus(provider) => provider.disconnect().await,
+            Self::Weaviate(provider) => provider.disconnect().await,
         }
     }
 }

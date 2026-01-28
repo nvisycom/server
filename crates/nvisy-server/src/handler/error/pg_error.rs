@@ -33,6 +33,8 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::FileChunk(c) => c.into(),
             ConstraintViolation::Pipeline(c) => c.into(),
             ConstraintViolation::PipelineRun(c) => c.into(),
+            ConstraintViolation::PipelineArtifact(c) => c.into(),
+            ConstraintViolation::WorkspaceConnection(c) => c.into(),
         }
     }
 }

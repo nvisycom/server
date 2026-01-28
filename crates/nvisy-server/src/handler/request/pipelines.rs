@@ -4,7 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_postgres::model::{NewPipeline, UpdatePipeline as UpdatePipelineModel};
+use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::PipelineStatus;
 use nvisy_runtime::definition::Workflow;
 use schemars::JsonSchema;
@@ -36,8 +36,8 @@ impl CreatePipeline {
     /// * `workspace_id` - The ID of the workspace this pipeline belongs to.
     /// * `account_id` - The ID of the account creating the pipeline.
     #[inline]
-    pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewPipeline {
-        NewPipeline {
+    pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewWorkspacePipeline {
+        NewWorkspacePipeline {
             workspace_id,
             account_id,
             name: self.name,

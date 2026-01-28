@@ -2,6 +2,8 @@
 //!
 //! Provides vector upsert operations for the Pinecone vector database.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::datatypes::Embedding;
@@ -10,6 +12,7 @@ use crate::{DataOutput, Provider, Result};
 
 /// Credentials for Pinecone connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PineconeCredentials {
     /// Pinecone API key.
     pub api_key: String,
@@ -17,6 +20,7 @@ pub struct PineconeCredentials {
 
 /// Parameters for Pinecone operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PineconeParams {
     /// Index name.
     pub index_name: String,

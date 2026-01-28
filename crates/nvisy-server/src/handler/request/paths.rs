@@ -160,3 +160,12 @@ pub struct PipelinePathParams {
     /// Unique identifier of the pipeline.
     pub pipeline_id: Uuid,
 }
+
+/// Path parameters for pipeline run operations.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineRunPathParams {
+    /// Unique identifier of the pipeline run.
+    pub run_id: Uuid,
+}

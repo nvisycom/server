@@ -4,16 +4,16 @@
 //! - [`Engine`]: The main execution engine
 //! - [`EngineConfig`]: Configuration options
 //! - [`ExecutionContext`]: Runtime context for workflow execution
-//! - [`CredentialsRegistry`]: Registry for AI provider credentials
+//! - [`ConnectionRegistry`]: Registry for provider connections
 
 mod compiler;
 mod config;
+mod connection;
 mod context;
-mod credentials;
 mod executor;
 
 pub use config::EngineConfig;
+pub use connection::{ConnectionRegistry, PgConnectionLoader, ProviderConnection};
 pub use context::ExecutionContext;
-pub use credentials::{CredentialsRegistry, ProviderCredentials};
 pub use executor::Engine;
 pub use nvisy_dal::contexts::AnyContext;

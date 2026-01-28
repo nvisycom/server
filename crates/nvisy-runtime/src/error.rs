@@ -41,13 +41,13 @@ pub enum Error {
     #[error("workflow execution timed out")]
     Timeout,
 
-    /// Failed to construct credentials registry.
-    #[error("failed to construct credentials registry: {0}")]
-    CredentialsRegistry(#[source] serde_json::Error),
+    /// Failed to construct connection registry.
+    #[error("failed to construct connection registry: {0}")]
+    ConnectionRegistry(#[source] serde_json::Error),
 
-    /// Credentials not found.
-    #[error("credentials not found: {0}")]
-    CredentialsNotFound(Uuid),
+    /// Connection not found.
+    #[error("connection not found: {0}")]
+    ConnectionNotFound(Uuid),
 
     /// Storage operation failed.
     #[error("storage error: {0}")]
@@ -60,4 +60,11 @@ pub enum Error {
     /// Internal error.
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl Error {
+    /// Creates an error from a PostgreSQL error.
+    pub fn from_postgres(err: nvisy_postgres::PgError) -> Self {
+        Self::Internal(format!("database error: {err}"))
+    }
 }

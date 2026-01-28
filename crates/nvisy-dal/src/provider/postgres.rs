@@ -2,6 +2,8 @@
 //!
 //! Provides relational data operations using a connection pool.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::contexts::RelationalContext;
@@ -15,6 +17,7 @@ use crate::{DataInput, DataOutput, Provider, Result, Resumable};
 ///
 /// Uses a connection string (DSN) format: `postgres://user:pass@host:port/database`
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PostgresCredentials {
     /// PostgreSQL connection string (DSN).
     pub dsn: String,
@@ -22,6 +25,7 @@ pub struct PostgresCredentials {
 
 /// Parameters for PostgreSQL operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PostgresParams {
     /// Schema name (defaults to "public").
     #[serde(default = "default_schema")]

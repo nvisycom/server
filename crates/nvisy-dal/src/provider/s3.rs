@@ -2,6 +2,8 @@
 //!
 //! Provides object storage operations for AWS S3 and S3-compatible services.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::contexts::ObjectContext;
@@ -13,6 +15,7 @@ use crate::{DataInput, DataOutput, Provider, Result, Resumable};
 
 /// Credentials for S3 connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct S3Credentials {
     /// AWS access key ID.
     pub access_key_id: String,
@@ -27,6 +30,7 @@ pub struct S3Credentials {
 
 /// Parameters for S3 operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct S3Params {
     /// Default content type for uploaded objects.
     #[serde(default = "default_content_type")]

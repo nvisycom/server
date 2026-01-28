@@ -3,10 +3,13 @@
 //! Params define how providers operate (columns, batch sizes, etc.),
 //! while contexts carry runtime state (cursors, tokens, limits).
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Common parameters for relational database operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RelationalParams {
     /// Target table name.
     pub table: String,
@@ -26,6 +29,7 @@ pub struct RelationalParams {
 
 /// Common parameters for object storage operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ObjectParams {
     /// Bucket name (S3 bucket, GCS bucket, Azure container).
     pub bucket: String,
@@ -39,6 +43,7 @@ pub struct ObjectParams {
 
 /// Common parameters for vector database operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct VectorParams {
     /// Collection or index name (Pinecone index, Qdrant collection).
     pub collection: String,
@@ -55,6 +60,7 @@ pub struct VectorParams {
 
 /// Distance metric for vector similarity search.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum DistanceMetric {
     /// Cosine similarity (default).

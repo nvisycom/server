@@ -7,11 +7,13 @@ mod account;
 mod account_action_token;
 mod account_api_token;
 mod account_notification;
-mod file;
 mod file_annotation;
 mod file_chunk;
-mod pipeline;
+mod pipeline_artifact;
 mod pipeline_run;
+mod workspace_connection;
+mod workspace_file;
+mod workspace_pipeline;
 
 mod workspace;
 mod workspace_activity;
@@ -31,15 +33,18 @@ pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
 // File models
-pub use file::{File, NewFile, UpdateFile};
 pub use file_annotation::{FileAnnotation, NewFileAnnotation, UpdateFileAnnotation};
 pub use file_chunk::{FileChunk, NewFileChunk, ScoredFileChunk, UpdateFileChunk};
 // Pipeline models
-pub use pipeline::{NewPipeline, Pipeline, UpdatePipeline};
+pub use pipeline_artifact::{NewPipelineArtifact, PipelineArtifact};
 pub use pipeline_run::{NewPipelineRun, PipelineRun, UpdatePipelineRun};
 // Workspace models
 pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};
 pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
+pub use workspace_connection::{
+    NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
+};
+pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 pub use workspace_integration::{
     NewWorkspaceIntegration, UpdateWorkspaceIntegration, WorkspaceIntegration,
 };
@@ -48,4 +53,5 @@ pub use workspace_integration_run::{
 };
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
+pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

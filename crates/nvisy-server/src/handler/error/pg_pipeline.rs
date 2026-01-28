@@ -1,6 +1,9 @@
 //! Pipeline-related constraint violation error handlers.
 
-use nvisy_postgres::types::{PipelineConstraints, PipelineRunConstraints};
+use nvisy_postgres::types::{
+    PipelineArtifactConstraints, PipelineConstraints, PipelineRunConstraints,
+    WorkspaceConnectionConstraints,
+};
 
 use crate::handler::{Error, ErrorKind};
 
@@ -46,5 +49,39 @@ impl From<PipelineRunConstraints> for Error<'static> {
         };
 
         error.with_resource("pipeline_run")
+    }
+}
+
+impl From<PipelineArtifactConstraints> for Error<'static> {
+    fn from(c: PipelineArtifactConstraints) -> Self {
+        let error = match c {
+            PipelineArtifactConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Artifact metadata size exceeds maximum limit")
+            }
+        };
+
+        error.with_resource("pipeline_artifact")
+    }
+}
+
+impl From<WorkspaceConnectionConstraints> for Error<'static> {
+    fn from(c: WorkspaceConnectionConstraints) -> Self {
+        let error = match c {
+            WorkspaceConnectionConstraints::NameLength => ErrorKind::BadRequest
+                .with_message("Connection name must be between 1 and 255 characters"),
+            WorkspaceConnectionConstraints::ProviderLength => ErrorKind::BadRequest
+                .with_message("Provider name must be between 1 and 64 characters"),
+            WorkspaceConnectionConstraints::DataSize => {
+                ErrorKind::BadRequest.with_message("Connection data size exceeds maximum limit")
+            }
+            WorkspaceConnectionConstraints::NameUnique => ErrorKind::Conflict
+                .with_message("A connection with this name already exists in the workspace"),
+            WorkspaceConnectionConstraints::UpdatedAfterCreated
+            | WorkspaceConnectionConstraints::DeletedAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("workspace_connection")
     }
 }

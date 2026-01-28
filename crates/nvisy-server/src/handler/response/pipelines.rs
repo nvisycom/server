@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::Page;
+use super::{Artifact, Page};
 
 /// Pipeline response.
 #[must_use]
@@ -30,6 +30,9 @@ pub struct Pipeline {
     /// Pipeline definition (workflow graph).
     #[schemars(with = "serde_json::Value")]
     pub definition: Workflow,
+    /// Artifacts produced by pipeline runs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<Artifact>,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
@@ -38,7 +41,7 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Creates a new instance of [`Pipeline`] from the database model.
-    pub fn from_model(pipeline: model::Pipeline) -> Self {
+    pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
         let definition: Workflow = serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {
             pipeline_id: pipeline.id,
@@ -48,6 +51,27 @@ impl Pipeline {
             description: pipeline.description,
             status: pipeline.status,
             definition,
+            artifacts: Vec::new(),
+            created_at: pipeline.created_at.into(),
+            updated_at: pipeline.updated_at.into(),
+        }
+    }
+
+    /// Creates a pipeline response with artifacts.
+    pub fn from_model_with_artifacts(
+        pipeline: model::WorkspacePipeline,
+        artifacts: Vec<model::PipelineArtifact>,
+    ) -> Self {
+        let definition: Workflow = serde_json::from_value(pipeline.definition).unwrap_or_default();
+        Self {
+            pipeline_id: pipeline.id,
+            workspace_id: pipeline.workspace_id,
+            account_id: pipeline.account_id,
+            name: pipeline.name,
+            description: pipeline.description,
+            status: pipeline.status,
+            definition,
+            artifacts: artifacts.into_iter().map(Artifact::from_model).collect(),
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),
         }
@@ -78,7 +102,7 @@ pub struct PipelineSummary {
 
 impl PipelineSummary {
     /// Creates a new instance of [`PipelineSummary`] from the database model.
-    pub fn from_model(pipeline: model::Pipeline) -> Self {
+    pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
         Self {
             pipeline_id: pipeline.id,
             name: pipeline.name,

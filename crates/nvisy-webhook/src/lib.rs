@@ -11,8 +11,7 @@ pub mod response;
 #[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
 pub mod reqwest;
 
-pub use nvisy_core::types::{ServiceHealth, ServiceStatus};
-pub use nvisy_core::{Error, ErrorKind, Result};
+pub use nvisy_core::{Error, ErrorKind, Result, ServiceHealth, ServiceStatus};
 pub use request::{WebhookContext, WebhookPayload, WebhookRequest};
 pub use response::WebhookResponse;
 pub use service::WebhookService;

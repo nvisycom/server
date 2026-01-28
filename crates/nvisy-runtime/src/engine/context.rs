@@ -3,12 +3,12 @@
 use derive_builder::Builder;
 use nvisy_dal::datatypes::AnyDataValue;
 
-use super::CredentialsRegistry;
+use super::ConnectionRegistry;
 
 /// Execution context for a workflow run.
 ///
 /// Manages the current data items flowing through the pipeline and holds
-/// credentials for provider access.
+/// connections for provider access.
 ///
 /// A single input can produce multiple outputs (e.g., 1 document → 1000 embeddings),
 /// so the context holds a `Vec` of values at each stage.
@@ -19,8 +19,8 @@ use super::CredentialsRegistry;
     build_fn(validate = "Self::validate")
 )]
 pub struct ExecutionContext {
-    /// Credentials registry for provider authentication.
-    credentials: CredentialsRegistry,
+    /// Connection registry for provider authentication.
+    connections: ConnectionRegistry,
     /// Current data items being processed (can expand: 1 input → N outputs).
     #[builder(default)]
     current: Vec<AnyDataValue>,
@@ -31,18 +31,18 @@ pub struct ExecutionContext {
 
 impl ExecutionContextBuilder {
     fn validate(&self) -> Result<(), String> {
-        if self.credentials.is_none() {
-            return Err("credentials is required".into());
+        if self.connections.is_none() {
+            return Err("connections is required".into());
         }
         Ok(())
     }
 }
 
 impl ExecutionContext {
-    /// Creates a new execution context with the given credentials.
-    pub fn new(credentials: CredentialsRegistry) -> Self {
+    /// Creates a new execution context with the given connections.
+    pub fn new(connections: ConnectionRegistry) -> Self {
         Self {
-            credentials,
+            connections,
             current: Vec::new(),
             items_processed: 0,
         }
@@ -53,9 +53,9 @@ impl ExecutionContext {
         ExecutionContextBuilder::default()
     }
 
-    /// Returns a reference to the credentials registry.
-    pub fn credentials(&self) -> &CredentialsRegistry {
-        &self.credentials
+    /// Returns a reference to the connection registry.
+    pub fn connections(&self) -> &ConnectionRegistry {
+        &self.connections
     }
 
     /// Sets the current data items being processed.
