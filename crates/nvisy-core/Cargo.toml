@@ -28,15 +28,20 @@ default = []
 schema = ["dep:schemars"]
 
 # Encryption support for sensitive data
-encryption = ["dep:chacha20poly1305", "dep:hkdf", "dep:sha2", "dep:rand", "dep:uuid"]
+encryption = ["dep:chacha20poly1305", "dep:hkdf", "dep:rand"]
 
 [dependencies]
 # Async runtime
 async-trait = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt"] }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["as_ref", "deref"] }
+
+# String types
+hipstr = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -45,15 +50,25 @@ tracing = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 
+# Encoding
+bytes = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
+
 # Datatypes
 jiff = { workspace = true, features = ["serde"] }
-uuid = { workspace = true, optional = true, features = [] }
+uuid = { workspace = true, features = ["v7"] }
 
 # OpenAPI documentation (optional)
 schemars = { workspace = true, optional = true, features = [] }
 
+# Hashing
+sha2 = { workspace = true, features = [] }
+
 # Encryption (optional)
 chacha20poly1305 = { workspace = true, optional = true, features = [] }
 hkdf = { workspace = true, optional = true, features = [] }
-sha2 = { workspace = true, optional = true, features = [] }
 rand = { workspace = true, optional = true, features = [] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

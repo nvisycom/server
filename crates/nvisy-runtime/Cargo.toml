@@ -29,10 +29,6 @@ nvisy-dal = { workspace = true, features = [] }
 nvisy-rig = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = [] }
 
-# Runtime crates
-nvisy-rt-core = { workspace = true, features = [] }
-nvisy-rt-engine = { workspace = true, features = [] }
-
 # Async runtime
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 futures = { workspace = true, features = [] }

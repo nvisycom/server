@@ -1,37 +1,39 @@
 # Packages
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
-
-This directory contains Python packages that provide provider implementations for the Rust crates.
+Python packages that provide runtime implementations for the Rust crates. The
+Rust core defines provider traits and data types; these packages supply the
+concrete implementations that connect to external systems. The PyO3 bridge loads
+them at pipeline execution time.
 
 ## nvisy-dal
 
-Data abstraction layer for external integrations. Provides unified async interfaces for storage, databases, and vector stores. The Rust `nvisy-dal` crate loads this package via PyO3 to delegate provider calls.
+Implements the data provider protocols defined by the Rust `nvisy-dal` crate.
+Each provider connects to an external system and exposes async read and/or write
+operations through a uniform interface.
 
-**Supported providers:** PostgreSQL, MySQL, S3, GCS, Azure Blob, Qdrant, Pinecone
+Supported provider categories:
+
+- Relational databases
+- Object stores
+- Vector databases
+- Document databases
+- Message queues
+- Graph databases
 
 ## nvisy-rig
 
-AI/LLM orchestration layer. Provides unified interfaces for LLM providers and agent workflows. Used by the Rust `nvisy-rig` crate for Python-based AI integrations.
-
-**Supported providers:** OpenAI, Anthropic, Cohere
+Implements AI model providers for the Rust `nvisy-rig` crate. Provides
+completion and embedding interfaces across LLM providers.
 
 ## Development
 
 Each package uses [uv](https://docs.astral.sh/uv/) for dependency management:
 
 ```bash
-cd packages/nvisy-dal
+cd packages/<package>
 
-# Install dependencies
-uv sync --extra dev
-
-# Run tests
-uv run pytest
-
-# Type check
-uv run basedpyright
-
-# Lint
-uv run ruff check .
+uv sync --extra dev   # Install dependencies
+uv run pytest         # Run tests
+uv run basedpyright   # Type check
+uv run ruff check .   # Lint
 ```

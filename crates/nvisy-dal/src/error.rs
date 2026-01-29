@@ -92,7 +92,7 @@ impl From<Error> for nvisy_core::Error {
         };
 
         nvisy_core::Error::new(kind)
-            .with_message(&err.message)
+            .with_message(err.message.as_str())
             .with_source(err)
     }
 }

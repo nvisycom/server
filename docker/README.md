@@ -6,7 +6,7 @@ Docker configuration for the Nvisy server.
 
 Nvisy requires two external services:
 
-**PostgreSQL 17+** with the pgvector extension. PostgreSQL serves as the primary
+**PostgreSQL 18+** with the pgvector extension. PostgreSQL serves as the primary
 data store for all application state — accounts, workspaces, pipelines,
 connections, file metadata — and provides vector similarity search through
 pgvector. The recommended image is `pgvector/pgvector:pg18`.
@@ -35,6 +35,11 @@ locally:
 make generate-all   # .env, keys, migrations
 cargo run --features dotenv --bin nvisy-server
 ```
+
+The API documentation is available at:
+
+- Scalar UI: `http://localhost:8080/api/scalar`
+- OpenAPI JSON: `http://localhost:8080/api/openapi.json`
 
 ### Production
 

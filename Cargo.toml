@@ -16,7 +16,7 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-rust-version = "1.89"
+rust-version = "1.92"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -41,12 +41,6 @@ nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
 nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
-
-# Runtime crates (from github.com/nvisycom/runtime)
-nvisy-rt-archive = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
-nvisy-rt-core = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
-nvisy-rt-document = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
-nvisy-rt-engine = { git = "https://github.com/nvisycom/runtime.git", branch = "feature/prerelease", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }
@@ -91,6 +85,7 @@ hmac = { version = "0.12", features = [] }
 # Encoding
 base64 = { version = "0.22", features = [] }
 hex = { version = "0.4", features = [] }
+hipstr = { version = "0.6", features = [] }
 
 # Randomness
 rand = { version = "0.10.0-rc.6", features = ["serde"] }

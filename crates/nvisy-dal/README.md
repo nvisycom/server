@@ -4,12 +4,13 @@
 
 Data Abstraction Layer for workflow inputs and outputs.
 
-This crate provides a unified interface for reading and writing data
-across various storage backends.
+This crate provides a unified interface for reading and writing data across
+various storage backends.
 
 ## Architecture
 
 The DAL is split into two parts:
+
 - **Rust**: Streaming, observability, unified interface, server integration
 - **Python**: Provider implementations, client libraries, external integrations
 
@@ -40,7 +41,8 @@ All types implement the `DataType` marker trait:
 
 ## Resumable Streaming
 
-Each read item is paired with a context for resumption, enabling efficient recovery if streaming is interrupted.
+Each read item is paired with a context for resumption, enabling efficient
+recovery if streaming is interrupted.
 
 ## Changelog
 

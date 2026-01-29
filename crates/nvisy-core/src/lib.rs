@@ -6,8 +6,12 @@
 #[cfg_attr(docsrs, doc(cfg(feature = "encryption")))]
 pub mod crypto;
 
+pub mod fs;
+pub mod io;
+pub mod path;
+
 mod common;
-mod error;
+pub mod error;
 
 #[doc(hidden)]
 pub mod prelude;

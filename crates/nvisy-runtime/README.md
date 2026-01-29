@@ -4,8 +4,8 @@
 
 Workflow definitions and execution engine for Nvisy pipelines.
 
-This crate provides the core abstractions for defining and executing
-data processing workflows as directed acyclic graphs (DAGs).
+This crate provides the core abstractions for defining and executing data
+processing workflows as directed acyclic graphs (DAGs).
 
 ## Architecture
 
@@ -13,12 +13,12 @@ data processing workflows as directed acyclic graphs (DAGs).
 
 The crate separates workflow representation into two layers:
 
-- **Definition types** (`definition`): JSON-serializable types for
-  storing, editing, and transmitting workflows. These include `Workflow`,
-  `Node`, `NodeKind`, `Input`, `Output`, and `CacheSlot`.
+- **Definition types** (`definition`): JSON-serializable types for storing,
+  editing, and transmitting workflows. These include `Workflow`, `Node`,
+  `NodeKind`, `Input`, `Output`, and `CacheSlot`.
 
-- **Compiled types** (`graph`): Runtime-optimized types for execution.
-  These include `CompiledGraph`, `CompiledNode`, and processor types like
+- **Compiled types** (`graph`): Runtime-optimized types for execution. These
+  include `CompiledGraph`, `CompiledNode`, and processor types like
   `EmbeddingProcessor` and `EnrichProcessor`.
 
 Use the `Engine` to compile definitions and execute workflows.

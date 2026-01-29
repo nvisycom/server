@@ -4,8 +4,8 @@ Thank you for your interest in contributing to Nvisy Server.
 
 ## Requirements
 
-- Rust 1.89+ (nightly for formatting)
-- PostgreSQL 17+
+- Rust 1.92+ (nightly for formatting)
+- PostgreSQL 18+
 - NATS 2.10+ (with JetStream)
 
 ## Setup
