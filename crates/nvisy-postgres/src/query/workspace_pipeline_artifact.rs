@@ -88,9 +88,9 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         &mut self,
         new_artifact: NewWorkspacePipelineArtifact,
     ) -> PgResult<WorkspacePipelineArtifact> {
-        use schema::pipeline_artifacts;
+        use schema::workspace_pipeline_artifacts;
 
-        let artifact = diesel::insert_into(pipeline_artifacts::table)
+        let artifact = diesel::insert_into(workspace_pipeline_artifacts::table)
             .values(&new_artifact)
             .returning(WorkspacePipelineArtifact::as_returning())
             .get_result(self)
@@ -104,9 +104,9 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         &mut self,
         new_artifacts: Vec<NewWorkspacePipelineArtifact>,
     ) -> PgResult<Vec<WorkspacePipelineArtifact>> {
-        use schema::pipeline_artifacts;
+        use schema::workspace_pipeline_artifacts;
 
-        let artifacts = diesel::insert_into(pipeline_artifacts::table)
+        let artifacts = diesel::insert_into(workspace_pipeline_artifacts::table)
             .values(&new_artifacts)
             .returning(WorkspacePipelineArtifact::as_returning())
             .get_results(self)
@@ -120,9 +120,9 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         &mut self,
         artifact_id: Uuid,
     ) -> PgResult<Option<WorkspacePipelineArtifact>> {
-        use schema::pipeline_artifacts::{self, dsl};
+        use schema::workspace_pipeline_artifacts::{self, dsl};
 
-        let artifact = pipeline_artifacts::table
+        let artifact = workspace_pipeline_artifacts::table
             .filter(dsl::id.eq(artifact_id))
             .select(WorkspacePipelineArtifact::as_select())
             .first(self)
@@ -137,9 +137,9 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         &mut self,
         file_id: Uuid,
     ) -> PgResult<Option<WorkspacePipelineArtifact>> {
-        use schema::pipeline_artifacts::{self, dsl};
+        use schema::workspace_pipeline_artifacts::{self, dsl};
 
-        let artifact = pipeline_artifacts::table
+        let artifact = workspace_pipeline_artifacts::table
             .filter(dsl::file_id.eq(file_id))
             .select(WorkspacePipelineArtifact::as_select())
             .first(self)
@@ -154,9 +154,9 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         &mut self,
         run_id: Uuid,
     ) -> PgResult<Vec<WorkspacePipelineArtifact>> {
-        use schema::pipeline_artifacts::{self, dsl};
+        use schema::workspace_pipeline_artifacts::{self, dsl};
 
-        let artifacts = pipeline_artifacts::table
+        let artifacts = workspace_pipeline_artifacts::table
             .filter(dsl::run_id.eq(run_id))
             .order(dsl::created_at.asc())
             .select(WorkspacePipelineArtifact::as_select())
@@ -172,9 +172,9 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         run_id: Uuid,
         artifact_type: ArtifactType,
     ) -> PgResult<Vec<WorkspacePipelineArtifact>> {
-        use schema::pipeline_artifacts::{self, dsl};
+        use schema::workspace_pipeline_artifacts::{self, dsl};
 
-        let artifacts = pipeline_artifacts::table
+        let artifacts = workspace_pipeline_artifacts::table
             .filter(dsl::run_id.eq(run_id))
             .filter(dsl::artifact_type.eq(artifact_type))
             .order(dsl::created_at.asc())
@@ -203,20 +203,21 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
     }
 
     async fn delete_workspace_pipeline_run_artifacts(&mut self, run_id: Uuid) -> PgResult<u64> {
-        use schema::pipeline_artifacts::{self, dsl};
+        use schema::workspace_pipeline_artifacts::{self, dsl};
 
-        let deleted = diesel::delete(pipeline_artifacts::table.filter(dsl::run_id.eq(run_id)))
-            .execute(self)
-            .await
-            .map_err(PgError::from)?;
+        let deleted =
+            diesel::delete(workspace_pipeline_artifacts::table.filter(dsl::run_id.eq(run_id)))
+                .execute(self)
+                .await
+                .map_err(PgError::from)?;
 
         Ok(deleted as u64)
     }
 
     async fn count_workspace_pipeline_run_artifacts(&mut self, run_id: Uuid) -> PgResult<i64> {
-        use schema::pipeline_artifacts::{self, dsl};
+        use schema::workspace_pipeline_artifacts::{self, dsl};
 
-        let count = pipeline_artifacts::table
+        let count = workspace_pipeline_artifacts::table
             .filter(dsl::run_id.eq(run_id))
             .count()
             .get_result(self)
@@ -230,13 +231,13 @@ impl WorkspacePipelineArtifactRepository for PgConnection {
         &mut self,
         pipeline_id: Uuid,
     ) -> PgResult<Vec<WorkspacePipelineArtifact>> {
-        use schema::{pipeline_artifacts, pipeline_runs};
+        use schema::{workspace_pipeline_artifacts, workspace_pipeline_runs};
 
-        let artifacts = pipeline_artifacts::table
-            .inner_join(pipeline_runs::table)
-            .filter(pipeline_runs::pipeline_id.eq(pipeline_id))
+        let artifacts = workspace_pipeline_artifacts::table
+            .inner_join(workspace_pipeline_runs::table)
+            .filter(workspace_pipeline_runs::pipeline_id.eq(pipeline_id))
             .select(WorkspacePipelineArtifact::as_select())
-            .order(pipeline_artifacts::created_at.desc())
+            .order(workspace_pipeline_artifacts::created_at.desc())
             .load(self)
             .await
             .map_err(PgError::from)?;

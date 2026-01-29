@@ -2,8 +2,8 @@
 -- Drop in reverse order of creation to avoid dependency issues
 
 -- Drop tables (indexes dropped automatically with tables)
-DROP TABLE IF EXISTS file_annotations;
-DROP TABLE IF EXISTS file_chunks;
+DROP TABLE IF EXISTS workspace_file_annotations;
+DROP TABLE IF EXISTS workspace_file_chunks;
 
 -- Drop trigger before the function it depends on
 DROP TRIGGER IF EXISTS workspace_files_set_version_trigger ON workspace_files;

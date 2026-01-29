@@ -3,11 +3,13 @@
 //! This module provides authentication-related services including password hashing,
 //! JWT secret key management, password strength evaluation, and user agent parsing.
 
+mod master_key;
 mod password_hasher;
 mod password_strength;
 mod session_keys;
 mod user_agent;
 
+pub use master_key::{MasterKey, MasterKeyConfig};
 pub use password_hasher::PasswordHasher;
 pub use password_strength::PasswordStrength;
 pub use session_keys::{SessionKeys, SessionKeysConfig};

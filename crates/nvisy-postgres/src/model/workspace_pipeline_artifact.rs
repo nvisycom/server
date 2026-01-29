@@ -4,12 +4,12 @@ use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::pipeline_artifacts;
+use crate::schema::workspace_pipeline_artifacts;
 use crate::types::{ArtifactType, HasCreatedAt};
 
 /// Workspace pipeline artifact model representing artifacts produced during pipeline runs.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = pipeline_artifacts)]
+#[diesel(table_name = workspace_pipeline_artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspacePipelineArtifact {
     /// Unique artifact identifier.
@@ -28,7 +28,7 @@ pub struct WorkspacePipelineArtifact {
 
 /// Data for creating a new workspace pipeline artifact.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = pipeline_artifacts)]
+#[diesel(table_name = workspace_pipeline_artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspacePipelineArtifact {
     /// Pipeline run ID (required).

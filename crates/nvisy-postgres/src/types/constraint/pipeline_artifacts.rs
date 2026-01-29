@@ -11,7 +11,7 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum PipelineArtifactConstraints {
     // Metadata validation constraints
-    #[strum(serialize = "pipeline_artifacts_metadata_size")]
+    #[strum(serialize = "workspace_pipeline_artifacts_metadata_size")]
     MetadataSize,
 }
 

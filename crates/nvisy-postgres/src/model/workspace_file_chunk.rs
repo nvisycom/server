@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use pgvector::Vector;
 use uuid::Uuid;
 
-use crate::schema::file_chunks;
+use crate::schema::workspace_file_chunks;
 use crate::types::{HasCreatedAt, HasUpdatedAt};
 
 /// Workspace file chunk model representing a text segment from a file.
@@ -14,7 +14,7 @@ use crate::types::{HasCreatedAt, HasUpdatedAt};
 /// represents a portion of a file with its embedding vector for
 /// similarity search.
 #[derive(Debug, Clone, Queryable, Selectable)]
-#[diesel(table_name = file_chunks)]
+#[diesel(table_name = workspace_file_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspaceFileChunk {
     /// Unique chunk identifier.
@@ -43,7 +43,7 @@ pub struct WorkspaceFileChunk {
 
 /// Data for creating a new workspace file chunk.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = file_chunks)]
+#[diesel(table_name = workspace_file_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspaceFileChunk {
     /// File ID (required).
@@ -66,7 +66,7 @@ pub struct NewWorkspaceFileChunk {
 
 /// Data for updating a workspace file chunk.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = file_chunks)]
+#[diesel(table_name = workspace_file_chunks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspaceFileChunk {
     /// Token count.

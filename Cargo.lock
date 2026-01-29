@@ -3075,6 +3075,7 @@ dependencies = [
  "ipnet",
  "jiff",
  "jsonwebtoken",
+ "nvisy-core",
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-runtime",

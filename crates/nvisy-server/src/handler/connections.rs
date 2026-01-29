@@ -15,6 +15,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_core::crypto::encrypt_json;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceConnection, UpdateWorkspaceConnection};
 use nvisy_postgres::query::WorkspaceConnectionRepository;
@@ -26,7 +27,7 @@ use crate::handler::request::{
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
-use crate::service::ServiceState;
+use crate::service::{MasterKey, ServiceState};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -44,6 +45,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
 )]
 async fn create_connection(
     State(pg_client): State<PgClient>,
+    State(master_key): State<MasterKey>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateConnection>,
@@ -60,14 +62,12 @@ async fn create_connection(
         )
         .await?;
 
-    // TODO: Encrypt connection data using workspace-derived key.
-    // This requires adding EncryptionKey to ServiceState and deriving
-    // workspace-specific keys using HKDF.
-    //
-    // For now, we store the JSON as-is (serialized to bytes).
-    // This MUST be replaced with proper encryption before production use.
-    let encrypted_data = serde_json::to_vec(&request.data)
-        .map_err(|_| ErrorKind::BadRequest.with_message("Invalid connection data"))?;
+    let workspace_key = master_key.derive_workspace_key(path_params.workspace_id);
+    let encrypted_data = encrypt_json(&workspace_key, &request.data).map_err(|e| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to encrypt connection data")
+            .with_context(e.to_string())
+    })?;
 
     let new_connection = NewWorkspaceConnection {
         workspace_id: path_params.workspace_id,
@@ -228,6 +228,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_connection(
     State(pg_client): State<PgClient>,
+    State(master_key): State<MasterKey>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<UpdateConnection>,
@@ -247,12 +248,15 @@ async fn update_connection(
         )
         .await?;
 
-    // TODO: Encrypt connection data using workspace-derived key if provided.
     let encrypted_data = request
         .data
         .map(|data| {
-            serde_json::to_vec(&data)
-                .map_err(|_| ErrorKind::BadRequest.with_message("Invalid connection data"))
+            let workspace_key = master_key.derive_workspace_key(existing.workspace_id);
+            encrypt_json(&workspace_key, &data).map_err(|e| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to encrypt connection data")
+                    .with_context(e.to_string())
+            })
         })
         .transpose()?;
 

@@ -76,9 +76,9 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         &mut self,
         new_annotation: NewWorkspaceFileAnnotation,
     ) -> PgResult<WorkspaceFileAnnotation> {
-        use schema::file_annotations;
+        use schema::workspace_file_annotations;
 
-        let annotation = diesel::insert_into(file_annotations::table)
+        let annotation = diesel::insert_into(workspace_file_annotations::table)
             .values(&new_annotation)
             .returning(WorkspaceFileAnnotation::as_returning())
             .get_result(self)
@@ -92,9 +92,9 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         &mut self,
         annotation_id: Uuid,
     ) -> PgResult<Option<WorkspaceFileAnnotation>> {
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
-        let annotation = file_annotations::table
+        let annotation = workspace_file_annotations::table
             .filter(dsl::id.eq(annotation_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceFileAnnotation::as_select())
@@ -111,9 +111,9 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         file_id: Uuid,
         pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceFileAnnotation>> {
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
-        let annotations = file_annotations::table
+        let annotations = workspace_file_annotations::table
             .filter(dsl::file_id.eq(file_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
@@ -133,13 +133,13 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         pagination: CursorPagination,
     ) -> PgResult<CursorPage<WorkspaceFileAnnotation>> {
         use diesel::dsl::count_star;
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
         let base_filter = dsl::file_id.eq(file_id).and(dsl::deleted_at.is_null());
 
         let total = if pagination.include_count {
             Some(
-                file_annotations::table
+                workspace_file_annotations::table
                     .filter(base_filter)
                     .select(count_star())
                     .get_result(self)
@@ -152,7 +152,7 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
 
         let items = if let Some(cursor) = &pagination.after {
             let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            file_annotations::table
+            workspace_file_annotations::table
                 .filter(base_filter)
                 .filter(
                     dsl::created_at
@@ -166,7 +166,7 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
                 .await
                 .map_err(PgError::from)?
         } else {
-            file_annotations::table
+            workspace_file_annotations::table
                 .filter(base_filter)
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(pagination.fetch_limit())
@@ -186,9 +186,9 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         account_id: Uuid,
         pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspaceFileAnnotation>> {
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
-        let annotations = file_annotations::table
+        let annotations = workspace_file_annotations::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::created_at.desc())
@@ -208,7 +208,7 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         pagination: CursorPagination,
     ) -> PgResult<CursorPage<WorkspaceFileAnnotation>> {
         use diesel::dsl::count_star;
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
         let base_filter = dsl::account_id
             .eq(account_id)
@@ -216,7 +216,7 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
 
         let total = if pagination.include_count {
             Some(
-                file_annotations::table
+                workspace_file_annotations::table
                     .filter(base_filter)
                     .select(count_star())
                     .get_result(self)
@@ -229,7 +229,7 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
 
         let items = if let Some(cursor) = &pagination.after {
             let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            file_annotations::table
+            workspace_file_annotations::table
                 .filter(base_filter)
                 .filter(
                     dsl::created_at
@@ -243,7 +243,7 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
                 .await
                 .map_err(PgError::from)?
         } else {
-            file_annotations::table
+            workspace_file_annotations::table
                 .filter(base_filter)
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(pagination.fetch_limit())
@@ -263,23 +263,24 @@ impl WorkspaceFileAnnotationRepository for PgConnection {
         annotation_id: Uuid,
         updates: UpdateWorkspaceFileAnnotation,
     ) -> PgResult<WorkspaceFileAnnotation> {
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
-        let annotation = diesel::update(file_annotations::table.filter(dsl::id.eq(annotation_id)))
-            .set(&updates)
-            .returning(WorkspaceFileAnnotation::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
+        let annotation =
+            diesel::update(workspace_file_annotations::table.filter(dsl::id.eq(annotation_id)))
+                .set(&updates)
+                .returning(WorkspaceFileAnnotation::as_returning())
+                .get_result(self)
+                .await
+                .map_err(PgError::from)?;
 
         Ok(annotation)
     }
 
     async fn delete_workspace_file_annotation(&mut self, annotation_id: Uuid) -> PgResult<()> {
         use diesel::dsl::now;
-        use schema::file_annotations::{self, dsl};
+        use schema::workspace_file_annotations::{self, dsl};
 
-        diesel::update(file_annotations::table.filter(dsl::id.eq(annotation_id)))
+        diesel::update(workspace_file_annotations::table.filter(dsl::id.eq(annotation_id)))
             .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await

@@ -12,6 +12,8 @@ mod files;
 mod invites;
 mod members;
 mod monitors;
+mod notifications;
+mod pipeline_runs;
 mod pipelines;
 pub mod request;
 pub mod response;
@@ -49,7 +51,9 @@ fn private_routes(
         .merge(webhooks::routes())
         .merge(files::routes())
         .merge(annotations::routes())
-        .merge(pipelines::routes());
+        .merge(pipelines::routes())
+        .merge(pipeline_runs::routes())
+        .merge(notifications::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);

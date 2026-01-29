@@ -44,13 +44,13 @@ pub struct RecoveryConfig {
         feature = "config",
         arg(long, env = "REQUEST_TIMEOUT", default_value = "30")
     )]
-    pub request_timeout_secs: u64,
+    pub request_timeout: u64,
 }
 
 impl Default for RecoveryConfig {
     fn default() -> Self {
         Self {
-            request_timeout_secs: 30,
+            request_timeout: 30,
         }
     }
 }
@@ -59,13 +59,13 @@ impl RecoveryConfig {
     /// Creates a new configuration with the specified request timeout in seconds.
     pub fn with_timeout_secs(secs: u64) -> Self {
         Self {
-            request_timeout_secs: secs,
+            request_timeout: secs,
         }
     }
 
     /// Returns the request timeout as a Duration.
     pub fn request_timeout(&self) -> Duration {
-        Duration::from_secs(self.request_timeout_secs)
+        Duration::from_secs(self.request_timeout)
     }
 }
 

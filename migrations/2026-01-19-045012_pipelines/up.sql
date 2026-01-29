@@ -209,7 +209,7 @@ COMMENT ON COLUMN workspace_pipelines.updated_at IS 'Last modification timestamp
 COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft deletion timestamp';
 
 -- Pipeline runs table (execution instances)
-CREATE TABLE pipeline_runs (
+CREATE TABLE workspace_pipeline_runs (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -224,54 +224,54 @@ CREATE TABLE pipeline_runs (
     -- Snapshot of pipeline definition at run time (for reproducibility)
     definition_snapshot JSONB               NOT NULL DEFAULT '{}',
 
-    CONSTRAINT pipeline_runs_definition_snapshot_size CHECK (length(definition_snapshot::TEXT) BETWEEN 2 AND 1048576),
+    CONSTRAINT workspace_pipeline_runs_definition_snapshot_size CHECK (length(definition_snapshot::TEXT) BETWEEN 2 AND 1048576),
 
     -- Metadata (non-encrypted, for filtering/display)
     metadata        JSONB                   NOT NULL DEFAULT '{}',
 
-    CONSTRAINT pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+    CONSTRAINT workspace_pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Execution logs
     logs            JSONB                   NOT NULL DEFAULT '[]',
 
-    CONSTRAINT pipeline_runs_logs_size CHECK (length(logs::TEXT) BETWEEN 2 AND 1048576),
+    CONSTRAINT workspace_pipeline_runs_logs_size CHECK (length(logs::TEXT) BETWEEN 2 AND 1048576),
 
     -- Timing
     started_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
     completed_at    TIMESTAMPTZ             DEFAULT NULL,
 
-    CONSTRAINT pipeline_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
+    CONSTRAINT workspace_pipeline_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
 
 -- Indexes
-CREATE INDEX pipeline_runs_pipeline_idx
-    ON pipeline_runs (pipeline_id, started_at DESC);
+CREATE INDEX workspace_pipeline_runs_pipeline_idx
+    ON workspace_pipeline_runs (pipeline_id, started_at DESC);
 
-CREATE INDEX pipeline_runs_account_idx
-    ON pipeline_runs (account_id, started_at DESC)
+CREATE INDEX workspace_pipeline_runs_account_idx
+    ON workspace_pipeline_runs (account_id, started_at DESC)
     WHERE account_id IS NOT NULL;
 
-CREATE INDEX pipeline_runs_status_idx
-    ON pipeline_runs (status, started_at DESC)
+CREATE INDEX workspace_pipeline_runs_status_idx
+    ON workspace_pipeline_runs (status, started_at DESC)
     WHERE status IN ('queued', 'running');
 
 -- Comments
-COMMENT ON TABLE pipeline_runs IS
+COMMENT ON TABLE workspace_pipeline_runs IS
     'Pipeline execution instances with status tracking and logs.';
 
-COMMENT ON COLUMN pipeline_runs.id IS 'Unique run identifier';
-COMMENT ON COLUMN pipeline_runs.pipeline_id IS 'Reference to pipeline definition';
-COMMENT ON COLUMN pipeline_runs.account_id IS 'Account that triggered the run (optional)';
-COMMENT ON COLUMN pipeline_runs.trigger_type IS 'How the run was initiated';
-COMMENT ON COLUMN pipeline_runs.status IS 'Current execution status';
-COMMENT ON COLUMN pipeline_runs.definition_snapshot IS 'Pipeline definition snapshot at run time';
-COMMENT ON COLUMN pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
-COMMENT ON COLUMN pipeline_runs.logs IS 'Execution logs as JSON array';
-COMMENT ON COLUMN pipeline_runs.started_at IS 'When execution started';
-COMMENT ON COLUMN pipeline_runs.completed_at IS 'When execution completed';
+COMMENT ON COLUMN workspace_pipeline_runs.id IS 'Unique run identifier';
+COMMENT ON COLUMN workspace_pipeline_runs.pipeline_id IS 'Reference to pipeline definition';
+COMMENT ON COLUMN workspace_pipeline_runs.account_id IS 'Account that triggered the run (optional)';
+COMMENT ON COLUMN workspace_pipeline_runs.trigger_type IS 'How the run was initiated';
+COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current execution status';
+COMMENT ON COLUMN workspace_pipeline_runs.definition_snapshot IS 'Pipeline definition snapshot at run time';
+COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN workspace_pipeline_runs.logs IS 'Execution logs as JSON array';
+COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When execution started';
+COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When execution completed';
 
 -- View for active pipeline runs
-CREATE VIEW active_pipeline_runs AS
+CREATE VIEW active_workspace_pipeline_runs AS
 SELECT
     pr.id,
     pr.pipeline_id,
@@ -282,16 +282,16 @@ SELECT
     pr.status,
     pr.started_at,
     EXTRACT(EPOCH FROM (COALESCE(pr.completed_at, current_timestamp) - pr.started_at)) AS duration_seconds
-FROM pipeline_runs pr
+FROM workspace_pipeline_runs pr
     JOIN workspace_pipelines p ON pr.pipeline_id = p.id
 WHERE pr.status IN ('queued', 'running')
 ORDER BY pr.started_at DESC NULLS LAST;
 
-COMMENT ON VIEW active_pipeline_runs IS
+COMMENT ON VIEW active_workspace_pipeline_runs IS
     'Currently active pipeline runs with progress information.';
 
--- View for pipeline run history
-CREATE VIEW pipeline_run_history AS
+-- View for workspace pipeline run history
+CREATE VIEW workspace_pipeline_run_history AS
 SELECT
     pr.id,
     pr.pipeline_id,
@@ -302,12 +302,12 @@ SELECT
     pr.started_at,
     pr.completed_at,
     EXTRACT(EPOCH FROM (pr.completed_at - pr.started_at)) AS duration_seconds
-FROM pipeline_runs pr
+FROM workspace_pipeline_runs pr
     JOIN workspace_pipelines p ON pr.pipeline_id = p.id
 WHERE pr.status IN ('completed', 'failed', 'cancelled')
 ORDER BY pr.completed_at DESC;
 
-COMMENT ON VIEW pipeline_run_history IS
+COMMENT ON VIEW workspace_pipeline_run_history IS
     'Completed pipeline runs for history and analytics.';
 
 -- Artifact type enum
@@ -321,12 +321,12 @@ COMMENT ON TYPE ARTIFACT_TYPE IS
     'Classification of pipeline run artifacts.';
 
 -- Pipeline artifacts table
-CREATE TABLE pipeline_artifacts (
+CREATE TABLE workspace_pipeline_artifacts (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    run_id          UUID            NOT NULL REFERENCES pipeline_runs (id) ON DELETE CASCADE,
+    run_id          UUID            NOT NULL REFERENCES workspace_pipeline_runs (id) ON DELETE CASCADE,
     file_id         UUID            NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
 
     -- Artifact attributes
@@ -335,26 +335,26 @@ CREATE TABLE pipeline_artifacts (
     -- Metadata
     metadata        JSONB           NOT NULL DEFAULT '{}',
 
-    CONSTRAINT pipeline_artifacts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+    CONSTRAINT workspace_pipeline_artifacts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Timestamps
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp
 );
 
 -- Indexes
-CREATE INDEX pipeline_artifacts_run_idx
-    ON pipeline_artifacts (run_id, artifact_type);
+CREATE INDEX workspace_pipeline_artifacts_run_idx
+    ON workspace_pipeline_artifacts (run_id, artifact_type);
 
-CREATE INDEX pipeline_artifacts_file_idx
-    ON pipeline_artifacts (file_id);
+CREATE INDEX workspace_pipeline_artifacts_file_idx
+    ON workspace_pipeline_artifacts (file_id);
 
 -- Comments
-COMMENT ON TABLE pipeline_artifacts IS
+COMMENT ON TABLE workspace_pipeline_artifacts IS
     'Artifacts produced during pipeline runs (inputs, outputs, intermediates).';
 
-COMMENT ON COLUMN pipeline_artifacts.id IS 'Unique artifact identifier';
-COMMENT ON COLUMN pipeline_artifacts.run_id IS 'Reference to pipeline run';
-COMMENT ON COLUMN pipeline_artifacts.file_id IS 'Reference to file storing the artifact data';
-COMMENT ON COLUMN pipeline_artifacts.artifact_type IS 'Type of artifact (input, output, intermediate)';
-COMMENT ON COLUMN pipeline_artifacts.metadata IS 'Extended metadata (checksums, counts, etc.)';
-COMMENT ON COLUMN pipeline_artifacts.created_at IS 'Creation timestamp';
+COMMENT ON COLUMN workspace_pipeline_artifacts.id IS 'Unique artifact identifier';
+COMMENT ON COLUMN workspace_pipeline_artifacts.run_id IS 'Reference to pipeline run';
+COMMENT ON COLUMN workspace_pipeline_artifacts.file_id IS 'Reference to file storing the artifact data';
+COMMENT ON COLUMN workspace_pipeline_artifacts.artifact_type IS 'Type of artifact (input, output, intermediate)';
+COMMENT ON COLUMN workspace_pipeline_artifacts.metadata IS 'Extended metadata (checksums, counts, etc.)';
+COMMENT ON COLUMN workspace_pipeline_artifacts.created_at IS 'Creation timestamp';

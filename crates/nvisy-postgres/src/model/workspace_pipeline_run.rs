@@ -4,12 +4,12 @@ use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::pipeline_runs;
+use crate::schema::workspace_pipeline_runs;
 use crate::types::{PipelineRunStatus, PipelineTriggerType};
 
 /// Workspace pipeline run model representing an execution instance of a pipeline.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = pipeline_runs)]
+#[diesel(table_name = workspace_pipeline_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspacePipelineRun {
     /// Unique run identifier.
@@ -36,7 +36,7 @@ pub struct WorkspacePipelineRun {
 
 /// Data for creating a new workspace pipeline run.
 #[derive(Debug, Default, Clone, Insertable)]
-#[diesel(table_name = pipeline_runs)]
+#[diesel(table_name = workspace_pipeline_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspacePipelineRun {
     /// Pipeline ID (required).
@@ -57,7 +57,7 @@ pub struct NewWorkspacePipelineRun {
 
 /// Data for updating a workspace pipeline run.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = pipeline_runs)]
+#[diesel(table_name = workspace_pipeline_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspacePipelineRun {
     /// Execution status.

@@ -24,6 +24,7 @@ __pycache__/
 
 # Generated files
 *.pem
+encryption.key
 *.backup
 coverage/
 *.lcov

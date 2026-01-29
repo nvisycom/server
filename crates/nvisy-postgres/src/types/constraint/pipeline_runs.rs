@@ -11,27 +11,27 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum PipelineRunConstraints {
     // Pipeline run input/output config constraints
-    #[strum(serialize = "pipeline_runs_input_config_size")]
+    #[strum(serialize = "workspace_pipeline_runs_input_config_size")]
     InputConfigSize,
-    #[strum(serialize = "pipeline_runs_output_config_size")]
+    #[strum(serialize = "workspace_pipeline_runs_output_config_size")]
     OutputConfigSize,
 
     // Pipeline run definition snapshot constraints
-    #[strum(serialize = "pipeline_runs_definition_snapshot_size")]
+    #[strum(serialize = "workspace_pipeline_runs_definition_snapshot_size")]
     DefinitionSnapshotSize,
 
     // Pipeline run error constraints
-    #[strum(serialize = "pipeline_runs_error_size")]
+    #[strum(serialize = "workspace_pipeline_runs_error_size")]
     ErrorSize,
 
     // Pipeline run metrics constraints
-    #[strum(serialize = "pipeline_runs_metrics_size")]
+    #[strum(serialize = "workspace_pipeline_runs_metrics_size")]
     MetricsSize,
 
     // Pipeline run chronological constraints
-    #[strum(serialize = "pipeline_runs_started_after_created")]
+    #[strum(serialize = "workspace_pipeline_runs_started_after_created")]
     StartedAfterCreated,
-    #[strum(serialize = "pipeline_runs_completed_after_started")]
+    #[strum(serialize = "workspace_pipeline_runs_completed_after_started")]
     CompletedAfterStarted,
 }
 

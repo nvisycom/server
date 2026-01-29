@@ -36,6 +36,7 @@ config = [
 
 [dependencies]
 # Internal crates
+nvisy-core = { workspace = true, features = ["encryption"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-runtime = { workspace = true, features = [] }

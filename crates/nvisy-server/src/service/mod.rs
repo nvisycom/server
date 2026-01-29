@@ -13,7 +13,8 @@ use crate::Result;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::config::ServiceConfig;
 pub use crate::service::security::{
-    PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
+    MasterKey, MasterKeyConfig, PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig,
+    UserAgentParser,
 };
 pub use crate::service::webhook::WebhookEmitter;
 
@@ -29,6 +30,9 @@ pub struct ServiceState {
     pub postgres: PgClient,
     pub nats: NatsClient,
     pub webhook: WebhookService,
+
+    // Security services:
+    pub master_key: MasterKey,
 
     // Internal services:
     pub health_cache: HealthCache,
@@ -50,12 +54,15 @@ impl ServiceState {
         let postgres = service_config.connect_postgres().await?;
         let nats = service_config.connect_nats().await?;
 
+        let master_key = service_config.load_master_key().await?;
         let webhook_emitter = WebhookEmitter::new(postgres.clone(), nats.clone());
 
         let service_state = Self {
             postgres,
             nats,
             webhook: webhook_service,
+
+            master_key,
 
             health_cache: HealthCache::new(),
             password_hasher: PasswordHasher::new(),
@@ -83,6 +90,9 @@ macro_rules! impl_di {
 impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
+
+// Security services:
+impl_di!(master_key: MasterKey);
 
 // Internal services:
 impl_di!(health_cache: HealthCache);

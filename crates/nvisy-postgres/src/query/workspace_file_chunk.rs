@@ -101,13 +101,13 @@ impl WorkspaceFileChunkRepository for PgConnection {
         &mut self,
         new_chunks: Vec<NewWorkspaceFileChunk>,
     ) -> PgResult<Vec<WorkspaceFileChunk>> {
-        use schema::file_chunks;
+        use schema::workspace_file_chunks;
 
         if new_chunks.is_empty() {
             return Ok(vec![]);
         }
 
-        let chunks = diesel::insert_into(file_chunks::table)
+        let chunks = diesel::insert_into(workspace_file_chunks::table)
             .values(&new_chunks)
             .returning(WorkspaceFileChunk::as_returning())
             .get_results(self)
@@ -122,9 +122,9 @@ impl WorkspaceFileChunkRepository for PgConnection {
         chunk_id: Uuid,
         updates: UpdateWorkspaceFileChunk,
     ) -> PgResult<WorkspaceFileChunk> {
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
-        let chunk = diesel::update(file_chunks::table.filter(dsl::id.eq(chunk_id)))
+        let chunk = diesel::update(workspace_file_chunks::table.filter(dsl::id.eq(chunk_id)))
             .set(&updates)
             .returning(WorkspaceFileChunk::as_returning())
             .get_result(self)
@@ -135,12 +135,13 @@ impl WorkspaceFileChunkRepository for PgConnection {
     }
 
     async fn delete_workspace_file_chunks(&mut self, file_id: Uuid) -> PgResult<usize> {
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
-        let affected = diesel::delete(file_chunks::table.filter(dsl::file_id.eq(file_id)))
-            .execute(self)
-            .await
-            .map_err(PgError::from)?;
+        let affected =
+            diesel::delete(workspace_file_chunks::table.filter(dsl::file_id.eq(file_id)))
+                .execute(self)
+                .await
+                .map_err(PgError::from)?;
 
         Ok(affected)
     }
@@ -149,9 +150,9 @@ impl WorkspaceFileChunkRepository for PgConnection {
         &mut self,
         file_id: Uuid,
     ) -> PgResult<Vec<WorkspaceFileChunk>> {
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
-        let chunks = file_chunks::table
+        let chunks = workspace_file_chunks::table
             .filter(dsl::file_id.eq(file_id))
             .order(dsl::chunk_index.asc())
             .select(WorkspaceFileChunk::as_select())
@@ -168,9 +169,9 @@ impl WorkspaceFileChunkRepository for PgConnection {
         limit: i64,
     ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
-        let chunks = file_chunks::table
+        let chunks = workspace_file_chunks::table
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
             .select(WorkspaceFileChunk::as_select())
@@ -188,13 +189,13 @@ impl WorkspaceFileChunkRepository for PgConnection {
         limit: i64,
     ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
         if file_ids.is_empty() {
             return Ok(vec![]);
         }
 
-        let chunks = file_chunks::table
+        let chunks = workspace_file_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
@@ -213,7 +214,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
         limit: i64,
     ) -> PgResult<Vec<WorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
         use schema::workspace_files;
 
         // Get all file IDs for the workspace
@@ -229,7 +230,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
             return Ok(vec![]);
         }
 
-        let chunks = file_chunks::table
+        let chunks = workspace_file_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
             .order(dsl::embedding.cosine_distance(&query_embedding))
             .limit(limit)
@@ -249,7 +250,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
         limit: i64,
     ) -> PgResult<Vec<ScoredWorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
         if file_ids.is_empty() {
             return Ok(vec![]);
@@ -259,7 +260,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
         // Score = 1 - distance, so min_score threshold means max_distance = 1 - min_score
         let max_distance = 1.0 - min_score;
 
-        let chunks: Vec<(WorkspaceFileChunk, f64)> = file_chunks::table
+        let chunks: Vec<(WorkspaceFileChunk, f64)> = workspace_file_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
             .filter(
                 dsl::embedding
@@ -291,7 +292,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
         limit: i64,
     ) -> PgResult<Vec<ScoredWorkspaceFileChunk>> {
         use pgvector::VectorExpressionMethods;
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
         use schema::workspace_files;
 
         // Get all file IDs for the workspace
@@ -309,7 +310,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
 
         let max_distance = 1.0 - min_score;
 
-        let chunks: Vec<(WorkspaceFileChunk, f64)> = file_chunks::table
+        let chunks: Vec<(WorkspaceFileChunk, f64)> = workspace_file_chunks::table
             .filter(dsl::file_id.eq_any(file_ids))
             .filter(
                 dsl::embedding
@@ -334,9 +335,9 @@ impl WorkspaceFileChunkRepository for PgConnection {
     }
 
     async fn count_workspace_file_chunks(&mut self, file_id: Uuid) -> PgResult<i64> {
-        use schema::file_chunks::{self, dsl};
+        use schema::workspace_file_chunks::{self, dsl};
 
-        let count: i64 = file_chunks::table
+        let count: i64 = workspace_file_chunks::table
             .filter(dsl::file_id.eq(file_id))
             .count()
             .get_result(self)

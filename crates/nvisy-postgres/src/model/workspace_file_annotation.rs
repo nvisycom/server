@@ -4,12 +4,12 @@ use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::file_annotations;
+use crate::schema::workspace_file_annotations;
 use crate::types::{AnnotationType, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Workspace file annotation model representing user annotations on file content.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = file_annotations)]
+#[diesel(table_name = workspace_file_annotations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspaceFileAnnotation {
     /// Unique annotation identifier.
@@ -34,7 +34,7 @@ pub struct WorkspaceFileAnnotation {
 
 /// Data for creating a new workspace file annotation.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = file_annotations)]
+#[diesel(table_name = workspace_file_annotations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspaceFileAnnotation {
     /// File ID.
@@ -51,7 +51,7 @@ pub struct NewWorkspaceFileAnnotation {
 
 /// Data for updating a workspace file annotation.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = file_annotations)]
+#[diesel(table_name = workspace_file_annotations)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspaceFileAnnotation {
     /// Annotation content.

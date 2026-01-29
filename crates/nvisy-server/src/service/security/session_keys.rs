@@ -65,7 +65,6 @@ pub struct SessionKeys {
 struct AuthKeysInner {
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
-    config: SessionKeysConfig,
 }
 
 impl SessionKeys {
@@ -103,7 +102,6 @@ impl SessionKeys {
         let inner = Arc::new(AuthKeysInner {
             decoding_key,
             encoding_key,
-            config: config.clone(),
         });
 
         Ok(Self { inner })
@@ -146,12 +144,6 @@ impl SessionKeys {
     #[inline]
     pub fn encoding_key(&self) -> &EncodingKey {
         &self.inner.encoding_key
-    }
-
-    /// Returns a reference to the configuration used to create this instance.
-    #[inline]
-    pub fn config(&self) -> &SessionKeysConfig {
-        &self.inner.config
     }
 
     /// Validates that the loaded keys are functional for JWT operations.
@@ -315,9 +307,9 @@ impl SessionKeys {
 
 impl fmt::Debug for SessionKeys {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthKeys")
-            .field("config", &self.inner.config)
-            .finish_non_exhaustive()
+        f.debug_struct("SessionKeys")
+            .field("keys", &"[REDACTED]")
+            .finish()
     }
 }
 

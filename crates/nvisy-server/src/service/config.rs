@@ -2,11 +2,12 @@
 use clap::Args;
 #[cfg(test)]
 use clap::Parser;
+
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::service::security::{SessionKeys, SessionKeysConfig};
+use crate::service::security::{MasterKey, MasterKeyConfig, SessionKeys, SessionKeysConfig};
 use crate::{Error, Result};
 
 /// App [`state`] configuration.
@@ -28,6 +29,10 @@ pub struct ServiceConfig {
     /// Authentication key paths configuration.
     #[cfg_attr(any(test, feature = "config"), command(flatten))]
     pub session_config: SessionKeysConfig,
+
+    /// Master encryption key configuration.
+    #[cfg_attr(any(test, feature = "config"), command(flatten))]
+    pub master_key_config: MasterKeyConfig,
 }
 
 impl ServiceConfig {
@@ -64,5 +69,10 @@ impl ServiceConfig {
     /// Loads authentication keys from configured paths.
     pub async fn load_session_keys(&self) -> Result<SessionKeys> {
         SessionKeys::from_config(&self.session_config).await
+    }
+
+    /// Loads the master encryption key from the configured file path.
+    pub async fn load_master_key(&self) -> Result<MasterKey> {
+        MasterKey::from_config(&self.master_key_config).await
     }
 }

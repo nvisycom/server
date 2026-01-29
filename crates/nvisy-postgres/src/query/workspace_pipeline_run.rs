@@ -98,9 +98,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         new_run: NewWorkspacePipelineRun,
     ) -> PgResult<WorkspacePipelineRun> {
-        use schema::pipeline_runs;
+        use schema::workspace_pipeline_runs;
 
-        let run = diesel::insert_into(pipeline_runs::table)
+        let run = diesel::insert_into(workspace_pipeline_runs::table)
             .values(&new_run)
             .returning(WorkspacePipelineRun::as_returning())
             .get_result(self)
@@ -114,9 +114,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         run_id: Uuid,
     ) -> PgResult<Option<WorkspacePipelineRun>> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = pipeline_runs::table
+        let run = workspace_pipeline_runs::table
             .filter(dsl::id.eq(run_id))
             .select(WorkspacePipelineRun::as_select())
             .first(self)
@@ -132,9 +132,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pipeline_id: Uuid,
         pagination: OffsetPagination,
     ) -> PgResult<Vec<WorkspacePipelineRun>> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let runs = pipeline_runs::table
+        let runs = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .order(dsl::started_at.desc())
             .limit(pagination.limit)
@@ -153,10 +153,10 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
     ) -> PgResult<CursorPage<WorkspacePipelineRun>> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
         // Build base query with filters
-        let mut base_query = pipeline_runs::table
+        let mut base_query = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .into_boxed();
 
@@ -177,7 +177,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         };
 
         // Rebuild query for fetching items
-        let mut query = pipeline_runs::table
+        let mut query = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .into_boxed();
 
@@ -224,9 +224,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         pipeline_id: Uuid,
     ) -> PgResult<Vec<WorkspacePipelineRun>> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let runs = pipeline_runs::table
+        let runs = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .filter(
                 dsl::status
@@ -247,9 +247,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         run_id: Uuid,
         updates: UpdateWorkspacePipelineRun,
     ) -> PgResult<WorkspacePipelineRun> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = diesel::update(pipeline_runs::table.filter(dsl::id.eq(run_id)))
+        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
             .set(&updates)
             .returning(WorkspacePipelineRun::as_returning())
             .get_result(self)
@@ -264,9 +264,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         run_id: Uuid,
     ) -> PgResult<WorkspacePipelineRun> {
         use diesel::dsl::now;
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = diesel::update(pipeline_runs::table.filter(dsl::id.eq(run_id)))
+        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
             .set((
                 dsl::status.eq(PipelineRunStatus::Running),
                 dsl::started_at.eq(now),
@@ -284,9 +284,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         run_id: Uuid,
     ) -> PgResult<WorkspacePipelineRun> {
         use diesel::dsl::now;
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = diesel::update(pipeline_runs::table.filter(dsl::id.eq(run_id)))
+        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
             .set((
                 dsl::status.eq(PipelineRunStatus::Completed),
                 dsl::completed_at.eq(now),
@@ -304,9 +304,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         run_id: Uuid,
     ) -> PgResult<WorkspacePipelineRun> {
         use diesel::dsl::now;
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = diesel::update(pipeline_runs::table.filter(dsl::id.eq(run_id)))
+        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
             .set((
                 dsl::status.eq(PipelineRunStatus::Failed),
                 dsl::completed_at.eq(now),
@@ -324,9 +324,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         run_id: Uuid,
     ) -> PgResult<WorkspacePipelineRun> {
         use diesel::dsl::now;
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = diesel::update(pipeline_runs::table.filter(dsl::id.eq(run_id)))
+        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
             .set((
                 dsl::status.eq(PipelineRunStatus::Cancelled),
                 dsl::completed_at.eq(now),
@@ -344,9 +344,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pipeline_id: Uuid,
         status: PipelineRunStatus,
     ) -> PgResult<i64> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let count = pipeline_runs::table
+        let count = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .filter(dsl::status.eq(status))
             .count()
@@ -361,9 +361,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         pipeline_id: Uuid,
     ) -> PgResult<Option<WorkspacePipelineRun>> {
-        use schema::pipeline_runs::{self, dsl};
+        use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = pipeline_runs::table
+        let run = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .order(dsl::started_at.desc())
             .select(WorkspacePipelineRun::as_select())

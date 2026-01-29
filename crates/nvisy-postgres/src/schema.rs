@@ -148,78 +148,6 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-    use super::sql_types::AnnotationType;
-
-    file_annotations (id) {
-        id -> Uuid,
-        file_id -> Uuid,
-        account_id -> Uuid,
-        content -> Text,
-        annotation_type -> AnnotationType,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-
-    file_chunks (id) {
-        id -> Uuid,
-        file_id -> Uuid,
-        chunk_index -> Int4,
-        content_sha256 -> Bytea,
-        content_size -> Int4,
-        token_count -> Int4,
-        embedding -> Vector,
-        embedding_model -> Text,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::ArtifactType;
-
-    pipeline_artifacts (id) {
-        id -> Uuid,
-        run_id -> Uuid,
-        file_id -> Uuid,
-        artifact_type -> ArtifactType,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::PipelineTriggerType;
-    use super::sql_types::PipelineRunStatus;
-
-    pipeline_runs (id) {
-        id -> Uuid,
-        pipeline_id -> Uuid,
-        account_id -> Nullable<Uuid>,
-        trigger_type -> PipelineTriggerType,
-        status -> PipelineRunStatus,
-        definition_snapshot -> Jsonb,
-        metadata -> Jsonb,
-        logs -> Jsonb,
-        started_at -> Timestamptz,
-        completed_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -254,6 +182,43 @@ diesel::table! {
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+    use super::sql_types::AnnotationType;
+
+    workspace_file_annotations (id) {
+        id -> Uuid,
+        file_id -> Uuid,
+        account_id -> Uuid,
+        content -> Text,
+        annotation_type -> AnnotationType,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+
+    workspace_file_chunks (id) {
+        id -> Uuid,
+        file_id -> Uuid,
+        chunk_index -> Int4,
+        content_sha256 -> Bytea,
+        content_size -> Int4,
+        token_count -> Int4,
+        embedding -> Vector,
+        embedding_model -> Text,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -330,6 +295,41 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::ArtifactType;
+
+    workspace_pipeline_artifacts (id) {
+        id -> Uuid,
+        run_id -> Uuid,
+        file_id -> Uuid,
+        artifact_type -> ArtifactType,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+    use super::sql_types::PipelineTriggerType;
+    use super::sql_types::PipelineRunStatus;
+
+    workspace_pipeline_runs (id) {
+        id -> Uuid,
+        pipeline_id -> Uuid,
+        account_id -> Nullable<Uuid>,
+        trigger_type -> PipelineTriggerType,
+        status -> PipelineRunStatus,
+        definition_snapshot -> Jsonb,
+        metadata -> Jsonb,
+        logs -> Jsonb,
+        started_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::PipelineStatus;
 
     workspace_pipelines (id) {
@@ -398,21 +398,21 @@ diesel::table! {
 diesel::joinable!(account_action_tokens -> accounts (account_id));
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
-diesel::joinable!(file_annotations -> accounts (account_id));
-diesel::joinable!(file_annotations -> workspace_files (file_id));
-diesel::joinable!(file_chunks -> workspace_files (file_id));
-diesel::joinable!(pipeline_artifacts -> pipeline_runs (run_id));
-diesel::joinable!(pipeline_artifacts -> workspace_files (file_id));
-diesel::joinable!(pipeline_runs -> accounts (account_id));
-diesel::joinable!(pipeline_runs -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
+diesel::joinable!(workspace_file_annotations -> accounts (account_id));
+diesel::joinable!(workspace_file_annotations -> workspace_files (file_id));
+diesel::joinable!(workspace_file_chunks -> workspace_files (file_id));
 diesel::joinable!(workspace_files -> accounts (account_id));
 diesel::joinable!(workspace_files -> workspaces (workspace_id));
 diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
+diesel::joinable!(workspace_pipeline_artifacts -> workspace_files (file_id));
+diesel::joinable!(workspace_pipeline_artifacts -> workspace_pipeline_runs (run_id));
+diesel::joinable!(workspace_pipeline_runs -> accounts (account_id));
+diesel::joinable!(workspace_pipeline_runs -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_pipelines -> accounts (account_id));
 diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
@@ -424,15 +424,15 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_api_tokens,
     account_notifications,
     accounts,
-    file_annotations,
-    file_chunks,
-    pipeline_artifacts,
-    pipeline_runs,
     workspace_activities,
     workspace_connections,
+    workspace_file_annotations,
+    workspace_file_chunks,
     workspace_files,
     workspace_invites,
     workspace_members,
+    workspace_pipeline_artifacts,
+    workspace_pipeline_runs,
     workspace_pipelines,
     workspace_webhooks,
     workspaces,

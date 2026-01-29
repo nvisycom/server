@@ -28,16 +28,16 @@ pub struct NatsConfig {
     /// Connection timeout in seconds (optional)
     #[cfg_attr(
         feature = "config",
-        arg(long = "nats-connect-timeout-secs", env = "NATS_CONNECT_TIMEOUT_SECS")
+        arg(long = "nats-connect-timeout", env = "NATS_CONNECT_TIMEOUT_SECS")
     )]
-    pub nats_connect_timeout_secs: Option<u64>,
+    pub nats_connect_timeout: Option<u64>,
 
     /// Request timeout in seconds (optional)
     #[cfg_attr(
         feature = "config",
-        arg(long = "nats-request-timeout-secs", env = "NATS_REQUEST_TIMEOUT_SECS")
+        arg(long = "nats-request-timeout", env = "NATS_REQUEST_TIMEOUT_SECS")
     )]
-    pub nats_request_timeout_secs: Option<u64>,
+    pub nats_request_timeout: Option<u64>,
 
     /// Maximum number of reconnection attempts (0 = unlimited)
     #[cfg_attr(
@@ -60,8 +60,8 @@ impl NatsConfig {
             nats_url: server_url.into(),
             nats_token: token.into(),
             nats_client_name: None,
-            nats_connect_timeout_secs: None,
-            nats_request_timeout_secs: None,
+            nats_connect_timeout: None,
+            nats_request_timeout: None,
             nats_max_reconnects: None,
         }
     }
@@ -80,13 +80,13 @@ impl NatsConfig {
     /// Returns the connection timeout as a Duration, if set.
     #[inline]
     pub fn connect_timeout(&self) -> Option<Duration> {
-        self.nats_connect_timeout_secs.map(Duration::from_secs)
+        self.nats_connect_timeout.map(Duration::from_secs)
     }
 
     /// Returns the request timeout as a Duration, if set.
     #[inline]
     pub fn request_timeout(&self) -> Option<Duration> {
-        self.nats_request_timeout_secs.map(Duration::from_secs)
+        self.nats_request_timeout.map(Duration::from_secs)
     }
 
     /// Returns the reconnect delay as a Duration.
@@ -132,14 +132,14 @@ impl NatsConfig {
     /// Set the connection timeout in seconds.
     #[must_use]
     pub fn with_connect_timeout_secs(mut self, secs: u64) -> Self {
-        self.nats_connect_timeout_secs = Some(secs);
+        self.nats_connect_timeout = Some(secs);
         self
     }
 
     /// Set the request timeout in seconds.
     #[must_use]
     pub fn with_request_timeout_secs(mut self, secs: u64) -> Self {
-        self.nats_request_timeout_secs = Some(secs);
+        self.nats_request_timeout = Some(secs);
         self
     }
 

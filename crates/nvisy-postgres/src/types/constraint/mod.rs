@@ -25,6 +25,7 @@ mod files;
 mod pipeline_artifacts;
 mod pipeline_runs;
 mod pipelines;
+
 mod workspace_connections;
 
 use std::fmt;
@@ -145,17 +146,13 @@ impl ConstraintViolation {
                 WorkspaceActivitiesConstraints::new => WorkspaceActivityLog,
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
                 WorkspaceConnectionConstraints::new => WorkspaceConnection,
-            },
-            "files" => try_parse!(FileConstraints::new => File),
-            "file" => try_parse! {
                 FileAnnotationConstraints::new => FileAnnotation,
                 FileChunkConstraints::new => FileChunk,
-            },
-            "pipelines" => try_parse!(PipelineConstraints::new => Pipeline),
-            "pipeline" => try_parse! {
                 PipelineRunConstraints::new => PipelineRun,
                 PipelineArtifactConstraints::new => PipelineArtifact,
             },
+            "files" => try_parse!(FileConstraints::new => File),
+            "pipelines" => try_parse!(PipelineConstraints::new => Pipeline),
             _ => None,
         }
     }
@@ -180,13 +177,13 @@ impl ConstraintViolation {
 
             // File-related tables
             ConstraintViolation::File(_) => "files",
-            ConstraintViolation::FileAnnotation(_) => "file_annotations",
-            ConstraintViolation::FileChunk(_) => "file_chunks",
+            ConstraintViolation::FileAnnotation(_) => "workspace_file_annotations",
+            ConstraintViolation::FileChunk(_) => "workspace_file_chunks",
 
             // Pipeline-related tables
             ConstraintViolation::Pipeline(_) => "pipelines",
-            ConstraintViolation::PipelineRun(_) => "pipeline_runs",
-            ConstraintViolation::PipelineArtifact(_) => "pipeline_artifacts",
+            ConstraintViolation::PipelineRun(_) => "workspace_pipeline_runs",
+            ConstraintViolation::PipelineArtifact(_) => "workspace_pipeline_artifacts",
             ConstraintViolation::WorkspaceConnection(_) => "workspace_connections",
         }
     }

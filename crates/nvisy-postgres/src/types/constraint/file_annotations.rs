@@ -11,19 +11,19 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum FileAnnotationConstraints {
     // Annotation content constraints
-    #[strum(serialize = "file_annotations_content_length")]
+    #[strum(serialize = "workspace_file_annotations_content_length")]
     ContentLength,
 
     // Annotation metadata constraints
-    #[strum(serialize = "file_annotations_metadata_size")]
+    #[strum(serialize = "workspace_file_annotations_metadata_size")]
     MetadataSize,
 
     // Annotation chronological constraints
-    #[strum(serialize = "file_annotations_updated_after_created")]
+    #[strum(serialize = "workspace_file_annotations_updated_after_created")]
     UpdatedAfterCreated,
-    #[strum(serialize = "file_annotations_deleted_after_created")]
+    #[strum(serialize = "workspace_file_annotations_deleted_after_created")]
     DeletedAfterCreated,
-    #[strum(serialize = "file_annotations_deleted_after_updated")]
+    #[strum(serialize = "workspace_file_annotations_deleted_after_updated")]
     DeletedAfterUpdated,
 }
 
