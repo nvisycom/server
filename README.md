@@ -2,15 +2,16 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 
-High-performance backend server for the Nvisy document processing platform.
+Open-source ETL platform for building intelligent data pipelines with pluggable sources, AI-powered transforms, and configurable sinks.
 
 ## Features
 
-- **High-Performance** - Async HTTP server with Axum and Tokio
-- **LLM Annotations** - AI-driven document edits via structured annotations
-- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
-- **Real-Time Updates** - AI streaming via SSE and job processing via NATS
-- **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
+- **Workflow Pipelines** — Declarative DAG-based workflows compiled to optimized execution graphs
+- **Pluggable Providers** — Uniform interface for databases, object stores, vector DBs, and more
+- **AI-Native Transforms** — Extraction, enrichment, embedding, entity resolution, and analysis as pipeline nodes
+- **Resumable Streaming** — Incremental processing with per-item pagination context
+- **Encrypted Connections** — Workspace-isolated credential encryption with HKDF-derived keys
+- **Interactive Docs** — Auto-generated OpenAPI with Scalar UI
 
 ## Quick Start
 
@@ -18,11 +19,14 @@ High-performance backend server for the Nvisy document processing platform.
 # Install tools and make scripts executable
 make install-all
 
-# Generate keys, env and migration files
+# Generate keys, env, and migration files
 make generate-all
 
-# Start the server with dotenv feature
-cargo run --features dotenv
+# Start infrastructure (PostgreSQL + NATS)
+docker compose -f docker/docker-compose.dev.yml up -d
+
+# Start the server
+cargo run --features dotenv --bin nvisy-server
 ```
 
 ## Configuration
@@ -33,19 +37,14 @@ See [.env.example](.env.example) for all available environment variables.
 
 - Scalar UI: `http://localhost:8080/api/scalar`
 - OpenAPI JSON: `http://localhost:8080/api/openapi.json`
-- Health Check: `POST http://localhost:8080/health`
 
 ## Docker
 
-```bash
-cd docker
+See [`docker/`](docker/) for development and production compose files, infrastructure requirements, and configuration reference.
 
-# Development (with hot reload)
-docker-compose -f docker-compose.dev.yml up -d
+## Documentation
 
-# Production
-docker-compose up -d
-```
+See [`docs/`](docs/) for architecture, intelligence capabilities, provider design, and security documentation.
 
 ## Changelog
 
@@ -53,11 +52,9 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
 
 ## License
 
-Apache 2.0 License - see [LICENSE.txt](LICENSE.txt)
+Apache 2.0 License — see [LICENSE.txt](LICENSE.txt)
 
 ## Support
 
-- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
 - **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
