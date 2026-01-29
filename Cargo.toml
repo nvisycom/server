@@ -53,7 +53,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 
 # HTTP server
 axum = { version = "0.8", features = [] }
-axum-client-ip = { version = "1.1", features = ["serde"] }
+axum-client-ip = { version = "1.3", features = ["serde"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 axum-extra = { version = "0.12", features = [] }
 axum-test = { version = "18.6", features = [] }
@@ -66,8 +66,8 @@ schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
 jsonschema = { version = "0.29", features = [] }
 
 # Authentication
-jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
-argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
+argon2 = { version = "0.6.0-rc.6", features = ["password-hash", "rand_core"] }
 zxcvbn = { version = "3.1", features = ["serde"] }
 
 # Encryption & Cryptography
@@ -82,7 +82,7 @@ hex = { version = "0.4", features = [] }
 hipstr = { version = "0.6", features = [] }
 
 # Randomness
-rand = { version = "0.10.0-rc.6", features = ["serde"] }
+rand = { version = "0.10.0-rc.8", features = ["serde"] }
 
 # Relational database (Postgres)
 diesel = { version = "2.3", features = [] }
@@ -119,7 +119,7 @@ anyhow = { version = "1.0", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
 
 # Primitive datatypes
-uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
+uuid = { version = "1.20", features = ["serde", "v4", "v7"] }
 bytes = { version = "1.10", features = ["serde"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
