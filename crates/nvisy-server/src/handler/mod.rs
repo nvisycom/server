@@ -6,16 +6,17 @@
 mod accounts;
 mod annotations;
 mod authentication;
+mod connections;
 mod error;
 mod files;
-mod integrations;
 mod invites;
 mod members;
 mod monitors;
+mod notifications;
+mod pipeline_runs;
 mod pipelines;
 pub mod request;
 pub mod response;
-mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -44,14 +45,15 @@ fn private_routes(
         .merge(accounts::routes(service_state.clone()))
         .merge(tokens::routes())
         .merge(workspaces::routes())
-        .merge(integrations::routes())
-        .merge(runs::routes())
+        .merge(connections::routes())
         .merge(invites::routes())
         .merge(members::routes())
         .merge(webhooks::routes())
         .merge(files::routes())
         .merge(annotations::routes())
-        .merge(pipelines::routes());
+        .merge(pipelines::routes())
+        .merge(pipeline_runs::routes())
+        .merge(notifications::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);

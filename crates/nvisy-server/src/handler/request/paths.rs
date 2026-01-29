@@ -45,18 +45,6 @@ pub struct InviteCodePathParams {
     pub invite_code: String,
 }
 
-/// Path parameters for integration operations (integration ID only).
-///
-/// Since integration IDs are globally unique UUIDs, workspace context can be
-/// derived from the integration record itself for authorization purposes.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct IntegrationPathParams {
-    /// Unique identifier of the integration.
-    pub integration_id: Uuid,
-}
-
 /// Path parameters for file operations within a workspace context.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -113,18 +101,6 @@ pub struct AnnotationPathParams {
     pub annotation_id: Uuid,
 }
 
-/// Path parameters for integration run operations (run ID only).
-///
-/// Since run IDs are globally unique UUIDs, workspace context can be
-/// derived from the run record itself for authorization purposes.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct IntegrationRunPathParams {
-    /// Unique identifier of the integration run.
-    pub run_id: Uuid,
-}
-
 /// Path parameters for API token operations.
 ///
 /// Since token IDs are globally unique UUIDs, account context is verified
@@ -159,4 +135,13 @@ pub struct AccountPathParams {
 pub struct PipelinePathParams {
     /// Unique identifier of the pipeline.
     pub pipeline_id: Uuid,
+}
+
+/// Path parameters for pipeline run operations.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineRunPathParams {
+    /// Unique identifier of the pipeline run.
+    pub run_id: Uuid,
 }

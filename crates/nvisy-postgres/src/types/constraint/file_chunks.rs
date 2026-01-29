@@ -11,31 +11,31 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum FileChunkConstraints {
     // Chunk position constraints
-    #[strum(serialize = "file_chunks_chunk_index_min")]
+    #[strum(serialize = "workspace_file_chunks_chunk_index_min")]
     ChunkIndexMin,
 
     // Content constraints
-    #[strum(serialize = "file_chunks_content_sha256_length")]
+    #[strum(serialize = "workspace_file_chunks_content_sha256_length")]
     ContentSha256Length,
-    #[strum(serialize = "file_chunks_content_size_min")]
+    #[strum(serialize = "workspace_file_chunks_content_size_min")]
     ContentSizeMin,
-    #[strum(serialize = "file_chunks_token_count_min")]
+    #[strum(serialize = "workspace_file_chunks_token_count_min")]
     TokenCountMin,
 
     // Embedding constraints
-    #[strum(serialize = "file_chunks_embedding_model_format")]
+    #[strum(serialize = "workspace_file_chunks_embedding_model_format")]
     EmbeddingModelFormat,
 
     // Metadata constraints
-    #[strum(serialize = "file_chunks_metadata_size")]
+    #[strum(serialize = "workspace_file_chunks_metadata_size")]
     MetadataSize,
 
     // Chronological constraints
-    #[strum(serialize = "file_chunks_updated_after_created")]
+    #[strum(serialize = "workspace_file_chunks_updated_after_created")]
     UpdatedAfterCreated,
 
     // Uniqueness constraints
-    #[strum(serialize = "file_chunks_file_chunk_unique")]
+    #[strum(serialize = "workspace_file_chunks_file_chunk_unique")]
     FileChunkUnique,
 }
 

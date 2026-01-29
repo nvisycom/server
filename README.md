@@ -1,69 +1,30 @@
 # Nvisy Server
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
-[![Crates.io](https://img.shields.io/crates/v/nvisy-server?style=flat-square)](https://crates.io/crates/nvisy-server)
-[![Docs](https://img.shields.io/docsrs/nvisy-server?style=flat-square&label=docs)](https://docs.rs/nvisy-server)
 
-High-performance backend server for the Nvisy document processing platform.
+Open-source ETL platform for building intelligent data pipelines with pluggable
+sources, AI-powered transforms, and configurable sinks.
 
 ## Features
 
-- **High-Performance** - Async HTTP server with Axum and Tokio
-- **LLM Annotations** - AI-driven document edits via structured annotations
-- **RAG Pipeline** - Build knowledge bases with document embeddings and semantic search
-- **Real-Time Updates** - AI streaming via SSE and job processing via NATS
-- **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
-
-## Architecture
-
-```
-server/
-├── crates/
-│   ├── nvisy-cli/         # Server binary with CLI and configuration
-│   ├── nvisy-core/        # Shared types, errors, and utilities
-│   ├── nvisy-nats/        # NATS client (streams, KV, object storage, jobs)
-│   ├── nvisy-postgres/    # PostgreSQL database layer with Diesel ORM
-│   ├── nvisy-rig/         # AI services (chat, RAG, embeddings)
-│   ├── nvisy-server/      # HTTP handlers, middleware, pipeline, and OpenAPI
-│   └── nvisy-webhook/     # Webhook delivery with HTTP client
-├── migrations/            # PostgreSQL database migrations
-└── Cargo.toml             # Workspace configuration
-```
+- **Workflow Pipelines** — Declarative DAG-based workflows compiled to optimized execution graphs
+- **Pluggable Providers** — Uniform interface for databases, object stores, vector DBs, and more
+- **AI-Native Transforms** — Extraction, enrichment, embedding, entity resolution, and analysis as pipeline nodes
+- **Resumable Streaming** — Incremental processing with per-item pagination context
+- **Encrypted Connections** — Workspace-isolated credential encryption with HKDF-derived keys
+- **Interactive Docs** — Auto-generated OpenAPI with Scalar UI
 
 ## Quick Start
 
-```bash
-# Install tools and make scripts executable
-make install-all
+The fastest way to get started is with [Nvisy Cloud](https://nvisy.com).
 
-# Generate keys, env and migration files
-make generate-all
+To run locally, see [`docker/`](docker/) for development and production compose
+files, infrastructure requirements, and configuration reference.
 
-# Start the server with dotenv feature
-cargo run --features dotenv
-```
+## Documentation
 
-## Configuration
-
-See [.env.example](.env.example) for all available environment variables.
-
-## API Documentation
-
-- Scalar UI: `http://localhost:8080/api/scalar`
-- OpenAPI JSON: `http://localhost:8080/api/openapi.json`
-- Health Check: `POST http://localhost:8080/health`
-
-## Docker
-
-```bash
-cd docker
-
-# Development (with hot reload)
-docker-compose -f docker-compose.dev.yml up -d
-
-# Production
-docker-compose up -d
-```
+See [`docs/`](docs/) for architecture, intelligence capabilities, provider
+design, and security documentation.
 
 ## Changelog
 
@@ -71,7 +32,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
 
 ## License
 
-Apache 2.0 License - see [LICENSE.txt](LICENSE.txt)
+Apache 2.0 License, see [LICENSE.txt](LICENSE.txt)
 
 ## Support
 

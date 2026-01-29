@@ -12,7 +12,6 @@ use uuid::Uuid;
 use crate::schema::workspace_webhooks;
 use crate::types::{
     HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, WebhookEvent, WebhookStatus,
-    WebhookType,
 };
 
 /// Workspace webhook model representing a webhook configuration for a workspace.
@@ -28,10 +27,6 @@ pub struct WorkspaceWebhook {
     pub id: Uuid,
     /// Reference to the workspace this webhook belongs to.
     pub workspace_id: Uuid,
-    /// Origin type of the webhook (provided or integration).
-    pub webhook_type: WebhookType,
-    /// Reference to integration (required for integration type).
-    pub integration_id: Option<Uuid>,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Description of the webhook's purpose.
@@ -65,10 +60,6 @@ pub struct WorkspaceWebhook {
 pub struct NewWorkspaceWebhook {
     /// Reference to the workspace this webhook will belong to.
     pub workspace_id: Uuid,
-    /// Origin type of the webhook (provided or integration).
-    pub webhook_type: Option<WebhookType>,
-    /// Reference to integration (required for integration type).
-    pub integration_id: Option<Uuid>,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Description of the webhook's purpose.
@@ -109,16 +100,6 @@ pub struct UpdateWorkspaceWebhook {
 }
 
 impl WorkspaceWebhook {
-    /// Returns whether the webhook was created manually by a user.
-    pub fn is_provided(&self) -> bool {
-        self.webhook_type.is_provided()
-    }
-
-    /// Returns whether the webhook was created by an integration.
-    pub fn is_integration(&self) -> bool {
-        self.webhook_type.is_integration()
-    }
-
     /// Returns whether the webhook is active and receiving events.
     pub fn is_active(&self) -> bool {
         self.status.is_active() && self.deleted_at.is_none()

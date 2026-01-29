@@ -2,7 +2,6 @@
 
 mod cache;
 mod config;
-mod integration;
 mod security;
 mod webhook;
 
@@ -13,9 +12,9 @@ use nvisy_webhook::WebhookService;
 use crate::Result;
 pub use crate::service::cache::HealthCache;
 pub use crate::service::config::ServiceConfig;
-pub use crate::service::integration::IntegrationProvider;
 pub use crate::service::security::{
-    PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
+    MasterKey, MasterKeyConfig, PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig,
+    UserAgentParser,
 };
 pub use crate::service::webhook::WebhookEmitter;
 
@@ -32,9 +31,11 @@ pub struct ServiceState {
     pub nats: NatsClient,
     pub webhook: WebhookService,
 
+    // Security services:
+    pub master_key: MasterKey,
+
     // Internal services:
     pub health_cache: HealthCache,
-    pub integration_provider: IntegrationProvider,
     pub password_hasher: PasswordHasher,
     pub password_strength: PasswordStrength,
     pub session_keys: SessionKeys,
@@ -53,6 +54,7 @@ impl ServiceState {
         let postgres = service_config.connect_postgres().await?;
         let nats = service_config.connect_nats().await?;
 
+        let master_key = service_config.load_master_key().await?;
         let webhook_emitter = WebhookEmitter::new(postgres.clone(), nats.clone());
 
         let service_state = Self {
@@ -60,8 +62,9 @@ impl ServiceState {
             nats,
             webhook: webhook_service,
 
+            master_key,
+
             health_cache: HealthCache::new(),
-            integration_provider: IntegrationProvider::new(),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
             session_keys: service_config.load_session_keys().await?,
@@ -88,9 +91,11 @@ impl_di!(postgres: PgClient);
 impl_di!(nats: NatsClient);
 impl_di!(webhook: WebhookService);
 
+// Security services:
+impl_di!(master_key: MasterKey);
+
 // Internal services:
 impl_di!(health_cache: HealthCache);
-impl_di!(integration_provider: IntegrationProvider);
 impl_di!(password_hasher: PasswordHasher);
 impl_di!(password_strength: PasswordStrength);
 impl_di!(session_keys: SessionKeys);

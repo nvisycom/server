@@ -2,7 +2,8 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 
-AI/LLM orchestration layer. Provides unified interfaces for LLM providers and agent workflows.
+AI/LLM orchestration layer. Provides unified interfaces for LLM providers and
+agent workflows.
 
 ## Installation
 
@@ -19,11 +20,11 @@ uv add "nvisy-rig[all]"
 
 ## Available Providers
 
-| Provider | Extra | Description |
-|----------|-------|-------------|
-| OpenAI | `openai` | GPT models, embeddings |
-| Anthropic | `anthropic` | Claude models |
-| Cohere | `cohere` | Command models, embeddings |
+| Provider  | Extra       | Description                |
+| --------- | ----------- | -------------------------- |
+| OpenAI    | `openai`    | GPT models, embeddings     |
+| Anthropic | `anthropic` | Claude models              |
+| Cohere    | `cohere`    | Command models, embeddings |
 
 ## Usage
 

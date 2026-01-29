@@ -9,7 +9,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::query::PipelineRepository;
+use nvisy_postgres::query::{WorkspacePipelineArtifactRepository, WorkspacePipelineRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -53,7 +53,7 @@ async fn create_pipeline(
         .await?;
 
     let new_pipeline = request.into_model(path_params.workspace_id, auth_state.account_id);
-    let pipeline = conn.create_pipeline(new_pipeline).await?;
+    let pipeline = conn.create_workspace_pipeline(new_pipeline).await?;
 
     let response = Pipeline::from_model(pipeline);
 
@@ -136,6 +136,7 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
 /// Retrieves a pipeline by ID.
 ///
 /// The workspace is derived from the pipeline record for authorization.
+/// Returns the pipeline with all artifacts from its runs.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -152,7 +153,10 @@ async fn get_pipeline(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(pipeline) = conn.find_pipeline_by_id(path_params.pipeline_id).await? else {
+    let Some(pipeline) = conn
+        .find_workspace_pipeline_by_id(path_params.pipeline_id)
+        .await?
+    else {
         return Err(ErrorKind::NotFound
             .with_message("Pipeline not found")
             .with_resource("pipeline"));
@@ -162,7 +166,12 @@ async fn get_pipeline(
         .authorize_workspace(&mut conn, pipeline.workspace_id, Permission::ViewPipelines)
         .await?;
 
-    let response = Pipeline::from_model(pipeline);
+    // Fetch artifacts for all runs of this pipeline
+    let artifacts = conn
+        .list_workspace_pipeline_artifacts(path_params.pipeline_id)
+        .await?;
+
+    let response = Pipeline::from_model_with_artifacts(pipeline, artifacts);
 
     tracing::info!(target: TRACING_TARGET, "Pipeline retrieved");
 
@@ -199,7 +208,10 @@ async fn update_pipeline(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(existing) = conn.find_pipeline_by_id(path_params.pipeline_id).await? else {
+    let Some(existing) = conn
+        .find_workspace_pipeline_by_id(path_params.pipeline_id)
+        .await?
+    else {
         return Err(ErrorKind::NotFound
             .with_message("Pipeline not found")
             .with_resource("pipeline"));
@@ -215,7 +227,7 @@ async fn update_pipeline(
 
     let update_data = request.into_model();
     let pipeline = conn
-        .update_pipeline(path_params.pipeline_id, update_data)
+        .update_workspace_pipeline(path_params.pipeline_id, update_data)
         .await?;
 
     let response = Pipeline::from_model(pipeline);
@@ -255,7 +267,10 @@ async fn delete_pipeline(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(pipeline) = conn.find_pipeline_by_id(path_params.pipeline_id).await? else {
+    let Some(pipeline) = conn
+        .find_workspace_pipeline_by_id(path_params.pipeline_id)
+        .await?
+    else {
         return Err(ErrorKind::NotFound
             .with_message("Pipeline not found")
             .with_resource("pipeline"));
@@ -269,7 +284,8 @@ async fn delete_pipeline(
         )
         .await?;
 
-    conn.delete_pipeline(path_params.pipeline_id).await?;
+    conn.delete_workspace_pipeline(path_params.pipeline_id)
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, "Pipeline deleted");
 

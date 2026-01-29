@@ -343,95 +343,95 @@ impl WebhookEmitter {
         .await
     }
 
-    /// Emit an integration created event.
+    /// Emit a connection created event.
     #[inline]
-    pub async fn emit_integration_created(
+    pub async fn emit_connection_created(
         &self,
         workspace_id: Uuid,
-        integration_id: Uuid,
+        connection_id: Uuid,
         triggered_by: Option<Uuid>,
         data: Option<serde_json::Value>,
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::IntegrationCreated,
-            integration_id,
+            WebhookEvent::ConnectionCreated,
+            connection_id,
             triggered_by,
             data,
         )
         .await
     }
 
-    /// Emit an integration updated event.
+    /// Emit a connection updated event.
     #[inline]
-    pub async fn emit_integration_updated(
+    pub async fn emit_connection_updated(
         &self,
         workspace_id: Uuid,
-        integration_id: Uuid,
+        connection_id: Uuid,
         triggered_by: Option<Uuid>,
         data: Option<serde_json::Value>,
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::IntegrationUpdated,
-            integration_id,
+            WebhookEvent::ConnectionUpdated,
+            connection_id,
             triggered_by,
             data,
         )
         .await
     }
 
-    /// Emit an integration deleted event.
+    /// Emit a connection deleted event.
     #[inline]
-    pub async fn emit_integration_deleted(
+    pub async fn emit_connection_deleted(
         &self,
         workspace_id: Uuid,
-        integration_id: Uuid,
+        connection_id: Uuid,
         triggered_by: Option<Uuid>,
         data: Option<serde_json::Value>,
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::IntegrationDeleted,
-            integration_id,
+            WebhookEvent::ConnectionDeleted,
+            connection_id,
             triggered_by,
             data,
         )
         .await
     }
 
-    /// Emit an integration synced event.
+    /// Emit a connection synced event.
     #[inline]
-    pub async fn emit_integration_synced(
+    pub async fn emit_connection_synced(
         &self,
         workspace_id: Uuid,
-        integration_id: Uuid,
+        connection_id: Uuid,
         triggered_by: Option<Uuid>,
         data: Option<serde_json::Value>,
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::IntegrationSynced,
-            integration_id,
+            WebhookEvent::ConnectionSynced,
+            connection_id,
             triggered_by,
             data,
         )
         .await
     }
 
-    /// Emit an integration desynced event.
+    /// Emit a connection desynced event.
     #[inline]
-    pub async fn emit_integration_desynced(
+    pub async fn emit_connection_desynced(
         &self,
         workspace_id: Uuid,
-        integration_id: Uuid,
+        connection_id: Uuid,
         triggered_by: Option<Uuid>,
         data: Option<serde_json::Value>,
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::IntegrationDesynced,
-            integration_id,
+            WebhookEvent::ConnectionDesynced,
+            connection_id,
             triggered_by,
             data,
         )

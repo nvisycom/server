@@ -13,7 +13,9 @@ postgres = ["asyncpg>=0.30", "asyncpg-stubs>=0.30"]
 mysql = ["aiomysql>=0.2"]
 qdrant = ["qdrant-client>=1.12"]
 pinecone = ["pinecone>=5.0"]
-all = ["nvisy-dal[s3,gcs,azure,postgres,mysql,qdrant,pinecone]"]
+milvus = ["pymilvus>=2.5"]
+weaviate = ["weaviate-client>=4.10"]
+all = ["nvisy-dal[s3,gcs,azure,postgres,mysql,qdrant,pinecone,milvus,weaviate]"]
 dev = ["nvisy-dal[all]", "pytest>=8.0", "pytest-asyncio>=0.24", "moto>=5.0"]
 
 [build-system]
@@ -46,6 +48,7 @@ asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
 dev = [
+    "pip-audit>=2.9",
     "pyright>=1.1.408",
-    "ruff>=0.14.14",
+    "ruff>=0.14",
 ]

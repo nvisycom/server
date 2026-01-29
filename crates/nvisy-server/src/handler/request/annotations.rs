@@ -1,6 +1,6 @@
 //! Annotation request types.
 
-use nvisy_postgres::model::{NewFileAnnotation, UpdateFileAnnotation};
+use nvisy_postgres::model::{NewWorkspaceFileAnnotation, UpdateWorkspaceFileAnnotation};
 use nvisy_postgres::types::AnnotationType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -24,8 +24,8 @@ pub struct CreateAnnotation {
 
 impl CreateAnnotation {
     /// Converts to database model.
-    pub fn into_model(self, file_id: Uuid, account_id: Uuid) -> NewFileAnnotation {
-        NewFileAnnotation {
+    pub fn into_model(self, file_id: Uuid, account_id: Uuid) -> NewWorkspaceFileAnnotation {
+        NewWorkspaceFileAnnotation {
             file_id,
             account_id,
             content: self.content,
@@ -52,8 +52,8 @@ pub struct UpdateAnnotation {
 }
 
 impl UpdateAnnotation {
-    pub fn into_model(self) -> UpdateFileAnnotation {
-        UpdateFileAnnotation {
+    pub fn into_model(self) -> UpdateWorkspaceFileAnnotation {
+        UpdateWorkspaceFileAnnotation {
             content: self.content,
             annotation_type: self.annotation_type,
             metadata: self.metadata,

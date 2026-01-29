@@ -51,7 +51,6 @@ pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 /// - [`ServiceConfig`]: External service connections (Postgres, NATS, workers)
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
-/// - `OllamaConfig`: Ollama AI services configuration (feature-gated)
 /// - `ReqwestConfig`: HTTP client configuration for webhooks
 #[derive(Debug, Clone, Parser, Serialize, Deserialize)]
 #[command(name = "nvisy")]
@@ -135,8 +134,8 @@ impl Cli {
         tracing::info!(
             target: TRACING_TARGET_CONFIG,
             postgres_max_connections = self.service.postgres_config.postgres_max_connections,
-            postgres_connection_timeout_secs = ?self.service.postgres_config.postgres_connection_timeout_secs,
-            postgres_idle_timeout_secs = ?self.service.postgres_config.postgres_idle_timeout_secs,
+            postgres_connection_timeout_secs = ?self.service.postgres_config.postgres_connection_timeout,
+            postgres_idle_timeout_secs = ?self.service.postgres_config.postgres_idle_timeout,
             "Database configuration"
         );
     }

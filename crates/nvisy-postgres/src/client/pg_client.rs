@@ -160,8 +160,8 @@ impl PgClient {
         tracing::info!(
             target: TRACING_TARGET_CONNECTION,
             max_connections = this.inner.config.postgres_max_connections,
-            connection_timeout_secs = this.inner.config.postgres_connection_timeout_secs,
-            idle_timeout_secs = this.inner.config.postgres_idle_timeout_secs,
+            connection_timeout_secs = this.inner.config.postgres_connection_timeout,
+            idle_timeout_secs = this.inner.config.postgres_idle_timeout,
             "Database client initialized successfully"
         );
 
@@ -248,11 +248,11 @@ impl std::fmt::Debug for PgClient {
             .field("pool_waiting", &pool_status.waiting)
             .field(
                 "connection_timeout_secs",
-                &self.inner.config.postgres_connection_timeout_secs,
+                &self.inner.config.postgres_connection_timeout,
             )
             .field(
                 "idle_timeout_secs",
-                &self.inner.config.postgres_idle_timeout_secs,
+                &self.inner.config.postgres_idle_timeout,
             )
             .finish()
     }

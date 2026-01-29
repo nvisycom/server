@@ -1,321 +1,94 @@
-# Provider Architecture
+# Providers
 
-Data providers enable reading from and writing to external systems (storage, databases, vector stores). This document defines the architecture for implementing providers in Python while maintaining type safety with the Rust core.
+## The Problem of Breadth
+
+An ETL platform is only as useful as the systems it can connect to. Relational
+databases, object stores, vector databases, document stores, message queues,
+search engines, graph databases — each has its own wire protocol, authentication
+model, pagination scheme, and SDK.
+
+Not all of these systems offer Rust as a first-class target for their client
+libraries. The Python ecosystem, by contrast, has mature, well-maintained SDKs
+for virtually every data system in production use today. The AI infrastructure
+ecosystem is even more skewed — model providers, embedding services, and
+orchestration frameworks overwhelmingly target Python first.
+
+Nvisy addresses this with a dual-language architecture: the performance-critical
+core — HTTP serving, workflow compilation, execution orchestration, encryption —
+is written in Rust, while provider integrations are implemented in Python and
+loaded at runtime through a PyO3 bridge. This gives the platform Rust's
+performance and safety guarantees where they matter most, and Python's ecosystem
+reach where breadth matters most.
+
+## Provider Abstraction
+
+Every external system is accessed through a uniform provider interface. A
+provider is defined by three concerns:
+
+**Connection** establishes a session with the external system using typed
+credentials and parameters. Credentials are encrypted at rest and decrypted only
+at execution time within the scope of a single run.
+
+**Reading** streams data from the source with resumable pagination. Each item
+carries its own context — a cursor, token, or offset — so that processing can
+resume from any point, whether recovering from a failure or continuing
+incrementally after new data has been added to the source. The platform defines
+context types for different pagination strategies: marker-based for object
+stores, keyset-based for relational databases, and token-based for vector
+databases.
+
+**Writing** sends data to the sink in batches. The platform defines typed data
+representations for each category of system: binary objects for file stores,
+relational records for databases, vector embeddings for similarity search
+systems, JSON documents for document stores, messages for queues, and graph
+structures for graph databases.
+
+## Type Safety Across the Boundary
+
+Rust defines the canonical types — data representations, parameter schemas,
+context structures — and Python conforms to them through Pydantic models that
+mirror the Rust structs. This ensures that data crossing the language boundary
+is validated on both sides.
+
+The Rust DAL crate defines three core traits:
+
+- **Provider** — connect to and disconnect from an external system
+- **DataInput** — read a resumable stream of typed items
+- **DataOutput** — write a batch of typed items
+
+Python providers implement matching structural protocols. The PyO3 bridge
+handles conversion between Rust and Python representations, async interop
+between Tokio and Python coroutines, and error propagation with full tracebacks.
+
+## Adding a New Provider
+
+Adding a provider does not require modifying the core engine. The process is:
+
+1. Define credential and parameter types in the Rust DAL crate
+2. Register the type-erased variants so the runtime can dispatch to the new
+   provider
+3. Add matching Pydantic models to the Python package
+4. Implement the read and/or write protocols in a Python module
+5. The runtime discovers and loads the provider by name at execution time
+
+This design keeps the provider surface area decoupled from the core. The engine
+does not know or care which specific systems are available — it operates on
+abstract streams of typed data.
 
 ## Design Principles
 
-1. **Rust owns the API boundary** - All HTTP schemas defined in Rust, Python conforms to them
-2. **Python owns integrations** - Provider implementations leverage Python's ecosystem
-3. **Type safety across the boundary** - Schemas generated from Rust, validated in Python
-4. **Async-first** - No synchronous APIs, no blocking calls
-5. **Minimal coupling** - Providers are independent, share only core protocols
+**Async-first.** All provider operations are asynchronous. No synchronous
+wrappers, no blocking calls. The GIL is released during all I/O operations to
+maintain concurrency.
 
-## Architecture
+**Protocols over inheritance.** Python providers implement structural protocols
+rather than inheriting from base classes. This allows any conforming object to
+serve as a provider without coupling to a specific class hierarchy.
 
-```
-┌────────────────────────────────────────────────────┐
-│                    Rust Core                       │
-│                                                    │
-│  OpenAPI Schema ◄── schemars ◄── Rust Types       │
-│        │                            │              │
-│        ▼                            ▼              │
-│  JSON Schema files            nvisy-dal traits    │
-│        │                            │              │
-└────────┼────────────────────────────┼──────────────┘
-         │                            │
-         ▼                            ▼
-┌────────────────────────────────────────────────────┐
-│                  Python Providers                  │
-│                                                    │
-│  datamodel-codegen ──► Pydantic Models            │
-│                            │                       │
-│                            ▼                       │
-│                    Provider Protocols              │
-│                            │                       │
-│                            ▼                       │
-│              Provider Implementations              │
-│                                                    │
-└────────────────────────────────────────────────────┘
-```
+**Minimal coupling.** Providers share only the core data types and protocols.
+Each provider is an independent module with its own optional dependencies,
+installable separately.
 
-## Schema Flow
-
-### 1. Define in Rust
-
-Schemas are defined once in Rust using `schemars`:
-
-```rust
-#[derive(JsonSchema, Serialize, Deserialize)]
-pub struct ObjectContext {
-    pub prefix: Option<String>,
-    pub continuation_token: Option<String>,
-    pub limit: Option<u32>,
-}
-```
-
-### 2. Export to JSON Schema
-
-Build script exports schemas to `schemas/`:
-
-```
-schemas/
-├── contexts/
-│   ├── object.json
-│   ├── relational.json
-│   └── vector.json
-├── credentials/
-│   ├── s3.json
-│   ├── gcs.json
-│   └── ...
-└── datatypes/
-    ├── blob.json
-    ├── document.json
-    └── ...
-```
-
-### 3. Generate Python Models
-
-Python models generated from JSON Schema at build time:
-
-```bash
-uv run datamodel-codegen \
-  --input schemas/ \
-  --output packages/nvisy-dal-core/nvisy_dal_core/generated/
-```
-
-### 4. Validate at Runtime
-
-Generated models used in provider implementations with Pydantic validation.
-
-## Provider Interface
-
-Providers implement async protocols for reading and writing data.
-
-### Input Protocol
-
-```python
-@runtime_checkable
-class DataInput(Protocol[T_co, Ctx_contra]):
-    """Protocol for reading data from external sources."""
-    
-    async def read(self, ctx: Ctx_contra) -> AsyncIterator[T_co]:
-        """Yield items from the source based on context."""
-        ...
-```
-
-### Output Protocol
-
-```python
-@runtime_checkable  
-class DataOutput(Protocol[T_contra, Ctx_contra]):
-    """Protocol for writing data to external sinks."""
-    
-    async def write(self, ctx: Ctx_contra, items: Sequence[T_contra]) -> None:
-        """Write a batch of items to the sink."""
-        ...
-```
-
-### Provider Protocol
-
-```python
-@runtime_checkable
-class Provider(Protocol[Cred, Params]):
-    """Protocol for provider lifecycle management."""
-    
-    @classmethod
-    async def connect(cls, credentials: Cred, params: Params) -> Self:
-        """Establish connection to the external service."""
-        ...
-    
-    async def disconnect(self) -> None:
-        """Release resources and close connections."""
-        ...
-```
-
-## Package Structure
-
-Single package with optional dependencies per provider:
-
-```
-packages/nvisy-dal/
-├── pyproject.toml
-├── py.typed                    # PEP 561 marker
-└── src/
-    └── nvisy_dal/
-        ├── __init__.py
-        ├── protocols.py        # DataInput, DataOutput, Provider
-        ├── errors.py           # DalError, error kinds
-        ├── _generated/         # From JSON Schema (committed)
-        │   ├── __init__.py
-        │   ├── contexts.py
-        │   └── datatypes.py
-        └── providers/
-            ├── __init__.py
-            ├── s3.py
-            ├── gcs.py
-            ├── azure.py
-            ├── postgres.py
-            ├── mysql.py
-            ├── qdrant.py
-            └── pinecone.py
-```
-
-### Layout Rationale
-
-- **Single package** - Internal code, not publishing separately to PyPI
-- **`src/` layout** - Prevents accidental imports from project root during development
-- **Flat providers** - One module per provider, no nested input/output structure
-- **`_generated/` committed** - Reproducible builds, `_` prefix indicates internal
-- **Optional deps** - `pip install nvisy-dal[s3,postgres]` for selective installation
-
-### Dependencies
-
-```toml
-# pyproject.toml
-[project]
-name = "nvisy-dal"
-dependencies = [
-    "pydantic>=2.0",
-]
-
-[project.optional-dependencies]
-s3 = ["boto3>=1.35", "types-boto3"]
-gcs = ["google-cloud-storage>=2.18"]
-azure = ["azure-storage-blob>=12.23"]
-postgres = ["asyncpg>=0.30"]
-mysql = ["aiomysql>=0.2"]
-qdrant = ["qdrant-client>=1.12"]
-pinecone = ["pinecone-client>=5.0"]
-all = ["nvisy-dal[s3,gcs,azure,postgres,mysql,qdrant,pinecone]"]
-dev = ["nvisy-dal[all]", "pytest>=8.0", "pytest-asyncio>=0.24", "moto>=5.0"]
-```
-
-## Python Standards
-
-### Tooling
-
-| Tool | Purpose |
-|------|---------|
-| `uv` | Package management, virtualenv, lockfile |
-| `ruff` | Linting + formatting (replaces black, isort, flake8) |
-| `pyright` | Type checking in strict mode |
-| `pytest` | Testing with `pytest-asyncio` |
-
-### Configuration
-
-All config in `pyproject.toml`:
-
-```toml
-[project]
-requires-python = ">=3.12"
-
-[tool.ruff]
-target-version = "py312"
-line-length = 100
-
-[tool.ruff.lint]
-select = ["ALL"]
-ignore = ["D", "ANN101", "ANN102", "COM812", "ISC001"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["nvisy_dal"]
-
-[tool.pyright]
-pythonVersion = "3.12"
-typeCheckingMode = "strict"
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-```
-
-### Code Style
-
-- Type hints on all public APIs
-- Protocols over ABCs (structural typing)
-- `Final` for constants, `ClassVar` for class attributes
-- `Sequence` over `list` in parameters (covariance)
-- `Mapping` over `dict` in parameters
-- `async def` always, no sync wrappers
-- Context managers for resource cleanup
-- `structlog` for structured logging
-
-### Error Handling
-
-```python
-from enum import StrEnum
-from typing import final
-
-class ErrorKind(StrEnum):
-    """Classification of provider errors."""
-    
-    CONNECTION = "connection"
-    NOT_FOUND = "not_found"
-    INVALID_INPUT = "invalid_input"
-    TIMEOUT = "timeout"
-    PROVIDER = "provider"
-
-@final
-class DalError(Exception):
-    """Base error for all provider operations."""
-    
-    __slots__ = ("message", "kind", "source")
-    
-    def __init__(
-        self,
-        message: str,
-        kind: ErrorKind = ErrorKind.PROVIDER,
-        source: BaseException | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.message = message
-        self.kind = kind
-        self.source = source
-```
-
-## PyO3 Bridge
-
-The bridge module in `nvisy-dal` handles:
-
-1. **Runtime management** - Python interpreter lifecycle
-2. **Async bridging** - Rust futures ↔ Python coroutines
-3. **Type conversion** - Via `pythonize` using shared JSON Schema
-4. **Error propagation** - Python exceptions → Rust errors
-5. **GIL coordination** - Release during I/O for concurrency
-
-### Guarantees
-
-- Provider methods are called with validated inputs (Pydantic)
-- Outputs conform to expected schema (Pydantic serialization)
-- Errors include Python traceback for debugging
-- GIL released during all I/O operations
-
-## Testing Strategy
-
-### Unit Tests (Python)
-
-- Mock external services (`moto` for AWS, `responses` for HTTP)
-- Test protocol conformance
-- Test error handling paths
-
-### Integration Tests (Rust)
-
-- Test PyO3 bridge with real Python runtime
-- Verify type conversion round-trips
-- Test async behavior across boundary
-
-### Contract Tests
-
-- Validate generated Python models against Rust schemas
-- Run on CI after schema changes
-
-## Adding a Provider
-
-1. Define credentials/params schema in Rust (`crates/nvisy-dal/src/schemas/`)
-2. Export JSON Schema (`make schemas`)
-3. Regenerate Python models (`make codegen`)
-4. Add optional dependency to `pyproject.toml`
-5. Create provider module in `src/nvisy_dal/providers/`
-6. Implement `DataInput` and/or `DataOutput` protocols
-7. Add unit tests with mocked external service
-8. Register in PyO3 bridge
+**Validated boundaries.** Inputs are validated by Pydantic on the Python side
+and by typed deserialization on the Rust side. Errors include full context —
+Python tracebacks propagate through the bridge for debugging.

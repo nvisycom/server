@@ -2,12 +2,12 @@
 
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_nats::jetstream::consumer::{self, Consumer};
-use async_nats::jetstream::{self, Context, Message};
+use async_nats::jetstream::{self, Context, Message, stream};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
-use tracing::{debug, instrument, warn};
 
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
@@ -36,25 +36,52 @@ where
     T: DeserializeOwned + Send + Sync + 'static,
 {
     /// Create a new type-safe stream subscriber.
-    #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
-    pub(crate) async fn new(
+    ///
+    /// If the stream doesn't exist, it will be created with the specified max age
+    /// (defaults to 24 hours if `None`).
+    #[tracing::instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
+    pub(crate) async fn new_with_max_age(
         jetstream: &Context,
         stream_name: &str,
         consumer_name: &str,
+        max_age: Option<Duration>,
     ) -> Result<Self> {
-        // Verify stream exists
-        jetstream
-            .get_stream(stream_name)
-            .await
-            .map_err(|e| Error::stream_error(stream_name, e.to_string()))?;
+        // Try to get existing stream, create if it doesn't exist
+        match jetstream.get_stream(stream_name).await {
+            Ok(_) => {
+                tracing::debug!(
+                    target: TRACING_TARGET_STREAM,
+                    stream = %stream_name,
+                    consumer = %consumer_name,
+                    type_name = std::any::type_name::<T>(),
+                    "Using existing stream for subscriber"
+                );
+            }
+            Err(_) => {
+                // Stream doesn't exist, create it
+                let stream_config = stream::Config {
+                    name: stream_name.to_string(),
+                    description: Some(format!("Stream: {}", stream_name)),
+                    subjects: vec![format!("{}.>", stream_name)],
+                    max_age: max_age.unwrap_or(Duration::from_secs(24 * 60 * 60)), // Default 24 hours
+                    ..Default::default()
+                };
 
-        debug!(
-            target: TRACING_TARGET_STREAM,
-            stream = %stream_name,
-            consumer = %consumer_name,
-            type_name = std::any::type_name::<T>(),
-            "Created type-safe stream subscriber"
-        );
+                tracing::debug!(
+                    target: TRACING_TARGET_STREAM,
+                    stream = %stream_name,
+                    consumer = %consumer_name,
+                    type_name = std::any::type_name::<T>(),
+                    max_age_secs = ?max_age,
+                    "Creating new stream for subscriber"
+                );
+
+                jetstream
+                    .create_stream(stream_config)
+                    .await
+                    .map_err(|e| Error::operation("stream_create", e.to_string()))?;
+            }
+        }
 
         Ok(Self {
             inner: Arc::new(StreamSubscriberInner {
@@ -78,7 +105,7 @@ where
     }
 
     /// Subscribe to the stream and get a typed message stream.
-    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn subscribe(&self) -> Result<TypedMessageStream<T>> {
         let mut consumer_config = consumer::pull::Config {
             durable_name: Some(self.inner.consumer_name.clone()),
@@ -114,7 +141,7 @@ where
                 )
             })?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_STREAM,
             stream = %self.inner.stream_name,
             consumer = %self.inner.consumer_name,
@@ -128,7 +155,7 @@ where
     }
 
     /// Subscribe with a batch size for fetching messages.
-    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn subscribe_batch(&self, batch_size: usize) -> Result<TypedBatchStream<T>> {
         let mut consumer_config = consumer::pull::Config {
             durable_name: Some(self.inner.consumer_name.clone()),
@@ -166,7 +193,7 @@ where
                 )
             })?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_STREAM,
             stream = %self.inner.stream_name,
             consumer = %self.inner.consumer_name,
@@ -194,7 +221,7 @@ where
     }
 
     /// Check if the stream and consumer are healthy and accessible.
-    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn health_check(&self) -> Result<bool> {
         match self
             .inner
@@ -207,7 +234,7 @@ where
                 .await
             {
                 Ok(_) => {
-                    debug!(
+                    tracing::debug!(
                         target: TRACING_TARGET_STREAM,
                         stream = %self.inner.stream_name,
                         consumer = %self.inner.consumer_name,
@@ -216,7 +243,7 @@ where
                     Ok(true)
                 }
                 Err(e) => {
-                    debug!(
+                    tracing::debug!(
                         target: TRACING_TARGET_STREAM,
                         stream = %self.inner.stream_name,
                         consumer = %self.inner.consumer_name,
@@ -227,7 +254,7 @@ where
                 }
             },
             Err(e) => {
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %self.inner.stream_name,
                     error = %e,
@@ -239,7 +266,7 @@ where
     }
 
     /// Get consumer information.
-    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn consumer_info(&self) -> Result<consumer::Info> {
         let stream = self
             .inner
@@ -292,7 +319,7 @@ where
                         Ok(message) => {
                             let payload: T = serde_json::from_slice(&message.payload)?;
 
-                            debug!(
+                            tracing::debug!(
                                 target: TRACING_TARGET_STREAM,
                                 subject = %message.subject,
                                 "Received typed message"
@@ -301,7 +328,7 @@ where
                             Ok(Some(TypedMessage { payload, message }))
                         }
                         Err(e) => {
-                            warn!(
+                            tracing::warn!(
                                 target: TRACING_TARGET_STREAM,
                                 error = %e,
                                 "Error receiving message"
@@ -360,7 +387,7 @@ where
                                 batch.push(TypedMessage { payload, message });
                             }
                             Err(e) => {
-                                warn!(
+                                tracing::warn!(
                                     target: TRACING_TARGET_STREAM,
                                     error = %e,
                                     "Failed to deserialize message payload in custom batch"
@@ -369,7 +396,7 @@ where
                             }
                         },
                         Err(e) => {
-                            warn!(
+                            tracing::warn!(
                                 target: TRACING_TARGET_STREAM,
                                 error = %e,
                                 "Error receiving message in custom batch"
@@ -378,7 +405,7 @@ where
                     }
                 }
 
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     batch_size = batch.len(),
                     requested_size = batch_size,
@@ -410,7 +437,7 @@ where
                                 batch.push(TypedMessage { payload, message });
                             }
                             Err(e) => {
-                                warn!(
+                                tracing::warn!(
                                     target: TRACING_TARGET_STREAM,
                                     error = %e,
                                     "Failed to deserialize message payload"
@@ -419,7 +446,7 @@ where
                             }
                         },
                         Err(e) => {
-                            warn!(
+                            tracing::warn!(
                                 target: TRACING_TARGET_STREAM,
                                 error = %e,
                                 "Error receiving message in batch"
@@ -428,7 +455,7 @@ where
                     }
                 }
 
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     batch_size = batch.len(),
                     "Received batch of typed messages"

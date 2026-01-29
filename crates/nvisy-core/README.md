@@ -15,8 +15,7 @@ This crate provides foundational types used by other nvisy crates:
 ## Usage
 
 ```rust
-use nvisy_core::{Error, ErrorKind, Result};
-use nvisy_core::types::{ServiceHealth, ServiceStatus};
+use nvisy_core::{Error, ErrorKind, Result, ServiceHealth, ServiceStatus};
 ```
 
 ## Features

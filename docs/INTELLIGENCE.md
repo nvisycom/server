@@ -1,67 +1,110 @@
-# Intelligence Layer
+# Intelligence
 
-## Cross-Document Linking
+Nvisy treats intelligence as a pipeline concern, not a separate layer.
+AI-powered transforms sit alongside rule-based processors in the workflow graph,
+operating on data as it flows from sources to sinks. Every transform is a node
+that accepts input, produces output, and can be composed with any other node.
 
-Related content across files must be explicitly linked. This is relationship modeling, not retrieval.
+## Document Processing
 
-| Technique | Purpose |
-|-----------|---------|
-| Entity resolution | Same person/company across files |
-| Concept embeddings | Same idea, different wording |
-| Citation graphs | What references what |
-| Contradiction detection | Conflicting statements across documents |
+Before content can be analyzed or enriched, it must be decomposed into
+structured elements.
 
-## Hybrid Search
+**Partitioning** breaks documents into typed elements — paragraphs, tables,
+images, headers, list items — using either fast rule-based heuristics or
+ML-based layout detection. For complex layouts, a vision-language model can be
+used to interpret page structure directly from rendered images.
 
-Vector search alone is insufficient for cross-file queries.
+**Chunking** splits partitioned elements into smaller segments suitable for
+embedding and retrieval. Strategies include fixed-size character windows,
+page-boundary splits, section-aware splits that respect document headings, and
+semantic similarity splits that group related content. Optionally, an LLM can
+generate contextual summaries per chunk to improve downstream retrieval quality.
 
-| Layer | Purpose | Example |
-|-------|---------|---------|
-| Vector search | Semantic similarity | "Find clauses about liability" |
-| Symbolic filters | Dates, types, authors | "After 2021", "Type: NDA" |
-| Graph traversal | Relationships | "Related to Company X" |
+## Extraction
 
-A query like "Show me all NDA clauses after 2021 that conflict with policy X" requires all three layers.
+Extraction transforms convert unstructured content into structured
+representations.
 
-## Temporal Intelligence
+**Format conversion** handles tables and text. Tables can be converted to HTML,
+Markdown, CSV, or JSON. Text can be converted to JSON or to structured JSON
+conforming to a user-provided schema, enabling extraction of arbitrary
+structured data from free-form content.
 
-| Capability | Description |
-|------------|-------------|
-| Versioned representations | Track document evolution |
-| Semantic diffing | Changes in meaning, not just text |
-| Temporal queries | "What changed since last quarter?" |
-| Change attribution | Who changed what and when |
+**Analysis** applies NLP tasks to content: named entity recognition (people,
+places, organizations, dates, amounts), keyword extraction, text classification
+against user-provided labels, sentiment analysis, and relationship extraction
+between identified entities.
 
-## Grounded Reasoning
+## Enrichment
 
-Every assertion links to evidence: file, section, exact text, and relevance score. Without this, enterprise users cannot validate conclusions.
+Enrichment adds metadata and descriptions that were not present in the source
+material.
 
-## Cross-File Reasoning Patterns
+**Table enrichment** generates natural language descriptions of table contents
+and per-column descriptions, making tabular data searchable and understandable
+without reading the raw data.
 
-Reusable patterns across any document set:
+**Image enrichment** generates descriptions at varying levels of detail — brief
+summaries, detailed descriptions covering people, objects, text, colors, and
+layout. Generative OCR extracts text from images using vision models rather than
+traditional OCR engines. Object detection identifies and lists entities present
+in the image.
 
-| Pattern | Question | Example |
-|---------|----------|---------|
-| Consistency | Do all docs use the same definition? | "Is 'confidential' defined consistently?" |
-| Coverage | Is X addressed somewhere? | "Do all contracts have termination clauses?" |
-| Conflict | Do any statements contradict? | "Are there conflicting liability terms?" |
-| Redundancy | Are we repeating ourselves? | "Is the same clause duplicated?" |
-| Completeness | What's missing? | "Which required sections are absent?" |
-| Drift | Has X changed from the standard? | "How does this differ from the template?" |
+## Derivation
 
-## Entity Resolution
+Derivation generates new content from existing input. **Summarization** produces
+condensed versions of longer content. **Title generation** creates headings or
+labels for untitled content. Both support custom prompt overrides for
+domain-specific behavior.
 
-The same entity appears differently across files.
+## Embedding
 
-| Challenge | Example |
-|-----------|---------|
-| Name variations | "IBM", "International Business Machines", "Big Blue" |
-| Role changes | "John Smith (CEO)" vs "John Smith (Board Member)" |
-| Temporal | "Acme Corp" acquired by "MegaCorp" in 2022 |
-| Abbreviations | "NDA", "Non-Disclosure Agreement" |
+Vector embedding generation converts content into dense numerical
+representations for storage in vector databases. The embedding transform
+supports configurable models and optional L2 normalization of output vectors.
 
-Resolution process: extraction → clustering → disambiguation → linking → propagation.
+## Cross-Content Intelligence
 
-## Knowledge Graph
+Beyond per-element transforms, Nvisy provides higher-order intelligence that
+operates across content boundaries.
 
-Entities link to Sections. Sections reference Sections. Documents relate to Documents. This graph grows over time and cannot be replicated by tools that process files in isolation.
+**Entity resolution** identifies when the same real-world entity appears in
+different forms across data — name variations ("IBM" vs. "International Business
+Machines"), role changes, acquisitions, and abbreviations. The resolution
+pipeline extracts, clusters, disambiguates, links, and propagates entity
+identities.
+
+**Contradiction detection** identifies conflicting statements across data from
+different sources, surfacing inconsistencies that would otherwise go unnoticed
+in large document sets.
+
+**Consistency checking** verifies that definitions and terms are used uniformly
+across content — for example, ensuring that "confidential" is defined the same
+way in every contract.
+
+**Coverage analysis** determines whether required topics, clauses, or sections
+are addressed across a body of content, identifying gaps and omissions.
+
+**Drift detection** compares content against templates or standards, identifying
+where and how a document has deviated from its expected form.
+
+**Semantic diffing** detects changes in meaning across versions of content,
+distinguishing substantive changes from cosmetic edits.
+
+**Temporal queries** enable time-aware filtering and analysis — "what changed
+since last quarter" or "show me the state of this document as of a specific
+date."
+
+## Routing
+
+Switch nodes route data conditionally within the workflow graph, enabling
+different processing paths based on data characteristics.
+
+**File category routing** directs data based on content type — text, images,
+audio, video, documents, spreadsheets, presentations, code, or archives —
+allowing each type to flow through an appropriate processing branch.
+
+**Language routing** directs data based on detected content language, with
+configurable confidence thresholds, enabling language-specific processing within
+a single workflow.

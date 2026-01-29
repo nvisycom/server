@@ -1,49 +1,65 @@
 # Crates
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+The Rust workspace contains nine crates. The core server logic lives in
+`nvisy-server`, which depends on all other crates. `nvisy-core` is the shared
+foundation with no internal dependencies. `nvisy-dal` and `nvisy-rig` bridge to
+Python packages in `../packages/` via PyO3 for provider implementations.
 
-This directory contains the workspace crates for Nvisy Server.
+## nvisy-cli
 
-## Core
+Server entry point and CLI configuration. Parses command-line arguments, loads
+environment configuration, and bootstraps the application by initializing all
+services and starting the HTTP server.
 
-### nvisy-cli
+## nvisy-core
 
-Server entry point and CLI configuration. Parses command-line arguments, loads environment configuration, and bootstraps the application by initializing all services and starting the HTTP server.
+Shared types, error handling, and encryption utilities used across all crates.
+Defines the `Error` and `ErrorKind` types, retry classification, and the
+credential encryption primitives (HKDF-SHA256 key derivation,
+XChaCha20-Poly1305 authenticated encryption).
 
-### nvisy-core
+## nvisy-dal
 
-Shared foundation used across all crates. Contains common error types with retry support, utility functions, and base traits. Provides the `Error` and `ErrorKind` types used throughout the application.
+Data abstraction layer for workflow inputs and outputs. Defines the core
+provider traits (`Provider`, `DataInput`, `DataOutput`), typed data
+representations (objects, records, embeddings, documents, messages, graphs), and
+the PyO3 bridge that loads Python provider implementations at runtime.
 
-### nvisy-server
+## nvisy-nats
 
-HTTP API layer built on Axum. Implements REST endpoints for documents, workspaces, accounts, and studio sessions. Includes middleware for authentication (JWT/Ed25519), request validation, and OpenAPI documentation via Aide.
+NATS client for real-time messaging, durable job queues, and object storage.
+Wraps JetStream for persistent streams, KV store for distributed state, and
+object storage for uploaded files. All operations are type-safe through generic
+parameters.
 
-## Data Layer
+## nvisy-postgres
 
-### nvisy-postgres
+PostgreSQL persistence layer using Diesel with async connection pooling. Defines
+ORM models, query builders, and repository patterns for all database entities.
+Migrations are embedded in the binary and applied automatically on startup.
 
-PostgreSQL persistence layer using Diesel async. Defines ORM models, query builders, and repository patterns for all database entities. Handles connection pooling via deadpool and compile-time SQL validation.
+## nvisy-rig
 
-### nvisy-nats
+AI service integration for completion and embedding model providers. Built on
+rig-core with support for multiple LLM backends. Provides chat sessions with
+document context, RAG pipelines with pgvector, and streaming responses.
 
-NATS messaging client for real-time features. Provides JetStream for durable message streams, KV store for distributed state, and object storage for large files. Used for pub/sub events and cross-service communication.
+## nvisy-runtime
 
-## Workflows
+Workflow compiler and execution engine. Compiles pipeline definitions (JSON
+graphs of source, transform, sink, and switch nodes) into optimized runtime
+graphs using petgraph. Executes compiled graphs with streaming, item-at-a-time
+processing and per-item resumption context.
 
-### nvisy-dal
+## nvisy-server
 
-Data Abstraction Layer for workflow inputs and outputs. Provides unified interfaces for reading/writing data across storage backends (S3, GCS, Azure Blob, PostgreSQL, MySQL) and vector databases (Qdrant, Pinecone, Milvus, pgvector). Defines core data types: Blob, Document, Embedding, Graph, Record, Message.
+HTTP API layer built on Axum. Implements REST endpoints for workspaces,
+pipelines, connections, files, and accounts. Includes JWT authentication with
+Ed25519, role-based authorization, request validation, security headers, and
+auto-generated OpenAPI documentation via Aide.
 
-### nvisy-runtime
+## nvisy-webhook
 
-Workflow execution engine. Defines workflow graphs with input, transformer, and output nodes. Manages provider credentials, node execution, and data flow between pipeline stages. Integrates with nvisy-dal for storage operations.
-
-### nvisy-rig
-
-AI services powered by rig-core. Provides chat completions, RAG pipelines with pgvector embeddings, and document processing. Supports multiple LLM providers (OpenAI, Anthropic, OpenRouter) for studio sessions.
-
-## Integration
-
-### nvisy-webhook
-
-Webhook delivery system. Defines traits and types for sending HTTP callbacks on events. Used to notify external systems about document processing completion, workflow status changes, and other application events.
+Webhook delivery for external event notification. Defines traits and types for
+sending HMAC-SHA256 signed HTTP callbacks on application events such as pipeline
+completion and status changes.

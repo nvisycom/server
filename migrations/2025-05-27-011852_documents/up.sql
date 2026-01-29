@@ -10,20 +10,20 @@ CREATE TYPE FILE_SOURCE AS ENUM (
 COMMENT ON TYPE FILE_SOURCE IS
     'Indicates how a file was created in the system.';
 
--- Create files table (renamed from document_files, standalone without documents container)
-CREATE TABLE files (
+-- Create workspace files table
+CREATE TABLE workspace_files (
     -- Primary identifiers
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
     workspace_id            UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     account_id              UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-    parent_id               UUID             DEFAULT NULL REFERENCES files (id) ON DELETE SET NULL,
+    parent_id               UUID             DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
 
     -- Version tracking (parent_id links to previous version, version_number tracks sequence)
     version_number          INTEGER          NOT NULL DEFAULT 1,
 
-    CONSTRAINT files_version_number_min CHECK (version_number >= 1),
+    CONSTRAINT workspace_files_version_number_min CHECK (version_number >= 1),
 
     -- File metadata
     display_name            TEXT             NOT NULL DEFAULT 'Untitled',
@@ -33,11 +33,11 @@ CREATE TABLE files (
     tags                    TEXT[]           NOT NULL DEFAULT '{}',
     source                  FILE_SOURCE      NOT NULL DEFAULT 'uploaded',
 
-    CONSTRAINT files_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
-    CONSTRAINT files_original_filename_length CHECK (length(original_filename) BETWEEN 1 AND 255),
-    CONSTRAINT files_file_extension_format CHECK (file_extension ~ '^[a-zA-Z0-9]{1,20}$'),
-    CONSTRAINT files_mime_type_format CHECK (mime_type IS NULL OR mime_type ~ '^[a-zA-Z0-9\-]+/[a-zA-Z0-9\-\.\+]+$'),
-    CONSTRAINT files_tags_count_max CHECK (array_length(tags, 1) IS NULL OR array_length(tags, 1) <= 32),
+    CONSTRAINT workspace_files_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_files_original_filename_length CHECK (length(original_filename) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_files_file_extension_format CHECK (file_extension ~ '^[a-zA-Z0-9]{1,20}$'),
+    CONSTRAINT workspace_files_mime_type_format CHECK (mime_type IS NULL OR mime_type ~ '^[a-zA-Z0-9\-]+/[a-zA-Z0-9\-\.\+]+$'),
+    CONSTRAINT workspace_files_tags_count_max CHECK (array_length(tags, 1) IS NULL OR array_length(tags, 1) <= 32),
 
     -- Storage and integrity
     file_size_bytes         BIGINT           NOT NULL,
@@ -45,66 +45,66 @@ CREATE TABLE files (
     storage_path            TEXT             NOT NULL,
     storage_bucket          TEXT             NOT NULL,
 
-    CONSTRAINT files_file_size_min CHECK (file_size_bytes >= 0),
-    CONSTRAINT files_file_hash_sha256_length CHECK (octet_length(file_hash_sha256) = 32),
-    CONSTRAINT files_storage_path_not_empty CHECK (trim(storage_path) <> ''),
-    CONSTRAINT files_storage_bucket_not_empty CHECK (trim(storage_bucket) <> ''),
+    CONSTRAINT workspace_files_file_size_min CHECK (file_size_bytes >= 0),
+    CONSTRAINT workspace_files_file_hash_sha256_length CHECK (octet_length(file_hash_sha256) = 32),
+    CONSTRAINT workspace_files_storage_path_not_empty CHECK (trim(storage_path) <> ''),
+    CONSTRAINT workspace_files_storage_bucket_not_empty CHECK (trim(storage_bucket) <> ''),
 
     -- Configuration
     metadata                JSONB            NOT NULL DEFAULT '{}',
 
-    CONSTRAINT files_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+    CONSTRAINT workspace_files_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Lifecycle timestamps
     created_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     deleted_at              TIMESTAMPTZ      DEFAULT NULL,
 
-    CONSTRAINT files_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT files_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT files_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
+    CONSTRAINT workspace_files_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_files_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
+    CONSTRAINT workspace_files_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
 );
 
 -- Set up automatic updated_at trigger
-SELECT setup_updated_at('files');
+SELECT setup_updated_at('workspace_files');
 
--- Create indexes for files
-CREATE INDEX files_workspace_idx
-    ON files (workspace_id, created_at DESC)
+-- Create indexes for workspace files
+CREATE INDEX workspace_files_workspace_idx
+    ON workspace_files (workspace_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX files_account_idx
-    ON files (account_id, created_at DESC)
+CREATE INDEX workspace_files_account_idx
+    ON workspace_files (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX files_hash_dedup_idx
-    ON files (file_hash_sha256, file_size_bytes)
+CREATE INDEX workspace_files_hash_dedup_idx
+    ON workspace_files (file_hash_sha256, file_size_bytes)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX files_tags_search_idx
-    ON files USING gin (tags)
+CREATE INDEX workspace_files_tags_search_idx
+    ON workspace_files USING gin (tags)
     WHERE array_length(tags, 1) > 0 AND deleted_at IS NULL;
 
-CREATE INDEX files_display_name_trgm_idx
-    ON files USING gin (display_name gin_trgm_ops)
+CREATE INDEX workspace_files_display_name_trgm_idx
+    ON workspace_files USING gin (display_name gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX files_version_chain_idx
-    ON files (parent_id, version_number DESC)
+CREATE INDEX workspace_files_version_chain_idx
+    ON workspace_files (parent_id, version_number DESC)
     WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 
-CREATE INDEX files_source_idx
-    ON files (source, workspace_id)
+CREATE INDEX workspace_files_source_idx
+    ON workspace_files (source, workspace_id)
     WHERE deleted_at IS NULL;
 
 -- Trigger function to auto-set version_number based on parent
-CREATE OR REPLACE FUNCTION set_file_version_number()
+CREATE OR REPLACE FUNCTION set_workspace_file_version_number()
 RETURNS TRIGGER AS $$
 BEGIN
     -- If parent_id is set, calculate version as parent's version + 1
     IF NEW.parent_id IS NOT NULL THEN
         SELECT version_number + 1 INTO NEW.version_number
-        FROM files
+        FROM workspace_files
         WHERE id = NEW.parent_id;
     ELSE
         -- No parent means version 1
@@ -114,45 +114,45 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER files_set_version_trigger
-    BEFORE INSERT ON files
+CREATE TRIGGER workspace_files_set_version_trigger
+    BEFORE INSERT ON workspace_files
     FOR EACH ROW
-    EXECUTE FUNCTION set_file_version_number();
+    EXECUTE FUNCTION set_workspace_file_version_number();
 
-COMMENT ON FUNCTION set_file_version_number() IS
+COMMENT ON FUNCTION set_workspace_file_version_number() IS
     'Automatically sets version_number based on parent file version.';
 
 -- Add table and column comments
-COMMENT ON TABLE files IS
+COMMENT ON TABLE workspace_files IS
     'Files stored in the system with version tracking and deduplication.';
 
-COMMENT ON COLUMN files.id IS 'Unique file identifier';
-COMMENT ON COLUMN files.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN files.account_id IS 'Uploading/creating account reference';
-COMMENT ON COLUMN files.parent_id IS 'Parent file reference for version chains';
-COMMENT ON COLUMN files.version_number IS 'Version number (1 for original, increments via parent_id chain)';
-COMMENT ON COLUMN files.display_name IS 'Display name (1-255 chars)';
-COMMENT ON COLUMN files.original_filename IS 'Original upload filename (1-255 chars)';
-COMMENT ON COLUMN files.file_extension IS 'File extension (1-20 alphanumeric)';
-COMMENT ON COLUMN files.mime_type IS 'MIME type of the file';
-COMMENT ON COLUMN files.tags IS 'Classification tags (max 32)';
-COMMENT ON COLUMN files.source IS 'How the file was created (uploaded, imported, generated)';
-COMMENT ON COLUMN files.file_size_bytes IS 'File size in bytes';
-COMMENT ON COLUMN files.file_hash_sha256 IS 'SHA256 content hash';
-COMMENT ON COLUMN files.storage_path IS 'Storage system path';
-COMMENT ON COLUMN files.storage_bucket IS 'Storage bucket/container';
-COMMENT ON COLUMN files.metadata IS 'Extended metadata (JSON)';
-COMMENT ON COLUMN files.created_at IS 'Upload timestamp';
-COMMENT ON COLUMN files.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN files.deleted_at IS 'Soft deletion timestamp';
+COMMENT ON COLUMN workspace_files.id IS 'Unique file identifier';
+COMMENT ON COLUMN workspace_files.workspace_id IS 'Parent workspace reference';
+COMMENT ON COLUMN workspace_files.account_id IS 'Uploading/creating account reference';
+COMMENT ON COLUMN workspace_files.parent_id IS 'Parent file reference for version chains';
+COMMENT ON COLUMN workspace_files.version_number IS 'Version number (1 for original, increments via parent_id chain)';
+COMMENT ON COLUMN workspace_files.display_name IS 'Display name (1-255 chars)';
+COMMENT ON COLUMN workspace_files.original_filename IS 'Original upload filename (1-255 chars)';
+COMMENT ON COLUMN workspace_files.file_extension IS 'File extension (1-20 alphanumeric)';
+COMMENT ON COLUMN workspace_files.mime_type IS 'MIME type of the file';
+COMMENT ON COLUMN workspace_files.tags IS 'Classification tags (max 32)';
+COMMENT ON COLUMN workspace_files.source IS 'How the file was created (uploaded, imported, generated)';
+COMMENT ON COLUMN workspace_files.file_size_bytes IS 'File size in bytes';
+COMMENT ON COLUMN workspace_files.file_hash_sha256 IS 'SHA256 content hash';
+COMMENT ON COLUMN workspace_files.storage_path IS 'Storage system path';
+COMMENT ON COLUMN workspace_files.storage_bucket IS 'Storage bucket/container';
+COMMENT ON COLUMN workspace_files.metadata IS 'Extended metadata (JSON)';
+COMMENT ON COLUMN workspace_files.created_at IS 'Upload timestamp';
+COMMENT ON COLUMN workspace_files.updated_at IS 'Last modification timestamp';
+COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft deletion timestamp';
 
 -- Create file chunks table - Text chunks with vector embeddings for semantic search
-CREATE TABLE file_chunks (
+CREATE TABLE workspace_file_chunks (
     -- Primary identifiers
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    file_id             UUID             NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    file_id             UUID             NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
 
     -- Chunk position and content info
     chunk_index         INTEGER          NOT NULL DEFAULT 0,
@@ -160,63 +160,63 @@ CREATE TABLE file_chunks (
     content_size        INTEGER          NOT NULL DEFAULT 0,
     token_count         INTEGER          NOT NULL DEFAULT 0,
 
-    CONSTRAINT file_chunks_chunk_index_min CHECK (chunk_index >= 0),
-    CONSTRAINT file_chunks_content_sha256_length CHECK (octet_length(content_sha256) = 32),
-    CONSTRAINT file_chunks_content_size_min CHECK (content_size >= 0),
-    CONSTRAINT file_chunks_token_count_min CHECK (token_count >= 0),
+    CONSTRAINT workspace_file_chunks_chunk_index_min CHECK (chunk_index >= 0),
+    CONSTRAINT workspace_file_chunks_content_sha256_length CHECK (octet_length(content_sha256) = 32),
+    CONSTRAINT workspace_file_chunks_content_size_min CHECK (content_size >= 0),
+    CONSTRAINT workspace_file_chunks_token_count_min CHECK (token_count >= 0),
 
     -- Vector embedding (1536 dimensions for OpenAI ada-002, adjust as needed)
     embedding           VECTOR(1536)     NOT NULL,
     embedding_model     TEXT             NOT NULL,
 
-    CONSTRAINT file_chunks_embedding_model_format CHECK (embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
+    CONSTRAINT workspace_file_chunks_embedding_model_format CHECK (embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
 
     -- Chunk metadata (positions, page numbers, etc.)
     metadata            JSONB            NOT NULL DEFAULT '{}',
 
-    CONSTRAINT file_chunks_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+    CONSTRAINT workspace_file_chunks_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
 
     -- Lifecycle timestamps
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
 
-    CONSTRAINT file_chunks_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_file_chunks_updated_after_created CHECK (updated_at >= created_at),
 
     -- Unique constraint on file + chunk index
-    CONSTRAINT file_chunks_file_chunk_unique UNIQUE (file_id, chunk_index)
+    CONSTRAINT workspace_file_chunks_file_chunk_unique UNIQUE (file_id, chunk_index)
 );
 
 -- Set up automatic updated_at trigger
-SELECT setup_updated_at('file_chunks');
+SELECT setup_updated_at('workspace_file_chunks');
 
 -- Create indexes for file chunks
-CREATE INDEX file_chunks_file_idx
-    ON file_chunks (file_id, chunk_index ASC);
+CREATE INDEX workspace_file_chunks_file_idx
+    ON workspace_file_chunks (file_id, chunk_index ASC);
 
-CREATE INDEX file_chunks_embedded_idx
-    ON file_chunks (file_id)
+CREATE INDEX workspace_file_chunks_embedded_idx
+    ON workspace_file_chunks (file_id)
     WHERE embedding IS NOT NULL;
 
 -- Create HNSW index for vector similarity search (cosine distance)
-CREATE INDEX file_chunks_embedding_idx
-    ON file_chunks USING hnsw (embedding vector_cosine_ops)
+CREATE INDEX workspace_file_chunks_embedding_idx
+    ON workspace_file_chunks USING hnsw (embedding vector_cosine_ops)
     WHERE embedding IS NOT NULL;
 
 -- Add table and column comments
-COMMENT ON TABLE file_chunks IS
+COMMENT ON TABLE workspace_file_chunks IS
     'Text chunks extracted from files with vector embeddings for semantic search.';
 
-COMMENT ON COLUMN file_chunks.id IS 'Unique chunk identifier';
-COMMENT ON COLUMN file_chunks.file_id IS 'Parent file reference';
-COMMENT ON COLUMN file_chunks.chunk_index IS 'Sequential index of chunk within file (0-based)';
-COMMENT ON COLUMN file_chunks.content_sha256 IS 'SHA-256 hash of chunk content';
-COMMENT ON COLUMN file_chunks.content_size IS 'Size of chunk content in bytes';
-COMMENT ON COLUMN file_chunks.token_count IS 'Approximate token count for the chunk';
-COMMENT ON COLUMN file_chunks.embedding IS 'Vector embedding (1536 dimensions)';
-COMMENT ON COLUMN file_chunks.embedding_model IS 'Model used to generate the embedding';
-COMMENT ON COLUMN file_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
-COMMENT ON COLUMN file_chunks.created_at IS 'Chunk creation timestamp';
-COMMENT ON COLUMN file_chunks.updated_at IS 'Last modification timestamp';
+COMMENT ON COLUMN workspace_file_chunks.id IS 'Unique chunk identifier';
+COMMENT ON COLUMN workspace_file_chunks.file_id IS 'Parent file reference';
+COMMENT ON COLUMN workspace_file_chunks.chunk_index IS 'Sequential index of chunk within file (0-based)';
+COMMENT ON COLUMN workspace_file_chunks.content_sha256 IS 'SHA-256 hash of chunk content';
+COMMENT ON COLUMN workspace_file_chunks.content_size IS 'Size of chunk content in bytes';
+COMMENT ON COLUMN workspace_file_chunks.token_count IS 'Approximate token count for the chunk';
+COMMENT ON COLUMN workspace_file_chunks.embedding IS 'Vector embedding (1536 dimensions)';
+COMMENT ON COLUMN workspace_file_chunks.embedding_model IS 'Model used to generate the embedding';
+COMMENT ON COLUMN workspace_file_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
+COMMENT ON COLUMN workspace_file_chunks.created_at IS 'Chunk creation timestamp';
+COMMENT ON COLUMN workspace_file_chunks.updated_at IS 'Last modification timestamp';
 
 -- Create annotation type enum
 CREATE TYPE ANNOTATION_TYPE AS ENUM (
@@ -228,67 +228,67 @@ COMMENT ON TYPE ANNOTATION_TYPE IS
     'Type classification for file annotations.';
 
 -- Create file annotations table
-CREATE TABLE file_annotations (
+CREATE TABLE workspace_file_annotations (
     -- Primary identifiers
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    file_id             UUID             NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    file_id             UUID             NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
     account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Annotation content
     content             TEXT             NOT NULL,
     annotation_type     ANNOTATION_TYPE  NOT NULL DEFAULT 'annotation',
 
-    CONSTRAINT file_annotations_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
+    CONSTRAINT workspace_file_annotations_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
 
     -- Metadata (position, page, bounds, etc.)
     metadata            JSONB            NOT NULL DEFAULT '{}',
 
-    CONSTRAINT file_annotations_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+    CONSTRAINT workspace_file_annotations_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
 
     -- Lifecycle timestamps
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     deleted_at          TIMESTAMPTZ      DEFAULT NULL,
 
-    CONSTRAINT file_annotations_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT file_annotations_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT file_annotations_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
+    CONSTRAINT workspace_file_annotations_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_file_annotations_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
+    CONSTRAINT workspace_file_annotations_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
 );
 
 -- Set up automatic updated_at trigger
-SELECT setup_updated_at('file_annotations');
+SELECT setup_updated_at('workspace_file_annotations');
 
 -- Create indexes for file annotations
-CREATE INDEX file_annotations_file_idx
-    ON file_annotations (file_id, created_at DESC)
+CREATE INDEX workspace_file_annotations_file_idx
+    ON workspace_file_annotations (file_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX file_annotations_account_idx
-    ON file_annotations (account_id, created_at DESC)
+CREATE INDEX workspace_file_annotations_account_idx
+    ON workspace_file_annotations (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX file_annotations_type_idx
-    ON file_annotations (annotation_type, file_id)
+CREATE INDEX workspace_file_annotations_type_idx
+    ON workspace_file_annotations (annotation_type, file_id)
     WHERE deleted_at IS NULL;
 
 -- Add table and column comments
-COMMENT ON TABLE file_annotations IS
+COMMENT ON TABLE workspace_file_annotations IS
     'User annotations and highlights on file content.';
 
-COMMENT ON COLUMN file_annotations.id IS 'Unique annotation identifier';
-COMMENT ON COLUMN file_annotations.file_id IS 'Parent file reference';
-COMMENT ON COLUMN file_annotations.account_id IS 'Annotation author reference';
-COMMENT ON COLUMN file_annotations.content IS 'Annotation text content (1-10000 chars)';
-COMMENT ON COLUMN file_annotations.annotation_type IS 'Type of annotation (annotation, highlight)';
-COMMENT ON COLUMN file_annotations.metadata IS 'Extended metadata including position/location (JSON)';
-COMMENT ON COLUMN file_annotations.created_at IS 'Annotation creation timestamp';
-COMMENT ON COLUMN file_annotations.updated_at IS 'Last edit timestamp';
-COMMENT ON COLUMN file_annotations.deleted_at IS 'Soft deletion timestamp';
+COMMENT ON COLUMN workspace_file_annotations.id IS 'Unique annotation identifier';
+COMMENT ON COLUMN workspace_file_annotations.file_id IS 'Parent file reference';
+COMMENT ON COLUMN workspace_file_annotations.account_id IS 'Annotation author reference';
+COMMENT ON COLUMN workspace_file_annotations.content IS 'Annotation text content (1-10000 chars)';
+COMMENT ON COLUMN workspace_file_annotations.annotation_type IS 'Type of annotation (annotation, highlight)';
+COMMENT ON COLUMN workspace_file_annotations.metadata IS 'Extended metadata including position/location (JSON)';
+COMMENT ON COLUMN workspace_file_annotations.created_at IS 'Annotation creation timestamp';
+COMMENT ON COLUMN workspace_file_annotations.updated_at IS 'Last edit timestamp';
+COMMENT ON COLUMN workspace_file_annotations.deleted_at IS 'Soft deletion timestamp';
 
 -- Create duplicate detection function
-CREATE OR REPLACE FUNCTION find_duplicate_files(_workspace_id UUID DEFAULT NULL)
+CREATE OR REPLACE FUNCTION find_duplicate_workspace_files(_workspace_id UUID DEFAULT NULL)
 RETURNS TABLE (
     file_hash TEXT,
     file_size BIGINT,
@@ -303,7 +303,7 @@ BEGIN
         f.file_size_bytes,
         COUNT(*),
         ARRAY_AGG(f.id)
-    FROM files f
+    FROM workspace_files f
     WHERE (_workspace_id IS NULL OR f.workspace_id = _workspace_id)
         AND f.deleted_at IS NULL
     GROUP BY f.file_hash_sha256, f.file_size_bytes
@@ -312,5 +312,5 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION find_duplicate_files(UUID) IS
-    'Finds duplicate files by hash and size. Optionally scoped to a specific workspace.';
+COMMENT ON FUNCTION find_duplicate_workspace_files(UUID) IS
+    'Finds duplicate workspace files by hash and size. Optionally scoped to a specific workspace.';

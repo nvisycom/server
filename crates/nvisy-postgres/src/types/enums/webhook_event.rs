@@ -63,31 +63,31 @@ pub enum WebhookEvent {
     #[serde(rename = "member:updated")]
     MemberUpdated,
 
-    // Integration events
-    /// An integration was created
-    #[db_rename = "integration:created"]
-    #[serde(rename = "integration:created")]
-    IntegrationCreated,
+    // Connection events
+    /// A connection was created
+    #[db_rename = "connection:created"]
+    #[serde(rename = "connection:created")]
+    ConnectionCreated,
 
-    /// An integration was updated
-    #[db_rename = "integration:updated"]
-    #[serde(rename = "integration:updated")]
-    IntegrationUpdated,
+    /// A connection was updated
+    #[db_rename = "connection:updated"]
+    #[serde(rename = "connection:updated")]
+    ConnectionUpdated,
 
-    /// An integration was deleted
-    #[db_rename = "integration:deleted"]
-    #[serde(rename = "integration:deleted")]
-    IntegrationDeleted,
+    /// A connection was deleted
+    #[db_rename = "connection:deleted"]
+    #[serde(rename = "connection:deleted")]
+    ConnectionDeleted,
 
-    /// An integration was synchronized
-    #[db_rename = "integration:synced"]
-    #[serde(rename = "integration:synced")]
-    IntegrationSynced,
+    /// A connection was synchronized
+    #[db_rename = "connection:synced"]
+    #[serde(rename = "connection:synced")]
+    ConnectionSynced,
 
-    /// An integration was desynchronized
-    #[db_rename = "integration:desynced"]
-    #[serde(rename = "integration:desynced")]
-    IntegrationDesynced,
+    /// A connection was desynchronized
+    #[db_rename = "connection:desynced"]
+    #[serde(rename = "connection:desynced")]
+    ConnectionDesynced,
 }
 
 impl WebhookEvent {
@@ -120,16 +120,16 @@ impl WebhookEvent {
         )
     }
 
-    /// Returns whether this is an integration-related event.
+    /// Returns whether this is a connection-related event.
     #[inline]
-    pub fn is_integration_event(self) -> bool {
+    pub fn is_connection_event(self) -> bool {
         matches!(
             self,
-            WebhookEvent::IntegrationCreated
-                | WebhookEvent::IntegrationUpdated
-                | WebhookEvent::IntegrationDeleted
-                | WebhookEvent::IntegrationSynced
-                | WebhookEvent::IntegrationDesynced
+            WebhookEvent::ConnectionCreated
+                | WebhookEvent::ConnectionUpdated
+                | WebhookEvent::ConnectionDeleted
+                | WebhookEvent::ConnectionSynced
+                | WebhookEvent::ConnectionDesynced
         )
     }
 
@@ -145,11 +145,11 @@ impl WebhookEvent {
             WebhookEvent::MemberAdded
             | WebhookEvent::MemberDeleted
             | WebhookEvent::MemberUpdated => "member",
-            WebhookEvent::IntegrationCreated
-            | WebhookEvent::IntegrationUpdated
-            | WebhookEvent::IntegrationDeleted
-            | WebhookEvent::IntegrationSynced
-            | WebhookEvent::IntegrationDesynced => "integration",
+            WebhookEvent::ConnectionCreated
+            | WebhookEvent::ConnectionUpdated
+            | WebhookEvent::ConnectionDeleted
+            | WebhookEvent::ConnectionSynced
+            | WebhookEvent::ConnectionDesynced => "connection",
         }
     }
 
@@ -167,11 +167,11 @@ impl WebhookEvent {
             WebhookEvent::MemberAdded => "member.added",
             WebhookEvent::MemberDeleted => "member.deleted",
             WebhookEvent::MemberUpdated => "member.updated",
-            WebhookEvent::IntegrationCreated => "integration.created",
-            WebhookEvent::IntegrationUpdated => "integration.updated",
-            WebhookEvent::IntegrationDeleted => "integration.deleted",
-            WebhookEvent::IntegrationSynced => "integration.synced",
-            WebhookEvent::IntegrationDesynced => "integration.desynced",
+            WebhookEvent::ConnectionCreated => "connection.created",
+            WebhookEvent::ConnectionUpdated => "connection.updated",
+            WebhookEvent::ConnectionDeleted => "connection.deleted",
+            WebhookEvent::ConnectionSynced => "connection.synced",
+            WebhookEvent::ConnectionDesynced => "connection.desynced",
         }
     }
 }

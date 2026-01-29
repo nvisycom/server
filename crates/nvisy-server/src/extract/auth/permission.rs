@@ -59,11 +59,11 @@ pub enum Permission {
     /// Can change member roles and permissions.
     ManageRoles,
 
-    // Integration permissions
-    /// Can view workspace integrations.
-    ViewIntegrations,
-    /// Can create, modify, and manage workspace integrations.
-    ManageIntegrations,
+    // Connection permissions
+    /// Can view workspace connections.
+    ViewConnections,
+    /// Can create, modify, and manage workspace connections.
+    ManageConnections,
 
     // Webhook permissions
     /// Can view workspace webhooks.
@@ -97,7 +97,7 @@ impl Permission {
             | Self::ViewFiles
             | Self::ViewPipelines
             | Self::ViewMembers
-            | Self::ViewIntegrations
+            | Self::ViewConnections
             | Self::ViewWebhooks => WorkspaceRole::Guest,
 
             // Member-level permissions (create and modify own resources)
@@ -115,7 +115,7 @@ impl Permission {
             Self::UpdateWorkspace
             | Self::InviteMembers
             | Self::RemoveMembers
-            | Self::ManageIntegrations
+            | Self::ManageConnections
             | Self::CreateWebhooks
             | Self::UpdateWebhooks
             | Self::DeleteWebhooks

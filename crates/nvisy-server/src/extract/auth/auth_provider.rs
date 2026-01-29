@@ -5,7 +5,7 @@
 //! The trait is designed to be implemented by types that represent authenticated users.
 
 use nvisy_postgres::model::WorkspaceMember;
-use nvisy_postgres::query::{FileRepository, WorkspaceMemberRepository};
+use nvisy_postgres::query::{WorkspaceFileRepository, WorkspaceMemberRepository};
 use nvisy_postgres::{PgConn, PgError};
 use uuid::Uuid;
 
@@ -146,7 +146,7 @@ pub trait AuthProvider {
         permission: Permission,
     ) -> Result<AuthResult, PgError> {
         // Get the file to find its workspace
-        let file = conn.find_file_by_id(file_id).await?;
+        let file = conn.find_workspace_file_by_id(file_id).await?;
 
         let Some(file) = file else {
             tracing::warn!(

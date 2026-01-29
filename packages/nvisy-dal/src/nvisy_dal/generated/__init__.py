@@ -25,16 +25,7 @@ from nvisy_dal.generated.params import (
 )
 
 __all__ = [
-    # Contexts (runtime state)
-    "ObjectContext",
-    "RelationalContext",
-    "VectorContext",
-    # Params (configuration)
     "DistanceMetric",
-    "ObjectParams",
-    "RelationalParams",
-    "VectorParams",
-    # Data types
     "Document",
     "Edge",
     "Embedding",
@@ -44,5 +35,11 @@ __all__ = [
     "Metadata",
     "Node",
     "Object",
+    "ObjectContext",
+    "ObjectParams",
     "Record",
+    "RelationalContext",
+    "RelationalParams",
+    "VectorContext",
+    "VectorParams",
 ]

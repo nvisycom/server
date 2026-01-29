@@ -6,7 +6,6 @@ use std::sync::Arc;
 use async_nats::jetstream::{Context, stream};
 use serde::Serialize;
 use tokio::sync::Semaphore;
-use tracing::{debug, instrument};
 
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
@@ -33,7 +32,7 @@ where
     T: Serialize + Send + Sync + 'static,
 {
     /// Create a new type-safe stream publisher
-    #[instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(jetstream), target = TRACING_TARGET_STREAM)]
     pub(crate) async fn new(jetstream: &Context, stream_name: &str) -> Result<Self> {
         let stream_config = stream::Config {
             name: stream_name.to_string(),
@@ -46,7 +45,7 @@ where
         // Try to get existing stream first
         match jetstream.get_stream(stream_name).await {
             Ok(_) => {
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %stream_name,
                     type_name = std::any::type_name::<T>(),
@@ -55,7 +54,7 @@ where
             }
             Err(_) => {
                 // Stream doesn't exist, create it
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %stream_name,
                     type_name = std::any::type_name::<T>(),
@@ -79,7 +78,7 @@ where
     }
 
     /// Publish an event to the stream
-    #[instrument(skip(self, event), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self, event), target = TRACING_TARGET_STREAM)]
     pub async fn publish(&self, subject: &str, event: &T) -> Result<()> {
         let full_subject = format!("{}.{}", self.inner.stream_name, subject);
         let payload = serde_json::to_vec(event).map_err(Error::Serialization)?;
@@ -93,7 +92,7 @@ where
             .await
             .map_err(|e| Error::operation("stream_publish", e.to_string()))?;
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_STREAM,
             subject = %full_subject,
             payload_size = payload_size,
@@ -104,7 +103,7 @@ where
     }
 
     /// Publish multiple events in batch with parallel processing
-    #[instrument(skip(self, events), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self, events), target = TRACING_TARGET_STREAM)]
     pub async fn publish_batch(&self, subject: &str, events: &[T]) -> Result<()>
     where
         T: Clone,
@@ -113,7 +112,7 @@ where
     }
 
     /// Publish multiple events in batch with configurable parallelism
-    #[instrument(skip(self, events), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self, events), target = TRACING_TARGET_STREAM)]
     pub async fn publish_batch_parallel(
         &self,
         subject: &str,
@@ -165,7 +164,7 @@ where
             ));
         }
 
-        debug!(
+        tracing::debug!(
             target: TRACING_TARGET_STREAM,
             count = count,
             parallelism = parallelism,
@@ -182,7 +181,7 @@ where
     }
 
     /// Check if the stream is healthy and accessible
-    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn health_check(&self) -> Result<bool> {
         match self
             .inner
@@ -191,7 +190,7 @@ where
             .await
         {
             Ok(_) => {
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %self.inner.stream_name,
                     "Stream health check passed"
@@ -199,7 +198,7 @@ where
                 Ok(true)
             }
             Err(e) => {
-                debug!(
+                tracing::debug!(
                     target: TRACING_TARGET_STREAM,
                     stream = %self.inner.stream_name,
                     error = %e,
@@ -211,7 +210,7 @@ where
     }
 
     /// Get stream information
-    #[instrument(skip(self), target = TRACING_TARGET_STREAM)]
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn stream_info(&self) -> Result<async_nats::jetstream::stream::Info> {
         let mut stream = self
             .inner

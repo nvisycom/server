@@ -2,7 +2,8 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 
-Data abstraction layer for external integrations. Provides unified async interfaces for storage, databases, and vector stores.
+Data abstraction layer for external integrations. Provides unified async
+interfaces for storage, databases, and vector stores.
 
 ## Installation
 
@@ -19,15 +20,15 @@ uv add "nvisy-dal[all]"
 
 ## Available Providers
 
-| Provider | Extra | Description |
-|----------|-------|-------------|
-| PostgreSQL | `postgres` | Relational database via asyncpg |
-| MySQL | `mysql` | Relational database via aiomysql |
-| S3 | `s3` | Object storage (AWS S3, MinIO) |
-| GCS | `gcs` | Google Cloud Storage |
-| Azure Blob | `azure` | Azure Blob Storage |
-| Qdrant | `qdrant` | Vector database |
-| Pinecone | `pinecone` | Vector database |
+| Provider   | Extra      | Description                      |
+| ---------- | ---------- | -------------------------------- |
+| PostgreSQL | `postgres` | Relational database via asyncpg  |
+| MySQL      | `mysql`    | Relational database via aiomysql |
+| S3         | `s3`       | Object storage (AWS S3, MinIO)   |
+| GCS        | `gcs`      | Google Cloud Storage             |
+| Azure Blob | `azure`    | Azure Blob Storage               |
+| Qdrant     | `qdrant`   | Vector database                  |
+| Pinecone   | `pinecone` | Vector database                  |
 
 ## Usage
 
@@ -62,10 +63,13 @@ await provider.disconnect()
 
 This package is the Python half of the nvisy DAL system:
 
-- **Rust (nvisy-dal crate)**: Streaming, observability, unified interface, server integration
-- **Python (nvisy-dal package)**: Provider implementations, client libraries, external integrations
+- **Rust (nvisy-dal crate)**: Streaming, observability, unified interface,
+  server integration
+- **Python (nvisy-dal package)**: Provider implementations, client libraries,
+  external integrations
 
-The Rust layer loads this package via PyO3 to delegate actual provider calls to Python.
+The Rust layer loads this package via PyO3 to delegate actual provider calls to
+Python.
 
 ## Protocols
 
