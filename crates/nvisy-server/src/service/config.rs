@@ -2,7 +2,6 @@
 use clap::Args;
 #[cfg(test)]
 use clap::Parser;
-
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use serde::{Deserialize, Serialize};

@@ -59,10 +59,7 @@ pub struct PgConfig {
     /// Idle connection timeout in seconds (optional)
     #[cfg_attr(
         feature = "config",
-        arg(
-            long = "postgres-idle-timeout",
-            env = "POSTGRES_IDLE_TIMEOUT"
-        )
+        arg(long = "postgres-idle-timeout", env = "POSTGRES_IDLE_TIMEOUT")
     )]
     pub postgres_idle_timeout: Option<u64>,
 }
@@ -110,8 +107,7 @@ impl PgConfig {
     /// Returns the connection timeout as a Duration.
     #[inline]
     pub fn connection_timeout(&self) -> Option<Duration> {
-        self.postgres_connection_timeout
-            .map(Duration::from_secs)
+        self.postgres_connection_timeout.map(Duration::from_secs)
     }
 
     /// Returns the idle timeout as a Duration.
@@ -269,10 +265,7 @@ impl fmt::Debug for PgConfig {
                 "postgres_connection_timeout_secs",
                 &self.postgres_connection_timeout,
             )
-            .field(
-                "postgres_idle_timeout_secs",
-                &self.postgres_idle_timeout,
-            )
+            .field("postgres_idle_timeout_secs", &self.postgres_idle_timeout)
             .finish()
     }
 }

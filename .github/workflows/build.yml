@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   fmt-rs:
-    name: Format (Rust)
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -52,7 +52,7 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
   check-rs:
-    name: Check & Clippy (Rust)
+    name: Check & Clippy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,7 +73,7 @@ jobs:
         run: cargo clippy --all-targets --all-features --workspace -- -D warnings
 
   test-rs:
-    name: Test (Rust)
+    name: Test
     runs-on: ubuntu-latest
     needs: check-rs
     env:
@@ -111,7 +111,7 @@ jobs:
         run: docker compose -f docker/docker-compose.dev.yml down -v
 
   docs-rs:
-    name: Docs (Rust)
+    name: Docs
     runs-on: ubuntu-latest
     needs: check-rs
     steps:

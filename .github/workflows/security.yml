@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   deny-rs:
-    name: Deny (Rust)
+    name: Deny
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
