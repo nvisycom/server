@@ -3,7 +3,6 @@
 use jiff::Timestamp;
 use nvisy_postgres::model;
 use nvisy_postgres::types::PipelineStatus;
-use nvisy_runtime::definition::Workflow;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -28,8 +27,7 @@ pub struct Pipeline {
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
     /// Pipeline definition (workflow graph).
-    #[schemars(with = "serde_json::Value")]
-    pub definition: Workflow,
+    pub definition: serde_json::Value,
     /// Artifacts produced by pipeline runs.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<Artifact>,
@@ -42,7 +40,6 @@ pub struct Pipeline {
 impl Pipeline {
     /// Creates a new instance of [`Pipeline`] from the database model.
     pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
-        let definition: Workflow = serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {
             pipeline_id: pipeline.id,
             workspace_id: pipeline.workspace_id,
@@ -50,7 +47,7 @@ impl Pipeline {
             name: pipeline.name,
             description: pipeline.description,
             status: pipeline.status,
-            definition,
+            definition: pipeline.definition,
             artifacts: Vec::new(),
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),
@@ -62,7 +59,6 @@ impl Pipeline {
         pipeline: model::WorkspacePipeline,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
     ) -> Self {
-        let definition: Workflow = serde_json::from_value(pipeline.definition).unwrap_or_default();
         Self {
             pipeline_id: pipeline.id,
             workspace_id: pipeline.workspace_id,
@@ -70,7 +66,7 @@ impl Pipeline {
             name: pipeline.name,
             description: pipeline.description,
             status: pipeline.status,
-            definition,
+            definition: pipeline.definition,
             artifacts: artifacts.into_iter().map(Artifact::from_model).collect(),
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),

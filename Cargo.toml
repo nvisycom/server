@@ -5,11 +5,8 @@ resolver = "2"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
-    "./crates/nvisy-dal",
     "./crates/nvisy-nats",
     "./crates/nvisy-postgres",
-    "./crates/nvisy-rig",
-    "./crates/nvisy-runtime",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
 ]
@@ -34,11 +31,8 @@ documentation = "https://docs.rs/nvisy-server"
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
-nvisy-dal = { path = "./crates/nvisy-dal", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
-nvisy-rig = { path = "./crates/nvisy-rig", version = "0.1.0" }
-nvisy-runtime = { path = "./crates/nvisy-runtime", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
@@ -134,16 +128,7 @@ jiff = { version = "0.2", features = ["serde"] }
 ipnet = { version = "2.11", features = [] }
 url = { version = "2.5", features = [] }
 semver = { version = "1.0", features = ["serde"] }
-petgraph = { version = "0.8", features = ["serde-1"] }
 
 # Text processing
 regex = { version = "1.0", features = [] }
-text-splitter = { version = "0.29", features = [] }
 woothee = { version = "0.13", features = [] }
-
-# AI/ML frameworks
-rig-core = { version = "0.29", default-features = false, features = ["reqwest-rustls"] }
-
-# Python interop
-pyo3 = { version = "0.27", features = [] }
-pyo3-async-runtimes = { version = "0.27", features = [] }

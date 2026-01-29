@@ -5,7 +5,6 @@ on:
     branches: [main, release]
     paths:
       - "crates/**"
-      - "packages/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -14,7 +13,6 @@ on:
     branches: [main, release]
     paths:
       - "crates/**"
-      - "packages/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -46,24 +44,3 @@ jobs:
 
       - name: Run deny
         run: cargo deny check all
-
-  audit-py:
-    name: Audit (Python)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Set up Python
-        run: uv python install 3.13
-
-      - name: Install dependencies
-        working-directory: packages/nvisy-dal
-        run: uv sync --all-extras
-
-      - name: Audit packages
-        working-directory: packages/nvisy-dal
-        run: uv run pip-audit --ignore-vuln CVE-2026-0994
