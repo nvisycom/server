@@ -28,7 +28,7 @@ pub struct CreatePipeline {
 }
 
 impl CreatePipeline {
-    /// Converts this request into a [`NewPipeline`] model for database insertion.
+    /// Converts this request into a [`NewWorkspacePipeline`] model for database insertion.
     ///
     /// # Arguments
     ///
