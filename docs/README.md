@@ -58,7 +58,7 @@ scoped to the workspace boundary.
 | --------------------------------- | ------------------------------------------------------------ |
 | [Architecture](./ARCHITECTURE.md) | System design, pipeline model, and technology stack          |
 | [Intelligence](./INTELLIGENCE.md) | AI-powered transform and analysis capabilities               |
-| [Providers](./PROVIDERS.md)       | Data provider architecture and the Rust-Python bridge        |
+| [Providers](./PROVIDERS.md)       | Data provider architecture and connection model              |
 | [Security](./SECURITY.md)         | Authentication, encryption, authorization, and audit logging |
 
 ## Deployment
