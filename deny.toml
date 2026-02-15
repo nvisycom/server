@@ -26,10 +26,6 @@ ignore = [
     # https://github.com/nats-io/nats.rs/pull/1492
     # https://github.com/programatik29/axum-server/pull/178
     "RUSTSEC-2025-0134",
-
-    # RSA Marvin Attack timing sidechannel vulnerability - no patch available
-    # Comes from opendal/sqlx dependencies for cloud storage and MySQL
-    "RUSTSEC-2023-0071",
 ]
 
 [licenses]

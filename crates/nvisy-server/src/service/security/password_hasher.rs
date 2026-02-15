@@ -174,7 +174,7 @@ impl PasswordHasher {
     /// - Prevents account enumeration via timing analysis
     /// - Always returns false but performs actual cryptographic work
     pub fn verify_dummy_password(&self, password: &str) -> bool {
-        use rand::Rng;
+        use rand::RngExt;
 
         // Generate a random dummy password (16 characters)
         let password_len = rand::random_range(16..32);

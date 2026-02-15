@@ -3,7 +3,7 @@
 use std::fmt;
 
 use hkdf::Hkdf;
-use rand::RngCore;
+use rand::Rng;
 use sha2::Sha256;
 use uuid::Uuid;
 
