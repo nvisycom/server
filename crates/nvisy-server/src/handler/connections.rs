@@ -15,7 +15,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_core::crypto::encrypt_json;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceConnection, UpdateWorkspaceConnection};
 use nvisy_postgres::query::WorkspaceConnectionRepository;
@@ -27,6 +26,7 @@ use crate::handler::request::{
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
 use crate::handler::{ErrorKind, Result};
+use crate::service::crypto::encrypt_json;
 use crate::service::{MasterKey, ServiceState};
 
 /// Tracing target for workspace connection operations.
@@ -63,11 +63,13 @@ async fn create_connection(
         .await?;
 
     let workspace_key = master_key.derive_workspace_key(path_params.workspace_id);
-    let encrypted_data = encrypt_json(&workspace_key, &request.data).map_err(|e| {
-        ErrorKind::InternalServerError
-            .with_message("Failed to encrypt connection data")
-            .with_context(e.to_string())
-    })?;
+    let encrypted_data = encrypt_json(&workspace_key, &request.data).map_err(
+        |e: crate::service::crypto::CryptoError| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to encrypt connection data")
+                .with_context(e.to_string())
+        },
+    )?;
 
     let new_connection = NewWorkspaceConnection {
         workspace_id: path_params.workspace_id,
@@ -252,7 +254,7 @@ async fn update_connection(
         .data
         .map(|data| {
             let workspace_key = master_key.derive_workspace_key(existing.workspace_id);
-            encrypt_json(&workspace_key, &data).map_err(|e| {
+            encrypt_json(&workspace_key, &data).map_err(|e: crate::service::crypto::CryptoError| {
                 ErrorKind::InternalServerError
                     .with_message("Failed to encrypt connection data")
                     .with_context(e.to_string())

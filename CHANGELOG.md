@@ -25,7 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nvisy-core** - Shared types and utilities
 - **nvisy-nats** - NATS client with JetStream support
 - **nvisy-postgres** - PostgreSQL database layer
-- **nvisy-rig** - AI services (chat, RAG, embeddings)
 - **nvisy-server** - HTTP handlers, middleware, pipeline, and services
 - **nvisy-webhook** - Webhook delivery with HTTP client
 

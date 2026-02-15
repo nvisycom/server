@@ -2,49 +2,35 @@
 
 ## System Design
 
-Nvisy is implemented as a workspace-based monorepo in Rust with Python provider
-packages. The Rust core handles HTTP serving, database access, messaging,
-workflow compilation, and execution. Python handles provider integrations — the
-actual reading from and writing to external systems — loaded at runtime through
-a PyO3 bridge.
-
-This split is a pragmatic choice. Not all data systems offer Rust as a
-first-class target for their SDKs and client libraries, whereas the Python
-ecosystem for data infrastructure and AI is substantially richer. By keeping the
-performance-critical core in Rust and delegating integrations to Python, the
-platform achieves both execution performance and broad provider coverage.
+Nvisy is implemented as a workspace-based monorepo in Rust. The server handles
+HTTP serving, database access, messaging, and pipeline orchestration. Pipeline
+execution — including AI transforms, provider integrations, and data
+processing — runs in a separate TypeScript runtime, communicating with the
+server over NATS.
 
 ## Crate Structure
 
-The Rust workspace contains nine crates, each with a single responsibility:
+The Rust workspace contains six crates, each with a single responsibility:
 
-| Crate            | Role                                                                |
-| ---------------- | ------------------------------------------------------------------- |
-| `nvisy-cli`      | Server entry point and CLI configuration                            |
-| `nvisy-core`     | Shared types, error handling, encryption utilities                  |
-| `nvisy-dal`      | Data abstraction layer — traits, type-erased providers, PyO3 bridge |
-| `nvisy-nats`     | NATS client for messaging, job queues, and object storage           |
-| `nvisy-postgres` | PostgreSQL ORM layer using Diesel with async support                |
-| `nvisy-rig`      | AI service integration — completion and embedding model providers   |
-| `nvisy-runtime`  | Workflow compiler and execution engine                              |
-| `nvisy-server`   | HTTP API handlers, middleware, authentication                       |
-| `nvisy-webhook`  | Webhook delivery for external event notification                    |
-
-Two Python packages mirror the Rust DAL and AI layers, providing the actual
-provider implementations that the Rust core loads at runtime.
+| Crate            | Role                                                       |
+| ---------------- | ---------------------------------------------------------- |
+| `nvisy-cli`      | Server entry point and CLI configuration                   |
+| `nvisy-core`     | Shared types, error handling, encryption utilities         |
+| `nvisy-nats`     | NATS client for messaging, job queues, and object storage  |
+| `nvisy-postgres` | PostgreSQL ORM layer using Diesel with async support       |
+| `nvisy-server`   | HTTP API handlers, middleware, authentication              |
+| `nvisy-webhook`  | Webhook delivery for external event notification           |
 
 ## Technology Stack
 
-| Layer           | Technology                                                         |
-| --------------- | ------------------------------------------------------------------ |
-| Language        | Rust (core) + Python (providers) via PyO3                          |
-| Database        | PostgreSQL with pgvector for relational data and vector embeddings |
-| Messaging       | NATS with JetStream for pub/sub, job queues, and object storage    |
-| AI              | rig-core for LLM orchestration across multiple model providers     |
-| HTTP            | Axum with Tower middleware, Aide for OpenAPI, Scalar for docs UI   |
-| Auth            | JWT with Ed25519 signing, Argon2 for password hashing              |
-| Workflow graphs | petgraph for compiled DAG representation                           |
-| Encryption      | XChaCha20-Poly1305 with HKDF-SHA256 key derivation                 |
+| Layer      | Technology                                                         |
+| ---------- | ------------------------------------------------------------------ |
+| Language   | Rust                                                               |
+| Database   | PostgreSQL with pgvector for relational data and vector embeddings |
+| Messaging  | NATS with JetStream for pub/sub, job queues, and object storage    |
+| HTTP       | Axum with Tower middleware, Aide for OpenAPI, Scalar for docs UI   |
+| Auth       | JWT with Ed25519 signing, Argon2 for password hashing              |
+| Encryption | XChaCha20-Poly1305 with HKDF-SHA256 key derivation                 |
 
 ## Pipeline Model
 

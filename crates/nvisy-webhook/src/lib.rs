@@ -2,6 +2,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+mod error;
+mod health;
 mod service;
 
 pub mod request;
@@ -11,7 +13,8 @@ pub mod response;
 #[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
 pub mod reqwest;
 
-pub use nvisy_core::{Error, ErrorKind, Result, ServiceHealth, ServiceStatus};
+pub use error::{BoxedError, Error, ErrorKind, Result};
+pub use health::{ServiceHealth, ServiceStatus};
 pub use request::{WebhookContext, WebhookPayload, WebhookRequest};
 pub use response::WebhookResponse;
 pub use service::WebhookService;

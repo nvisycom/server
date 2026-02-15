@@ -2,6 +2,7 @@
 
 mod cache;
 mod config;
+pub mod crypto;
 mod security;
 mod webhook;
 

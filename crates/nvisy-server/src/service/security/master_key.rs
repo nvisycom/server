@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 #[cfg(any(test, feature = "config"))]
 use clap::Args;
-use nvisy_core::crypto::EncryptionKey;
 use serde::{Deserialize, Serialize};
 
+use crate::service::crypto::EncryptionKey;
 use crate::{Error, Result};
 
 /// Tracing target for master key operations.

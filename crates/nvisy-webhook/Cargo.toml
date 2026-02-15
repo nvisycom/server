@@ -33,17 +33,18 @@ config = ["reqwest", "dep:clap"]
 # JSON Schema support: enables JsonSchema derives on Postgres types
 # This allows Postgres types to be used directly in API documentation without
 # manual schema implementations, while keeping the dependency optional
-schema = ["dep:schemars", "nvisy-core/schema"]
+schema = ["dep:schemars"]
 
 [dependencies]
-# Internal crates
-nvisy-core = { workspace = true }
-
 # Async runtime
 async-trait = { workspace = true }
 
 # Macros and utilities
 thiserror = { workspace = true }
+strum = { workspace = true, features = [] }
+
+# String types
+hipstr = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true }

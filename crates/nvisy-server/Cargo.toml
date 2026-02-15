@@ -36,7 +36,6 @@ config = [
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true, features = ["encryption"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
@@ -69,6 +68,10 @@ argon2 = { workspace = true, features = [] }
 rand = { workspace = true, features = [] }
 base64 = { workspace = true, features = [] }
 sha2 = { workspace = true, features = [] }
+
+# Encryption
+chacha20poly1305 = { workspace = true, features = [] }
+hkdf = { workspace = true, features = [] }
 
 # (De)serialization and Validation
 serde = { workspace = true, features = ["derive"] }

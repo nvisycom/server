@@ -4,7 +4,6 @@
 resolver = "2"
 members = [
     "./crates/nvisy-cli",
-    "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
@@ -30,7 +29,6 @@ documentation = "https://docs.rs/nvisy-server"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Internal crates
-nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
@@ -53,7 +51,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 
 # HTTP server
 axum = { version = "0.8", features = [] }
-axum-client-ip = { version = "1.1", features = ["serde"] }
+axum-client-ip = { version = "1.3", features = ["serde"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 axum-extra = { version = "0.12", features = [] }
 axum-test = { version = "18.6", features = [] }
@@ -66,7 +64,7 @@ schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
 jsonschema = { version = "0.29", features = [] }
 
 # Authentication
-jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 argon2 = { version = "0.6.0-rc.5", features = ["password-hash", "rand_core"] }
 zxcvbn = { version = "3.1", features = ["serde"] }
 
@@ -119,7 +117,7 @@ anyhow = { version = "1.0", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
 
 # Primitive datatypes
-uuid = { version = "1.18", features = ["serde", "v4", "v7"] }
+uuid = { version = "1.20", features = ["serde", "v4", "v7"] }
 bytes = { version = "1.10", features = ["serde"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }

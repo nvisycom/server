@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fmt-rs:
+  fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
@@ -51,7 +51,7 @@ jobs:
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
 
-  check-rs:
+  check:
     name: Check & Clippy
     runs-on: ubuntu-latest
     steps:
@@ -72,10 +72,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features --workspace -- -D warnings
 
-  test-rs:
+  test:
     name: Test
     runs-on: ubuntu-latest
-    needs: check-rs
+    needs: check
     env:
       POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
       NATS_URL: nats://localhost:4222
@@ -110,10 +110,10 @@ jobs:
         if: always()
         run: docker compose -f docker/docker-compose.dev.yml down -v
 
-  docs-rs:
+  docs:
     name: Docs
     runs-on: ubuntu-latest
-    needs: check-rs
+    needs: check
     steps:
       - name: Checkout
         uses: actions/checkout@v6
