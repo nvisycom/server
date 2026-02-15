@@ -1,21 +1,15 @@
 # Crates
 
-The Rust workspace contains six crates. The core server logic lives in
-`nvisy-server`, which depends on all other crates. `nvisy-core` is the shared
-foundation with no internal dependencies.
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+
+The Rust workspace contains five crates. The core server logic lives in
+`nvisy-server`, which depends on all other crates.
 
 ## nvisy-cli
 
 Server entry point and CLI configuration. Parses command-line arguments, loads
 environment configuration, and bootstraps the application by initializing all
 services and starting the HTTP server.
-
-## nvisy-core
-
-Shared types, error handling, and encryption utilities used across all crates.
-Defines the `Error` and `ErrorKind` types, retry classification, and the
-credential encryption primitives (HKDF-SHA256 key derivation,
-XChaCha20-Poly1305 authenticated encryption).
 
 ## nvisy-nats
 

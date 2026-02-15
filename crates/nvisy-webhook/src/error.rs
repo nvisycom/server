@@ -1,20 +1,16 @@
-//! Structured error handling for the nvisy ecosystem.
+//! Structured error handling for webhook operations.
 
 use hipstr::HipStr;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
 use thiserror::Error;
 
 /// Type alias for boxed dynamic errors that can be sent across threads.
-///
-/// This type is commonly used as a source error in structured error types,
-/// providing a way to wrap any error that implements the standard `Error` trait
-/// while maintaining Send and Sync bounds for multi-threaded contexts.
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Type alias for Results with our custom Error type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Categories of errors that can occur in nvisy operations.
+/// Categories of errors that can occur in webhook operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[derive(AsRefStr, Display, EnumString, IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
@@ -60,16 +56,6 @@ impl ErrorKind {
 }
 
 /// Structured error type with classification and context tracking.
-///
-/// # Example
-///
-/// ```
-/// use nvisy_core::error::{Error, ErrorKind};
-///
-/// let error = Error::new(ErrorKind::InternalError)
-///     .with_message("Something went wrong")
-///     .with_context("during document processing");
-/// ```
 #[must_use]
 #[derive(Debug, Error)]
 #[error("[{kind}]{}", message.as_ref().map(|m| format!(": {m}")).unwrap_or_default())]

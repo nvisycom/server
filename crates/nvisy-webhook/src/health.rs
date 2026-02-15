@@ -1,11 +1,4 @@
-//! Health monitoring utilities for AI services.
-//!
-//! This module provides types for reporting and tracking service health status,
-//! including operational state, response times, and custom metrics.
-//!
-//! Health checks are essential for monitoring service availability and performance
-//! in production environments, enabling proper load balancing, circuit breaking,
-//! and alerting.
+//! Health monitoring types for webhook services.
 
 use std::collections::HashMap;
 use std::time::Duration;
