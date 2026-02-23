@@ -88,7 +88,7 @@ diesel_migrations = { version = "2.3", features = [] }
 diesel-async = { version = "0.7", features = [] }
 jiff-diesel = { version = "0.1.3", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
-deadpool = { version = "0.12", features = [] }
+deadpool = { version = "0.13", features = [] }
 pgvector = { version = "0.4", features = [] }
 pgtrgm = { version = "0.4", features = [] }
 
