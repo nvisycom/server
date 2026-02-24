@@ -2477,8 +2477,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "derive_more",
  "futures",
  "object_store",
+ "schemars",
  "serde",
  "tokio",
  "tracing",

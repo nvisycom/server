@@ -1,38 +1,38 @@
-//! Provider trait for creating authenticated client connections.
+//! Client trait for object storage providers.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::ops::Deref;
 
 use serde::de::DeserializeOwned;
 
+use crate::client::ObjectStoreClient;
 use crate::types::Error;
 
-/// Factory for creating authenticated connections to an external service.
+/// Authenticated connection to an object storage backend.
 ///
-/// Implementations handle credential validation, connectivity verification,
-/// and client construction for a specific provider (e.g. S3, OpenAI).
-#[async_trait::async_trait]
-pub trait Provider: Send + Sync + 'static {
+/// Implementations are newtype wrappers around [`ObjectStoreClient`] that
+/// handle credential validation and client construction for a specific
+/// provider (e.g. S3, Azure, GCS).
+pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
     /// Strongly-typed credentials for this provider.
     type Credentials: DeserializeOwned + Send;
-    /// The client type produced by [`connect`](Self::connect).
-    type Client: Send + 'static;
 
-    /// Unique identifier (e.g. "s3", "openai").
+    /// Unique identifier (e.g. "s3", "azure").
     const ID: &str;
 
-    /// Verify credentials by attempting a lightweight connection.
-    async fn verify(creds: &Self::Credentials) -> Result<(), Error>;
+    /// Verify that the backing store is reachable.
+    fn verify(&self) -> impl Future<Output = Result<(), Error>> + Send {
+        self.verify_reachable()
+    }
 
-    /// Create a connected client instance.
-    async fn connect(creds: &Self::Credentials) -> Result<Self::Client, Error>;
+    /// Create a connected client from credentials.
+    fn connect(creds: &Self::Credentials) -> impl Future<Output = Result<Self, Error>> + Send
+    where
+        Self: Sized;
 
     /// Optional async cleanup when the connection is released.
     ///
-    /// Return `None` if no cleanup is needed. The default implementation
-    /// returns `None`.
-    #[allow(clippy::type_complexity)]
-    fn disconnect(_client: Self::Client) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
-        None
+    /// The default implementation is a no-op.
+    fn disconnect(&self) -> impl Future<Output = ()> + Send {
+        async {}
     }
 }

@@ -1,15 +1,19 @@
 //! Azure Blob Storage provider using [`object_store::azure::MicrosoftAzureBuilder`].
 
+use derive_more::Deref;
 use object_store::azure::MicrosoftAzureBuilder;
-use serde::Deserialize;
-
-use crate::types::Error;
-use super::Provider;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::client::ObjectStoreClient;
+use crate::types::Error;
+
+use super::Client;
 
 /// Typed credentials for Azure Blob Storage.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AzureCredentials {
     /// Azure storage container name.
@@ -27,22 +31,16 @@ pub struct AzureCredentials {
     pub endpoint: Option<String>,
 }
 
-/// Factory that creates [`ObjectStoreClient`] instances backed by Azure Blob Storage.
-pub struct AzureProvider;
+/// Azure Blob Storage-backed object storage client.
+#[derive(Deref)]
+pub struct AzureProvider(ObjectStoreClient);
 
-#[async_trait::async_trait]
-impl Provider for AzureProvider {
+impl Client for AzureProvider {
     type Credentials = AzureCredentials;
-    type Client = ObjectStoreClient;
 
     const ID: &str = "azure";
 
-    async fn verify(creds: &Self::Credentials) -> Result<(), Error> {
-        let client = Self::connect(creds).await?;
-        client.verify_reachable().await
-    }
-
-    async fn connect(creds: &Self::Credentials) -> Result<Self::Client, Error> {
+    async fn connect(creds: &Self::Credentials) -> Result<Self, Error> {
         let mut builder = MicrosoftAzureBuilder::new()
             .with_container_name(&creds.container)
             .with_account(&creds.account_name);
@@ -69,8 +67,8 @@ impl Provider for AzureProvider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::connection(e.to_string(), "azure", true))?;
+            .map_err(|e| Error::connection(e.to_string(), Self::ID, true))?;
 
-        Ok(ObjectStoreClient::new(store))
+        Ok(Self(ObjectStoreClient::new(store)))
     }
 }

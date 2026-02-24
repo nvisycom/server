@@ -1,15 +1,19 @@
 //! Google Cloud Storage provider using [`object_store::gcp::GoogleCloudStorageBuilder`].
 
+use derive_more::Deref;
 use object_store::gcp::GoogleCloudStorageBuilder;
-use serde::Deserialize;
-
-use crate::types::Error;
-use super::Provider;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::client::ObjectStoreClient;
+use crate::types::Error;
+
+use super::Client;
 
 /// Typed credentials for Google Cloud Storage.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GcsCredentials {
     /// GCS bucket name.
@@ -22,22 +26,16 @@ pub struct GcsCredentials {
     pub endpoint: Option<String>,
 }
 
-/// Factory that creates [`ObjectStoreClient`] instances backed by Google Cloud Storage.
-pub struct GcsProvider;
+/// Google Cloud Storage-backed object storage client.
+#[derive(Deref)]
+pub struct GcsProvider(ObjectStoreClient);
 
-#[async_trait::async_trait]
-impl Provider for GcsProvider {
+impl Client for GcsProvider {
     type Credentials = GcsCredentials;
-    type Client = ObjectStoreClient;
 
     const ID: &str = "gcs";
 
-    async fn verify(creds: &Self::Credentials) -> Result<(), Error> {
-        let client = Self::connect(creds).await?;
-        client.verify_reachable().await
-    }
-
-    async fn connect(creds: &Self::Credentials) -> Result<Self::Client, Error> {
+    async fn connect(creds: &Self::Credentials) -> Result<Self, Error> {
         let mut builder =
             GoogleCloudStorageBuilder::new().with_bucket_name(&creds.bucket);
 
@@ -51,8 +49,8 @@ impl Provider for GcsProvider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::connection(e.to_string(), "gcs", true))?;
+            .map_err(|e| Error::connection(e.to_string(), Self::ID, true))?;
 
-        Ok(ObjectStoreClient::new(store))
+        Ok(Self(ObjectStoreClient::new(store)))
     }
 }

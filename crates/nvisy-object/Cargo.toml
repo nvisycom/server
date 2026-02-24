@@ -1,8 +1,7 @@
-# https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [package]
 name = "nvisy-object"
 description = "Object store providers and streams (S3, Azure, GCS) for Nvisy"
+readme = "./README.md"
 keywords = ["nvisy", "object-store", "s3", "storage"]
 categories = ["filesystem"]
 
@@ -21,6 +20,9 @@ documentation = { workspace = true }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+schema = ["dep:schemars"]
+
 [dependencies]
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
@@ -30,12 +32,18 @@ tokio = { workspace = true, features = ["sync"] }
 async-trait = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 
+# Derive macros
+derive_more = { workspace = true, features = ["deref"] }
+
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = [] }
 
 # Cloud object storage (S3, Azure Blob, GCS)
 object_store = { workspace = true, features = ["aws", "azure", "gcp"] }
+
+# JSON Schema (optional)
+schemars = { workspace = true, features = [], optional = true }
 
 # Observability
 tracing = { workspace = true, features = [] }

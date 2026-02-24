@@ -2,16 +2,20 @@
 //!
 //! Works with AWS S3, MinIO, and any S3-compatible service.
 
+use derive_more::Deref;
 use object_store::aws::AmazonS3Builder;
-use serde::Deserialize;
-
-use crate::types::Error;
-use super::Provider;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::client::ObjectStoreClient;
+use crate::types::Error;
+
+use super::Client;
 
 /// Typed credentials for S3-compatible provider.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct S3Credentials {
     /// S3 bucket name.
@@ -38,22 +42,16 @@ fn default_region() -> String {
     "us-east-1".to_string()
 }
 
-/// Factory that creates [`ObjectStoreClient`] instances backed by S3.
-pub struct S3Provider;
+/// S3-backed object storage client.
+#[derive(Deref)]
+pub struct S3Provider(ObjectStoreClient);
 
-#[async_trait::async_trait]
-impl Provider for S3Provider {
+impl Client for S3Provider {
     type Credentials = S3Credentials;
-    type Client = ObjectStoreClient;
 
     const ID: &str = "s3";
 
-    async fn verify(creds: &Self::Credentials) -> Result<(), Error> {
-        let client = Self::connect(creds).await?;
-        client.verify_reachable().await
-    }
-
-    async fn connect(creds: &Self::Credentials) -> Result<Self::Client, Error> {
+    async fn connect(creds: &Self::Credentials) -> Result<Self, Error> {
         let mut builder = AmazonS3Builder::new()
             .with_bucket_name(&creds.bucket)
             .with_region(&creds.region);
@@ -79,8 +77,8 @@ impl Provider for S3Provider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::connection(e.to_string(), "s3", true))?;
+            .map_err(|e| Error::connection(e.to_string(), Self::ID, true))?;
 
-        Ok(ObjectStoreClient::new(store))
+        Ok(Self(ObjectStoreClient::new(store)))
     }
 }
