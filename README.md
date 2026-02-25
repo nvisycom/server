@@ -7,11 +7,11 @@ across documents, images, audio, and video.
 
 ## Features
 
-- **Multimodal Redaction** - Detect and remove sensitive data across PDFs, images, audio, and video
-- **AI-Powered Detection** - LLM-driven PII and entity recognition with configurable redaction policies
-- **Workspace Isolation** - Multi-tenant workspaces with HKDF-derived credential encryption
-- **Real-Time Collaboration** - WebSocket and NATS pub/sub for live document editing
-- **Interactive Docs** - Auto-generated OpenAPI with Scalar UI
+- **Multimodal Redaction:** Detect and remove sensitive data across PDFs, images, audio, and video
+- **AI-Powered Detection:** LLM-driven PII and entity recognition with configurable redaction policies
+- **Workspace Isolation:** Multi-tenant workspaces with HKDF-derived credential encryption
+- **Real-Time Collaboration:** WebSocket and NATS pub/sub for live document editing
+- **Interactive Docs:** Auto-generated OpenAPI with Scalar UI
 
 ## Quick Start
 
@@ -31,11 +31,11 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
 
 ## License
 
-Apache 2.0 License - see [LICENSE.txt](LICENSE.txt)
+Apache 2.0 License, see [LICENSE.txt](LICENSE.txt)
 
 ## Support
 
-- **Documentation** - [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues** - [GitHub Issues](https://github.com/nvisycom/server/issues)
-- **Email** - [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status** - [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
+- **Documentation:** [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues:** [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email:** [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status:** [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
