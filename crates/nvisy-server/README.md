@@ -25,9 +25,9 @@ built with Axum and Tokio.
 
 When running, the server exposes interactive documentation at:
 
-- **Swagger UI**: `/api/swagger`
-- **Scalar UI**: `/api/scalar`
-- **OpenAPI JSON**: `/api/openapi.json`
+- **Swagger UI** - `/api/swagger`
+- **Scalar UI** - `/api/scalar`
+- **OpenAPI JSON** - `/api/openapi.json`
 
 ## Changelog
 
@@ -39,7 +39,7 @@ Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
 
 ## Support
 
-- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
-- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
+- **Documentation** - [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues** - [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email** - [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status** - [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
