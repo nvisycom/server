@@ -8,10 +8,9 @@ use object_store::aws::AmazonS3Builder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::Client;
 use crate::client::ObjectStoreClient;
 use crate::types::Error;
-
-use super::Client;
 
 /// Typed credentials for S3-compatible provider.
 #[derive(Debug, Deserialize, Serialize)]

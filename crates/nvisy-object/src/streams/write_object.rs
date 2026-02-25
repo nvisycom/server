@@ -4,12 +4,9 @@ use object_store::PutMode;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::types::Error;
-use crate::types::ContentData;
-
 use super::StreamTarget;
-
 use crate::client::ObjectStoreClient;
+use crate::types::{ContentData, Error};
 
 /// Typed parameters for [`ObjectWriteStream`].
 #[derive(Debug, Deserialize)]
@@ -30,10 +27,12 @@ pub struct ObjectWriteStream;
 
 #[async_trait::async_trait]
 impl StreamTarget for ObjectWriteStream {
-    type Params = ObjectWriteParams;
     type Client = ObjectStoreClient;
+    type Params = ObjectWriteParams;
 
-    fn id(&self) -> &str { "write" }
+    fn id(&self) -> &str {
+        "write"
+    }
 
     #[tracing::instrument(name = "object.write", skip_all, fields(prefix = %params.prefix, count))]
     async fn write(
@@ -72,11 +71,11 @@ impl StreamTarget for ObjectWriteStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytes::Bytes;
-    use crate::types::ContentData;
-    use crate::types::ContentSource;
     use object_store::memory::InMemory;
+
+    use super::*;
+    use crate::types::{ContentData, ContentSource};
 
     fn test_client() -> ObjectStoreClient {
         ObjectStoreClient::new(InMemory::new())

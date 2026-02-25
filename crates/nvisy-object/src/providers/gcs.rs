@@ -6,10 +6,9 @@ use object_store::gcp::GoogleCloudStorageBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::Client;
 use crate::client::ObjectStoreClient;
 use crate::types::Error;
-
-use super::Client;
 
 /// Typed credentials for Google Cloud Storage.
 #[derive(Debug, Deserialize, Serialize)]
@@ -36,8 +35,7 @@ impl Client for GcsProvider {
     const ID: &str = "gcs";
 
     async fn connect(creds: &Self::Credentials) -> Result<Self, Error> {
-        let mut builder =
-            GoogleCloudStorageBuilder::new().with_bucket_name(&creds.bucket);
+        let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&creds.bucket);
 
         if let Some(key_path) = &creds.service_account_key {
             builder = builder.with_service_account_key(key_path);

@@ -4,13 +4,9 @@ use futures::StreamExt;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::types::Error;
-use crate::types::ContentData;
-use crate::types::ContentSource;
-
 use super::StreamSource;
-
 use crate::client::ObjectStoreClient;
+use crate::types::{ContentData, ContentSource, Error};
 
 /// Typed parameters for [`ObjectReadStream`].
 #[derive(Debug, Deserialize)]
@@ -30,10 +26,12 @@ pub struct ObjectReadStream;
 
 #[async_trait::async_trait]
 impl StreamSource for ObjectReadStream {
-    type Params = ObjectReadParams;
     type Client = ObjectStoreClient;
+    type Params = ObjectReadParams;
 
-    fn id(&self) -> &str { "read" }
+    fn id(&self) -> &str {
+        "read"
+    }
 
     #[tracing::instrument(name = "object.read", skip_all, fields(prefix = %params.prefix, count))]
     async fn read(
@@ -52,7 +50,12 @@ impl StreamSource for ObjectReadStream {
             if let Some(max) = params.max_size
                 && meta.size > max
             {
-                tracing::debug!(key, size = meta.size, max_size = max, "skipping oversized object");
+                tracing::debug!(
+                    key,
+                    size = meta.size,
+                    max_size = max,
+                    "skipping oversized object"
+                );
                 continue;
             }
 
@@ -79,9 +82,10 @@ impl StreamSource for ObjectReadStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytes::Bytes;
     use object_store::memory::InMemory;
+
+    use super::*;
 
     fn test_client() -> ObjectStoreClient {
         ObjectStoreClient::new(InMemory::new())
@@ -126,7 +130,11 @@ mod tests {
             .await
             .unwrap();
         client
-            .put("filter/big.bin", Bytes::from("this is a much bigger payload"), None)
+            .put(
+                "filter/big.bin",
+                Bytes::from("this is a much bigger payload"),
+                None,
+            )
             .await
             .unwrap();
 

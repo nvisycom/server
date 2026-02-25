@@ -5,8 +5,7 @@
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
 
-use crate::types::Error;
-use crate::types::ContentData;
+use crate::types::{ContentData, Error};
 
 /// A source stream that reads content from an external system into the pipeline.
 ///

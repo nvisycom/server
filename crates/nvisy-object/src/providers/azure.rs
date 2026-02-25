@@ -6,10 +6,9 @@ use object_store::azure::MicrosoftAzureBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::Client;
 use crate::client::ObjectStoreClient;
 use crate::types::Error;
-
-use super::Client;
 
 /// Typed credentials for Azure Blob Storage.
 #[derive(Debug, Deserialize, Serialize)]
@@ -55,7 +54,10 @@ impl Client for AzureProvider {
                 .split('&')
                 .filter_map(|pair| {
                     let mut parts = pair.splitn(2, '=');
-                    Some((parts.next()?.to_string(), parts.next().unwrap_or("").to_string()))
+                    Some((
+                        parts.next()?.to_string(),
+                        parts.next().unwrap_or("").to_string(),
+                    ))
                 })
                 .collect();
             builder = builder.with_sas_authorization(pairs);

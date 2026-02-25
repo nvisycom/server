@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use futures::stream::BoxStream;
 use object_store::path::Path;
 use object_store::{ObjectMeta, ObjectStore, PutMode, PutOptions, PutPayload};
 
@@ -53,10 +53,7 @@ impl ObjectStoreClient {
     /// Returns all matching keys in a single `Vec`. For lazy iteration,
     /// use [`list_stream`](Self::list_stream) instead.
     #[tracing::instrument(name = "object.list", skip(self), fields(prefix))]
-    pub async fn list(
-        &self,
-        prefix: &str,
-    ) -> Result<Vec<ObjectMeta>, Error> {
+    pub async fn list(&self, prefix: &str) -> Result<Vec<ObjectMeta>, Error> {
         let prefix = if prefix.is_empty() {
             None
         } else {
@@ -71,10 +68,7 @@ impl ObjectStoreClient {
 
     /// Lazily stream object metadata under `prefix`.
     #[tracing::instrument(name = "object.list_stream", skip(self), fields(prefix))]
-    pub fn list_stream(
-        &self,
-        prefix: &str,
-    ) -> BoxStream<'_, Result<ObjectMeta, Error>> {
+    pub fn list_stream(&self, prefix: &str) -> BoxStream<'_, Result<ObjectMeta, Error>> {
         let prefix = if prefix.is_empty() {
             None
         } else {
@@ -108,7 +102,8 @@ impl ObjectStoreClient {
         data: Bytes,
         content_type: Option<&str>,
     ) -> Result<PutOutput, Error> {
-        self.put_opts(key, data, PutMode::Overwrite, content_type).await
+        self.put_opts(key, data, PutMode::Overwrite, content_type)
+            .await
     }
 
     /// Upload `data` to `key` with the specified [`PutMode`].
@@ -127,10 +122,8 @@ impl ObjectStoreClient {
             ..Default::default()
         };
         if let Some(ct) = content_type {
-            opts.attributes.insert(
-                object_store::Attribute::ContentType,
-                ct.to_string().into(),
-            );
+            opts.attributes
+                .insert(object_store::Attribute::ContentType, ct.to_string().into());
         }
         let result = self
             .0
@@ -173,14 +166,14 @@ fn from_object_store(err: object_store::Error) -> Error {
             | object_store::Error::AlreadyExists { .. }
             | object_store::Error::Precondition { .. }
     );
-    Error::runtime(err.to_string(), "object-store", retryable)
-        .with_source(err)
+    Error::runtime(err.to_string(), "object-store", retryable).with_source(err)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use object_store::memory::InMemory;
+
+    use super::*;
 
     fn test_client() -> ObjectStoreClient {
         ObjectStoreClient::new(InMemory::new())
@@ -244,10 +237,7 @@ mod tests {
     #[tokio::test]
     async fn delete() {
         let client = test_client();
-        client
-            .put("del.bin", Bytes::from("x"), None)
-            .await
-            .unwrap();
+        client.put("del.bin", Bytes::from("x"), None).await.unwrap();
         client.delete("del.bin").await.unwrap();
 
         assert!(client.get("del.bin").await.is_err());
@@ -311,22 +301,12 @@ mod tests {
     async fn put_create_only() {
         let client = test_client();
         client
-            .put_opts(
-                "unique.bin",
-                Bytes::from("first"),
-                PutMode::Create,
-                None,
-            )
+            .put_opts("unique.bin", Bytes::from("first"), PutMode::Create, None)
             .await
             .unwrap();
 
         let err = client
-            .put_opts(
-                "unique.bin",
-                Bytes::from("second"),
-                PutMode::Create,
-                None,
-            )
+            .put_opts("unique.bin", Bytes::from("second"), PutMode::Create, None)
             .await
             .unwrap_err();
         assert!(!err.is_retryable());
