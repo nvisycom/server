@@ -105,7 +105,7 @@ tracing = { version = "0.1", features = [] }
 tracing-subscriber = { version = "0.3", features = [] }
 
 # Testing utilities
-tempfile = { version = "3.25", features = [] }
+tempfile = { version = "3.26", features = [] }
 dotenvy = { version = "0.15", features = [] }
 
 # (De)serialization
