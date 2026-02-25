@@ -7,22 +7,23 @@ across documents, images, audio, and video.
 
 ## Features
 
-- **Multimodal Redaction** — Detect and remove sensitive data across PDFs, images, audio, and video
-- **AI-Powered Detection** — LLM-driven PII and entity recognition with configurable redaction policies
-- **Workspace Isolation** — Multi-tenant workspaces with HKDF-derived credential encryption
-- **Real-Time Collaboration** — WebSocket and NATS pub/sub for live document editing
-- **Interactive Docs** — Auto-generated OpenAPI with Scalar UI
+- **Multimodal Redaction:** Detect and remove sensitive data across PDFs, images, audio, and video
+- **AI-Powered Detection:** LLM-driven PII and entity recognition with configurable redaction policies
+- **Workspace Isolation:** Multi-tenant workspaces with HKDF-derived credential encryption
+- **Real-Time Collaboration:** WebSocket and NATS pub/sub for live document editing
+- **Interactive Docs:** Auto-generated OpenAPI with Scalar UI
 
 ## Quick Start
 
 The fastest way to get started is with [Nvisy Cloud](https://nvisy.com).
 
-To run locally, see [`docker/`](docker/) for development and production compose
-files, infrastructure requirements, and configuration reference.
+For self-hosted deployments, refer to [`docker/`](docker/) for compose files and
+infrastructure requirements, and [`.env.example`](.env.example) for configuration.
 
 ## Documentation
 
-See [`docs/`](docs/) for architecture, security, and API documentation.
+See [`docs/`](docs/) for architecture, intelligence capabilities, provider
+design, and security documentation.
 
 ## Changelog
 
