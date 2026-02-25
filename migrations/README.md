@@ -27,32 +27,32 @@ Each migration includes a comprehensive down migration that:
 
 ### 1. Naming Conventions
 
-- **Tables**: `snake_case`, descriptive nouns
-- **Columns**: `snake_case`, clear and concise
-- **Indexes**: `table_purpose_idx` format
-- **Constraints**: `table_column_constraint_type` format
-- **Functions**: `snake_case` with descriptive verbs
-- **Enums**: `UPPER_CASE` with descriptive names
+- **Tables:** `snake_case`, descriptive nouns
+- **Columns:** `snake_case`, clear and concise
+- **Indexes:** `table_purpose_idx` format
+- **Constraints:** `table_column_constraint_type` format
+- **Functions:** `snake_case` with descriptive verbs
+- **Enums:** `UPPER_CASE` with descriptive names
 
 ### 2. Data Types and Sizing
 
-- **UUIDs**: Primary keys for external references
-- **BIGSERIAL**: Internal sequential IDs where needed
-- **TEXT**: Variable length strings with CHECK constraints for limits
-- **JSONB**: Structured data with size limits
-- **TIMESTAMPTZ**: All timestamps with timezone awareness
-- **DECIMAL**: Precise numeric values for financial data
+- **UUIDs:** Primary keys for external references
+- **BIGSERIAL:** Internal sequential IDs where needed
+- **TEXT:** Variable length strings with CHECK constraints for limits
+- **JSONB:** Structured data with size limits
+- **TIMESTAMPTZ:** All timestamps with timezone awareness
+- **DECIMAL:** Precise numeric values for financial data
 
 ### 3. Relationship Management
 
-- **Foreign Keys**: Always include appropriate CASCADE/SET NULL rules
-- **Self-referencing**: Support for hierarchical structures where needed
-- **Many-to-many**: Explicit junction tables with additional metadata
-- **Soft relationships**: References that survive deletions where appropriate
+- **Foreign Keys:** Always include appropriate CASCADE/SET NULL rules
+- **Self-referencing:** Support for hierarchical structures where needed
+- **Many-to-many:** Explicit junction tables with additional metadata
+- **Soft relationships:** References that survive deletions where appropriate
 
 ### 4. Error Handling and Resilience
 
-- **Graceful failures**: Functions that handle errors appropriately
-- **Transaction safety**: All operations designed for ACID compliance
-- **Rollback support**: Complete down migrations for all changes
-- **Data preservation**: Soft deletion patterns to prevent data loss
+- **Graceful failures:** Functions that handle errors appropriately
+- **Transaction safety:** All operations designed for ACID compliance
+- **Rollback support:** Complete down migrations for all changes
+- **Data preservation:** Soft deletion patterns to prevent data loss

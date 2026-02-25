@@ -1,0 +1,52 @@
+[package]
+name = "nvisy-object"
+description = "Object store providers and streams (S3, Azure, GCS) for Nvisy"
+readme = "./README.md"
+keywords = ["nvisy", "object-store", "s3", "storage"]
+categories = ["filesystem"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+schema = ["dep:schemars"]
+
+[dependencies]
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["sync"] }
+async-trait = { workspace = true, features = [] }
+futures = { workspace = true, features = [] }
+
+# Derive macros
+derive_more = { workspace = true, features = ["deref"] }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = [] }
+
+# Cloud object storage (S3, Azure Blob, GCS)
+object_store = { workspace = true, features = ["aws", "azure", "gcp"] }
+
+# JSON Schema (optional)
+schemars = { workspace = true, features = [], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

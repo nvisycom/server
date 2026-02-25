@@ -24,8 +24,8 @@ pub use crate::service::webhook::WebhookEmitter;
 /// Used for the [`State`] extraction (dependency injection).
 ///
 /// [`State`]: axum::extract::State
-#[must_use = "state does nothing unless you use it"]
 #[derive(Clone)]
+#[must_use = "state does nothing unless you use it"]
 pub struct ServiceState {
     // External services:
     pub postgres: PgClient,

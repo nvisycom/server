@@ -7,27 +7,27 @@ built with Axum and Tokio.
 
 ## Features
 
-- **Async HTTP Server** - Built with Axum web framework on Tokio runtime
-- **JWT Authentication** - Stateless authentication with session management
-- **OpenAPI Documentation** - Auto-generated Swagger and Scalar UI
-- **Type-Safe Validation** - Comprehensive request/response validation
-- **Middleware Stack** - CORS, security headers, and request logging
-- **Service Integration** - PostgreSQL, MinIO, OpenRouter, and NATS clients
+- **Async HTTP Server:** Built with Axum web framework on Tokio runtime
+- **JWT Authentication:** Stateless authentication with session management
+- **OpenAPI Documentation:** Auto-generated Swagger and Scalar UI
+- **Type-Safe Validation:** Comprehensive request/response validation
+- **Middleware Stack:** CORS, security headers, and request logging
+- **Service Integration:** PostgreSQL, MinIO, OpenRouter, and NATS clients
 
 ## Key Dependencies
 
-- `axum` - Modern web framework with excellent async performance
-- `tokio` - Async runtime for concurrent request handling
-- `tower` - Middleware ecosystem for HTTP services
-- `utoipa` - OpenAPI documentation generation
+- `axum`: Modern web framework with excellent async performance
+- `tokio`: Async runtime for concurrent request handling
+- `tower`: Middleware ecosystem for HTTP services
+- `utoipa`: OpenAPI documentation generation
 
 ## API Documentation
 
 When running, the server exposes interactive documentation at:
 
-- **Swagger UI**: `/api/swagger`
-- **Scalar UI**: `/api/scalar`
-- **OpenAPI JSON**: `/api/openapi.json`
+- **Swagger UI:** `/api/swagger`
+- **Scalar UI:** `/api/scalar`
+- **OpenAPI JSON:** `/api/openapi.json`
 
 ## Changelog
 
@@ -35,11 +35,11 @@ See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
 
 ## License
 
-Apache 2.0 License - see [LICENSE.txt](../../LICENSE.txt)
+Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
 
 ## Support
 
-- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
-- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
+- **Documentation:** [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues:** [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email:** [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status:** [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
