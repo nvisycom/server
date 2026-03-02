@@ -98,7 +98,7 @@ pgtrgm = { version = "0.4", features = [] }
 async-nats = { version = "0.46", features = [] }
 
 # Cloud object storage
-object_store = { version = "0.12", features = [] }
+object_store = { version = "0.13", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }
