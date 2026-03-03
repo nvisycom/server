@@ -128,7 +128,7 @@ bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
 
 # Domain datatypes & data structures
-ipnet = { version = "2.11", features = [] }
+ipnet = { version = "2.12", features = [] }
 url = { version = "2.5", features = [] }
 semver = { version = "1.0", features = ["serde"] }
 
