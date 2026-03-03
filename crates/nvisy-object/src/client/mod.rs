@@ -11,7 +11,7 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use futures::stream::BoxStream;
 use object_store::path::Path;
-use object_store::{ObjectMeta, ObjectStore, PutMode, PutOptions, PutPayload};
+use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
 use crate::types::Error;
 
