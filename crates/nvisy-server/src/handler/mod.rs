@@ -139,8 +139,7 @@ mod test {
     ) -> anyhow::Result<TestServer> {
         let app = router.with_state(state);
         let app = Into::<Router>::into(app);
-        let server = TestServer::new(app)?;
-        Ok(server)
+        Ok(TestServer::new(app))
     }
 
     /// Returns a new [`TestServer`] with the default router and state.
