@@ -4,8 +4,8 @@
 
 Nvisy is implemented as a workspace-based monorepo in Rust. The server handles
 HTTP serving, database access, messaging, and pipeline orchestration. Pipeline
-execution — including AI transforms, provider integrations, and data
-processing — runs in a separate TypeScript runtime, communicating with the
+execution (including AI transforms, provider integrations, and data
+processing) runs in a separate TypeScript runtime, communicating with the
 server over NATS.
 
 ## Crate Structure
@@ -34,8 +34,8 @@ The Rust workspace contains six crates, each with a single responsibility:
 
 ## Pipeline Model
 
-A Nvisy pipeline is a directed acyclic graph. Nodes represent operations —
-reading data, transforming it, writing results — and edges define the flow
+A Nvisy pipeline is a directed acyclic graph. Nodes represent operations:
+reading data, transforming it, writing results. Edges define the flow
 between them. This graph is the central abstraction of the platform: users
 author it as a JSON document, the compiler validates and optimizes it, and the
 engine executes it.
@@ -49,7 +49,7 @@ execution time for auditability.
 
 Every node in the graph falls into one of four categories:
 
-**Source nodes** read data from external systems — relational databases, object
+**Source nodes** read data from external systems: relational databases, object
 stores, or other providers connected through the platform's credential
 management system. Each source references a stored connection and carries
 provider-specific parameters.
@@ -67,7 +67,7 @@ simultaneously writing embeddings to a vector store.
 
 **Switch nodes** route data conditionally. A switch evaluates a condition
 against each incoming item and directs it to one of two output branches. This
-enables type-specific processing within a single pipeline — for example, routing
+enables type-specific processing within a single pipeline: for example, routing
 images through OCR while routing text through NLP extraction.
 
 ### Cache Slots
@@ -83,7 +83,7 @@ eliminating the indirection at runtime.
 Before execution, the workflow definition is compiled into an optimized runtime
 graph. Compilation proceeds in four phases:
 
-1. **Validation** verifies structural correctness — all edge references resolve
+1. **Validation** verifies structural correctness: all edge references resolve
    to existing nodes, at least one source and one sink exist, and the graph is
    acyclic.
 
@@ -91,7 +91,7 @@ graph. Compilation proceeds in four phases:
    are wired directly to inputs reading from the same slot, and the intermediate
    cache nodes are removed from the graph.
 
-3. **Node compilation** converts each definition node into its executable form —
+3. **Node compilation** converts each definition node into its executable form:
    source nodes become input streams, sink nodes become output streams,
    transforms become processors, and switches become condition evaluators.
 
@@ -107,10 +107,10 @@ before advancing to the next item.
 
 This design avoids buffering entire datasets in memory. A single document can
 expand into thousands of chunks at one transform and contract back into a single
-summary at another — the engine handles both directions naturally.
+summary at another: the engine handles both directions naturally.
 
 Every item carries its own resumption context. Runs can resume from the last
-successfully processed item — whether recovering from a failure or continuing
+successfully processed item: whether recovering from a failure or continuing
 incrementally after new data has been added to the source. This makes pipelines
 suitable for both batch reprocessing and ongoing incremental ingestion.
 
@@ -124,24 +124,24 @@ artifact set.
 ## Data Model
 
 The data model is organized around workspaces. A workspace is the tenant
-boundary — all resources belong to exactly one workspace, and all access is
+boundary: all resources belong to exactly one workspace, and all access is
 scoped accordingly.
 
 **Workspaces** contain three primary resource types:
 
-- **Pipelines** — Workflow definitions stored as JSON graphs. Each pipeline has
+- **Pipelines:** Workflow definitions stored as JSON graphs. Each pipeline has
   a lifecycle status (draft, enabled, disabled) and optional cron scheduling.
-  When a pipeline executes, it produces a **run** — an immutable record of the
+  When a pipeline executes, it produces a **run**: an immutable record of the
   execution with a snapshot of the definition, execution logs, and timing. Runs
   produce **artifacts**, which link back to files and classify them as input,
   output, or intermediate.
 
-- **Connections** — Encrypted references to external systems. Each connection
+- **Connections:** Encrypted references to external systems. Each connection
   stores a provider identifier and an encrypted blob containing credentials and
   configuration. Encryption uses workspace-derived keys so that a compromise of
   one workspace cannot expose another's credentials.
 
-- **Files** — Binary objects stored in NATS object storage with metadata in
+- **Files:** Binary objects stored in NATS object storage with metadata in
   PostgreSQL. Files support versioning through parent-child chains and are
   classified by source: uploaded by a user, imported from an external system, or
   generated by a pipeline run.

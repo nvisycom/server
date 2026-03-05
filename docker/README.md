@@ -7,14 +7,14 @@ Docker configuration for the Nvisy server.
 Nvisy requires two external services:
 
 **PostgreSQL 18+** with the pgvector extension. PostgreSQL serves as the primary
-data store for all application state — accounts, workspaces, pipelines,
-connections, file metadata — and provides vector similarity search through
+data store for all application state (accounts, workspaces, pipelines,
+connections, file metadata) and provides vector similarity search through
 pgvector. The recommended image is `pgvector/pgvector:pg18`.
 
 **NATS 2.10+** with JetStream enabled. NATS handles three concerns: pub/sub
 messaging for real-time events, persistent job queues for asynchronous
 processing, and object storage for uploaded files. JetStream must be enabled
-with sufficient storage allocation — the default configuration uses 1 GB of
+with sufficient storage allocation: the default configuration uses 1 GB of
 memory store and 10 GB of file store.
 
 ## Quick Start
@@ -86,10 +86,10 @@ variables above.
 
 The Dockerfile uses a multi-stage build:
 
-1. **Planner** — generates a dependency recipe with cargo-chef
-2. **Builder** — builds dependencies from the recipe (cached), then builds the
+1. **Planner:** generates a dependency recipe with cargo-chef
+2. **Builder:** builds dependencies from the recipe (cached), then builds the
    server binary and strips it
-3. **Runtime** — minimal Debian image with only the binary and runtime libraries
+3. **Runtime:** minimal Debian image with only the binary and runtime libraries
 
 The runtime image runs as a non-root user (`nvisy`, UID 1000) and includes a
 health check endpoint at `/health`.
