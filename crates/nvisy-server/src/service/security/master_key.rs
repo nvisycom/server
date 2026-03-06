@@ -45,7 +45,7 @@ impl MasterKeyConfig {
 ///
 /// This is a thin wrapper around [`EncryptionKey`] that adds file-based loading
 /// and tracing. The underlying key is used exclusively to derive per-workspace
-/// keys via HKDF-SHA256 — it is never used for encryption directly.
+/// keys via HKDF-SHA256: it is never used for encryption directly.
 #[derive(Clone)]
 pub struct MasterKey {
     inner: Arc<EncryptionKey>,

@@ -9,7 +9,7 @@ use url::Url;
 use uuid::Uuid;
 
 /// A webhook delivery request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WebhookRequest {
     /// Unique identifier for this request.
@@ -30,8 +30,24 @@ pub struct WebhookRequest {
     #[cfg_attr(feature = "schema", schemars(with = "Option<u64>"))]
     pub timeout: Option<Duration>,
     /// HMAC-SHA256 signing secret for request authentication.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     pub secret: Option<String>,
+}
+
+impl std::fmt::Debug for WebhookRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebhookRequest")
+            .field("request_id", &self.request_id)
+            .field("url", &self.url)
+            .field("event", &self.event)
+            .field("message", &self.message)
+            .field("context", &self.context)
+            .field("headers", &self.headers)
+            .field("timeout", &self.timeout)
+            .field("secret", &self.secret.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl WebhookRequest {

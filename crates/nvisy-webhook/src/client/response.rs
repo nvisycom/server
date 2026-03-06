@@ -40,19 +40,6 @@ impl WebhookResponse {
     pub fn duration(&self) -> jiff::Span {
         self.started_at.until(self.finished_at).unwrap_or_default()
     }
-
-    /// Checks if the response indicates a retryable error.
-    pub fn is_retryable(&self) -> bool {
-        if self.is_success() {
-            return false;
-        }
-
-        // Network errors (status 0) or server errors (5xx) or specific client errors are retryable
-        self.status_code == 0
-            || self.status_code >= 500
-            || self.status_code == 408
-            || self.status_code == 429
-    }
 }
 
 #[cfg(test)]
@@ -71,27 +58,11 @@ mod tests {
     }
 
     #[test]
-    fn test_is_retryable() {
+    fn test_failure_response() {
         let started_at = Timestamp::now();
 
-        // Success is not retryable
-        assert!(!WebhookResponse::new(Uuid::new_v4(), 200, started_at).is_retryable());
-
-        // 5xx errors are retryable
-        assert!(WebhookResponse::new(Uuid::new_v4(), 500, started_at).is_retryable());
-        assert!(WebhookResponse::new(Uuid::new_v4(), 503, started_at).is_retryable());
-
-        // 429 Too Many Requests is retryable
-        assert!(WebhookResponse::new(Uuid::new_v4(), 429, started_at).is_retryable());
-
-        // 408 Request Timeout is retryable
-        assert!(WebhookResponse::new(Uuid::new_v4(), 408, started_at).is_retryable());
-
-        // 4xx errors (except 408, 429) are not retryable
-        assert!(!WebhookResponse::new(Uuid::new_v4(), 400, started_at).is_retryable());
-        assert!(!WebhookResponse::new(Uuid::new_v4(), 404, started_at).is_retryable());
-
-        // Network errors (status 0) are retryable
-        assert!(WebhookResponse::new(Uuid::new_v4(), 0, started_at).is_retryable());
+        assert!(!WebhookResponse::new(Uuid::new_v4(), 500, started_at).is_success());
+        assert!(!WebhookResponse::new(Uuid::new_v4(), 404, started_at).is_success());
+        assert!(!WebhookResponse::new(Uuid::new_v4(), 0, started_at).is_success());
     }
 }
