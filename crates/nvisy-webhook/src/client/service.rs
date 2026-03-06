@@ -4,9 +4,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::{
-    Result, ServiceHealth, TRACING_TARGET, WebhookProvider, WebhookRequest, WebhookResponse,
-};
+use super::{ServiceHealth, WebhookProvider, WebhookRequest, WebhookResponse};
+use crate::{Result, TRACING_TARGET};
 
 /// Webhook service wrapper with observability.
 ///
@@ -101,7 +100,8 @@ impl WebhookService {
             Ok(health) => {
                 tracing::debug!(
                     target: TRACING_TARGET,
-                    status = ?health.status,
+                    healthy = health.is_healthy(),
+                    latency_ms = health.latency.as_millis(),
                     elapsed_ms = elapsed.as_millis(),
                     "Webhook health check completed"
                 );

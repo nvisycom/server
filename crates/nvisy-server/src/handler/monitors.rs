@@ -9,10 +9,9 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use jiff::Timestamp;
-use nvisy_webhook::ServiceStatus;
 
 use super::request::CheckHealth;
-use super::response::MonitorStatus;
+use super::response::{MonitorStatus, ServiceStatus};
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
 use crate::service::{HealthCache, ServiceState};

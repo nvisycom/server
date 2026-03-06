@@ -183,15 +183,13 @@ impl WebhookProvider for ReqwestClient {
 
     async fn health_check(&self) -> crate::Result<ServiceHealth> {
         // The client is stateless and always healthy if it was created successfully
-        Ok(ServiceHealth::healthy())
+        Ok(ServiceHealth::healthy(std::time::Duration::ZERO))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ServiceStatus;
-
     #[test]
     fn test_sign_payload() {
         let secret = "test_secret";
@@ -216,6 +214,6 @@ mod tests {
     async fn test_health_check() {
         let client = ReqwestClient::default();
         let health = client.health_check().await.unwrap();
-        assert_eq!(health.status, ServiceStatus::Healthy);
+        assert!(health.is_healthy());
     }
 }
