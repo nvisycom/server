@@ -1,16 +1,14 @@
-//! Webhook service wrapper with observability.
+//! Webhook service wrapper.
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::{ServiceHealth, WebhookProvider, WebhookRequest, WebhookResponse};
-use crate::{Result, TRACING_TARGET};
+use crate::Result;
 
-/// Webhook service wrapper with observability.
+/// Webhook service wrapper for dependency injection.
 ///
-/// This wrapper adds structured logging to any webhook delivery implementation.
-/// The inner service is wrapped in `Arc` for cheap cloning.
+/// Wraps any [`WebhookProvider`] in an `Arc` for cheap cloning across tasks.
 #[derive(Clone)]
 pub struct WebhookService {
     inner: Arc<dyn WebhookProvider>,
@@ -35,87 +33,11 @@ impl WebhookService {
 
     /// Delivers a webhook payload to the specified endpoint.
     pub async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse> {
-        let started_at = Instant::now();
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            request_id = %request.request_id,
-            url = %request.url,
-            timeout_ms = ?request.timeout.map(|t| t.as_millis()),
-            "Delivering webhook"
-        );
-
-        let result = self.inner.deliver(request).await;
-        let elapsed = started_at.elapsed();
-
-        match &result {
-            Ok(response) => {
-                if response.is_success() {
-                    tracing::debug!(
-                        target: TRACING_TARGET,
-                        request_id = %request.request_id,
-                        response_id = %response.response_id,
-                        status_code = ?response.status_code,
-                        elapsed_ms = elapsed.as_millis(),
-                        "Webhook delivered successfully"
-                    );
-                } else {
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        request_id = %request.request_id,
-                        response_id = %response.response_id,
-                        status_code = ?response.status_code,
-                        elapsed_ms = elapsed.as_millis(),
-                        "Webhook delivery failed"
-                    );
-                }
-            }
-            Err(error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    request_id = %request.request_id,
-                    error = %error,
-                    elapsed_ms = elapsed.as_millis(),
-                    "Webhook delivery error"
-                );
-            }
-        }
-
-        result
+        self.inner.deliver(request).await
     }
 
     /// Performs a health check on the underlying webhook provider.
     pub async fn health_check(&self) -> Result<ServiceHealth> {
-        let started_at = Instant::now();
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            "Performing webhook provider health check"
-        );
-
-        let result = self.inner.health_check().await;
-        let elapsed = started_at.elapsed();
-
-        match &result {
-            Ok(health) => {
-                tracing::debug!(
-                    target: TRACING_TARGET,
-                    healthy = health.is_healthy(),
-                    latency_ms = health.latency.as_millis(),
-                    elapsed_ms = elapsed.as_millis(),
-                    "Webhook health check completed"
-                );
-            }
-            Err(error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %error,
-                    elapsed_ms = elapsed.as_millis(),
-                    "Webhook health check failed"
-                );
-            }
-        }
-
-        result
+        self.inner.health_check().await
     }
 }

@@ -114,11 +114,6 @@ impl ReqwestConfig {
         }
     }
 
-    /// Returns the timeout as a Duration.
-    pub fn timeout(&self) -> Duration {
-        Duration::from_secs(self.http_timeout)
-    }
-
     /// Returns the effective timeout, using default if zero.
     pub fn effective_timeout(&self) -> Duration {
         if self.http_timeout == 0 {
@@ -189,7 +184,7 @@ mod tests {
         let config = ReqwestConfig::default();
         assert_eq!(config.http_timeout, 30);
         assert!(config.user_agent.is_none());
-        assert_eq!(config.timeout(), Duration::from_secs(30));
+        assert_eq!(config.effective_timeout(), Duration::from_secs(30));
         assert_eq!(config.max_retries, 3);
         assert_eq!(config.min_retry_interval_ms, 500);
         assert_eq!(config.max_retry_interval_ms, 30_000);
@@ -199,7 +194,7 @@ mod tests {
     fn test_new_config() {
         let config = ReqwestConfig::new(60);
         assert_eq!(config.http_timeout, 60);
-        assert_eq!(config.timeout(), Duration::from_secs(60));
+        assert_eq!(config.effective_timeout(), Duration::from_secs(60));
         assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
     }
 

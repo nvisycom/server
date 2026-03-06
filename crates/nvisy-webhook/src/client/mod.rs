@@ -1,8 +1,8 @@
 //! Webhook client types (requests, responses, health, and service wrapper).
 
 mod health;
-pub mod request;
-pub mod response;
+mod request;
+mod response;
 mod service;
 
 pub use health::ServiceHealth;
