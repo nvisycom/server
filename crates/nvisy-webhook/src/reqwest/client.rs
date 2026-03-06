@@ -1,10 +1,15 @@
 //! Reqwest-based HTTP client for webhook delivery.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use hmac::{Hmac, Mac};
 use jiff::Timestamp;
 use reqwest::Client;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::RetryTransientMiddleware;
+use reqwest_retry::policies::ExponentialBackoff;
+use reqwest_tracing::TracingMiddleware;
 use sha2::Sha256;
 
 use super::{Error, ReqwestConfig, TRACING_TARGET};
@@ -12,16 +17,16 @@ use crate::{ServiceHealth, WebhookProvider, WebhookRequest, WebhookResponse, Web
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Inner client that holds the HTTP client and configuration.
+/// Inner client state.
 struct ReqwestClientInner {
-    http: Client,
-    config: ReqwestConfig,
+    http: ClientWithMiddleware,
 }
 
 /// Reqwest-based HTTP client for delivering webhook payloads to external endpoints.
 ///
 /// This client implements the [`WebhookProvider`] trait and provides HTTP-based
-/// webhook delivery with request signing support.
+/// webhook delivery with request signing, automatic retries with exponential
+/// backoff, and distributed tracing.
 ///
 /// # Examples
 ///
@@ -44,9 +49,7 @@ pub struct ReqwestClient {
 
 impl std::fmt::Debug for ReqwestClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReqwestClient")
-            .field("config", &self.inner.config)
-            .finish_non_exhaustive()
+        f.debug_struct("ReqwestClient").finish_non_exhaustive()
     }
 }
 
@@ -59,36 +62,35 @@ impl ReqwestClient {
         tracing::debug!(
             target: TRACING_TARGET,
             timeout_ms = timeout.as_millis(),
+            max_retries = config.max_retries,
             "Creating reqwest client"
         );
 
-        let http = Client::builder()
+        let base_client = Client::builder()
             .timeout(timeout)
             .user_agent(&user_agent)
             .build()
             .expect("failed to create HTTP client");
 
-        let inner = ReqwestClientInner { http, config };
-        let client = Self {
-            inner: Arc::new(inner),
-        };
+        let retry_policy = ExponentialBackoff::builder()
+            .retry_bounds(config.min_retry_interval(), config.max_retry_interval())
+            .build_with_max_retries(config.max_retries);
+
+        let http = ClientBuilder::new(base_client)
+            .with(TracingMiddleware::default())
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build();
+
+        let inner = ReqwestClientInner { http };
 
         tracing::info!(
             target: TRACING_TARGET,
             "Reqwest client created successfully"
         );
 
-        client
-    }
-
-    /// Gets the underlying HTTP client.
-    pub(crate) fn http(&self) -> &Client {
-        &self.inner.http
-    }
-
-    /// Gets the client configuration.
-    pub fn config(&self) -> &ReqwestConfig {
-        &self.inner.config
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     /// Converts this client into a [`WebhookService`] for use with dependency injection.
@@ -135,18 +137,20 @@ impl WebhookProvider for ReqwestClient {
         let payload = request.to_payload();
         let payload_bytes = serde_json::to_vec(&payload).map_err(Error::Serde)?;
 
-        // Determine the timeout to use
-        let timeout = request.timeout.unwrap_or_else(|| self.config().timeout());
-
         // Build the HTTP request
         let mut http_request = self
-            .http()
+            .inner
+            .http
             .post(request.url.as_str())
             .header("Content-Type", "application/json")
             .header("X-Webhook-Event", &request.event)
             .header("X-Webhook-Timestamp", timestamp.to_string())
-            .header("X-Webhook-Request-Id", request.request_id.to_string())
-            .timeout(timeout);
+            .header("X-Webhook-Request-Id", request.request_id.to_string());
+
+        // Override timeout if the request specifies one
+        if let Some(timeout) = request.timeout {
+            http_request = http_request.timeout(timeout);
+        }
 
         // Add HMAC-SHA256 signature if secret is present
         if let Some(ref secret) = request.secret {
@@ -182,14 +186,14 @@ impl WebhookProvider for ReqwestClient {
     }
 
     async fn health_check(&self) -> crate::Result<ServiceHealth> {
-        // The client is stateless and always healthy if it was created successfully
-        Ok(ServiceHealth::healthy(std::time::Duration::ZERO))
+        Ok(ServiceHealth::healthy(Duration::ZERO))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_sign_payload() {
         let secret = "test_secret";
@@ -205,9 +209,7 @@ mod tests {
 
     #[test]
     fn test_client_creation() {
-        let config = ReqwestConfig::default();
-        let client = ReqwestClient::new(config);
-        assert!(client.config().user_agent.is_none());
+        let _client = ReqwestClient::default();
     }
 
     #[tokio::test]
