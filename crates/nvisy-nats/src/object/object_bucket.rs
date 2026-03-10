@@ -59,6 +59,17 @@ impl ObjectBucket for AvatarsBucket {
     const NAME: &'static str = "ACCOUNT_AVATARS";
 }
 
+/// Storage for encrypted workspace context files.
+///
+/// No expiration, context files are retained indefinitely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct ContextFilesBucket;
+
+impl ObjectBucket for ContextFilesBucket {
+    const MAX_AGE: Option<Duration> = None;
+    const NAME: &'static str = "CONTEXT_FILES";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +80,7 @@ mod tests {
         assert_eq!(IntermediatesBucket::NAME, "DOCUMENT_INTERMEDIATES");
         assert_eq!(ThumbnailsBucket::NAME, "DOCUMENT_THUMBNAILS");
         assert_eq!(AvatarsBucket::NAME, "ACCOUNT_AVATARS");
+        assert_eq!(ContextFilesBucket::NAME, "CONTEXT_FILES");
     }
 
     #[test]
@@ -80,5 +92,6 @@ mod tests {
         );
         assert_eq!(ThumbnailsBucket::MAX_AGE, None);
         assert_eq!(AvatarsBucket::MAX_AGE, None);
+        assert_eq!(ContextFilesBucket::MAX_AGE, None);
     }
 }

@@ -9,13 +9,13 @@ execution as compiled workflow graphs.
 
 The platform is designed around three ideas: data should flow between any two
 systems without custom glue code, transformations should be composable and
-reusable, and the intelligence applied during processing — extraction,
-enrichment, analysis, reasoning — should be a first-class part of the pipeline,
+reusable, and the intelligence applied during processing (extraction,
+enrichment, analysis, reasoning) should be a first-class part of the pipeline,
 not a bolted-on afterthought.
 
 ## Problem
 
-Organizations accumulate data across dozens of systems — relational databases,
+Organizations accumulate data across dozens of systems: relational databases,
 object stores, vector databases, document repositories, message queues. Moving
 data between these systems typically requires either rigid, vendor-locked ETL
 tools that cannot accommodate AI workloads, or bespoke engineering that is
@@ -30,7 +30,7 @@ orchestration.
 ## Design Principles
 
 **Workflow-first.** The pipeline is the unit of work. Each workflow is a
-directed acyclic graph of typed nodes — sources, transforms, and sinks —
+directed acyclic graph of typed nodes (sources, transforms, and sinks)
 connected by edges. This structure is serializable, versionable, and
 schedulable.
 
@@ -39,13 +39,13 @@ object stores, vector databases, and other external systems. Adding a new
 provider requires implementing a small set of protocols without modifying the
 core engine.
 
-**Intelligence-native.** LLM-powered transforms — extraction, enrichment,
-summarization, entity resolution, contradiction detection — sit alongside
+**Intelligence-native.** LLM-powered transforms (extraction, enrichment,
+summarization, entity resolution, contradiction detection) sit alongside
 rule-based transforms as equal citizens in the graph. AI is not a separate
 layer; it is woven into the data flow.
 
 **Resumable streaming.** Every data item carries its own pagination context.
-Runs can resume from the last processed item — whether recovering from a failure
+Runs can resume from the last processed item: whether recovering from a failure
 or continuing incrementally after new data has been added to the source.
 
 **Workspace isolation.** Tenants are cryptographically isolated. Provider

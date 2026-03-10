@@ -91,6 +91,84 @@ COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft deletion timestamp';
 
+-- Workspace context files table (metadata for encrypted context stored in NATS)
+CREATE TABLE workspace_contexts (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Core attributes
+    name            TEXT            NOT NULL,
+    description     TEXT            DEFAULT NULL,
+    mime_type       TEXT            NOT NULL DEFAULT 'application/json',
+
+    CONSTRAINT workspace_contexts_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_contexts_description_length CHECK (description IS NULL OR length(description) <= 4096),
+    CONSTRAINT workspace_contexts_mime_type_length CHECK (length(trim(mime_type)) BETWEEN 1 AND 128),
+
+    -- Storage reference (NATS object store key)
+    storage_key     TEXT            NOT NULL,
+
+    CONSTRAINT workspace_contexts_storage_key_length CHECK (length(trim(storage_key)) BETWEEN 1 AND 512),
+
+    -- Content metadata
+    content_size    BIGINT          NOT NULL,
+    content_hash    BYTEA           NOT NULL,
+
+    CONSTRAINT workspace_contexts_content_size_positive CHECK (content_size > 0),
+    CONSTRAINT workspace_contexts_content_hash_length CHECK (length(content_hash) = 32),
+
+    -- Metadata (non-encrypted, for filtering/display)
+    metadata        JSONB           NOT NULL DEFAULT '{}',
+
+    CONSTRAINT workspace_contexts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+
+    -- Lifecycle timestamps
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
+    deleted_at      TIMESTAMPTZ     DEFAULT NULL,
+
+    CONSTRAINT workspace_contexts_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_contexts_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
+);
+
+-- Triggers
+SELECT setup_updated_at('workspace_contexts');
+
+-- Indexes
+CREATE INDEX workspace_contexts_workspace_idx
+    ON workspace_contexts (workspace_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX workspace_contexts_account_idx
+    ON workspace_contexts (account_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX workspace_contexts_name_unique_idx
+    ON workspace_contexts (workspace_id, lower(trim(name)))
+    WHERE deleted_at IS NULL;
+
+-- Comments
+COMMENT ON TABLE workspace_contexts IS
+    'Metadata for encrypted context files stored in NATS object storage.';
+
+COMMENT ON COLUMN workspace_contexts.id IS 'Unique context identifier';
+COMMENT ON COLUMN workspace_contexts.workspace_id IS 'Parent workspace reference';
+COMMENT ON COLUMN workspace_contexts.account_id IS 'Creator account reference';
+COMMENT ON COLUMN workspace_contexts.name IS 'Human-readable context name (1-255 chars)';
+COMMENT ON COLUMN workspace_contexts.description IS 'Context description (up to 4096 chars)';
+COMMENT ON COLUMN workspace_contexts.mime_type IS 'Content MIME type';
+COMMENT ON COLUMN workspace_contexts.storage_key IS 'NATS object store key for the encrypted content';
+COMMENT ON COLUMN workspace_contexts.content_size IS 'Size of the encrypted content in bytes';
+COMMENT ON COLUMN workspace_contexts.content_hash IS 'SHA-256 hash of the encrypted content';
+COMMENT ON COLUMN workspace_contexts.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN workspace_contexts.created_at IS 'Creation timestamp';
+COMMENT ON COLUMN workspace_contexts.updated_at IS 'Last modification timestamp';
+COMMENT ON COLUMN workspace_contexts.deleted_at IS 'Soft deletion timestamp';
+
 -- Pipeline status enum
 CREATE TYPE PIPELINE_STATUS AS ENUM (
     'draft',        -- Pipeline is being configured

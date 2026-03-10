@@ -30,8 +30,9 @@ mod object_key;
 mod object_store;
 
 pub use object_bucket::{
-    AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ThumbnailsBucket,
+    AvatarsBucket, ContextFilesBucket, FilesBucket, IntermediatesBucket, ObjectBucket,
+    ThumbnailsBucket,
 };
 pub use object_data::{GetResult, PutResult};
-pub use object_key::{AccountKey, FileKey, ObjectKey};
+pub use object_key::{AccountKey, ContextKey, FileKey, ObjectKey};
 pub use object_store::ObjectStore;

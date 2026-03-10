@@ -10,6 +10,7 @@ mod account_notification;
 mod workspace;
 mod workspace_activity;
 mod workspace_connection;
+mod workspace_context;
 mod workspace_file;
 mod workspace_file_annotation;
 mod workspace_file_chunk;
@@ -35,6 +36,7 @@ pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_connection::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
+pub use workspace_context::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 // File models
 pub use workspace_file_annotation::{

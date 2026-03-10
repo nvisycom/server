@@ -7,6 +7,7 @@ mod accounts;
 mod annotations;
 mod authentication;
 mod connections;
+mod contexts;
 mod error;
 mod files;
 mod invites;
@@ -46,6 +47,7 @@ fn private_routes(
         .merge(tokens::routes())
         .merge(workspaces::routes())
         .merge(connections::routes())
+        .merge(contexts::routes())
         .merge(invites::routes())
         .merge(members::routes())
         .merge(webhooks::routes())

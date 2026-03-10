@@ -1,9 +1,31 @@
 //! Monitor response types.
 
 use jiff::Timestamp;
-use nvisy_webhook::ServiceStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Represents the operational status of a service.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceStatus {
+    /// Service is operating normally.
+    #[default]
+    Healthy,
+    /// Service is operating with some issues but still functional.
+    Degraded,
+    /// Service is not operational.
+    Unhealthy,
+}
 
 /// System monitoring status response.
 #[must_use]
