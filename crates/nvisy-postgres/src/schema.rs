@@ -166,6 +166,27 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+
+    workspace_contexts (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        mime_type -> Text,
+        storage_key -> Text,
+        content_size -> Int8,
+        content_hash -> Bytea,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::SyncStatus;
 
     workspace_connections (id) {
@@ -402,6 +423,8 @@ diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
+diesel::joinable!(workspace_contexts -> accounts (account_id));
+diesel::joinable!(workspace_contexts -> workspaces (workspace_id));
 diesel::joinable!(workspace_file_annotations -> accounts (account_id));
 diesel::joinable!(workspace_file_annotations -> workspace_files (file_id));
 diesel::joinable!(workspace_file_chunks -> workspace_files (file_id));
@@ -426,6 +449,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     workspace_activities,
     workspace_connections,
+    workspace_contexts,
     workspace_file_annotations,
     workspace_file_chunks,
     workspace_files,

@@ -18,8 +18,8 @@ pub use constraint::{
     AccountNotificationConstraints, ConstraintCategory, ConstraintViolation,
     FileAnnotationConstraints, FileChunkConstraints, FileConstraints, PipelineArtifactConstraints,
     PipelineConstraints, PipelineRunConstraints, WorkspaceActivitiesConstraints,
-    WorkspaceConnectionConstraints, WorkspaceConstraints, WorkspaceInviteConstraints,
-    WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConstraints, WorkspaceContextConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
     ActionTokenType, ActivityCategory, ActivityType, AnnotationType, ApiTokenType, ArtifactType,

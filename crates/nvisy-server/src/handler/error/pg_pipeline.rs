@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::{
     PipelineArtifactConstraints, PipelineConstraints, PipelineRunConstraints,
-    WorkspaceConnectionConstraints,
+    WorkspaceConnectionConstraints, WorkspaceContextConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -83,5 +83,38 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
         };
 
         error.with_resource("workspace_connection")
+    }
+}
+
+impl From<WorkspaceContextConstraints> for Error<'static> {
+    fn from(c: WorkspaceContextConstraints) -> Self {
+        let error =
+            match c {
+                WorkspaceContextConstraints::NameLength => ErrorKind::BadRequest
+                    .with_message("Context name must be between 1 and 255 characters"),
+                WorkspaceContextConstraints::DescriptionLength => ErrorKind::BadRequest
+                    .with_message("Context description must be at most 4096 characters"),
+                WorkspaceContextConstraints::MimeTypeLength => ErrorKind::BadRequest
+                    .with_message("MIME type must be between 1 and 128 characters"),
+                WorkspaceContextConstraints::StorageKeyLength => {
+                    ErrorKind::BadRequest.with_message("Storage key length exceeds maximum limit")
+                }
+                WorkspaceContextConstraints::ContentSizePositive => {
+                    ErrorKind::BadRequest.with_message("Content size must be greater than zero")
+                }
+                WorkspaceContextConstraints::ContentHashLength => {
+                    ErrorKind::BadRequest.with_message("Content hash must be exactly 32 bytes")
+                }
+                WorkspaceContextConstraints::MetadataSize => ErrorKind::BadRequest
+                    .with_message("Context metadata size exceeds maximum limit"),
+                WorkspaceContextConstraints::NameUnique => ErrorKind::Conflict
+                    .with_message("A context with this name already exists in the workspace"),
+                WorkspaceContextConstraints::UpdatedAfterCreated
+                | WorkspaceContextConstraints::DeletedAfterCreated => {
+                    ErrorKind::InternalServerError.into_error()
+                }
+            };
+
+        error.with_resource("workspace_context")
     }
 }

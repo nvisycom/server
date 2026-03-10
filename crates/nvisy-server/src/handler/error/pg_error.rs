@@ -33,6 +33,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::PipelineRun(c) => c.into(),
             ConstraintViolation::PipelineArtifact(c) => c.into(),
             ConstraintViolation::WorkspaceConnection(c) => c.into(),
+            ConstraintViolation::WorkspaceContext(c) => c.into(),
         }
     }
 }

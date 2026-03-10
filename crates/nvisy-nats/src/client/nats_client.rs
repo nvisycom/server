@@ -42,8 +42,8 @@ use crate::kv::{
     ApiToken, ApiTokensBucket, ChatHistoryBucket, KvBucket, KvKey, KvStore, SessionKey, TokenKey,
 };
 use crate::object::{
-    AccountKey, AvatarsBucket, FileKey, FilesBucket, IntermediatesBucket, ObjectBucket, ObjectKey,
-    ObjectStore, ThumbnailsBucket,
+    AccountKey, AvatarsBucket, ContextFilesBucket, ContextKey, FileKey, FilesBucket,
+    IntermediatesBucket, ObjectBucket, ObjectKey, ObjectStore, ThumbnailsBucket,
 };
 use crate::stream::{EventPublisher, EventStream, EventSubscriber, FileStream, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
@@ -253,6 +253,12 @@ impl NatsClient {
     /// Get or create an avatar store for account avatars.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn avatar_store(&self) -> Result<ObjectStore<AvatarsBucket, AccountKey>> {
+        self.object_store().await
+    }
+
+    /// Get or create a context file store for encrypted workspace contexts.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn context_file_store(&self) -> Result<ObjectStore<ContextFilesBucket, ContextKey>> {
         self.object_store().await
     }
 }

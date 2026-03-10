@@ -164,6 +164,81 @@ impl From<Uuid> for AccountKey {
     }
 }
 
+/// A validated key for context file objects in NATS object storage.
+///
+/// The key is encoded as `ctx_` prefix followed by URL-safe base64 of the
+/// concatenated workspace ID and context ID. This produces a key like
+/// `ctx_ABC123...` from two UUIDs (32 bytes -> base64).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ContextKey {
+    pub workspace_id: Uuid,
+    pub context_id: Uuid,
+}
+
+impl ObjectKey for ContextKey {
+    const PREFIX: &'static str = "ctx_";
+}
+
+impl ContextKey {
+    /// Creates a new context key from workspace and context IDs.
+    pub fn new(workspace_id: Uuid, context_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            context_id,
+        }
+    }
+
+    /// Encodes the key payload as URL-safe base64.
+    fn encode_payload(&self) -> String {
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(self.workspace_id.as_bytes());
+        bytes[16..].copy_from_slice(self.context_id.as_bytes());
+        BASE64_URL_SAFE_NO_PAD.encode(bytes)
+    }
+
+    /// Decodes a key payload from URL-safe base64.
+    fn decode_payload(s: &str) -> Result<Self> {
+        let bytes = BASE64_URL_SAFE_NO_PAD.decode(s).map_err(|e| {
+            Error::operation("parse_key", format!("Invalid base64 encoding: {}", e))
+        })?;
+
+        if bytes.len() != 32 {
+            return Err(Error::operation(
+                "parse_key",
+                format!("Invalid key length: expected 32 bytes, got {}", bytes.len()),
+            ));
+        }
+
+        let workspace_id = Uuid::from_slice(&bytes[..16])
+            .map_err(|e| Error::operation("parse_key", format!("Invalid workspace UUID: {}", e)))?;
+
+        let context_id = Uuid::from_slice(&bytes[16..])
+            .map_err(|e| Error::operation("parse_key", format!("Invalid context UUID: {}", e)))?;
+
+        Ok(Self::new(workspace_id, context_id))
+    }
+}
+
+impl fmt::Display for ContextKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", Self::PREFIX, self.encode_payload())
+    }
+}
+
+impl FromStr for ContextKey {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let payload = s.strip_prefix(Self::PREFIX).ok_or_else(|| {
+            Error::operation(
+                "parse_key",
+                format!("Invalid key prefix: expected '{}'", Self::PREFIX),
+            )
+        })?;
+        Self::decode_payload(payload)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +352,53 @@ mod tests {
         #[test]
         fn test_from_str_invalid_uuid() {
             assert!(AccountKey::from_str("account_not-a-uuid").is_err());
+        }
+    }
+
+    mod context_key {
+        use super::*;
+
+        #[test]
+        fn test_prefix() {
+            assert_eq!(ContextKey::PREFIX, "ctx_");
+        }
+
+        #[test]
+        fn test_new() {
+            let workspace_id = Uuid::new_v4();
+            let context_id = Uuid::new_v4();
+            let key = ContextKey::new(workspace_id, context_id);
+            assert_eq!(key.workspace_id, workspace_id);
+            assert_eq!(key.context_id, context_id);
+        }
+
+        #[test]
+        fn test_display_has_prefix() {
+            let key = ContextKey::new(Uuid::new_v4(), Uuid::new_v4());
+            let encoded = key.to_string();
+            assert!(encoded.starts_with("ctx_"));
+            // prefix (4) + base64 (43) = 47
+            assert_eq!(encoded.len(), 47);
+        }
+
+        #[test]
+        fn test_roundtrip() {
+            let workspace_id = Uuid::new_v4();
+            let context_id = Uuid::new_v4();
+
+            let key = ContextKey::new(workspace_id, context_id);
+            let encoded = key.to_string();
+            let decoded: ContextKey = encoded.parse().unwrap();
+
+            assert_eq!(decoded.workspace_id, workspace_id);
+            assert_eq!(decoded.context_id, context_id);
+            assert_eq!(key, decoded);
+        }
+
+        #[test]
+        fn test_from_str_invalid_prefix() {
+            assert!(ContextKey::from_str("file_abc").is_err());
+            assert!(ContextKey::from_str("abc").is_err());
         }
     }
 }
