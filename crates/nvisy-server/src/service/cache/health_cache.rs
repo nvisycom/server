@@ -1,19 +1,20 @@
 //! Health monitoring service with simple caching.
 //!
 //! This module provides a centralized health checking system for monitoring the status
-//! of all critical system components including PostgreSQL, NATS, and OpenRouter services.
-//! It uses atomic boolean caching with configurable TTL to avoid repeated expensive
+//! of all critical system components including PostgreSQL and NATS services.
+//! It caches per-component results with a configurable TTL to avoid repeated expensive
 //! health check operations while ensuring timely detection of service degradation.
 
-use std::future::Future;
+use std::borrow::Cow;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use jiff::Timestamp;
 use nvisy_nats::NatsClient;
 use nvisy_postgres::PgClient;
 use tokio::sync::RwLock;
 
+use crate::handler::response::{ComponentCheck, Health, ServiceStatus};
 use crate::service::ServiceState;
 
 /// Tracing target for health cache operations.
@@ -22,20 +23,22 @@ const TRACING_TARGET: &str = "nvisy_server::health_cache";
 /// Default cache duration for health checks.
 const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(30);
 
-/// Internal health cache entry with atomic boolean and timestamp.
-///
-/// This structure stores the cached health status using an atomic boolean for
-/// lock-free reads, combined with a RwLock-protected timestamp for cache expiration.
-/// This design optimizes for the common case of reading cached values while still
-/// allowing safe concurrent updates.
+/// Cached health snapshot containing per-component results and a timestamp.
+#[derive(Debug, Clone)]
+struct HealthSnapshot {
+    /// Per-component results: `(name, healthy)`.
+    components: Vec<(Cow<'static, str>, bool)>,
+    /// When the snapshot was taken.
+    checked_at: Instant,
+    /// RFC 3339 timestamp for the response.
+    timestamp: Timestamp,
+}
+
+/// Internal health cache entry.
 #[derive(Debug)]
 struct HealthCacheEntry {
-    /// Cached health status. Uses relaxed ordering since health status doesn't
-    /// require strict ordering guarantees - eventual consistency is acceptable.
-    is_healthy: AtomicBool,
-    /// Timestamp of the last successful health check. Protected by RwLock to
-    /// allow concurrent reads while preventing data races during updates.
-    last_check: RwLock<Instant>,
+    /// Cached health snapshot.
+    snapshot: RwLock<Option<HealthSnapshot>>,
     /// How long cached values remain valid before requiring a fresh check.
     cache_duration: Duration,
 }
@@ -43,129 +46,59 @@ struct HealthCacheEntry {
 impl HealthCacheEntry {
     fn new(cache_duration: Duration) -> Self {
         Self {
-            is_healthy: AtomicBool::new(false),
-            last_check: RwLock::new(Instant::now() - cache_duration), // Force initial check
+            snapshot: RwLock::new(None),
             cache_duration,
         }
     }
 
-    /// Retrieves the cached health status or performs a fresh check if the cache has expired.
-    ///
-    /// This method implements a check-then-act pattern for cache validation:
-    /// 1. Reads the last check timestamp (shared lock)
-    /// 2. Compares against cache duration
-    /// 3. Returns cached value if still valid
-    /// 4. Otherwise performs health check and updates cache (exclusive lock)
-    ///
-    /// # Arguments
-    ///
-    /// * `check_fn` - Async function that performs the actual health check
-    ///
-    /// # Returns
-    ///
-    /// Current health status (either cached or freshly checked)
-    async fn get_or_update<F, Fut>(&self, check_fn: F) -> bool
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = bool>,
-    {
-        let now = Instant::now();
-        let last_check = { *self.last_check.read().await };
+    /// Returns the cached snapshot if it is still valid.
+    async fn get_cached(&self) -> Option<HealthSnapshot> {
+        let guard = self.snapshot.read().await;
+        let snapshot = guard.as_ref()?;
 
-        // Check if cache is still valid
-        if now.duration_since(last_check) < self.cache_duration {
-            return self.is_healthy.load(Ordering::Relaxed);
+        if snapshot.checked_at.elapsed() < self.cache_duration {
+            Some(snapshot.clone())
+        } else {
+            None
         }
-
-        // Perform health check
-        let healthy = check_fn().await;
-
-        // Update cache
-        self.is_healthy.store(healthy, Ordering::Relaxed);
-        *self.last_check.write().await = now;
-
-        healthy
     }
 
-    /// Returns the current cached value without triggering any health checks.
-    ///
-    /// This is a lock-free operation that simply reads the atomic boolean.
-    /// The value may be stale if the cache has expired but no check has been
-    /// performed since expiration.
-    fn get_cached(&self) -> bool {
-        self.is_healthy.load(Ordering::Relaxed)
+    /// Stores a new snapshot.
+    async fn store(&self, snapshot: HealthSnapshot) {
+        *self.snapshot.write().await = Some(snapshot);
     }
 
-    /// Forces cache invalidation by backdating the last check timestamp.
-    ///
-    /// After calling this method, the next call to `get_or_update` will
-    /// perform a fresh health check regardless of when the last check occurred.
-    /// This is useful when you know a service state has changed and want to
-    /// ensure the next health check reflects current reality.
+    /// Returns the last snapshot regardless of expiry.
+    async fn get_last(&self) -> Option<HealthSnapshot> {
+        self.snapshot.read().await.clone()
+    }
+
+    /// Forces cache invalidation.
     async fn invalidate(&self) {
-        *self.last_check.write().await = Instant::now() - self.cache_duration;
+        *self.snapshot.write().await = None;
     }
 }
 
-/// Health monitoring service with efficient atomic boolean caching.
+/// Health monitoring service with per-component caching.
 ///
 /// This service provides centralized health checking for all critical system components
-/// (PostgreSQL, NATS, OpenRouter) with intelligent caching to balance responsiveness
-/// and performance. Health checks are expensive operations that involve network calls,
-/// so caching prevents excessive load while still detecting failures within the TTL window.
-///
-/// # Caching Strategy
-///
-/// - Health status is cached for a configurable duration (default: 30 seconds)
-/// - Concurrent health checks are performed across all services
-/// - Cache can be explicitly invalidated when service state changes are known
-/// - Atomic operations ensure thread-safe access without locks on reads
+/// (PostgreSQL, NATS) with intelligent caching to balance responsiveness and performance.
 ///
 /// # Thread Safety
 ///
 /// This type is `Clone` and all clones share the same underlying cache through `Arc`.
-/// All operations are thread-safe and can be called concurrently from multiple tasks.
-///
-/// # Example
-///
-/// ```rust
-/// use nvisy_server::service::HealthCache;
-/// use std::time::Duration;
-///
-/// let health = HealthCache::with_cache_duration(Duration::from_secs(60));
-///
-/// // Fast cached read without any checks
-/// let cached = health.get_cached_health();
-/// assert!(!cached); // Initially unhealthy until first check
-/// ```
 #[derive(Debug, Clone)]
 pub struct HealthCache {
-    /// Shared cache entry wrapped in Arc for cheap cloning and shared state.
     cache: Arc<HealthCacheEntry>,
 }
 
 impl HealthCache {
     /// Creates a new health monitoring service with the default cache duration of 30 seconds.
-    ///
-    /// This provides a good balance between responsiveness to failures and avoiding
-    /// excessive health check overhead for most applications.
     pub fn new() -> Self {
         Self::with_cache_duration(DEFAULT_CACHE_DURATION)
     }
 
     /// Creates a new health monitoring service with a custom cache duration.
-    ///
-    /// # Arguments
-    ///
-    /// * `cache_duration` - How long health check results remain valid
-    ///
-    /// # Choosing a Cache Duration
-    ///
-    /// - **Shorter durations** (5-15s): More responsive to failures, higher overhead
-    /// - **Medium durations** (30-60s): Balanced approach, suitable for most cases
-    /// - **Longer durations** (2-5m): Lower overhead, slower failure detection
-    ///
-    /// Consider your SLA requirements and health check endpoint call frequency.
     pub fn with_cache_duration(cache_duration: Duration) -> Self {
         tracing::debug!(
             target: TRACING_TARGET,
@@ -178,74 +111,38 @@ impl HealthCache {
         }
     }
 
-    /// Checks the overall system health status with intelligent caching.
+    /// Performs a health check and returns a [`Health`] response.
     ///
-    /// This method performs comprehensive health checks across all system components:
-    /// - **PostgreSQL**: Verifies database connectivity
-    /// - **NATS**: Checks connection state and performs ping
-    /// - **OCR**: Validates OCR service availability
-    /// - **VLM**: Validates VLM service availability
-    ///
-    /// All checks are performed concurrently for optimal performance. Results are
-    /// cached according to the configured TTL. The system is considered healthy
-    /// only if ALL components pass their health checks.
-    ///
-    /// # Arguments
-    ///
-    /// * `service_state` - Application state containing service clients
-    ///
-    /// # Returns
-    ///
-    /// `true` if all services are healthy (cached or fresh), `false` otherwise
-    ///
-    /// # Performance
-    ///
-    /// - **Cache hit**: ~nanoseconds (atomic read)
-    /// - **Cache miss**: Depends on service latencies, typically 50-500ms
-    pub async fn is_healthy(&self, service_state: &ServiceState) -> bool {
-        self.cache
-            .get_or_update(|| {
-                self.check_all_components(&service_state.postgres, &service_state.nats)
-            })
-            .await
+    /// If the cache is still valid the cached snapshot is returned immediately.
+    /// Otherwise all components are checked concurrently.
+    pub async fn check(&self, service_state: &ServiceState) -> Health {
+        if let Some(snapshot) = self.cache.get_cached().await {
+            return Self::snapshot_to_health(snapshot);
+        }
+
+        let snapshot = self
+            .check_all_components(&service_state.postgres, &service_state.nats)
+            .await;
+        self.cache.store(snapshot.clone()).await;
+        Self::snapshot_to_health(snapshot)
     }
 
-    /// Returns the currently cached health status without performing any checks.
+    /// Returns the last cached [`Health`] without performing any checks.
     ///
-    /// This is an extremely fast operation (atomic load) that returns the most
-    /// recently cached health status. The value may be stale if:
-    /// - The cache has expired but no check has been performed since
-    /// - Service states have changed since the last check
-    ///
-    /// Use this when you need a fast health indication and can tolerate slightly
-    /// stale data (e.g., for monitoring dashboards, metrics collection).
-    ///
-    /// # Returns
-    ///
-    /// The last cached health status (`true` = healthy, `false` = unhealthy or unknown)
-    pub fn get_cached_health(&self) -> bool {
-        self.cache.get_cached()
+    /// Falls back to an unhealthy response with no component checks when
+    /// no snapshot has been cached yet.
+    pub async fn get_cached_health(&self) -> Health {
+        match self.cache.get_last().await {
+            Some(snapshot) => Self::snapshot_to_health(snapshot),
+            None => Health {
+                status: ServiceStatus::Unhealthy,
+                checks: Vec::new(),
+                timestamp: Timestamp::now(),
+            },
+        }
     }
 
     /// Invalidates the health cache, forcing a fresh check on the next access.
-    ///
-    /// Use this method when you know service state has changed and want to ensure
-    /// the next health check reflects current reality. Common scenarios:
-    /// - After recovering from a known service outage
-    /// - Following a service restart or deployment
-    /// - When manual intervention has fixed a known issue
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nvisy_server::service::HealthCache;
-    ///
-    /// let rt = tokio::runtime::Runtime::new().unwrap();
-    /// rt.block_on(async {
-    ///     let health = HealthCache::new();
-    ///     health.invalidate().await;
-    /// });
-    /// ```
     pub async fn invalidate(&self) {
         self.cache.invalidate().await;
 
@@ -255,20 +152,50 @@ impl HealthCache {
         );
     }
 
+    /// Converts a [`HealthSnapshot`] into a [`Health`] response.
+    fn snapshot_to_health(snapshot: HealthSnapshot) -> Health {
+        let checks: Vec<ComponentCheck> = snapshot
+            .components
+            .iter()
+            .map(|(name, healthy)| ComponentCheck {
+                name: name.clone(),
+                status: if *healthy {
+                    ServiceStatus::Healthy
+                } else {
+                    ServiceStatus::Unhealthy
+                },
+            })
+            .collect();
+
+        let all_healthy = snapshot.components.iter().all(|(_, h)| *h);
+        let any_healthy = snapshot.components.iter().any(|(_, h)| *h);
+
+        let status = if all_healthy {
+            ServiceStatus::Healthy
+        } else if any_healthy {
+            ServiceStatus::Degraded
+        } else {
+            ServiceStatus::Unhealthy
+        };
+
+        Health {
+            status,
+            checks,
+            timestamp: snapshot.timestamp,
+        }
+    }
+
     /// Performs concurrent health checks across all system components.
-    ///
-    /// This internal method coordinates health checking for PostgreSQL, NATS,
-    /// OCR, and VLM services. All checks run concurrently using `tokio::join!` to
-    /// minimize total check duration.
-    ///
-    /// Detailed metrics are logged including per-service status and total duration.
     #[tracing::instrument(skip_all, target = TRACING_TARGET)]
-    async fn check_all_components(&self, pg_client: &PgClient, nats_client: &NatsClient) -> bool {
+    async fn check_all_components(
+        &self,
+        pg_client: &PgClient,
+        nats_client: &NatsClient,
+    ) -> HealthSnapshot {
         let start = Instant::now();
 
-        // Perform all health checks concurrently
         let (db_healthy, nats_healthy) =
-            tokio::join!(self.check_database(pg_client), self.check_nats(nats_client),);
+            tokio::join!(self.check_database(pg_client), self.check_nats(nats_client));
 
         let check_duration = start.elapsed();
         let overall_healthy = db_healthy && nats_healthy;
@@ -282,13 +209,17 @@ impl HealthCache {
             "Health check completed"
         );
 
-        overall_healthy
+        HealthSnapshot {
+            components: vec![
+                (Cow::Borrowed("postgres"), db_healthy),
+                (Cow::Borrowed("nats"), nats_healthy),
+            ],
+            checked_at: start,
+            timestamp: Timestamp::now(),
+        }
     }
 
     /// Checks PostgreSQL database health by attempting to acquire a connection.
-    ///
-    /// A successful connection acquisition indicates the database is reachable
-    /// and the connection pool has available capacity.
     async fn check_database(&self, pg_client: &PgClient) -> bool {
         match pg_client.get_connection().await {
             Ok(_) => {
@@ -310,10 +241,7 @@ impl HealthCache {
     ///
     /// 1. First checks connection state (fast, no network call)
     /// 2. Then performs a ping to verify actual connectivity (network round-trip)
-    ///
-    /// This ensures both the client state and actual network connectivity are verified.
     async fn check_nats(&self, nats_client: &NatsClient) -> bool {
-        // First check connection state
         if !nats_client.is_connected() {
             tracing::warn!(
                 target: TRACING_TARGET,
@@ -323,7 +251,6 @@ impl HealthCache {
             return false;
         }
 
-        // Then try a ping to verify actual connectivity
         match nats_client.ping().await {
             Ok(duration) => {
                 tracing::debug!(
@@ -355,88 +282,133 @@ impl Default for HealthCache {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_health_cache_entry_creation() {
+    #[tokio::test]
+    async fn test_health_cache_entry_creation() {
         let entry = HealthCacheEntry::new(Duration::from_secs(30));
-        assert!(!entry.get_cached()); // Should start as unhealthy
+        assert!(entry.get_cached().await.is_none());
     }
 
     #[tokio::test]
-    async fn test_health_cache_entry_update() {
-        let entry = HealthCacheEntry::new(Duration::from_secs(1));
+    async fn test_health_cache_entry_store_and_get() {
+        let entry = HealthCacheEntry::new(Duration::from_secs(60));
 
-        // Should perform check on first call
-        let result = entry.get_or_update(|| async { true }).await;
-        assert!(result);
-        assert!(entry.get_cached());
+        let snapshot = HealthSnapshot {
+            components: vec![
+                (Cow::Borrowed("postgres"), true),
+                (Cow::Borrowed("nats"), true),
+            ],
+            checked_at: Instant::now(),
+            timestamp: Timestamp::now(),
+        };
 
-        // Should return cached result on second immediate call
-        let result = entry.get_or_update(|| async { false }).await;
-        assert!(result); // Should still be true from cache
+        entry.store(snapshot).await;
+
+        let cached = entry.get_cached().await;
+        assert!(cached.is_some());
+
+        let cached = cached.unwrap();
+        assert_eq!(cached.components.len(), 2);
+        assert!(cached.components.iter().all(|(_, h)| *h));
     }
 
     #[tokio::test]
     async fn test_health_cache_entry_expiry() {
         let entry = HealthCacheEntry::new(Duration::from_millis(10));
 
-        // Set initial value
-        let result = entry.get_or_update(|| async { true }).await;
-        assert!(result);
+        let snapshot = HealthSnapshot {
+            components: vec![(Cow::Borrowed("postgres"), true)],
+            checked_at: Instant::now(),
+            timestamp: Timestamp::now(),
+        };
 
-        // Wait for cache to expire
+        entry.store(snapshot).await;
+        assert!(entry.get_cached().await.is_some());
+
         tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(entry.get_cached().await.is_none());
 
-        // Should perform new check
-        let result = entry.get_or_update(|| async { false }).await;
-        assert!(!result);
+        // get_last still returns expired snapshot
+        assert!(entry.get_last().await.is_some());
     }
 
     #[tokio::test]
     async fn test_health_cache_entry_invalidation() {
-        let entry = HealthCacheEntry::new(Duration::from_secs(60)); // Long cache
+        let entry = HealthCacheEntry::new(Duration::from_secs(60));
 
-        // Set initial value
-        entry.get_or_update(|| async { true }).await;
-        assert!(entry.get_cached());
+        let snapshot = HealthSnapshot {
+            components: vec![(Cow::Borrowed("postgres"), true)],
+            checked_at: Instant::now(),
+            timestamp: Timestamp::now(),
+        };
 
-        // Invalidate cache
+        entry.store(snapshot).await;
+        assert!(entry.get_cached().await.is_some());
+
         entry.invalidate().await;
+        assert!(entry.get_cached().await.is_none());
+        assert!(entry.get_last().await.is_none());
+    }
 
-        // Should perform new check even though cache duration hasn't passed
-        let result = entry.get_or_update(|| async { false }).await;
-        assert!(!result);
+    #[tokio::test]
+    async fn test_snapshot_to_health_all_healthy() {
+        let snapshot = HealthSnapshot {
+            components: vec![
+                (Cow::Borrowed("postgres"), true),
+                (Cow::Borrowed("nats"), true),
+            ],
+            checked_at: Instant::now(),
+            timestamp: Timestamp::now(),
+        };
+
+        let health = HealthCache::snapshot_to_health(snapshot);
+        assert_eq!(health.status, ServiceStatus::Healthy);
+        assert_eq!(health.checks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_to_health_degraded() {
+        let snapshot = HealthSnapshot {
+            components: vec![
+                (Cow::Borrowed("postgres"), true),
+                (Cow::Borrowed("nats"), false),
+            ],
+            checked_at: Instant::now(),
+            timestamp: Timestamp::now(),
+        };
+
+        let health = HealthCache::snapshot_to_health(snapshot);
+        assert_eq!(health.status, ServiceStatus::Degraded);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_to_health_all_unhealthy() {
+        let snapshot = HealthSnapshot {
+            components: vec![
+                (Cow::Borrowed("postgres"), false),
+                (Cow::Borrowed("nats"), false),
+            ],
+            checked_at: Instant::now(),
+            timestamp: Timestamp::now(),
+        };
+
+        let health = HealthCache::snapshot_to_health(snapshot);
+        assert_eq!(health.status, ServiceStatus::Unhealthy);
     }
 
     #[tokio::test]
     async fn test_health_service_invalidation() {
         let service = HealthCache::new();
-
-        // This should work without panicking
         service.invalidate().await;
-        assert!(!service.get_cached_health());
+
+        let health = service.get_cached_health().await;
+        assert_eq!(health.status, ServiceStatus::Unhealthy);
+        assert!(health.checks.is_empty());
     }
 
     #[test]
     fn test_health_service_creation_variants() {
-        // Test default creation
-        let service1 = HealthCache::new();
-        assert!(!service1.get_cached_health());
-
-        // Test with custom duration
-        let service2 = HealthCache::with_cache_duration(Duration::from_secs(5));
-        assert!(!service2.get_cached_health());
-
-        // Test default trait
-        let service3: HealthCache = Default::default();
-        assert!(!service3.get_cached_health());
-    }
-
-    #[test]
-    fn test_health_service_cached_health_initially_false() {
-        let service = HealthCache::new();
-
-        // Cached value should start as false
-        assert!(!service.get_cached_health());
-        assert!(!service.cache.get_cached());
+        let _service1 = HealthCache::new();
+        let _service2 = HealthCache::with_cache_duration(Duration::from_secs(5));
+        let _service3: HealthCache = Default::default();
     }
 }
