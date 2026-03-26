@@ -25,7 +25,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 # Reqwest-based HTTP client for webhook delivery
-reqwest = ["dep:reqwest", "dep:hmac", "dep:sha2", "dep:hex"]
+reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:reqwest-tracing", "dep:hmac", "dep:sha2", "dep:hex"]
 
 # CLI configuration support: enables clap derives for config types
 config = ["reqwest", "dep:clap"]
@@ -43,26 +43,25 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 strum = { workspace = true, features = [] }
 
-# String types
-hipstr = { workspace = true, features = [] }
-
 # Observability
 tracing = { workspace = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
-
-# OpenAPI documentation (optional)
 schemars = { workspace = true, optional = true }
 
 # Commonly used datatypes
+hipstr = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 url = { workspace = true, features = ["serde"] }
 
 # Reqwest feature dependencies (optional)
 reqwest = { workspace = true, features = ["json"], optional = true }
+reqwest-middleware = { workspace = true, optional = true }
+reqwest-retry = { workspace = true, optional = true }
+reqwest-tracing = { workspace = true, optional = true }
 
 # Security
 hmac = { workspace = true, optional = true, features = [] }

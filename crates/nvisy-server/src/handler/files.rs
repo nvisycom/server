@@ -171,15 +171,14 @@ async fn process_single_file(
     // Step 3: Publish job to queue (use Postgres-generated file ID)
     let job = FileJob::new(created_file.id, file_key.to_string(), file_extension, ());
 
-    ctx.publisher.publish(&job).await.map_err(|err| {
+    if let Err(err) = ctx.publisher.publish(&job).await {
         tracing::error!(
             target: TRACING_TARGET,
             error = %err,
             file_id = %created_file.id,
-            "Failed to publish file job"
+            "Failed to publish file job, file stored but not queued for processing"
         );
-        ErrorKind::InternalServerError.with_message("Failed to queue file for processing")
-    })?;
+    }
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -227,13 +226,21 @@ async fn upload_file(
     };
 
     let mut uploaded_files = Vec::new();
-
     while let Some(field) = multipart.next_field().await.map_err(|err| {
         tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
         ErrorKind::BadRequest
             .with_message("Invalid multipart data")
             .with_context(format!("Failed to parse multipart form: {}", err))
     })? {
+        if field.file_name().is_none() {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                name = ?field.name(),
+                "Skipping non-file multipart field"
+            );
+            continue;
+        }
+
         let created_file = process_single_file(&mut conn, &ctx, field).await?;
         uploaded_files.push(response::File::from_model(created_file));
     }

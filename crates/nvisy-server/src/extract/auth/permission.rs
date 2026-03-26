@@ -65,6 +65,12 @@ pub enum Permission {
     /// Can create, modify, and manage workspace connections.
     ManageConnections,
 
+    // Context permissions
+    /// Can view workspace contexts.
+    ViewContexts,
+    /// Can create, modify, and manage workspace contexts.
+    ManageContexts,
+
     // Webhook permissions
     /// Can view workspace webhooks.
     ViewWebhooks,
@@ -98,6 +104,7 @@ impl Permission {
             | Self::ViewPipelines
             | Self::ViewMembers
             | Self::ViewConnections
+            | Self::ViewContexts
             | Self::ViewWebhooks => WorkspaceRole::Guest,
 
             // Member-level permissions (create and modify own resources)
@@ -116,6 +123,7 @@ impl Permission {
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageConnections
+            | Self::ManageContexts
             | Self::CreateWebhooks
             | Self::UpdateWebhooks
             | Self::DeleteWebhooks

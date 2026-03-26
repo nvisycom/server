@@ -3,11 +3,11 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 
 Open-source multimodal redaction API. Detect and redact PII and sensitive data
-across documents, images, audio, and video.
+across documents, images, and audio.
 
 ## Features
 
-- **Multimodal Redaction:** Detect and remove sensitive data across PDFs, images, audio, and video
+- **Multimodal Redaction:** Detect and remove sensitive data across PDFs, images, and audio
 - **AI-Powered Detection:** LLM-driven PII and entity recognition with configurable redaction policies
 - **Workspace Isolation:** Multi-tenant workspaces with HKDF-derived credential encryption
 - **Real-Time Collaboration:** WebSocket and NATS pub/sub for live document editing

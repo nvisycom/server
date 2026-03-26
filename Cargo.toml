@@ -49,7 +49,12 @@ async-stream = { version = "0.3", features = [] }
 async-trait = { version = "0.1", features = [] }
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
+# HTTP middleware
+reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
+reqwest-retry = { version = "0.9", features = [] }
+reqwest-tracing = { version = "0.7", features = [] }
 
 # HTTP server
 axum = { version = "0.8", features = [] }

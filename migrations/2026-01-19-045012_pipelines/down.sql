@@ -18,6 +18,9 @@ DROP TYPE IF EXISTS PIPELINE_TRIGGER_TYPE;
 DROP TYPE IF EXISTS PIPELINE_RUN_STATUS;
 DROP TYPE IF EXISTS PIPELINE_STATUS;
 
+-- Workspace contexts
+DROP TABLE IF EXISTS workspace_contexts;
+
 -- Workspace connections
 DROP TABLE IF EXISTS workspace_connections;
 

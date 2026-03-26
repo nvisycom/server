@@ -36,7 +36,7 @@ impl ObjectStoreClient {
 
     /// Verify that the backing store is reachable.
     ///
-    /// Issues a HEAD for a probe key — a not-found response is treated as
+    /// Issues a HEAD for a probe key: a not-found response is treated as
     /// success (the bucket/container exists), any other error is propagated.
     #[tracing::instrument(name = "object.verify", skip(self))]
     pub async fn verify_reachable(&self) -> Result<(), Error> {

@@ -8,11 +8,9 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use jiff::Timestamp;
-use nvisy_webhook::ServiceStatus;
 
 use super::request::CheckHealth;
-use super::response::MonitorStatus;
+use super::response::{Health, ServiceStatus};
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
 use crate::service::{HealthCache, ServiceState};
@@ -24,17 +22,16 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 ///
 /// This endpoint provides health information about the API server and its
 /// dependencies. The response includes the current status, timestamp, and
-/// application version.
+/// per-component check results.
 ///
 /// # Behavior
 ///
 /// - **Unauthenticated requests**: Always return cached health status for performance
 /// - **Authenticated requests**: Perform real-time health check unless `use_cache` is true
-/// - **Administrator requests**: Can force real-time checks even when caching is preferred
 ///
 /// # Response Codes
 ///
-/// - `200 OK` - System is healthy
+/// - `200 OK` - System is healthy (or degraded)
 /// - `503 Service Unavailable` - System is unhealthy
 #[tracing::instrument(
     skip_all,
@@ -50,7 +47,7 @@ async fn health_status(
     auth_state: Option<AuthState>,
     version: Version,
     request: Option<Json<CheckHealth>>,
-) -> Result<(StatusCode, Json<MonitorStatus>)> {
+) -> Result<(StatusCode, Json<Health>)> {
     let Json(request) = request.unwrap_or_default();
 
     let is_authenticated = auth_state.is_some();
@@ -64,67 +61,53 @@ async fn health_status(
         is_admin,
         version = %version,
         use_cache = request.use_cache,
-        timeout_ms = request.timeout.unwrap_or(5000),
         "Health status check requested"
     );
 
     // Determine whether to use cached or real-time health check
     // - Unauthenticated: always use cache (fast response for load balancers)
-    // - Authenticated non-admin: use cache if explicitly requested, otherwise real-time
-    // - Administrator: real-time check unless explicitly cached
+    // - Authenticated: real-time check unless explicitly cached
     let use_cached = if !is_authenticated {
         true
     } else {
         request.use_cache.unwrap_or(false)
     };
 
-    let is_healthy = if use_cached {
+    let health = if use_cached {
         tracing::trace!(
             target: TRACING_TARGET,
             "Using cached health status"
         );
-        health_service.get_cached_health()
+        health_service.get_cached_health().await
     } else {
         tracing::trace!(
             target: TRACING_TARGET,
             "Performing real-time health check"
         );
-        health_service.is_healthy(&service_state).await
+        health_service.check(&service_state).await
     };
 
-    let status = if is_healthy {
-        ServiceStatus::Healthy
-    } else {
-        ServiceStatus::Unhealthy
-    };
-
-    let status_code = if is_healthy {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
-
-    let response = MonitorStatus {
-        checked_at: Timestamp::now(),
-        status,
-        version: env!("CARGO_PKG_VERSION").to_string(),
+    let status_code = match health.status {
+        ServiceStatus::Healthy | ServiceStatus::Degraded => StatusCode::OK,
+        ServiceStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
     };
 
     tracing::info!(
         target: TRACING_TARGET,
-        is_healthy,
+        status = ?health.status,
         used_cache = use_cached,
+        components = health.checks.len(),
         "Health status response"
     );
 
-    Ok((status_code, Json(response)))
+    Ok((status_code, Json(health)))
 }
 
 fn health_status_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Health status")
         .description("Returns system health status. Unauthenticated requests use cache; authenticated requests perform real-time checks.")
-        .response::<200, Json<MonitorStatus>>()
-        .response::<503, Json<MonitorStatus>>()
+        .response::<200, Json<Health>>()
+        .response::<503, Json<Health>>()
 }
 
 /// Returns a [`Router`] with all health monitoring routes.

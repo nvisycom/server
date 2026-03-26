@@ -8,9 +8,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Error type for reqwest operations.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// HTTP request failed.
+    /// HTTP request or middleware error.
     #[error("HTTP error: {0}")]
-    Reqwest(#[from] reqwest::Error),
+    Middleware(#[from] reqwest_middleware::Error),
     /// Serialization error.
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
@@ -19,7 +19,7 @@ pub enum Error {
 impl From<Error> for crate::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::Reqwest(e) => {
+            Error::Middleware(e) => {
                 if e.is_timeout() {
                     crate::Error::new(crate::ErrorKind::Timeout)
                         .with_message(e.to_string())

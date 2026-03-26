@@ -4,13 +4,13 @@
 
 An ETL platform is only as useful as the systems it can connect to. Relational
 databases, object stores, vector databases, document stores, message queues,
-search engines, graph databases — each has its own wire protocol, authentication
+search engines, graph databases: each has its own wire protocol, authentication
 model, pagination scheme, and SDK.
 
 Nvisy addresses this with a provider abstraction that decouples the core
 platform from specific external systems. The Rust server manages connections,
-credentials, and pipeline orchestration. Provider integrations — the actual
-reading from and writing to external systems — run in a separate TypeScript
+credentials, and pipeline orchestration. Provider integrations (the actual
+reading from and writing to external systems) run in a separate TypeScript
 runtime, communicating with the server over NATS.
 
 ## Provider Abstraction
@@ -23,7 +23,7 @@ credentials and parameters. Credentials are encrypted at rest and decrypted only
 at execution time within the scope of a single run.
 
 **Reading** streams data from the source with resumable pagination. Each item
-carries its own context — a cursor, token, or offset — so that processing can
+carries its own context (a cursor, token, or offset) so that processing can
 resume from any point, whether recovering from a failure or continuing
 incrementally after new data has been added to the source.
 
@@ -54,7 +54,7 @@ Adding a provider does not require modifying the Rust server. The process is:
 3. Register the provider identifier so the runtime can dispatch to it
 
 This design keeps the provider surface area decoupled from the core. The server
-does not know or care which specific systems are available — it manages
+does not know or care which specific systems are available: it manages
 connections, credentials, and orchestration while the runtime handles execution.
 
 ## Design Principles

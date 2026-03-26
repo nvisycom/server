@@ -2,7 +2,9 @@ name: Security
 
 on:
   push:
-    branches: [main, release]
+    branches:
+      - "main"
+      - "release"
     paths:
       - "crates/**"
       - "Cargo.toml"
@@ -10,7 +12,9 @@ on:
       - "deny.toml"
       - ".github/workflows/security.yml"
   pull_request:
-    branches: [main, release]
+    branches:
+      - "main"
+      - "release"
     paths:
       - "crates/**"
       - "Cargo.toml"
@@ -28,10 +32,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   deny:
     name: Deny
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
