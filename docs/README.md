@@ -1,65 +1,78 @@
-# Nvisy
+# Nvisy Server
 
 ## Overview
 
-Nvisy is an open-source ETL platform for building intelligent data pipelines. It
-connects to external data sources and sinks through a pluggable provider system,
-transforms data through AI-powered and rule-based processors, and orchestrates
-execution as compiled workflow graphs.
+Nvisy Server is the API gateway for the Nvisy multimodal redaction platform. It
+handles authentication, authorization, workspace management, credential
+encryption, document storage, and API serving. The actual detection and
+redaction of sensitive data is performed by the
+[Nvisy Runtime](https://github.com/nvisycom/runtime), which communicates with
+the server over NATS.
 
-The platform is designed around three ideas: data should flow between any two
-systems without custom glue code, transformations should be composable and
-reusable, and the intelligence applied during processing (extraction,
-enrichment, analysis, reasoning) should be a first-class part of the pipeline,
-not a bolted-on afterthought.
+Together, the server and runtime form a platform that detects and removes
+personally identifiable information (PII), protected health information (PHI),
+and other sensitive data across documents, images, and audio using AI-powered
+detection with configurable, policy-driven redaction.
 
-## Problem
+The guiding principle is: **extract everything, understand context, redact
+precisely, prove compliance.**
 
-Organizations accumulate data across dozens of systems: relational databases,
-object stores, vector databases, document repositories, message queues. Moving
-data between these systems typically requires either rigid, vendor-locked ETL
-tools that cannot accommodate AI workloads, or bespoke engineering that is
-expensive to build and maintain.
+## What the Server Does
 
-Nvisy addresses this by providing a declarative workflow language that compiles
-to an optimized execution graph. Users define what data to read, how to
-transform it, and where to write the results. The platform handles connection
-management, credential security, incremental streaming, and execution
-orchestration.
+The server is responsible for everything outside the detection and redaction
+pipeline itself:
 
-## Design Principles
+- **Authentication and authorization:** JWT-based auth with Ed25519 signing,
+  SSO (SAML/OIDC), SCIM provisioning, role-based access control per workspace,
+  scoped API token management
+- **Account management:** User profiles, account deletion (GDPR),
+  notifications, and immutable activity feeds
+- **Workspace management:** Multi-tenant workspace hierarchy with
+  cryptographic isolation, member and invite management, role-based permissions
+- **Credential management:** Encrypted storage of provider credentials using
+  workspace-derived keys (HKDF-SHA256 + XChaCha20-Poly1305)
+- **Document storage:** File upload, versioning, annotations, and metadata
+  tracking via NATS object storage and PostgreSQL
+- **Pipeline orchestration:** Processing workflow definitions, scheduling,
+  run history, and artifact tracking
+- **Webhooks:** Event subscription management with HMAC-SHA256 signed
+  delivery and retry support
+- **Data retention:** Configurable retention policies with scheduled cleanup,
+  zero-retention mode for sensitive environments
+- **API gateway:** Versioned REST API with OpenAPI docs, request validation,
+  rate limiting, idempotency keys, and cursor-based pagination
+- **Real-time collaboration:** WebSocket and NATS pub/sub for Studio sessions
+- **Observability:** Per-component health checks, structured logging, and
+  distributed tracing
 
-**Workflow-first.** The pipeline is the unit of work. Each workflow is a
-directed acyclic graph of typed nodes (sources, transforms, and sinks)
-connected by edges. This structure is serializable, versionable, and
-schedulable.
+The runtime handles detection, redaction, format processing, and policy
+evaluation. The server orchestrates these operations, manages the data they
+operate on, and enforces the security boundary around them.
 
-**Provider-agnostic.** A uniform interface abstracts over relational databases,
-object stores, vector databases, and other external systems. Adding a new
-provider requires implementing a small set of protocols without modifying the
-core engine.
+## Target Verticals
 
-**Intelligence-native.** LLM-powered transforms (extraction, enrichment,
-summarization, entity resolution, contradiction detection) sit alongside
-rule-based transforms as equal citizens in the graph. AI is not a separate
-layer; it is woven into the data flow.
+The platform serves regulated industries where sensitive data handling is a
+legal and operational requirement:
 
-**Resumable streaming.** Every data item carries its own pagination context.
-Runs can resume from the last processed item: whether recovering from a failure
-or continuing incrementally after new data has been added to the source.
-
-**Workspace isolation.** Tenants are cryptographically isolated. Provider
-credentials are encrypted with workspace-derived keys, and all data access is
-scoped to the workspace boundary.
+- **Healthcare:** HIPAA-governed medical records, clinical communications,
+  insurance claims, and patient intake forms
+- **Legal:** Court filings, discovery documents, attorney-client
+  communications, and case management systems
+- **Government and defense:** Law enforcement records, intelligence reports,
+  FOIA responses, and classified material processing
+- **Financial services:** Transaction records, customer onboarding documents,
+  fraud investigation files, and PCI-scoped payment data
+- **Education:** Student records, admissions documents, and FERPA-governed
+  institutional data
 
 ## Documentation
 
-| Document                          | Description                                                  |
-| --------------------------------- | ------------------------------------------------------------ |
-| [Architecture](./ARCHITECTURE.md) | System design, pipeline model, and technology stack          |
-| [Intelligence](./INTELLIGENCE.md) | AI-powered transform and analysis capabilities               |
-| [Providers](./PROVIDERS.md)       | Data provider architecture and connection model              |
-| [Security](./SECURITY.md)         | Authentication, encryption, authorization, and audit logging |
+| Document                          | Description                                                           |
+| --------------------------------- | --------------------------------------------------------------------- |
+| [Architecture](./ARCHITECTURE.md) | System design, deployment models, and technology stack                |
+| [Intelligence](./INTELLIGENCE.md) | Policy management, job dispatch, and runtime interaction              |
+| [Providers](./PROVIDERS.md)       | Connection management, credential encryption, and document upload     |
+| [Security](./SECURITY.md)         | Authentication, encryption, authorization, and audit logging          |
 
 ## Deployment
 

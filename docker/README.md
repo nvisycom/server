@@ -7,8 +7,8 @@ Docker configuration for the Nvisy server.
 Nvisy requires two external services:
 
 **PostgreSQL 18+** with the pgvector extension. PostgreSQL serves as the primary
-data store for all application state (accounts, workspaces, pipelines,
-connections, file metadata) and provides vector similarity search through
+data store for all application state: accounts, workspaces, documents,
+connections, and file metadata and provides vector similarity search through
 pgvector. The recommended image is `pgvector/pgvector:pg18`.
 
 **NATS 2.10+** with JetStream enabled. NATS handles three concerns: pub/sub
