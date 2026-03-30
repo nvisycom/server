@@ -127,7 +127,7 @@ anyhow = { version = "1.0", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
 
 # Primitive datatypes
-uuid = { version = "1.22", features = ["serde", "v4", "v7"] }
+uuid = { version = "1.23", features = ["serde", "v4", "v7"] }
 bytes = { version = "1.10", features = ["serde"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
