@@ -1,7 +1,7 @@
 //! Event types for stream processing.
 //!
 //! This module contains common event types and the file job type
-//! used in processing pipelines.
+//! used in redaction pipelines.
 
 use jiff::Timestamp;
 #[cfg(feature = "schema")]
@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 /// File processing job.
 ///
-/// Represents a unit of work in a file processing pipeline.
+/// Represents a unit of work in a file redaction pipeline.
 /// Each job targets a specific file and carries a generic payload
 /// that defines the processing parameters.
 ///
