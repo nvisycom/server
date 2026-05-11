@@ -37,10 +37,10 @@ nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
 # CLI
-clap = { version = "4.5", features = [] }
+clap = { version = "4.6", features = [] }
 
 # Async runtime
-tokio = { version = "1.50", features = [] }
+tokio = { version = "1.52", features = [] }
 tokio-util = { version = "0.7", features = ["io"] }
 tokio-stream = { version = "0.1", features = [] }
 futures = { version = "0.3", features = [] }
@@ -87,7 +87,7 @@ hex = { version = "0.4", features = [] }
 hipstr = { version = "0.8", features = [] }
 
 # Randomness
-rand = { version = "0.10.0-rc.6", features = ["serde"] }
+rand = { version = "0.10.1", features = ["serde"] }
 
 # Relational database (Postgres)
 diesel = { version = "2.3", features = [] }
@@ -127,7 +127,7 @@ anyhow = { version = "1.0", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
 
 # Primitive datatypes
-uuid = { version = "1.22", features = ["serde", "v4", "v7"] }
+uuid = { version = "1.23", features = ["serde", "v4", "v7"] }
 bytes = { version = "1.10", features = ["serde"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
