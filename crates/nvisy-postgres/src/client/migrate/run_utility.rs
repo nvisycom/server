@@ -77,7 +77,7 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<(
 
 /// Gets list of applied migration versions from the database.
 #[tracing::instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
-pub async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<String>> {
+async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<String>> {
     use diesel::sql_query;
 
     tracing::debug!(
