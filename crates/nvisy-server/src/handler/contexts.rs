@@ -4,6 +4,8 @@
 //! The metadata (name, size, hash) is stored in PostgreSQL while the actual
 //! content is encrypted with workspace-derived keys and stored as objects.
 
+use std::io::Cursor;
+
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
@@ -11,7 +13,7 @@ use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{ContextFilesBucket, ContextKey};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewWorkspaceContext, UpdateWorkspaceContext};
+use nvisy_postgres::model::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
 use nvisy_postgres::query::WorkspaceContextRepository;
 use uuid::Uuid;
 
@@ -135,7 +137,7 @@ async fn create_context(
         .object_store::<ContextFilesBucket, ContextKey>()
         .await?;
 
-    let reader = std::io::Cursor::new(encrypted_content);
+    let reader = Cursor::new(encrypted_content);
     let put_result = context_store.put(&context_key, reader).await?;
 
     tracing::debug!(
@@ -369,7 +371,7 @@ async fn update_context(
             .object_store::<ContextFilesBucket, ContextKey>()
             .await?;
 
-        let reader = std::io::Cursor::new(encrypted_content);
+        let reader = Cursor::new(encrypted_content);
         let put_result = context_store.put(&context_key, reader).await?;
 
         updates.storage_key = Some(context_key.to_string());
@@ -459,7 +461,7 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
 async fn find_context(
     conn: &mut nvisy_postgres::PgConn,
     context_id: Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceContext> {
+) -> Result<WorkspaceContext> {
     conn.find_workspace_context_by_id(context_id)
         .await?
         .ok_or_else(|| {

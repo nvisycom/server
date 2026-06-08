@@ -8,6 +8,9 @@ use std::convert::Infallible;
 use std::fmt;
 use std::num::NonZeroU16;
 
+use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::{Operation, Response};
 use axum::RequestPartsExt;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -236,18 +239,15 @@ where
     }
 }
 
-impl aide::OperationInput for Version {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+impl OperationInput for Version {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         Path::<VersionParams>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<u16>, Response)> {
         Path::<VersionParams>::inferred_early_responses(ctx, operation)
     }
 }

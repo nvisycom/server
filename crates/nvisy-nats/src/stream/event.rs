@@ -3,6 +3,8 @@
 //! This module contains common event types and the file job type
 //! used in redaction pipelines.
 
+use std::time::Duration;
+
 use jiff::Timestamp;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -70,10 +72,10 @@ impl<T> FileJob<T> {
     }
 
     /// Returns job age since creation.
-    pub fn age(&self) -> std::time::Duration {
+    pub fn age(&self) -> Duration {
         let now = Timestamp::now();
         let signed_dur = now.duration_since(self.created_at);
-        std::time::Duration::from_secs(signed_dur.as_secs().max(0) as u64)
+        Duration::from_secs(signed_dur.as_secs().max(0) as u64)
     }
 }
 

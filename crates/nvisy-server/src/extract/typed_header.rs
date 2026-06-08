@@ -3,7 +3,10 @@
 //! This module provides [`TypedHeader`], a wrapper around [`axum_extra::TypedHeader`]
 //! that implements [`aide::OperationInput`] for OpenAPI documentation generation.
 
+use aide::OperationInput;
 use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use axum_extra::headers::Header;
 use derive_more::{Deref, DerefMut, From};
 
 /// Typed header extractor with OpenAPI support.
@@ -22,18 +25,15 @@ pub struct TypedHeader<T>(pub T);
 impl<S, T> FromRequestParts<S> for TypedHeader<T>
 where
     S: Send + Sync,
-    T: axum_extra::headers::Header,
+    T: Header,
 {
     type Rejection = <axum_extra::TypedHeader<T> as FromRequestParts<S>>::Rejection;
 
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let axum_extra::TypedHeader(header) =
             axum_extra::TypedHeader::<T>::from_request_parts(parts, state).await?;
         Ok(Self(header))
     }
 }
 
-impl<T> aide::OperationInput for TypedHeader<T> {}
+impl<T> OperationInput for TypedHeader<T> {}

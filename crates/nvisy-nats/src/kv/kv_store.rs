@@ -1,7 +1,8 @@
 //! Type-safe NATS KV store wrapper.
 
+use std::future::Future;
 use std::marker::PhantomData;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_nats::jetstream::{self, kv};
 use futures::StreamExt;
@@ -282,7 +283,7 @@ where
     pub async fn get_or_compute<F, Fut>(&self, key: &K, compute_fn: F) -> Result<V>
     where
         F: FnOnce() -> Fut + Send,
-        Fut: std::future::Future<Output = Result<V>> + Send,
+        Fut: Future<Output = Result<V>> + Send,
         V: Clone,
     {
         if let Some(existing) = self.get_value(key).await? {
@@ -315,7 +316,7 @@ pub struct KvValue<V> {
     pub value: V,
     pub revision: u64,
     pub size: u64,
-    pub created: std::time::SystemTime,
+    pub created: SystemTime,
 }
 
 #[cfg(test)]

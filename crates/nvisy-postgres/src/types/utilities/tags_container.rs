@@ -1,5 +1,8 @@
 //! Tags helper module for consistent tag handling across models with serialization support.
 
+use std::iter::FilterMap;
+use std::slice::Iter;
+
 use serde::{Deserialize, Serialize};
 
 /// A wrapper around a vector of optional strings that provides convenient methods
@@ -224,10 +227,7 @@ impl From<Tags> for Vec<String> {
 }
 
 impl<'a> IntoIterator for &'a Tags {
-    type IntoIter = std::iter::FilterMap<
-        std::slice::Iter<'a, Option<String>>,
-        fn(&'a Option<String>) -> Option<&'a str>,
-    >;
+    type IntoIter = FilterMap<Iter<'a, Option<String>>, fn(&'a Option<String>) -> Option<&'a str>>;
     type Item = &'a str;
 
     fn into_iter(self) -> Self::IntoIter {

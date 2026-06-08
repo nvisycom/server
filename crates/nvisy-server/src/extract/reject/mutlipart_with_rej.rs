@@ -3,6 +3,9 @@
 //! This module provides [`Multipart`], an enhanced version of [`axum::extract::Multipart`]
 //! with better error messages and proper error responses.
 
+use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::Operation;
 use axum::extract::multipart::MultipartRejection;
 use axum::extract::{FromRequest, Multipart as AxumMultipart, Request};
 use derive_more::{Deref, DerefMut, From};
@@ -55,11 +58,8 @@ impl From<MultipartRejection> for Error<'static> {
     }
 }
 
-impl aide::OperationInput for Multipart {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+impl OperationInput for Multipart {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         AxumMultipart::operation_input(ctx, operation);
     }
 }

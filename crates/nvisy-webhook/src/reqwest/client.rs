@@ -1,5 +1,6 @@
 //! Reqwest-based HTTP client for webhook delivery.
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,8 +43,8 @@ pub struct ReqwestClient {
     http: Arc<ClientWithMiddleware>,
 }
 
-impl std::fmt::Debug for ReqwestClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ReqwestClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReqwestClient").finish_non_exhaustive()
     }
 }

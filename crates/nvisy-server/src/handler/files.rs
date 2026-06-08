@@ -10,6 +10,7 @@ use std::str::FromStr;
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::body::Body;
+use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use futures::StreamExt;
@@ -19,6 +20,7 @@ use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
+use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
@@ -115,7 +117,7 @@ struct FileUploadContext {
 async fn process_single_file(
     conn: &mut nvisy_postgres::PgConn,
     ctx: &FileUploadContext,
-    field: axum::extract::multipart::Field<'_>,
+    field: Field<'_>,
 ) -> Result<FileModel> {
     let filename = field
         .file_name()
@@ -138,9 +140,7 @@ async fn process_single_file(
     );
 
     // Step 1: Stream upload to NATS (computes SHA-256 on-the-fly)
-    let reader = tokio_util::io::StreamReader::new(
-        field.map(|result| result.map_err(std::io::Error::other)),
-    );
+    let reader = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
 
     let put_result = ctx.file_store.put(&file_key, reader).await?;
 
@@ -499,7 +499,7 @@ async fn download_file(
     );
 
     // Stream the file content using ReaderStream
-    let stream = tokio_util::io::ReaderStream::new(get_result.into_reader());
+    let stream = ReaderStream::new(get_result.into_reader());
     let body = Body::from_stream(stream);
 
     Ok((StatusCode::OK, headers, body))

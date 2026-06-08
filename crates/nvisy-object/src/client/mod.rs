@@ -11,7 +11,9 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use futures::stream::BoxStream;
 use object_store::path::Path;
-use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload};
+use object_store::{
+    Attribute, ObjectMeta, ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload,
+};
 
 use crate::types::Error;
 
@@ -87,7 +89,7 @@ impl ObjectStoreClient {
         let meta = result.meta.clone();
         let content_type = result
             .attributes
-            .get(&object_store::Attribute::ContentType)
+            .get(&Attribute::ContentType)
             .map(|v| v.to_string());
         let data = result.bytes().await.map_err(from_object_store)?;
         Ok(GetOutput {
@@ -125,7 +127,7 @@ impl ObjectStoreClient {
         };
         if let Some(ct) = content_type {
             opts.attributes
-                .insert(object_store::Attribute::ContentType, ct.to_string().into());
+                .insert(Attribute::ContentType, ct.to_string().into());
         }
         let result = self
             .0

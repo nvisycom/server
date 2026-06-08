@@ -3,7 +3,11 @@
 //! This module provides user agent string parsing to extract human-readable
 //! browser/application names for use as session token names.
 
+use std::fmt;
 use std::sync::Arc;
+
+use woothee::parser::Parser;
+use woothee::woothee::VALUE_UNKNOWN;
 
 /// Maximum length for parsed token names.
 const TOKEN_NAME_MAX_LENGTH: usize = 64;
@@ -14,11 +18,11 @@ const TOKEN_NAME_MAX_LENGTH: usize = 64;
 /// names and versions for use as session token identifiers.
 #[derive(Clone)]
 pub struct UserAgentParser {
-    parser: Arc<woothee::parser::Parser>,
+    parser: Arc<Parser>,
 }
 
-impl std::fmt::Debug for UserAgentParser {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for UserAgentParser {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UserAgentParser").finish_non_exhaustive()
     }
 }
@@ -27,7 +31,7 @@ impl UserAgentParser {
     /// Creates a new instance of the [`UserAgentParser`] service.
     pub fn new() -> Self {
         Self {
-            parser: Arc::new(woothee::parser::Parser::new()),
+            parser: Arc::new(Parser::new()),
         }
     }
 
@@ -58,7 +62,7 @@ impl UserAgentParser {
                 // Browser name and version
                 let browser = result.name;
                 let version = result.version;
-                if version.is_empty() || version == woothee::woothee::VALUE_UNKNOWN {
+                if version.is_empty() || version == VALUE_UNKNOWN {
                     parts.push(browser.to_string());
                 } else {
                     // Use only major version for brevity
@@ -68,13 +72,13 @@ impl UserAgentParser {
 
                 // OS
                 let os = result.os;
-                if !os.is_empty() && os != woothee::woothee::VALUE_UNKNOWN {
+                if !os.is_empty() && os != VALUE_UNKNOWN {
                     parts.push(format!("on {}", os));
                 }
 
                 // Device category
                 let category = result.category;
-                if !category.is_empty() && category != woothee::woothee::VALUE_UNKNOWN {
+                if !category.is_empty() && category != VALUE_UNKNOWN {
                     let device = match category {
                         "pc" => "Desktop",
                         "smartphone" => "Mobile",

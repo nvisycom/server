@@ -3,10 +3,14 @@
 //! This module provides [`Path`], an enhanced version of [`axum::extract::Path`]
 //! with better error messages and OpenAPI documentation support.
 
+use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::{Operation, Response};
 use axum::extract::rejection::PathRejection;
 use axum::extract::{FromRequestParts, OptionalFromRequestParts, Path as AxumPath};
 use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut, From};
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 use crate::handler::{Error, ErrorKind};
@@ -163,21 +167,18 @@ fn sanitize_error_message(message: &str) -> String {
         .collect()
 }
 
-impl<T> aide::OperationInput for Path<T>
+impl<T> OperationInput for Path<T>
 where
-    T: schemars::JsonSchema,
+    T: JsonSchema,
 {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         AxumPath::<T>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<u16>, Response)> {
         AxumPath::<T>::inferred_early_responses(ctx, operation)
     }
 }

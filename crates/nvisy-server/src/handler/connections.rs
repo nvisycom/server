@@ -16,7 +16,9 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewWorkspaceConnection, UpdateWorkspaceConnection};
+use nvisy_postgres::model::{
+    NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
+};
 use nvisy_postgres::query::WorkspaceConnectionRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
@@ -338,7 +340,7 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 async fn find_connection(
     conn: &mut nvisy_postgres::PgConn,
     connection_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceConnection> {
+) -> Result<WorkspaceConnection> {
     conn.find_workspace_connection_by_id(connection_id)
         .await?
         .ok_or_else(|| {

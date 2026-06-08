@@ -1,5 +1,6 @@
 //! Streaming reader that computes SHA-256 hash on-the-fly.
 
+use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -45,7 +46,7 @@ impl<R: AsyncRead> AsyncRead for HashingReader<R> {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         let this = self.project();
         let before = buf.filled().len();
 

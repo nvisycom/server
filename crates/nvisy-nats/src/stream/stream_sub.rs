@@ -301,7 +301,7 @@ where
     /// Fetch the next message from the stream with timeout.
     pub async fn next_with_timeout(
         &mut self,
-        timeout: std::time::Duration,
+        timeout: Duration,
     ) -> Result<Option<TypedMessage<T>>> {
         let result = tokio::time::timeout(timeout, self.next()).await;
         match result {
@@ -359,7 +359,7 @@ where
     /// Fetch the next batch of messages with timeout.
     pub async fn next_batch_with_timeout(
         &mut self,
-        timeout: std::time::Duration,
+        timeout: Duration,
     ) -> Result<Vec<TypedMessage<T>>> {
         let result = tokio::time::timeout(timeout, self.next_batch()).await;
         match result {

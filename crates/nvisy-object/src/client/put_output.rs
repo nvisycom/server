@@ -3,6 +3,8 @@
 //! [`ObjectStoreClient::put`]: super::ObjectStoreClient::put
 //! [`ObjectStoreClient::put_opts`]: super::ObjectStoreClient::put_opts
 
+use object_store::PutResult;
+
 /// Result of a successful put operation.
 #[derive(Debug)]
 pub struct PutOutput {
@@ -12,8 +14,8 @@ pub struct PutOutput {
     pub version: Option<String>,
 }
 
-impl From<object_store::PutResult> for PutOutput {
-    fn from(r: object_store::PutResult) -> Self {
+impl From<PutResult> for PutOutput {
+    fn from(r: PutResult) -> Self {
         Self {
             e_tag: r.e_tag,
             version: r.version,

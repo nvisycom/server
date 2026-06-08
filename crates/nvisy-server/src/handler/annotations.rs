@@ -7,6 +7,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
+use nvisy_postgres::model::{WorkspaceFile, WorkspaceFileAnnotation};
 use nvisy_postgres::query::{WorkspaceFileAnnotationRepository, WorkspaceFileRepository};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
@@ -24,7 +25,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::annotations";
 async fn find_annotation(
     conn: &mut nvisy_postgres::PgConn,
     annotation_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceFileAnnotation> {
+) -> Result<WorkspaceFileAnnotation> {
     conn.find_workspace_file_annotation_by_id(annotation_id)
         .await?
         .ok_or_else(|| {
@@ -38,7 +39,7 @@ async fn find_annotation(
 async fn find_file(
     conn: &mut nvisy_postgres::PgConn,
     file_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceFile> {
+) -> Result<WorkspaceFile> {
     conn.find_workspace_file_by_id(file_id)
         .await?
         .ok_or_else(|| {

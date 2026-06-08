@@ -6,6 +6,8 @@
 
 use chacha20poly1305::XChaCha20Poly1305;
 use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use super::error::{CryptoError, CryptoResult};
 use super::key::EncryptionKey;
@@ -58,13 +60,13 @@ pub fn decrypt(key: &EncryptionKey, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> 
 }
 
 /// Encrypts a serializable value as JSON.
-pub fn encrypt_json<T: serde::Serialize>(key: &EncryptionKey, value: &T) -> CryptoResult<Vec<u8>> {
+pub fn encrypt_json<T: Serialize>(key: &EncryptionKey, value: &T) -> CryptoResult<Vec<u8>> {
     let json = serde_json::to_vec(value).map_err(|e| CryptoError::Json(e.to_string()))?;
     encrypt(key, &json)
 }
 
 /// Decrypts and deserializes a JSON value.
-pub fn decrypt_json<T: serde::de::DeserializeOwned>(
+pub fn decrypt_json<T: DeserializeOwned>(
     key: &EncryptionKey,
     ciphertext: &[u8],
 ) -> CryptoResult<T> {

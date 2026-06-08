@@ -9,7 +9,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::NewWorkspaceMember;
+use nvisy_postgres::model::{NewWorkspaceMember, WorkspaceInvite};
 use nvisy_postgres::query::{
     WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
@@ -513,7 +513,7 @@ fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
 async fn find_invite(
     conn: &mut nvisy_postgres::PgConn,
     invite_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceInvite> {
+) -> Result<WorkspaceInvite> {
     conn.find_workspace_invite_by_id(invite_id)
         .await?
         .ok_or_else(|| {

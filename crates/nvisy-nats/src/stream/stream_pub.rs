@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_nats::jetstream::{Context, stream};
 use serde::Serialize;
@@ -38,7 +39,7 @@ where
             name: stream_name.to_string(),
             description: Some(format!("Type-safe stream: {}", stream_name)),
             subjects: vec![format!("{}.>", stream_name)],
-            max_age: std::time::Duration::from_secs(3600), // Keep messages for 1 hour
+            max_age: Duration::from_secs(3600), // Keep messages for 1 hour
             ..Default::default()
         };
 
@@ -211,7 +212,7 @@ where
 
     /// Get stream information
     #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
-    pub async fn stream_info(&self) -> Result<async_nats::jetstream::stream::Info> {
+    pub async fn stream_info(&self) -> Result<stream::Info> {
         let mut stream = self
             .inner
             .jetstream

@@ -10,6 +10,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
+use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_webhook::{WebhookRequest, WebhookService};
 use url::Url;
@@ -337,7 +338,7 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
 async fn find_webhook(
     conn: &mut nvisy_postgres::PgConn,
     webhook_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceWebhook> {
+) -> Result<WorkspaceWebhook> {
     conn.find_workspace_webhook_by_id(webhook_id)
         .await?
         .ok_or_else(|| {
