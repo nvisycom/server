@@ -51,7 +51,9 @@ impl ObjectStoreClient {
     /// List object keys under `prefix`.
     ///
     /// Returns all matching keys in a single `Vec`. For lazy iteration,
-    /// use [`list_stream`](Self::list_stream) instead.
+    /// use [`list_stream`] instead.
+    ///
+    /// [`list_stream`]: Self::list_stream
     #[tracing::instrument(name = "object.list", skip(self), fields(prefix))]
     pub async fn list(&self, prefix: &str) -> Result<Vec<ObjectMeta>, Error> {
         let prefix = if prefix.is_empty() {

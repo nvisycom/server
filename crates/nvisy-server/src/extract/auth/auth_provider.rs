@@ -23,8 +23,8 @@ const TRACING_TARGET: &str = "nvisy_server::authorization";
 ///
 /// # Implementation Requirements
 ///
-/// - [`account_id`](Self::account_id): Must return the authenticated user's UUID
-/// - [`is_admin`](Self::is_admin): Must return current admin status
+/// - [`account_id`]: Must return the authenticated user's UUID
+/// - [`is_admin`]: Must return current admin status
 ///
 /// # Authorization Levels
 ///
@@ -32,6 +32,9 @@ const TRACING_TARGET: &str = "nvisy_server::authorization";
 /// - **Workspace-Level**: Based on membership and role within specific workspaces
 /// - **Document-Level**: Extends workspace permissions with ownership rules
 /// - **Self-Access**: Operations on the user's own account data
+///
+/// [`account_id`]: Self::account_id
+/// [`is_admin`]: Self::is_admin
 pub trait AuthProvider {
     /// Returns the account ID of the authenticated user.
     fn account_id(&self) -> Uuid;

@@ -1,9 +1,13 @@
-//! Result type for [`ObjectStoreClient::get`](super::ObjectStoreClient::get).
+//! Result type for [`ObjectStoreClient::get`].
+//!
+//! [`ObjectStoreClient::get`]: super::ObjectStoreClient::get
 
 use bytes::Bytes;
 use object_store::ObjectMeta;
 
-/// Result of a successful [`ObjectStoreClient::get`](super::ObjectStoreClient::get) call.
+/// Result of a successful [`ObjectStoreClient::get`] call.
+///
+/// [`ObjectStoreClient::get`]: super::ObjectStoreClient::get
 #[derive(Debug)]
 pub struct GetOutput {
     /// Raw bytes of the retrieved object.

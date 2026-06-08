@@ -1,5 +1,7 @@
-//! Result type for [`ObjectStoreClient::put`](super::ObjectStoreClient::put) and
-//! [`ObjectStoreClient::put_opts`](super::ObjectStoreClient::put_opts).
+//! Result type for [`ObjectStoreClient::put`] and [`ObjectStoreClient::put_opts`].
+//!
+//! [`ObjectStoreClient::put`]: super::ObjectStoreClient::put
+//! [`ObjectStoreClient::put_opts`]: super::ObjectStoreClient::put_opts
 
 /// Result of a successful put operation.
 #[derive(Debug)]
