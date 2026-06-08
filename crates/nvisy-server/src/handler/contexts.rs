@@ -12,9 +12,9 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{ContextFilesBucket, ContextKey};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
 use nvisy_postgres::query::WorkspaceContextRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Multipart, Path, Permission, Query};
@@ -458,10 +458,7 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Finds a context by ID or returns NotFound error.
-async fn find_context(
-    conn: &mut nvisy_postgres::PgConn,
-    context_id: Uuid,
-) -> Result<WorkspaceContext> {
+async fn find_context(conn: &mut PgConn, context_id: Uuid) -> Result<WorkspaceContext> {
     conn.find_workspace_context_by_id(context_id)
         .await?
         .ok_or_else(|| {

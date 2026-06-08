@@ -17,9 +17,9 @@ use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
@@ -41,7 +41,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 
 /// Finds a file by ID or returns NotFound error.
-async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<FileModel> {
+async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<FileModel> {
     conn.find_workspace_file_by_id(file_id)
         .await?
         .ok_or_else(|| {
@@ -115,7 +115,7 @@ struct FileUploadContext {
 
 /// Processes a single file from a multipart upload using streaming.
 async fn process_single_file(
-    conn: &mut nvisy_postgres::PgConn,
+    conn: &mut PgConn,
     ctx: &FileUploadContext,
     field: Field<'_>,
 ) -> Result<FileModel> {

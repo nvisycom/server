@@ -15,11 +15,12 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 use nvisy_postgres::query::WorkspaceConnectionRepository;
+use nvisy_postgres::{PgClient, PgConn};
+use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -337,10 +338,7 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Finds a connection by ID or returns NotFound error.
-async fn find_connection(
-    conn: &mut nvisy_postgres::PgConn,
-    connection_id: uuid::Uuid,
-) -> Result<WorkspaceConnection> {
+async fn find_connection(conn: &mut PgConn, connection_id: Uuid) -> Result<WorkspaceConnection> {
     conn.find_workspace_connection_by_id(connection_id)
         .await?
         .ok_or_else(|| {

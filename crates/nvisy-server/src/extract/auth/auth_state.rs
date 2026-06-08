@@ -12,9 +12,9 @@ use aide::openapi::Operation;
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::Account;
 use nvisy_postgres::query::AccountRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use serde::Deserialize;
 
 use super::{AuthClaims, AuthHeader};
@@ -197,7 +197,7 @@ where
     /// * [`ErrorKind::Unauthorized`]: Account not found or suspended
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_account_status(
-        conn: &mut nvisy_postgres::PgConn,
+        conn: &mut PgConn,
         auth_claims: &AuthClaims<T>,
     ) -> Result<Account> {
         let account = conn

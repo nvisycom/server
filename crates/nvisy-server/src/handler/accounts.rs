@@ -9,9 +9,9 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::Account as AccountModel;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
+use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
@@ -210,7 +210,7 @@ fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str)
 }
 
 /// Finds an account by ID or returns NotFound error.
-async fn find_account(conn: &mut nvisy_postgres::PgConn, account_id: Uuid) -> Result<AccountModel> {
+async fn find_account(conn: &mut PgConn, account_id: Uuid) -> Result<AccountModel> {
     conn.find_account_by_id(account_id).await?.ok_or_else(|| {
         ErrorKind::NotFound
             .with_message("Account not found")

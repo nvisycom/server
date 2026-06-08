@@ -9,11 +9,12 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::{WebhookRequest, WebhookService};
 use url::Url;
+use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -335,10 +336,7 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Finds a webhook by ID or returns NotFound error.
-async fn find_webhook(
-    conn: &mut nvisy_postgres::PgConn,
-    webhook_id: uuid::Uuid,
-) -> Result<WorkspaceWebhook> {
+async fn find_webhook(conn: &mut PgConn, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
     conn.find_workspace_webhook_by_id(webhook_id)
         .await?
         .ok_or_else(|| {

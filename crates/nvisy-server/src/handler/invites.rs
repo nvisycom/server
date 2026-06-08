@@ -13,7 +13,8 @@ use nvisy_postgres::model::{NewWorkspaceMember, WorkspaceInvite};
 use nvisy_postgres::query::{
     WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::{AsyncConnection, PgClient, PgError};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
+use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -510,10 +511,7 @@ fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Finds an invite by ID or returns NotFound error.
-async fn find_invite(
-    conn: &mut nvisy_postgres::PgConn,
-    invite_id: uuid::Uuid,
-) -> Result<WorkspaceInvite> {
+async fn find_invite(conn: &mut PgConn, invite_id: Uuid) -> Result<WorkspaceInvite> {
     conn.find_workspace_invite_by_id(invite_id)
         .await?
         .ok_or_else(|| {
