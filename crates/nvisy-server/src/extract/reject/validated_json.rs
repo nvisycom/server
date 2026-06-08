@@ -6,10 +6,15 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::{Operation, Response};
 use axum::extract::{FromRequest, Request};
 use derive_more::{Deref, DerefMut, From};
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
-use validator::{Validate, ValidationErrors};
+use serde_json::Value;
+use validator::{Validate, ValidationError, ValidationErrors};
 
 use super::Json;
 use crate::handler::{Error, ErrorKind};
@@ -59,10 +64,7 @@ where
 }
 
 /// Formats length validation errors with appropriate units and context.
-fn format_length_error(
-    field: &str,
-    params: &HashMap<Cow<'static, str>, serde_json::Value>,
-) -> String {
+fn format_length_error(field: &str, params: &HashMap<Cow<'static, str>, Value>) -> String {
     if params.is_empty() {
         return format!("Field '{}' has invalid length", field);
     }
@@ -102,10 +104,7 @@ fn format_length_error(
 }
 
 /// Formats range validation errors with appropriate context and units.
-fn format_range_error(
-    field: &str,
-    params: &HashMap<Cow<'static, str>, serde_json::Value>,
-) -> String {
+fn format_range_error(field: &str, params: &HashMap<Cow<'static, str>, Value>) -> String {
     if params.is_empty() {
         return format!("Field '{}' is out of valid range", field);
     }
@@ -132,15 +131,15 @@ fn format_range_error(
 }
 
 /// Extracts a number from a JSON value, supporting both integers and floats.
-fn extract_number_from_json(value: &serde_json::Value) -> Option<f64> {
+fn extract_number_from_json(value: &Value) -> Option<f64> {
     match value {
-        serde_json::Value::Number(n) => n.as_f64(),
+        Value::Number(n) => n.as_f64(),
         _ => None,
     }
 }
 
 /// Formats validation errors with context-aware, user-friendly messages.
-fn format_validation_error(field: &str, error: &validator::ValidationError) -> String {
+fn format_validation_error(field: &str, error: &ValidationError) -> String {
     // Use custom message if provided, otherwise generate appropriate message
     if let Some(custom_message) = &error.message {
         return format!("Field '{}': {}", field, custom_message);
@@ -215,21 +214,18 @@ impl From<ValidationErrors> for Error<'static> {
     }
 }
 
-impl<T> aide::OperationInput for ValidateJson<T>
+impl<T> OperationInput for ValidateJson<T>
 where
-    T: schemars::JsonSchema,
+    T: JsonSchema,
 {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         Json::<T>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<u16>, Response)> {
         Json::<T>::inferred_early_responses(ctx, operation)
     }
 }

@@ -3,10 +3,14 @@
 //! This module provides [`Json`], an enhanced version of [`axum::Json`] with
 //! better error messages, size limits, and OpenAPI documentation support.
 
+use aide::generate::GenContext;
+use aide::openapi::Operation;
+use aide::{OperationInput, OperationOutput};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Json as AxumJson, OptionalFromRequest, Request};
 use axum::response::{IntoResponse, Response};
 use derive_more::{Deref, DerefMut, From};
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -165,41 +169,38 @@ fn sanitize_error_message(message: &str) -> String {
     lines.join(" ").chars().take(200).collect()
 }
 
-impl<T> aide::OperationInput for Json<T>
+impl<T> OperationInput for Json<T>
 where
-    T: schemars::JsonSchema,
+    T: JsonSchema,
 {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         axum::Json::<T>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
+        ctx: &mut GenContext,
+        operation: &mut Operation,
     ) -> Vec<(Option<u16>, aide::openapi::Response)> {
         axum::Json::<T>::inferred_early_responses(ctx, operation)
     }
 }
 
-impl<T> aide::OperationOutput for Json<T>
+impl<T> OperationOutput for Json<T>
 where
-    T: schemars::JsonSchema + Serialize,
+    T: JsonSchema + Serialize,
 {
     type Inner = T;
 
     fn operation_response(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
+        ctx: &mut GenContext,
+        operation: &mut Operation,
     ) -> Option<aide::openapi::Response> {
         AxumJson::<T>::operation_response(ctx, operation)
     }
 
     fn inferred_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
+        ctx: &mut GenContext,
+        operation: &mut Operation,
     ) -> Vec<(Option<u16>, aide::openapi::Response)> {
         AxumJson::<T>::inferred_responses(ctx, operation)
     }

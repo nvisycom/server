@@ -7,10 +7,11 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::ops::Deref;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use axum::extract::FromRequestParts;
 use axum::extract::connect_info::Connected;
+use axum::http::request::Parts;
 use axum::serve::IncomingStream;
 use tokio::net::TcpListener;
 
@@ -37,10 +38,7 @@ where
 {
     type Rejection = <axum_client_ip::ClientIp as FromRequestParts<S>>::Rejection;
 
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let axum_client_ip::ClientIp(ip) =
             axum_client_ip::ClientIp::from_request_parts(parts, state).await?;
         Ok(Self(ip))
@@ -169,7 +167,7 @@ impl AppConnectInfo {
     /// Returns the duration since the connection was established.
     ///
     /// Returns `None` if the system clock has moved backward.
-    pub fn connection_duration(&self) -> Option<std::time::Duration> {
+    pub fn connection_duration(&self) -> Option<Duration> {
         SystemTime::now().duration_since(self.connected_at).ok()
     }
 

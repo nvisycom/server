@@ -7,6 +7,7 @@
 
 use argon2::password_hash::{Error as ArgonError, PasswordHasher as _, PasswordVerifier};
 use argon2::{Argon2, PasswordHash};
+use rand::distr::Alphanumeric;
 
 use crate::handler::{ErrorKind, Result};
 
@@ -179,7 +180,7 @@ impl PasswordHasher {
         // Generate a random dummy password (16 characters)
         let password_len = rand::random_range(16..32);
         let dummy_password: String = (0..password_len)
-            .map(|_| rand::rng().sample(rand::distr::Alphanumeric) as char)
+            .map(|_| rand::rng().sample(Alphanumeric) as char)
             .collect();
 
         // Hash the dummy password and verify, this will always fail

@@ -1,5 +1,8 @@
 //! Structured error handling for webhook operations.
 
+use std::str::Utf8Error;
+use std::string::FromUtf8Error;
+
 use hipstr::HipStr;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
 use thiserror::Error;
@@ -123,14 +126,14 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<std::string::FromUtf8Error> for Error {
-    fn from(error: std::string::FromUtf8Error) -> Self {
+impl From<FromUtf8Error> for Error {
+    fn from(error: FromUtf8Error) -> Self {
         Self::from_source(ErrorKind::Serialization, error).with_message("Invalid UTF-8 encoding")
     }
 }
 
-impl From<std::str::Utf8Error> for Error {
-    fn from(error: std::str::Utf8Error) -> Self {
+impl From<Utf8Error> for Error {
+    fn from(error: Utf8Error) -> Self {
         Self::from_source(ErrorKind::Serialization, error).with_message("Invalid UTF-8 encoding")
     }
 }

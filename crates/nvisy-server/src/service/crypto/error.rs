@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 /// Result type for cryptographic operations.
-pub type CryptoResult<T> = std::result::Result<T, CryptoError>;
+pub type CryptoResult<T> = Result<T, CryptoError>;
 
 /// Errors that can occur during cryptographic operations.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

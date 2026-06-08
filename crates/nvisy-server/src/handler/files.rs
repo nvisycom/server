@@ -10,15 +10,17 @@ use std::str::FromStr;
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::body::Body;
+use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
+use nvisy_postgres::{PgClient, PgConn};
+use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
@@ -39,7 +41,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 
 /// Finds a file by ID or returns NotFound error.
-async fn find_file(conn: &mut nvisy_postgres::PgConn, file_id: Uuid) -> Result<FileModel> {
+async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<FileModel> {
     conn.find_workspace_file_by_id(file_id)
         .await?
         .ok_or_else(|| {
@@ -113,9 +115,9 @@ struct FileUploadContext {
 
 /// Processes a single file from a multipart upload using streaming.
 async fn process_single_file(
-    conn: &mut nvisy_postgres::PgConn,
+    conn: &mut PgConn,
     ctx: &FileUploadContext,
-    field: axum::extract::multipart::Field<'_>,
+    field: Field<'_>,
 ) -> Result<FileModel> {
     let filename = field
         .file_name()
@@ -138,9 +140,7 @@ async fn process_single_file(
     );
 
     // Step 1: Stream upload to NATS (computes SHA-256 on-the-fly)
-    let reader = tokio_util::io::StreamReader::new(
-        field.map(|result| result.map_err(std::io::Error::other)),
-    );
+    let reader = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
 
     let put_result = ctx.file_store.put(&file_key, reader).await?;
 
@@ -499,7 +499,7 @@ async fn download_file(
     );
 
     // Stream the file content using ReaderStream
-    let stream = tokio_util::io::ReaderStream::new(get_result.into_reader());
+    let stream = ReaderStream::new(get_result.into_reader());
     let body = Body::from_stream(stream);
 
     Ok((StatusCode::OK, headers, body))

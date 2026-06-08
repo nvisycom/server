@@ -3,6 +3,8 @@
 //! Cursor pagination provides efficient, stable pagination for large datasets.
 //! Unlike offset pagination, performance remains constant regardless of page depth.
 
+use std::fmt;
+
 use base64::prelude::*;
 use jiff::Timestamp;
 #[cfg(feature = "schema")]
@@ -55,8 +57,8 @@ impl Cursor {
     }
 }
 
-impl std::fmt::Display for Cursor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Cursor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.encode())
     }
 }

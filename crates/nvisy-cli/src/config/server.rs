@@ -134,6 +134,8 @@ impl Default for ServerConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv6Addr;
+
     use super::*;
 
     #[test]
@@ -160,7 +162,7 @@ mod tests {
         config.host = IpAddr::V4(Ipv4Addr::LOCALHOST);
         assert!(!config.binds_to_all_interfaces());
 
-        config.host = IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED);
+        config.host = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
         assert!(config.binds_to_all_interfaces());
     }
 }

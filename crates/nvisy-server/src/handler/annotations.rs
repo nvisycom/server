@@ -6,8 +6,10 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
+use nvisy_postgres::model::{WorkspaceFile, WorkspaceFileAnnotation};
 use nvisy_postgres::query::{WorkspaceFileAnnotationRepository, WorkspaceFileRepository};
+use nvisy_postgres::{PgClient, PgConn};
+use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -22,9 +24,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::annotations";
 
 /// Finds an annotation by ID or returns NotFound error.
 async fn find_annotation(
-    conn: &mut nvisy_postgres::PgConn,
-    annotation_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceFileAnnotation> {
+    conn: &mut PgConn,
+    annotation_id: Uuid,
+) -> Result<WorkspaceFileAnnotation> {
     conn.find_workspace_file_annotation_by_id(annotation_id)
         .await?
         .ok_or_else(|| {
@@ -35,10 +37,7 @@ async fn find_annotation(
 }
 
 /// Finds a file by ID or returns NotFound error.
-async fn find_file(
-    conn: &mut nvisy_postgres::PgConn,
-    file_id: uuid::Uuid,
-) -> Result<nvisy_postgres::model::WorkspaceFile> {
+async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<WorkspaceFile> {
     conn.find_workspace_file_by_id(file_id)
         .await?
         .ok_or_else(|| {

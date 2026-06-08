@@ -1,5 +1,6 @@
 //! Workspace invite request types.
 
+use nvisy_postgres::model::NewWorkspaceInvite;
 use nvisy_postgres::types::{
     InviteFilter, InviteSortBy, InviteSortField, SortOrder, WorkspaceRole,
 };
@@ -25,12 +26,8 @@ pub struct CreateInvite {
 
 impl CreateInvite {
     /// Converts to database model.
-    pub fn into_model(
-        self,
-        workspace_id: Uuid,
-        created_by: Uuid,
-    ) -> nvisy_postgres::model::NewWorkspaceInvite {
-        nvisy_postgres::model::NewWorkspaceInvite {
+    pub fn into_model(self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
+        NewWorkspaceInvite {
             workspace_id,
             invitee_email: Some(self.invitee_email),
             invited_role: Some(self.invited_role),
@@ -98,12 +95,8 @@ pub struct GenerateInviteCode {
 
 impl GenerateInviteCode {
     /// Converts to database model.
-    pub fn into_model(
-        self,
-        workspace_id: Uuid,
-        created_by: Uuid,
-    ) -> nvisy_postgres::model::NewWorkspaceInvite {
-        nvisy_postgres::model::NewWorkspaceInvite {
+    pub fn into_model(self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
+        NewWorkspaceInvite {
             workspace_id,
             invitee_email: None,
             invited_role: Some(self.invited_role),

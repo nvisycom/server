@@ -11,6 +11,7 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "config"))]
 use clap::Args;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::service::crypto::EncryptionKey;
 use crate::{Error, Result};
@@ -76,7 +77,7 @@ impl MasterKey {
     /// Derives a workspace-specific encryption key via HKDF-SHA256.
     #[inline]
     #[must_use]
-    pub fn derive_workspace_key(&self, workspace_id: uuid::Uuid) -> EncryptionKey {
+    pub fn derive_workspace_key(&self, workspace_id: Uuid) -> EncryptionKey {
         self.inner.derive_workspace_key(workspace_id)
     }
 
@@ -183,7 +184,7 @@ mod tests {
         fs::write(&key_path, raw).unwrap();
 
         let master_key = MasterKey::new(&key_path).await.unwrap();
-        let workspace_id = uuid::Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
 
         let derived = master_key.derive_workspace_key(workspace_id);
         let expected = EncryptionKey::from_bytes(&raw)

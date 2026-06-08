@@ -1,5 +1,6 @@
 //! Workspace member request types.
 
+use nvisy_postgres::model::UpdateWorkspaceMember;
 use nvisy_postgres::types::{
     MemberFilter, MemberSortBy, MemberSortField, SortOrder, WorkspaceRole,
 };
@@ -17,8 +18,8 @@ pub struct UpdateMember {
 }
 
 impl UpdateMember {
-    pub fn into_model(self) -> nvisy_postgres::model::UpdateWorkspaceMember {
-        nvisy_postgres::model::UpdateWorkspaceMember {
+    pub fn into_model(self) -> UpdateWorkspaceMember {
+        UpdateWorkspaceMember {
             member_role: Some(self.role),
             ..Default::default()
         }

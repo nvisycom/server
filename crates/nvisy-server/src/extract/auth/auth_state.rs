@@ -6,12 +6,15 @@
 
 use std::hash::Hash;
 
+use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::Operation;
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::Account;
 use nvisy_postgres::query::AccountRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use serde::Deserialize;
 
 use super::{AuthClaims, AuthHeader};
@@ -194,7 +197,7 @@ where
     /// * [`ErrorKind::Unauthorized`]: Account not found or suspended
     /// * [`ErrorKind::InternalServerError`]: Database query failures
     async fn verify_account_status(
-        conn: &mut nvisy_postgres::PgConn,
+        conn: &mut PgConn,
         auth_claims: &AuthClaims<T>,
     ) -> Result<Account> {
         let account = conn
@@ -338,14 +341,11 @@ where
     }
 }
 
-impl<T> aide::OperationInput for AuthState<T>
+impl<T> OperationInput for AuthState<T>
 where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    fn operation_input(
-        _ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+    fn operation_input(_ctx: &mut GenContext, operation: &mut Operation) {
         // Add security requirement for Bearer token
         operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
     }

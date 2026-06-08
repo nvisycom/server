@@ -10,6 +10,8 @@ mod jwt_claims;
 mod jwt_header;
 mod permission;
 
+use uuid::Uuid;
+
 pub use self::auth_provider::AuthProvider;
 pub use self::auth_state::AuthState;
 pub use self::jwt_claims::AuthClaims;
@@ -17,7 +19,7 @@ pub use self::jwt_header::AuthHeader;
 pub use self::permission::{AuthResult, Permission};
 
 impl<T> AuthProvider for AuthClaims<T> {
-    fn account_id(&self) -> uuid::Uuid {
+    fn account_id(&self) -> Uuid {
         self.account_id
     }
 

@@ -1,7 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use deadpool::Runtime;
 use deadpool::managed::{Hook, Pool};
 use derive_more::{Deref, DerefMut};
 use diesel_async::RunQueryDsl;
@@ -90,7 +91,7 @@ impl PgClient {
             .wait_timeout(config.connection_timeout())
             .create_timeout(config.connection_timeout())
             .recycle_timeout(config.idle_timeout())
-            .runtime(deadpool::Runtime::Tokio1)
+            .runtime(Runtime::Tokio1)
             .post_create(Hook::sync_fn(custom_hooks::post_create))
             .pre_recycle(Hook::sync_fn(custom_hooks::pre_recycle))
             .post_recycle(Hook::sync_fn(custom_hooks::post_recycle))
@@ -179,7 +180,7 @@ impl PgClient {
     pub async fn get_connection(&self) -> PgResult<PgConn> {
         tracing::debug!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let conn = self.inner.pool.get().await.map_err(|e| {
             tracing::error!(
                 target: TRACING_TARGET_CONNECTION,
@@ -233,8 +234,8 @@ impl PgClient {
     }
 }
 
-impl std::fmt::Debug for PgClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for PgClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let pool_status = self.pool_status();
         f.debug_struct("PgDatabase")
             .field("database_url", &self.inner.config.database_url_masked())

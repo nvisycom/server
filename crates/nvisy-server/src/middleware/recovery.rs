@@ -15,8 +15,8 @@ use axum::response::{IntoResponse, Response};
 use clap::Args;
 use futures::future::{BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
-use tower::ServiceBuilder;
 use tower::timeout::TimeoutLayer;
+use tower::{BoxError, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::handler::{Error, ErrorKind};
@@ -104,7 +104,7 @@ where
     }
 }
 
-fn handle_error(err: tower::BoxError) -> ResponseFut {
+fn handle_error(err: BoxError) -> ResponseFut {
     use axum_client_ip::Rejection as IpRejection;
     use tower::timeout::error::Elapsed;
 

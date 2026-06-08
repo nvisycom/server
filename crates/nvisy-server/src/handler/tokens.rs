@@ -9,10 +9,10 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::model::UpdateAccountApiToken;
+use nvisy_postgres::model::{AccountApiToken, UpdateAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
+use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
@@ -223,10 +223,10 @@ fn revoke_api_token_docs(op: TransformOperation) -> TransformOperation {
 
 /// Finds an API token by ID and verifies it belongs to the specified account.
 async fn find_account_token(
-    conn: &mut nvisy_postgres::PgConn,
+    conn: &mut PgConn,
     account_id: Uuid,
     token_id: Uuid,
-) -> Result<nvisy_postgres::model::AccountApiToken> {
+) -> Result<AccountApiToken> {
     let Some(token) = conn.find_account_api_token_by_id(token_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")

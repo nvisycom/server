@@ -3,6 +3,9 @@
 //! This module provides [`Query`], an enhanced version of [`axum::extract::Query`]
 //! with better error messages and OpenAPI documentation support.
 
+use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::{Operation, Response};
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{FromRequestParts, OptionalFromRequestParts, Query as AxumQuery};
 use axum::http::request::Parts;
@@ -156,21 +159,18 @@ fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
     None
 }
 
-impl<T> aide::OperationInput for Query<T>
+impl<T> OperationInput for Query<T>
 where
     T: JsonSchema,
 {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         AxumQuery::<T>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<u16>, Response)> {
         AxumQuery::<T>::inferred_early_responses(ctx, operation)
     }
 }

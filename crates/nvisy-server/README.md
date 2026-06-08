@@ -1,33 +1,20 @@
 # nvisy-server
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+High-performance HTTP API server for the Nvisy redaction platform, built
+with Axum and Tokio.
 
-High-performance HTTP API server for the Nvisy document redaction platform,
-built with Axum and Tokio.
+## Overview
 
-## Features
+The core HTTP API layer implementing REST endpoints for workspaces,
+pipelines, connections, files, and accounts. It provides JWT
+authentication with Ed25519, role-based authorization, request
+validation, a Tower middleware stack, and auto-generated OpenAPI
+documentation via Aide. Depends on all other workspace crates for
+persistence, messaging, storage, and webhook delivery.
 
-- **Async HTTP Server:** Built with Axum web framework on Tokio runtime
-- **JWT Authentication:** Stateless authentication with session management
-- **OpenAPI Documentation:** Auto-generated Swagger and Scalar UI
-- **Type-Safe Validation:** Comprehensive request/response validation
-- **Middleware Stack:** CORS, security headers, and request logging
-- **Service Integration:** PostgreSQL, MinIO, OpenRouter, and NATS clients
+## Documentation
 
-## Key Dependencies
-
-- `axum`: Modern web framework with excellent async performance
-- `tokio`: Async runtime for concurrent request handling
-- `tower`: Middleware ecosystem for HTTP services
-- `utoipa`: OpenAPI documentation generation
-
-## API Documentation
-
-When running, the server exposes interactive documentation at:
-
-- **Swagger UI:** `/api/swagger`
-- **Scalar UI:** `/api/scalar`
-- **OpenAPI JSON:** `/api/openapi.json`
+See [`docs/`](../../docs/) for architecture, security, and API documentation.
 
 ## Changelog
 
@@ -39,7 +26,7 @@ Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
 
 ## Support
 
-- **Documentation:** [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues:** [GitHub Issues](https://github.com/nvisycom/server/issues)
-- **Email:** [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status:** [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)

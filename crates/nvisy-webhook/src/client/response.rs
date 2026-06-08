@@ -1,6 +1,6 @@
 //! Webhook delivery response types.
 
-use jiff::Timestamp;
+use jiff::{Span, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -37,7 +37,7 @@ impl WebhookResponse {
     }
 
     /// Calculates the response time as a duration.
-    pub fn duration(&self) -> jiff::Span {
+    pub fn duration(&self) -> Span {
         self.started_at.until(self.finished_at).unwrap_or_default()
     }
 }

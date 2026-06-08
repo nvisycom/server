@@ -1,6 +1,7 @@
 //! Webhook delivery request and payload types.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Duration;
 
 use jiff::Timestamp;
@@ -35,8 +36,8 @@ pub struct WebhookRequest {
     pub secret: Option<String>,
 }
 
-impl std::fmt::Debug for WebhookRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for WebhookRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WebhookRequest")
             .field("request_id", &self.request_id)
             .field("url", &self.url)

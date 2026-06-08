@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use diesel::prelude::*;
+use diesel::sql_types::Double;
 use diesel_async::RunQueryDsl;
 use pgvector::Vector;
 use uuid::Uuid;
@@ -271,8 +272,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
             .limit(limit)
             .select((
                 WorkspaceFileChunk::as_select(),
-                (1.0.into_sql::<diesel::sql_types::Double>()
-                    - dsl::embedding.cosine_distance(&query_embedding)),
+                (1.0.into_sql::<Double>() - dsl::embedding.cosine_distance(&query_embedding)),
             ))
             .load(self)
             .await
@@ -321,8 +321,7 @@ impl WorkspaceFileChunkRepository for PgConnection {
             .limit(limit)
             .select((
                 WorkspaceFileChunk::as_select(),
-                (1.0.into_sql::<diesel::sql_types::Double>()
-                    - dsl::embedding.cosine_distance(&query_embedding)),
+                (1.0.into_sql::<Double>() - dsl::embedding.cosine_distance(&query_embedding)),
             ))
             .load(self)
             .await

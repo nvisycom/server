@@ -154,6 +154,8 @@ impl SessionKeys {
     ///
     /// Returns `Ok(())` if keys are valid, or an error if validation fails.
     pub fn validate_keys(&self) -> Result<()> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
         use jsonwebtoken::{Algorithm, Header, Validation, decode, encode};
         use serde::{Deserialize, Serialize};
 
@@ -165,8 +167,8 @@ impl SessionKeys {
 
         let claims = TestClaims {
             sub: "test".to_string(),
-            exp: (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            exp: (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
                 + 300) as usize, // 5 minutes from now

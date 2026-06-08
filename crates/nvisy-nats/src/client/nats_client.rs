@@ -30,8 +30,9 @@
 //! ```
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use async_nats::connection::State;
 use async_nats::{Client, ConnectOptions, jetstream};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -137,7 +138,7 @@ impl NatsClient {
     /// Test connectivity with a ping
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub async fn ping(&self) -> Result<Duration> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         timeout(Duration::from_secs(10), self.inner.client.flush())
             .await
@@ -158,10 +159,7 @@ impl NatsClient {
     /// Check if the client is connected.
     #[must_use]
     pub fn is_connected(&self) -> bool {
-        matches!(
-            self.inner.client.connection_state(),
-            async_nats::connection::State::Connected
-        )
+        matches!(self.inner.client.connection_state(), State::Connected)
     }
 }
 
