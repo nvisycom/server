@@ -3,8 +3,9 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::{ServiceHealth, WebhookProvider, WebhookRequest, WebhookResponse};
+use super::ServiceHealth;
 use crate::Result;
+use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
 
 /// Webhook service wrapper for dependency injection.
 ///

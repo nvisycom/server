@@ -124,7 +124,7 @@ impl ReqwestConfig {
     }
 
     /// Returns the effective user agent, using default if not set.
-    pub fn effective_user_agent(&self) -> String {
+    pub(crate) fn effective_user_agent(&self) -> String {
         self.user_agent
             .clone()
             .unwrap_or_else(Self::default_user_agent)

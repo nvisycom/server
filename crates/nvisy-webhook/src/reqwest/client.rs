@@ -95,7 +95,7 @@ impl ReqwestClient {
     /// Signs a payload using HMAC-SHA256.
     ///
     /// The signature is computed over the raw bytes: `{timestamp}.{payload}`.
-    pub fn sign_payload(secret: &str, timestamp: i64, payload: &[u8]) -> String {
+    pub(crate) fn sign_payload(secret: &str, timestamp: i64, payload: &[u8]) -> String {
         let timestamp_bytes = timestamp.to_string();
 
         let mut mac =
