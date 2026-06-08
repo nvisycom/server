@@ -4,9 +4,8 @@ use std::time::Duration;
 
 use deadpool::managed::{Hook, Pool};
 use derive_more::{Deref, DerefMut};
+use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig};
-use diesel_async::scoped_futures::ScopedBoxFuture;
-use diesel_async::{AsyncConnection, RunQueryDsl};
 
 use super::custom_hooks;
 use crate::{
@@ -290,34 +289,6 @@ impl PgConn {
     /// Creates a new connection wrapper from a pooled connection.
     pub fn new(conn: PooledConnection) -> Self {
         Self { conn }
-    }
-
-    /// Executes the given function within a database transaction.
-    ///
-    /// If the function returns `Ok`, the transaction is committed.
-    /// If the function returns `Err`, the transaction is rolled back.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// conn.transaction(|conn| {
-    ///     Box::pin(async move {
-    ///         // Perform multiple database operations
-    ///         diesel::insert_into(table).values(&data).execute(conn).await?;
-    ///         diesel::update(other_table).set(&changes).execute(conn).await?;
-    ///         Ok(result)
-    ///     })
-    /// }).await?;
-    /// ```
-    pub async fn transaction<'a, T, E, F>(&mut self, f: F) -> Result<T, E>
-    where
-        F: for<'r> FnOnce(&'r mut PooledConnection) -> ScopedBoxFuture<'a, 'r, Result<T, E>>
-            + Send
-            + 'a,
-        T: Send + 'a,
-        E: From<diesel::result::Error> + Send + 'a,
-    {
-        self.conn.transaction(f).await
     }
 }
 

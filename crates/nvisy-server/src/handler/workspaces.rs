@@ -8,11 +8,11 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
 use nvisy_postgres::query::{
     WorkspaceActivityRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
+use nvisy_postgres::{AsyncConnection, PgClient};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -45,15 +45,11 @@ async fn create_workspace(
     let creator_id = auth_state.account_id;
 
     let (workspace, membership) = conn
-        .transaction(|conn| {
-            Box::pin(async move {
-                let workspace = conn.create_workspace(new_workspace).await?;
-                let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
-                let member = conn.add_workspace_member(new_member).await?;
-                Ok::<(WorkspaceModel, WorkspaceMember), nvisy_postgres::PgError>((
-                    workspace, member,
-                ))
-            })
+        .transaction(async |conn| {
+            let workspace = conn.create_workspace(new_workspace).await?;
+            let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
+            let member = conn.add_workspace_member(new_member).await?;
+            Ok::<(WorkspaceModel, WorkspaceMember), nvisy_postgres::PgError>((workspace, member))
         })
         .await?;
 

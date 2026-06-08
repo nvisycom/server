@@ -1,7 +1,7 @@
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-nats",
@@ -13,9 +13,9 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-rust-version = "1.92"
+rust-version = "1.95"
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 publish = false
 
 authors = ["nvisy <contact@nvisy.com>"]
@@ -92,10 +92,10 @@ rand = { version = "0.10.0-rc.6", features = ["serde"] }
 # Relational database (Postgres)
 diesel = { version = "2.3", features = [] }
 diesel_migrations = { version = "2.3", features = [] }
-diesel-async = { version = "0.7", features = [] }
+diesel-async = { version = "0.9", features = [] }
 jiff-diesel = { version = "0.1.3", features = [] }
 diesel-derive-enum = { version = "2.1", features = [] }
-deadpool = { version = "0.12", features = [] }
+deadpool = { version = "0.13", features = [] }
 pgvector = { version = "0.4", features = [] }
 pgtrgm = { version = "0.4", features = [] }
 
