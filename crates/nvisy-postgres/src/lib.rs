@@ -29,7 +29,7 @@ pub mod query;
 mod schema;
 pub mod types;
 
-pub use diesel_async::AsyncPgConnection as PgConnection;
+pub use diesel_async::{AsyncConnection, AsyncPgConnection as PgConnection};
 pub use jiff_diesel::Timestamp as JiffTimestamp;
 pub use pgvector::Vector;
 

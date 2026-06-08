@@ -6,7 +6,7 @@
 
 use std::convert::Infallible;
 use std::fmt;
-use std::num::NonZeroU32;
+use std::num::NonZeroU16;
 
 use axum::RequestPartsExt;
 use axum::extract::FromRequestParts;
@@ -20,7 +20,7 @@ use crate::extract::Path;
 const VERSION_PREFIX: char = 'v';
 
 /// The unstable version number.
-const UNSTABLE_VERSION: u32 = 0;
+const UNSTABLE_VERSION: u16 = 0;
 
 /// Enhanced version parameter extractor for API versioning support.
 ///
@@ -39,7 +39,7 @@ const UNSTABLE_VERSION: u32 = 0;
 /// # Version Validation
 ///
 /// The extractor automatically parses and validates version parameters:
-/// - `v1` → `Version::Stable(NonZeroU32::new(1).unwrap())`
+/// - `v1` → `Version::Stable(NonZeroU16::new(1).unwrap())`
 /// - `v0` → `Version::Unstable`
 /// - `invalid` → `Version::Unrecognized`
 #[must_use]
@@ -62,8 +62,8 @@ pub enum Version {
     ///
     /// These versions follow semantic versioning principles and
     /// are expected to provide backward compatibility guarantees.
-    /// The contained `NonZeroU32` represents the version number.
-    Stable(NonZeroU32),
+    /// The contained `NonZeroU16` represents the version number.
+    Stable(NonZeroU16),
 }
 
 impl Version {
@@ -76,9 +76,9 @@ impl Version {
     /// # Examples
     ///
     /// ```rust
-    /// # use std::num::NonZeroU32;
+    /// # use std::num::NonZeroU16;
     /// # use nvisy_server::extract::Version;
-    /// assert_eq!(Version::new("v1"), Version::Stable(NonZeroU32::new(1).unwrap()));
+    /// assert_eq!(Version::new("v1"), Version::Stable(NonZeroU16::new(1).unwrap()));
     /// assert_eq!(Version::new("v0"), Version::Unstable);
     /// assert_eq!(Version::new("invalid"), Version::Unrecognized);
     /// ```
@@ -91,9 +91,9 @@ impl Version {
     pub fn new(version: &str) -> Self {
         let number = version
             .strip_prefix(VERSION_PREFIX)
-            .and_then(|x| x.parse::<u32>().ok());
+            .and_then(|x| x.parse::<u16>().ok());
 
-        match number.map(NonZeroU32::new) {
+        match number.map(NonZeroU16::new) {
             None => Self::Unrecognized,
             Some(Some(x)) => Self::Stable(x),
             Some(None) => Self::Unstable,
@@ -165,7 +165,7 @@ impl Version {
     /// assert!(!v0.is_v(1));
     /// ```
     #[must_use]
-    pub fn is_v(&self, version: u32) -> bool {
+    pub fn is_v(&self, version: u16) -> bool {
         match self {
             Self::Unstable => version == UNSTABLE_VERSION,
             Self::Stable(x) => x.get() == version,
@@ -189,7 +189,7 @@ impl Version {
     /// assert_eq!(Version::new("v0").into_inner(), Some(0));
     /// assert_eq!(Version::new("invalid").into_inner(), None);
     /// ```
-    pub fn into_inner(self) -> Option<u32> {
+    pub fn into_inner(self) -> Option<u16> {
         match self {
             Self::Unrecognized => None,
             Self::Stable(x) => Some(x.get()),

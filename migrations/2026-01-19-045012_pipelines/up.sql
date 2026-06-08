@@ -1,5 +1,5 @@
 -- Pipeline: Workflow definitions, connections, and execution tracking
--- This migration creates tables for user-defined processing pipelines
+-- This migration creates tables for redaction pipeline definitions
 
 -- Sync status enum for connections
 CREATE TYPE SYNC_STATUS AS ENUM (
@@ -269,7 +269,7 @@ CREATE INDEX workspace_pipelines_name_trgm_idx
 
 -- Comments
 COMMENT ON TABLE workspace_pipelines IS
-    'User-defined processing pipeline definitions with step configurations.';
+    'Redaction pipeline definitions with step configurations.';
 
 COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
 COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Parent workspace reference';

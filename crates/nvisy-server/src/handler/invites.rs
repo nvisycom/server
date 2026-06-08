@@ -13,7 +13,7 @@ use nvisy_postgres::model::NewWorkspaceMember;
 use nvisy_postgres::query::{
     WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::{PgClient, PgError};
+use nvisy_postgres::{AsyncConnection, PgClient, PgError};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -257,16 +257,13 @@ async fn reply_to_invite(
         let account_id = auth_state.account_id;
 
         let accepted = conn
-            .transaction(|conn| {
-                Box::pin(async move {
-                    let accepted = conn.accept_workspace_invite(invite_id, account_id).await?;
+            .transaction(async |conn| {
+                let accepted = conn.accept_workspace_invite(invite_id, account_id).await?;
 
-                    let new_member =
-                        NewWorkspaceMember::new(workspace_id, account_id, invited_role);
-                    conn.add_workspace_member(new_member).await?;
+                let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
+                conn.add_workspace_member(new_member).await?;
 
-                    Ok::<_, PgError>(accepted)
-                })
+                Ok::<_, PgError>(accepted)
             })
             .await?;
 
@@ -459,23 +456,18 @@ async fn reply_to_invite_code(
         let account_id = auth_state.account_id;
 
         let (workspace_member, account) = conn
-            .transaction(|conn| {
-                Box::pin(async move {
-                    conn.accept_workspace_invite(invite_id, account_id).await?;
+            .transaction(async |conn| {
+                conn.accept_workspace_invite(invite_id, account_id).await?;
 
-                    let new_member =
-                        NewWorkspaceMember::new(workspace_id, account_id, invited_role);
-                    conn.add_workspace_member(new_member).await?;
+                let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
+                conn.add_workspace_member(new_member).await?;
 
-                    let result = conn
-                        .find_workspace_member_with_account(workspace_id, account_id)
-                        .await?
-                        .ok_or_else(|| {
-                            PgError::Unexpected("Member not found after insert".into())
-                        })?;
+                let result = conn
+                    .find_workspace_member_with_account(workspace_id, account_id)
+                    .await?
+                    .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))?;
 
-                    Ok::<_, PgError>(result)
-                })
+                Ok::<_, PgError>(result)
             })
             .await?;
 

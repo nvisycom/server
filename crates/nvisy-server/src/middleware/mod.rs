@@ -53,6 +53,7 @@ mod recovery;
 mod route_category;
 mod security;
 mod specification;
+mod sunset;
 
 pub use authentication::{RouterAuthExt, require_authentication, validate_token_middleware};
 pub use authorization::require_admin;
@@ -64,3 +65,4 @@ pub use security::{
     CorsConfig, FrameOptions, ReferrerPolicy, RouterSecurityExt, SecurityHeadersConfig,
 };
 pub use specification::{OpenApiConfig, RouterOpenApiExt};
+pub use sunset::{SunsetConfig, sunset_headers};
