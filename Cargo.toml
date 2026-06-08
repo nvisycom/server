@@ -100,7 +100,7 @@ pgvector = { version = "0.4", features = [] }
 pgtrgm = { version = "0.4", features = [] }
 
 # Messaging and object storage (NATS)
-async-nats = { version = "0.46", features = [] }
+async-nats = { version = "0.49", features = [] }
 
 # Cloud object storage
 object_store = { version = "0.13", features = [] }
