@@ -106,6 +106,13 @@ reset-docker: ## Resets Docker containers (down -v, then up -d).
 	@docker compose -f ./docker/docker-compose.dev.yml up -d
 	@$(call log,Docker containers reset successfully.)
 
+.PHONY: run
+run: ## Runs the server with .env loaded (starts Postgres and NATS first).
+	@$(call log,Starting Postgres and NATS...)
+	@docker compose -f ./docker/docker-compose.dev.yml up -d postgres nats
+	@$(call log,Starting server...)
+	@cargo run --features dotenv --bin nvisy-cli
+
 .PHONY: generate-all
 generate-all: generate-env generate-keys generate-migrations
 
