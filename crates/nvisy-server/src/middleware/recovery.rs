@@ -38,34 +38,33 @@ type Panic = Box<dyn Any + Send + 'static>;
 #[cfg_attr(feature = "config", derive(Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct RecoveryConfig {
-    /// Maximum duration in seconds to wait for a request to complete before timing out.
-    /// Requests exceeding this duration receive a 500 response with a timeout message.
+    /// Maximum duration to wait for a request to complete before timing out
+    /// (e.g. `30s`, `1m`). Requests exceeding this duration receive a 500
+    /// response with a timeout message.
     #[cfg_attr(
         feature = "config",
-        arg(long, env = "REQUEST_TIMEOUT", default_value = "30")
+        arg(
+            long,
+            env = "REQUEST_TIMEOUT",
+            default_value = "30s",
+            value_parser = humantime::parse_duration,
+        )
     )]
-    pub request_timeout: u64,
+    pub request_timeout: Duration,
 }
 
 impl Default for RecoveryConfig {
     fn default() -> Self {
         Self {
-            request_timeout: 30,
+            request_timeout: Duration::from_secs(30),
         }
     }
 }
 
 impl RecoveryConfig {
-    /// Creates a new configuration with the specified request timeout in seconds.
-    pub fn with_timeout_secs(secs: u64) -> Self {
-        Self {
-            request_timeout: secs,
-        }
-    }
-
-    /// Returns the request timeout as a Duration.
-    pub fn request_timeout(&self) -> Duration {
-        Duration::from_secs(self.request_timeout)
+    /// Creates a new configuration with the specified request timeout.
+    pub fn with_timeout(request_timeout: Duration) -> Self {
+        Self { request_timeout }
     }
 }
 
@@ -94,7 +93,7 @@ where
         let middlewares = ServiceBuilder::new()
             .layer(HandleErrorLayer::new(handle_error))
             .layer(CatchPanicLayer::custom(catch_panic))
-            .layer(TimeoutLayer::new(config.request_timeout()));
+            .layer(TimeoutLayer::new(config.request_timeout));
 
         self.layer(middlewares)
     }

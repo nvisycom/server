@@ -25,19 +25,27 @@ pub struct NatsConfig {
     )]
     pub nats_client_name: Option<String>,
 
-    /// Connection timeout in seconds (optional)
+    /// Connection timeout (optional, e.g. `30s`).
     #[cfg_attr(
         feature = "config",
-        arg(long = "nats-connect-timeout", env = "NATS_CONNECT_TIMEOUT_SECS")
+        arg(
+            long = "nats-connect-timeout",
+            env = "NATS_CONNECT_TIMEOUT",
+            value_parser = humantime::parse_duration,
+        )
     )]
-    pub nats_connect_timeout: Option<u64>,
+    pub nats_connect_timeout: Option<Duration>,
 
-    /// Request timeout in seconds (optional)
+    /// Request timeout (optional, e.g. `30s`).
     #[cfg_attr(
         feature = "config",
-        arg(long = "nats-request-timeout", env = "NATS_REQUEST_TIMEOUT_SECS")
+        arg(
+            long = "nats-request-timeout",
+            env = "NATS_REQUEST_TIMEOUT",
+            value_parser = humantime::parse_duration,
+        )
     )]
-    pub nats_request_timeout: Option<u64>,
+    pub nats_request_timeout: Option<Duration>,
 
     /// Maximum number of reconnection attempts (0 = unlimited)
     #[cfg_attr(
@@ -75,18 +83,6 @@ impl NatsConfig {
     /// Returns the server URLs as a vector (splits comma-separated URLs).
     pub fn servers(&self) -> Vec<&str> {
         self.nats_url.split(',').map(str::trim).collect()
-    }
-
-    /// Returns the connection timeout as a Duration, if set.
-    #[inline]
-    pub fn connect_timeout(&self) -> Option<Duration> {
-        self.nats_connect_timeout.map(Duration::from_secs)
-    }
-
-    /// Returns the request timeout as a Duration, if set.
-    #[inline]
-    pub fn request_timeout(&self) -> Option<Duration> {
-        self.nats_request_timeout.map(Duration::from_secs)
     }
 
     /// Returns the reconnect delay as a Duration.
@@ -129,17 +125,17 @@ impl NatsConfig {
         self
     }
 
-    /// Set the connection timeout in seconds.
+    /// Set the connection timeout.
     #[must_use]
-    pub fn with_connect_timeout_secs(mut self, secs: u64) -> Self {
-        self.nats_connect_timeout = Some(secs);
+    pub fn with_connect_timeout(mut self, timeout: Duration) -> Self {
+        self.nats_connect_timeout = Some(timeout);
         self
     }
 
-    /// Set the request timeout in seconds.
+    /// Set the request timeout.
     #[must_use]
-    pub fn with_request_timeout_secs(mut self, secs: u64) -> Self {
-        self.nats_request_timeout = Some(secs);
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.nats_request_timeout = Some(timeout);
         self
     }
 
@@ -185,8 +181,8 @@ mod tests {
         assert_eq!(config.servers(), vec!["nats://localhost:4222"]);
         assert_eq!(config.nats_token, "my-token");
         assert_eq!(config.name(), "nvisy-nats");
-        assert_eq!(config.connect_timeout(), None);
-        assert_eq!(config.request_timeout(), None);
+        assert_eq!(config.nats_connect_timeout, None);
+        assert_eq!(config.nats_request_timeout, None);
         assert_eq!(config.max_reconnects_option(), Some(10));
     }
 
@@ -194,14 +190,14 @@ mod tests {
     fn test_config_builder() {
         let config = NatsConfig::new("nats://localhost:4222", "my-token")
             .with_name("test-client")
-            .with_connect_timeout_secs(5)
-            .with_request_timeout_secs(15)
+            .with_connect_timeout(Duration::from_secs(5))
+            .with_request_timeout(Duration::from_secs(15))
             .with_max_reconnects(5);
 
         assert_eq!(config.servers(), vec!["nats://localhost:4222"]);
         assert_eq!(config.name(), "test-client");
-        assert_eq!(config.connect_timeout(), Some(Duration::from_secs(5)));
-        assert_eq!(config.request_timeout(), Some(Duration::from_secs(15)));
+        assert_eq!(config.nats_connect_timeout, Some(Duration::from_secs(5)));
+        assert_eq!(config.nats_request_timeout, Some(Duration::from_secs(15)));
         assert_eq!(config.max_reconnects_option(), Some(5));
     }
 
@@ -246,10 +242,10 @@ mod tests {
     #[test]
     fn test_duration_helpers() {
         let config = NatsConfig::new("nats://localhost:4222", "token")
-            .with_connect_timeout_secs(10)
-            .with_request_timeout_secs(30);
-        assert_eq!(config.connect_timeout(), Some(Duration::from_secs(10)));
-        assert_eq!(config.request_timeout(), Some(Duration::from_secs(30)));
+            .with_connect_timeout(Duration::from_secs(10))
+            .with_request_timeout(Duration::from_secs(30));
+        assert_eq!(config.nats_connect_timeout, Some(Duration::from_secs(10)));
+        assert_eq!(config.nats_request_timeout, Some(Duration::from_secs(30)));
         assert_eq!(config.reconnect_delay(), Duration::from_secs(2));
         assert_eq!(config.ping_interval(), Duration::from_secs(30));
     }

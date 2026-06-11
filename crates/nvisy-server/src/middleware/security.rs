@@ -57,7 +57,7 @@ where
             .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
             .expose_headers([header::AUTHORIZATION])
             .allow_credentials(cors.allow_credentials)
-            .max_age(cors.max_age());
+            .max_age(cors.max_age);
 
         let mut router = self
             .layer(DefaultBodyLimit::max(DEFAULT_MAX_BODY_SIZE))
@@ -113,12 +113,17 @@ pub struct CorsConfig {
     )]
     pub allowed_origins: Vec<String>,
 
-    /// Maximum age for CORS preflight requests in seconds.
+    /// Maximum age for CORS preflight caching (e.g. `1h`, `3600s`).
     #[cfg_attr(
         feature = "config",
-        arg(long, env = "CORS_MAX_AGE", default_value = "3600")
+        arg(
+            long,
+            env = "CORS_MAX_AGE",
+            default_value = "1h",
+            value_parser = humantime::parse_duration,
+        )
     )]
-    pub max_age_seconds: u64,
+    pub max_age: Duration,
 
     /// Whether to allow credentials in CORS requests.
     #[cfg_attr(
@@ -132,18 +137,13 @@ impl Default for CorsConfig {
     fn default() -> Self {
         Self {
             allowed_origins: Vec::new(),
-            max_age_seconds: 3600,
+            max_age: Duration::from_secs(3600),
             allow_credentials: true,
         }
     }
 }
 
 impl CorsConfig {
-    /// Returns the CORS max age as a Duration.
-    pub fn max_age(&self) -> Duration {
-        Duration::from_secs(self.max_age_seconds)
-    }
-
     /// Converts configured origins to HeaderValue list, falling back to localhost for development.
     pub fn to_header_values(&self) -> Vec<HeaderValue> {
         if self.allowed_origins.is_empty() {

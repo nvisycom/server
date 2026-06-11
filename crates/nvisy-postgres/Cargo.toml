@@ -33,7 +33,7 @@ schema = ["dep:schemars"]
 
 # CLI configuration support: enables clap derives for config types
 # This allows config types to be used with command-line argument parsing
-config = ["dep:clap"]
+config = ["dep:clap", "dep:humantime"]
 
 [dependencies]
 # Async runtime
@@ -74,3 +74,4 @@ schemars = { workspace = true, features = [], optional = true }
 
 # CLI (optional)
 clap = { workspace = true, features = ["derive", "env"], optional = true }
+humantime = { workspace = true, features = [], optional = true }

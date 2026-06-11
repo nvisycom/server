@@ -134,8 +134,8 @@ impl Cli {
         tracing::info!(
             target: TRACING_TARGET_CONFIG,
             postgres_max_connections = self.service.postgres_config.postgres_max_connections,
-            postgres_connection_timeout_secs = ?self.service.postgres_config.postgres_connection_timeout,
-            postgres_idle_timeout_secs = ?self.service.postgres_config.postgres_idle_timeout,
+            postgres_connection_timeout = ?self.service.postgres_config.postgres_connection_timeout,
+            postgres_idle_timeout = ?self.service.postgres_config.postgres_idle_timeout,
             "Database configuration"
         );
     }

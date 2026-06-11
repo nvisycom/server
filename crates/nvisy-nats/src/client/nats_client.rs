@@ -78,7 +78,7 @@ impl NatsClient {
             .token(config.nats_token.clone());
 
         // Set connection timeout if specified
-        if let Some(timeout) = config.connect_timeout() {
+        if let Some(timeout) = config.nats_connect_timeout {
             connect_opts = connect_opts.connection_timeout(timeout);
         }
 
@@ -96,7 +96,9 @@ impl NatsClient {
 
         // Connect to NATS
         // Use configured timeout or a sensible default (30 seconds)
-        let connect_timeout = config.connect_timeout().unwrap_or(Duration::from_secs(30));
+        let connect_timeout = config
+            .nats_connect_timeout
+            .unwrap_or(Duration::from_secs(30));
         let client = timeout(
             connect_timeout,
             async_nats::connect_with_options(&config.nats_url, connect_opts),

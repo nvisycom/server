@@ -55,12 +55,17 @@ pub struct ServerConfig {
     #[arg(short = 'p', long, env = "PORT", default_value_t = 3000)]
     pub port: u16,
 
-    /// Maximum time in seconds to wait for graceful shutdown.
+    /// Maximum time to wait for graceful shutdown (e.g. `30s`, `2m`).
     ///
     /// During shutdown, the server stops accepting new connections and waits
     /// for existing requests to complete before forcefully terminating.
-    #[arg(long, env = "SHUTDOWN_TIMEOUT", default_value_t = 30)]
-    pub shutdown_timeout: u64,
+    #[arg(
+        long,
+        env = "SHUTDOWN_TIMEOUT",
+        default_value = "30s",
+        value_parser = humantime::parse_duration,
+    )]
+    pub shutdown_timeout: Duration,
 
     /// Path to TLS certificate file (PEM format).
     #[cfg(feature = "tls")]
@@ -84,10 +89,10 @@ impl ServerConfig {
         SocketAddr::new(self.host, self.port)
     }
 
-    /// Returns the graceful shutdown timeout as a `Duration`.
+    /// Returns the graceful shutdown timeout.
     #[must_use]
     pub const fn shutdown_timeout(&self) -> Duration {
-        Duration::from_secs(self.shutdown_timeout)
+        self.shutdown_timeout
     }
 
     /// Returns whether the server binds to all interfaces (0.0.0.0 or ::).
@@ -112,7 +117,7 @@ impl ServerConfig {
             host = %self.host,
             port = self.port,
             tls = self.is_tls_enabled(),
-            shutdown_timeout_secs = self.shutdown_timeout,
+            shutdown_timeout = ?self.shutdown_timeout,
             "Server configuration"
         );
     }
@@ -123,7 +128,7 @@ impl Default for ServerConfig {
         Self {
             host: default_host(),
             port: 8080,
-            shutdown_timeout: 30,
+            shutdown_timeout: Duration::from_secs(30),
             #[cfg(feature = "tls")]
             tls_cert_path: PathBuf::from("cert.pem"),
             #[cfg(feature = "tls")]
@@ -143,7 +148,7 @@ mod tests {
         let config = ServerConfig::default();
         assert!(config.binds_to_all_interfaces());
         assert_eq!(config.port, 8080);
-        assert_eq!(config.shutdown_timeout, 30);
+        assert_eq!(config.shutdown_timeout, Duration::from_secs(30));
     }
 
     #[test]

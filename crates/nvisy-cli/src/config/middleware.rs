@@ -65,7 +65,7 @@ impl MiddlewareConfig {
 
         tracing::info!(
             target: TRACING_TARGET_CONFIG,
-            request_timeout_secs = self.recovery.request_timeout,
+            request_timeout = ?self.recovery.request_timeout,
             "Recovery configuration"
         );
     }

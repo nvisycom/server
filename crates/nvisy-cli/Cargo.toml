@@ -45,10 +45,13 @@ nvisy-webhook = { workspace = true, features = ["config"] }
 # Service implementations.
 nvisy-server = { workspace = true, features = ["config"] }
 
-# Async runtime, environment and CLI.
+# Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = { workspace = true, features = [] }
+
+# CLI and environment
 clap = { workspace = true, features = ["derive", "env"] }
+humantime = { workspace = true, features = [] }
 dotenvy = { workspace = true, features = [], optional = true }
 
 # HTTP server
