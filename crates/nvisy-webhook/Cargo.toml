@@ -50,12 +50,12 @@ tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 schemars = { workspace = true, optional = true }
-
-# Commonly used datatypes
-hipstr = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 url = { workspace = true, features = ["serde"] }
+
+# Commonly used datatypes
+hipstr = { workspace = true, features = [] }
 
 # Reqwest feature dependencies (optional)
 reqwest = { workspace = true, features = ["json"], optional = true }

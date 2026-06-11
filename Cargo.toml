@@ -4,6 +4,7 @@
 resolver = "3"
 members = [
     "./crates/nvisy-cli",
+    "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-object",
     "./crates/nvisy-postgres",
@@ -30,6 +31,7 @@ documentation = "https://docs.rs/nvisy-server"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Internal crates
+nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-object = { path = "./crates/nvisy-object", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
@@ -38,6 +40,8 @@ nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.5", features = [] }
+humantime = { version = "2.3", features = [] }
+dotenvy = { version = "0.15", features = [] }
 
 # Async runtime
 tokio = { version = "1.50", features = [] }
@@ -110,7 +114,6 @@ tracing-subscriber = { version = "0.3", features = [] }
 
 # Testing utilities
 tempfile = { version = "3.27", features = [] }
-dotenvy = { version = "0.15", features = [] }
 
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }

@@ -2,12 +2,11 @@
 
 use thiserror::Error;
 
-/// Result type alias for reqwest operations.
-pub type Result<T> = std::result::Result<T, Error>;
+use crate::ErrorKind;
 
 /// Error type for reqwest operations.
 #[derive(Debug, Error)]
-pub enum Error {
+pub(crate) enum Error {
     /// HTTP request or middleware error.
     #[error("HTTP error: {0}")]
     Middleware(#[from] reqwest_middleware::Error),
@@ -21,20 +20,20 @@ impl From<Error> for crate::Error {
         match err {
             Error::Middleware(e) => {
                 if e.is_timeout() {
-                    crate::Error::new(crate::ErrorKind::Timeout)
+                    crate::Error::new(ErrorKind::Timeout)
                         .with_message(e.to_string())
                         .with_source(e)
                 } else if e.is_connect() {
-                    crate::Error::new(crate::ErrorKind::NetworkError)
+                    crate::Error::new(ErrorKind::DeliveryFailed)
                         .with_message("Connection failed")
                         .with_source(e)
                 } else {
-                    crate::Error::new(crate::ErrorKind::NetworkError)
+                    crate::Error::new(ErrorKind::DeliveryFailed)
                         .with_message(e.to_string())
                         .with_source(e)
                 }
             }
-            Error::Serde(e) => crate::Error::new(crate::ErrorKind::Serialization)
+            Error::Serde(e) => crate::Error::new(ErrorKind::Serialization)
                 .with_message(e.to_string())
                 .with_source(e),
         }

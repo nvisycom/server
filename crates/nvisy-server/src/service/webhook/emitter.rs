@@ -8,7 +8,7 @@ use nvisy_nats::stream::{EventPublisher, WebhookStream};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::WebhookEvent;
-use nvisy_webhook::{WebhookContext, WebhookRequest};
+use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
 use url::Url;
 use uuid::Uuid;
 

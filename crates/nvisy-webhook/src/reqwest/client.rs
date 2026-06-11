@@ -13,8 +13,10 @@ use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_tracing::TracingMiddleware;
 use sha2::Sha256;
 
-use super::{Error, ReqwestConfig, TRACING_TARGET};
-use crate::{ServiceHealth, WebhookProvider, WebhookRequest, WebhookResponse, WebhookService};
+use super::error::Error;
+use super::{ReqwestConfig, TRACING_TARGET};
+use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
+use crate::{ServiceHealth, WebhookService};
 
 type HmacSha256 = Hmac<Sha256>;
 

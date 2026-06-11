@@ -2446,6 +2446,7 @@ dependencies = [
  "axum-server",
  "clap",
  "dotenvy",
+ "humantime",
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-server",
@@ -2459,6 +2460,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvisy-core"
+version = "0.1.0"
+
+[[package]]
 name = "nvisy-nats"
 version = "0.1.0"
 dependencies = [
@@ -2468,6 +2473,7 @@ dependencies = [
  "derive_more",
  "futures",
  "hex",
+ "humantime",
  "jiff",
  "pin-project-lite",
  "schemars",
@@ -2510,6 +2516,7 @@ dependencies = [
  "diesel-derive-enum",
  "diesel_migrations",
  "futures",
+ "humantime",
  "ipnet",
  "jiff",
  "jiff-diesel",
@@ -2545,6 +2552,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "hkdf",
+ "humantime",
  "ipnet",
  "jiff",
  "jsonwebtoken",

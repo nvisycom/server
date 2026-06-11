@@ -109,7 +109,7 @@ pub struct WebhookResult {
 
 impl WebhookResult {
     /// Creates a WebhookResult from the core webhook response.
-    pub fn from_response(response: nvisy_webhook::WebhookResponse) -> Self {
+    pub fn from_response(response: nvisy_webhook::provider::WebhookResponse) -> Self {
         let duration_ms = response
             .duration()
             .total(jiff::Unit::Millisecond)

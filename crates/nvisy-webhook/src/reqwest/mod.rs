@@ -15,7 +15,7 @@
 //! let service: WebhookService = client.into_service();
 //! ```
 //!
-//! [`WebhookProvider`]: crate::WebhookProvider
+//! [`WebhookProvider`]: crate::provider::WebhookProvider
 
 mod client;
 mod config;
@@ -23,7 +23,6 @@ mod error;
 
 pub use client::ReqwestClient;
 pub use config::ReqwestConfig;
-pub use error::{Error, Result};
 
 /// Tracing target for reqwest client operations.
 pub const TRACING_TARGET: &str = "nvisy_webhook::reqwest";
