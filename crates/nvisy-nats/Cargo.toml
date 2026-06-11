@@ -31,10 +31,6 @@ default = []
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
-# CLI configuration support: enables clap derives for config types
-# This allows config types to be used with command-line argument parsing
-config = ["dep:clap", "dep:humantime"]
-
 [dependencies]
 # NATS messaging client
 async-nats = { workspace = true }
@@ -66,7 +62,3 @@ base64 = { workspace = true, features = [] }
 
 # JSON schema generation (Optional)
 schemars = { workspace = true, features = [], optional = true }
-
-# CLI (Optional)
-clap = { workspace = true, features = ["derive", "env"], optional = true }
-humantime = { workspace = true, features = [], optional = true }

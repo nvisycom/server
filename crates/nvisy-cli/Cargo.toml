@@ -38,12 +38,12 @@ dotenv = ["dep:dotenvy"]
 
 [dependencies]
 # Internal and core services.
-nvisy-nats = { workspace = true, features = ["config"] }
-nvisy-postgres = { workspace = true, features = ["config"] }
-nvisy-webhook = { workspace = true, features = ["config"] }
+nvisy-nats = { workspace = true, features = [] }
+nvisy-postgres = { workspace = true, features = [] }
+nvisy-webhook = { workspace = true, features = ["reqwest"] }
 
 # Service implementations.
-nvisy-server = { workspace = true, features = ["config"] }
+nvisy-server = { workspace = true, features = [] }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }

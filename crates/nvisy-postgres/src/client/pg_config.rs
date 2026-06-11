@@ -7,10 +7,6 @@
 use std::fmt;
 use std::time::Duration;
 
-#[cfg(feature = "config")]
-use clap::Args;
-use serde::{Deserialize, Serialize};
-
 use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
 
 /// Complete database configuration including connection string and pool settings.
@@ -27,45 +23,19 @@ use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
 /// let config = PgConfig::new("postgresql://user:pass@localhost/db");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "config", derive(Args))]
+#[derive(Clone)]
 #[must_use = "database configurations must be used to create connection pools"]
 pub struct PgConfig {
     /// PostgreSQL connection URL
-    #[cfg_attr(feature = "config", arg(long = "postgres-url", env = "POSTGRES_URL"))]
     pub postgres_url: String,
 
     /// Maximum number of connections in the pool (2-16)
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "postgres-max-connections",
-            env = "POSTGRES_MAX_CONNECTIONS",
-            default_value = "10"
-        )
-    )]
     pub postgres_max_connections: u32,
 
-    /// Connection timeout (optional, e.g. `30s`).
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "postgres-connection-timeout",
-            env = "POSTGRES_CONNECTION_TIMEOUT",
-            value_parser = humantime::parse_duration,
-        )
-    )]
+    /// Connection timeout (optional).
     pub postgres_connection_timeout: Option<Duration>,
 
-    /// Idle connection timeout (optional, e.g. `10m`).
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "postgres-idle-timeout",
-            env = "POSTGRES_IDLE_TIMEOUT",
-            value_parser = humantime::parse_duration,
-        )
-    )]
+    /// Idle connection timeout (optional).
     pub postgres_idle_timeout: Option<Duration>,
 }
 

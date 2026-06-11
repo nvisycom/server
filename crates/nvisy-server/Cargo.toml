@@ -26,15 +26,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
-# CLI configuration support: enables clap derives for config types
-# This allows config types to be used with command-line argument parsing
-config = [
-    "dep:clap",
-    "dep:humantime",
-    "nvisy-nats/config",
-    "nvisy-postgres/config",
-]
-
 [dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = ["schema"] }
@@ -99,17 +90,12 @@ url = { workspace = true, features = [] }
 # Error handling
 anyhow = { workspace = true, features = [] }
 
-# CLI (optional)
-clap = { workspace = true, features = ["derive", "env"], optional = true }
-humantime = { workspace = true, features = [], optional = true }
-
 [dev-dependencies]
 # Internal crates
-nvisy-nats = { workspace = true, features = ["config"] }
-nvisy-postgres = { workspace = true, features = ["config"] }
+nvisy-nats = { workspace = true, features = ["schema"] }
+nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["reqwest"] }
 
-clap = { workspace = true, features = ["derive", "env"] }
 axum-test = { workspace = true, features = [] }
 anyhow = { workspace = true, features = ["backtrace"] }
 tempfile = { workspace = true, features = [] }

@@ -2469,11 +2469,9 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "base64",
- "clap",
  "derive_more",
  "futures",
  "hex",
- "humantime",
  "jiff",
  "pin-project-lite",
  "schemars",
@@ -2508,7 +2506,6 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bigdecimal",
- "clap",
  "deadpool",
  "derive_more",
  "diesel",
@@ -2516,7 +2513,6 @@ dependencies = [
  "diesel-derive-enum",
  "diesel_migrations",
  "futures",
- "humantime",
  "ipnet",
  "jiff",
  "jiff-diesel",
@@ -2547,12 +2543,10 @@ dependencies = [
  "base64",
  "bigdecimal",
  "chacha20poly1305",
- "clap",
  "derive_more",
  "dotenvy",
  "futures",
  "hkdf",
- "humantime",
  "ipnet",
  "jiff",
  "jsonwebtoken",
@@ -2587,7 +2581,6 @@ name = "nvisy-webhook"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clap",
  "hex",
  "hipstr",
  "hmac",

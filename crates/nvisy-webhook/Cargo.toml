@@ -27,9 +27,6 @@ default = []
 # Reqwest-based HTTP client for webhook delivery
 reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:reqwest-tracing", "dep:hmac", "dep:sha2", "dep:hex"]
 
-# CLI configuration support: enables clap derives for config types
-config = ["reqwest", "dep:clap"]
-
 # JSON Schema support: enables JsonSchema derives on Postgres types
 # This allows Postgres types to be used directly in API documentation without
 # manual schema implementations, while keeping the dependency optional
@@ -67,9 +64,6 @@ reqwest-tracing = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true, features = [] }
 sha2 = { workspace = true, optional = true, features = [] }
 hex = { workspace = true, optional = true, features = [] }
-
-# CLI (optional)
-clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

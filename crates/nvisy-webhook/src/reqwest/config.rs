@@ -2,125 +2,63 @@
 
 use std::time::Duration;
 
-#[cfg(feature = "config")]
-use clap::Args;
-use serde::{Deserialize, Serialize};
-
-/// Default timeout for HTTP requests: 30 seconds.
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+/// Default timeout for HTTP requests.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: u32 = 3;
 
-/// Default minimum retry interval in milliseconds.
-pub const DEFAULT_MIN_RETRY_INTERVAL_MS: u64 = 500;
+/// Default minimum retry interval.
+pub const DEFAULT_MIN_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Default maximum retry interval in milliseconds.
-pub const DEFAULT_MAX_RETRY_INTERVAL_MS: u64 = 30_000;
+/// Default maximum retry interval.
+pub const DEFAULT_MAX_RETRY_INTERVAL: Duration = Duration::from_millis(30_000);
 
 /// Configuration for the reqwest HTTP client.
 ///
 /// This configuration is used for webhook delivery and other HTTP operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "config", derive(Args))]
+#[derive(Debug, Clone)]
 pub struct ReqwestConfig {
-    /// HTTP request timeout in seconds.
-    #[cfg_attr(
-        feature = "config",
-        arg(long = "http-timeout", env = "HTTP_TIMEOUT", default_value = "30")
-    )]
-    #[serde(default = "default_timeout_secs")]
-    pub http_timeout: u64,
+    /// HTTP request timeout (falls back to the default when unset).
+    pub http_timeout: Option<Duration>,
 
     /// User-Agent header to send with requests.
-    #[cfg_attr(
-        feature = "config",
-        arg(long = "http-user-agent", env = "HTTP_USER_AGENT")
-    )]
-    #[serde(default)]
     pub user_agent: Option<String>,
 
     /// Maximum number of retry attempts for transient failures.
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "http-max-retries",
-            env = "HTTP_MAX_RETRIES",
-            default_value = "3"
-        )
-    )]
-    #[serde(default = "default_max_retries")]
     pub max_retries: u32,
 
-    /// Minimum retry interval in milliseconds.
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "http-min-retry-interval",
-            env = "HTTP_MIN_RETRY_INTERVAL_MS",
-            default_value = "500"
-        )
-    )]
-    #[serde(default = "default_min_retry_interval_ms")]
-    pub min_retry_interval_ms: u64,
+    /// Minimum retry interval.
+    pub min_retry_interval: Duration,
 
-    /// Maximum retry interval in milliseconds.
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "http-max-retry-interval",
-            env = "HTTP_MAX_RETRY_INTERVAL_MS",
-            default_value = "30000"
-        )
-    )]
-    #[serde(default = "default_max_retry_interval_ms")]
-    pub max_retry_interval_ms: u64,
-}
-
-fn default_timeout_secs() -> u64 {
-    DEFAULT_TIMEOUT_SECS
-}
-
-fn default_max_retries() -> u32 {
-    DEFAULT_MAX_RETRIES
-}
-
-fn default_min_retry_interval_ms() -> u64 {
-    DEFAULT_MIN_RETRY_INTERVAL_MS
-}
-
-fn default_max_retry_interval_ms() -> u64 {
-    DEFAULT_MAX_RETRY_INTERVAL_MS
+    /// Maximum retry interval.
+    pub max_retry_interval: Duration,
 }
 
 impl Default for ReqwestConfig {
     fn default() -> Self {
         Self {
-            http_timeout: default_timeout_secs(),
+            http_timeout: None,
             user_agent: None,
-            max_retries: default_max_retries(),
-            min_retry_interval_ms: default_min_retry_interval_ms(),
-            max_retry_interval_ms: default_max_retry_interval_ms(),
+            max_retries: DEFAULT_MAX_RETRIES,
+            min_retry_interval: DEFAULT_MIN_RETRY_INTERVAL,
+            max_retry_interval: DEFAULT_MAX_RETRY_INTERVAL,
         }
     }
 }
 
 impl ReqwestConfig {
     /// Create a new configuration with the specified timeout.
-    pub fn new(timeout_secs: u64) -> Self {
+    pub fn new(timeout: Duration) -> Self {
         Self {
-            http_timeout: timeout_secs,
+            http_timeout: Some(timeout),
             ..Default::default()
         }
     }
 
-    /// Returns the effective timeout, using default if zero.
+    /// Returns the effective timeout, using the default when unset.
     pub fn effective_timeout(&self) -> Duration {
-        if self.http_timeout == 0 {
-            Duration::from_secs(DEFAULT_TIMEOUT_SECS)
-        } else {
-            Duration::from_secs(self.http_timeout)
-        }
+        self.http_timeout.unwrap_or(DEFAULT_TIMEOUT)
     }
 
     /// Returns the effective user agent, using default if not set.
@@ -135,20 +73,10 @@ impl ReqwestConfig {
         format!("nvisy/{}", env!("CARGO_PKG_VERSION"))
     }
 
-    /// Returns the minimum retry interval as a Duration.
-    pub fn min_retry_interval(&self) -> Duration {
-        Duration::from_millis(self.min_retry_interval_ms)
-    }
-
-    /// Returns the maximum retry interval as a Duration.
-    pub fn max_retry_interval(&self) -> Duration {
-        Duration::from_millis(self.max_retry_interval_ms)
-    }
-
-    /// Set the timeout in seconds.
+    /// Set the request timeout.
     #[must_use]
-    pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
-        self.http_timeout = timeout_secs;
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.http_timeout = Some(timeout);
         self
     }
 
@@ -166,11 +94,11 @@ impl ReqwestConfig {
         self
     }
 
-    /// Set the retry interval bounds in milliseconds.
+    /// Set the retry interval bounds.
     #[must_use]
-    pub fn with_retry_interval(mut self, min_ms: u64, max_ms: u64) -> Self {
-        self.min_retry_interval_ms = min_ms;
-        self.max_retry_interval_ms = max_ms;
+    pub fn with_retry_interval(mut self, min: Duration, max: Duration) -> Self {
+        self.min_retry_interval = min;
+        self.max_retry_interval = max;
         self
     }
 }
@@ -182,18 +110,18 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ReqwestConfig::default();
-        assert_eq!(config.http_timeout, 30);
+        assert_eq!(config.http_timeout, None);
         assert!(config.user_agent.is_none());
-        assert_eq!(config.effective_timeout(), Duration::from_secs(30));
+        assert_eq!(config.effective_timeout(), DEFAULT_TIMEOUT);
         assert_eq!(config.max_retries, 3);
-        assert_eq!(config.min_retry_interval_ms, 500);
-        assert_eq!(config.max_retry_interval_ms, 30_000);
+        assert_eq!(config.min_retry_interval, Duration::from_millis(500));
+        assert_eq!(config.max_retry_interval, Duration::from_millis(30_000));
     }
 
     #[test]
     fn test_new_config() {
-        let config = ReqwestConfig::new(60);
-        assert_eq!(config.http_timeout, 60);
+        let config = ReqwestConfig::new(Duration::from_secs(60));
+        assert_eq!(config.http_timeout, Some(Duration::from_secs(60)));
         assert_eq!(config.effective_timeout(), Duration::from_secs(60));
         assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
     }
@@ -201,37 +129,27 @@ mod tests {
     #[test]
     fn test_builder_pattern() {
         let config = ReqwestConfig::default()
-            .with_timeout(120)
+            .with_timeout(Duration::from_secs(120))
             .with_user_agent("custom-agent/1.0")
             .with_max_retries(5)
-            .with_retry_interval(1000, 60_000);
+            .with_retry_interval(Duration::from_secs(1), Duration::from_secs(60));
 
-        assert_eq!(config.http_timeout, 120);
+        assert_eq!(config.http_timeout, Some(Duration::from_secs(120)));
         assert_eq!(config.user_agent, Some("custom-agent/1.0".to_string()));
         assert_eq!(config.max_retries, 5);
-        assert_eq!(config.min_retry_interval_ms, 1000);
-        assert_eq!(config.max_retry_interval_ms, 60_000);
+        assert_eq!(config.min_retry_interval, Duration::from_secs(1));
+        assert_eq!(config.max_retry_interval, Duration::from_secs(60));
     }
 
     #[test]
-    fn test_effective_timeout_uses_default_when_zero() {
-        let config = ReqwestConfig::new(0);
-        assert_eq!(
-            config.effective_timeout(),
-            Duration::from_secs(DEFAULT_TIMEOUT_SECS)
-        );
+    fn test_effective_timeout_uses_default_when_unset() {
+        let config = ReqwestConfig::default();
+        assert_eq!(config.effective_timeout(), DEFAULT_TIMEOUT);
     }
 
     #[test]
     fn test_effective_user_agent_uses_default_when_none() {
         let config = ReqwestConfig::default();
         assert!(config.effective_user_agent().contains("nvisy"));
-    }
-
-    #[test]
-    fn test_retry_interval_durations() {
-        let config = ReqwestConfig::default();
-        assert_eq!(config.min_retry_interval(), Duration::from_millis(500));
-        assert_eq!(config.max_retry_interval(), Duration::from_millis(30_000));
     }
 }

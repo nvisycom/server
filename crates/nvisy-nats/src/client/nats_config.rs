@@ -2,56 +2,25 @@
 
 use std::time::Duration;
 
-#[cfg(feature = "config")]
-use clap::Args;
-use serde::{Deserialize, Serialize};
-
 /// Configuration for NATS connections with sensible defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "config", derive(Args))]
+#[derive(Debug, Clone)]
 pub struct NatsConfig {
     /// NATS server URL (comma-separated for clustering)
-    #[cfg_attr(feature = "config", arg(long = "nats-url", env = "NATS_URL"))]
     pub nats_url: String,
 
     /// Authentication token
-    #[cfg_attr(feature = "config", arg(long = "nats-token", env = "NATS_TOKEN"))]
     pub nats_token: String,
 
     /// Client connection name for debugging and monitoring
-    #[cfg_attr(
-        feature = "config",
-        arg(long = "nats-client-name", env = "NATS_CLIENT_NAME")
-    )]
     pub nats_client_name: Option<String>,
 
-    /// Connection timeout (optional, e.g. `30s`).
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "nats-connect-timeout",
-            env = "NATS_CONNECT_TIMEOUT",
-            value_parser = humantime::parse_duration,
-        )
-    )]
+    /// Connection timeout (optional).
     pub nats_connect_timeout: Option<Duration>,
 
-    /// Request timeout (optional, e.g. `30s`).
-    #[cfg_attr(
-        feature = "config",
-        arg(
-            long = "nats-request-timeout",
-            env = "NATS_REQUEST_TIMEOUT",
-            value_parser = humantime::parse_duration,
-        )
-    )]
+    /// Request timeout (optional).
     pub nats_request_timeout: Option<Duration>,
 
     /// Maximum number of reconnection attempts (0 = unlimited)
-    #[cfg_attr(
-        feature = "config",
-        arg(long = "nats-max-reconnects", env = "NATS_MAX_RECONNECTS")
-    )]
     pub nats_max_reconnects: Option<usize>,
 }
 

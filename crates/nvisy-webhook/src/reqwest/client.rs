@@ -71,7 +71,7 @@ impl ReqwestClient {
             .expect("failed to create HTTP client");
 
         let retry_policy = ExponentialBackoff::builder()
-            .retry_bounds(config.min_retry_interval(), config.max_retry_interval())
+            .retry_bounds(config.min_retry_interval, config.max_retry_interval)
             .build_with_max_retries(config.max_retries);
 
         let http = ClientBuilder::new(base_client)

@@ -8,9 +8,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-#[cfg(any(test, feature = "config"))]
-use clap::Args;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::service::crypto::EncryptionKey;
@@ -20,25 +17,17 @@ use crate::{Error, Result};
 const TRACING_TARGET: &str = "nvisy_server::master_key";
 
 /// Master encryption key file path configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "config"), derive(Args))]
+#[derive(Debug, Clone)]
 pub struct MasterKeyConfig {
     /// File path to the 32-byte master encryption key.
-    #[cfg_attr(
-        any(test, feature = "config"),
-        arg(
-            long,
-            env = "ENCRYPTION_KEY_FILEPATH",
-            default_value = "./encryption.key"
-        )
-    )]
-    #[serde(default = "MasterKeyConfig::default_key_path")]
     pub key_path: PathBuf,
 }
 
-impl MasterKeyConfig {
-    fn default_key_path() -> PathBuf {
-        "./encryption.key".into()
+impl Default for MasterKeyConfig {
+    fn default() -> Self {
+        Self {
+            key_path: "./encryption.key".into(),
+        }
     }
 }
 
