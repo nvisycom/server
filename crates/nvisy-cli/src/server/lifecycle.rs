@@ -53,7 +53,7 @@ fn log_config_details(config: &ServerConfig) {
         target: TRACING_TARGET_STARTUP,
         host = %config.host,
         port = config.port,
-        shutdown_timeout = config.shutdown_timeout,
+        shutdown_timeout = ?config.shutdown_timeout,
         tls = config.is_tls_enabled(),
         "Server configuration"
     );

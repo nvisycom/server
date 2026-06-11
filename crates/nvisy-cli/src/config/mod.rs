@@ -4,14 +4,15 @@
 //!
 //! ```text
 //! Cli
-//! ├── service: ServiceConfig      # Database, NATS, auth keys, workers
-//! ├── middleware: MiddlewareConfig # CORS, OpenAPI, recovery/timeouts
 //! ├── server: ServerConfig         # Host, port, TLS, shutdown
-//! ├── ollama: OllamaConfig         # Ollama embeddings/VLM/OCR
-//! └── reqwest: ReqwestConfig       # HTTP client for webhooks
+//! ├── middleware: MiddlewareConfig  # CORS, OpenAPI, recovery/timeouts
+//! ├── service: ServiceArgs          # Database, NATS, auth keys
+//! └── reqwest: ReqwestArgs          # HTTP client for webhooks
 //! ```
 //!
-//! All configuration can be provided via CLI arguments or environment variables.
+//! The `*Args` structs carry the clap/env wiring and convert into the plain
+//! config types owned by the library crates. All configuration can be provided
+//! via CLI arguments or environment variables.
 //! Use `--help` to see all available options.
 //!
 //! # Example
@@ -26,20 +27,23 @@
 
 mod middleware;
 mod server;
+mod service;
+mod webhook;
 
 use std::process;
 
 use clap::Parser;
-use nvisy_server::service::{ServiceConfig, ServiceState};
+use nvisy_server::service::ServiceState;
 use nvisy_webhook::WebhookService;
-use nvisy_webhook::reqwest::{ReqwestClient, ReqwestConfig};
-use serde::{Deserialize, Serialize};
+use nvisy_webhook::reqwest::ReqwestClient;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 pub use self::middleware::MiddlewareConfig;
 pub use self::server::ServerConfig;
+pub use self::service::ServiceArgs;
+pub use self::webhook::ReqwestArgs;
 use crate::server::TRACING_TARGET_STARTUP;
 
 /// Tracing target for configuration events.
@@ -48,11 +52,11 @@ pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 /// Complete CLI configuration.
 ///
 /// Combines all configuration groups for the nvisy server:
-/// - [`ServiceConfig`]: External service connections (Postgres, NATS, workers)
-/// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServerConfig`]: Network binding and TLS
-/// - `ReqwestConfig`: HTTP client configuration for webhooks
-#[derive(Debug, Clone, Parser, Serialize, Deserialize)]
+/// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
+/// - [`ServiceArgs`]: External service connections (Postgres, NATS, auth keys)
+/// - [`ReqwestArgs`]: HTTP client configuration for webhooks
+#[derive(Debug, Clone, Parser)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy document processing server")]
 #[command(version)]
@@ -67,11 +71,11 @@ pub struct Cli {
 
     /// External service configuration (databases, message queues).
     #[clap(flatten)]
-    pub service: ServiceConfig,
+    pub service: ServiceArgs,
 
     /// HTTP client configuration for webhook delivery.
     #[clap(flatten)]
-    pub reqwest: ReqwestConfig,
+    pub reqwest: ReqwestArgs,
 }
 
 impl Cli {
@@ -133,9 +137,9 @@ impl Cli {
 
         tracing::info!(
             target: TRACING_TARGET_CONFIG,
-            postgres_max_connections = self.service.postgres_config.postgres_max_connections,
-            postgres_connection_timeout_secs = ?self.service.postgres_config.postgres_connection_timeout,
-            postgres_idle_timeout_secs = ?self.service.postgres_config.postgres_idle_timeout,
+            postgres_max_connections = self.service.postgres.postgres_max_connections,
+            postgres_connection_timeout = ?self.service.postgres.postgres_connection_timeout,
+            postgres_idle_timeout = ?self.service.postgres.postgres_idle_timeout,
             "Database configuration"
         );
     }
@@ -154,12 +158,20 @@ impl Cli {
 
     /// Creates webhook service from CLI configuration.
     pub fn webhook_service(&self) -> WebhookService {
-        ReqwestClient::new(self.reqwest.clone()).into_service()
+        ReqwestClient::new(self.reqwest.clone().into()).into_service()
     }
 
     /// Initializes application state from CLI configuration.
     pub async fn service_state(&self) -> anyhow::Result<ServiceState> {
         let webhook = self.webhook_service();
-        Ok(ServiceState::from_config(self.service.clone(), webhook).await?)
+        let service = self.service.clone();
+        Ok(ServiceState::from_config(
+            service.postgres.into(),
+            service.nats.into(),
+            service.session_keys.into(),
+            service.master_key.into(),
+            webhook,
+        )
+        .await?)
     }
 }

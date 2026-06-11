@@ -30,30 +30,18 @@ use aide::scalar::Scalar;
 use aide::transform::TransformOpenApi;
 use axum::routing::{Router, get};
 use axum::{Extension, Json};
-#[cfg(feature = "config")]
-use clap::Args;
-use serde::{Deserialize, Serialize};
 
 /// OpenAPI configuration for aide integration.
 ///
 /// Configures the paths where the OpenAPI JSON specification and
 /// Scalar UI will be served.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "config", derive(Args))]
+#[derive(Debug, Clone)]
 #[must_use = "config does nothing unless you use it"]
 pub struct OpenApiConfig {
     /// Path which exposes the OpenAPI JSON specification.
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "OPENAPI_JSON_PATH", default_value = "/api/openapi.json")
-    )]
     pub open_api_json: String,
 
     /// Path which exposes the Scalar API reference UI.
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "OPENAPI_SCALAR_PATH", default_value = "/api/scalar")
-    )]
     pub scalar_ui: String,
 }
 

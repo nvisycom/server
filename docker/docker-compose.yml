@@ -2,7 +2,7 @@ name: nvisy
 
 services:
   postgres:
-    image: pgvector/pgvector:pg18
+    image: pgvector/pgvector:0.8.2-pg18
     container_name: nvisy-postgres
     restart: unless-stopped
     ports:
@@ -26,7 +26,7 @@ services:
       - nvisy
 
   nats:
-    image: nats:2.12.3-alpine
+    image: nats:2.14.2-alpine
     container_name: nvisy-nats
     restart: unless-stopped
     ports:

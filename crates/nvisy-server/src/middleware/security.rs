@@ -11,9 +11,6 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
 use axum::http::header::{self, HeaderValue};
-#[cfg(feature = "config")]
-use clap::Args;
-use serde::{Deserialize, Serialize};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -57,7 +54,7 @@ where
             .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
             .expose_headers([header::AUTHORIZATION])
             .allow_credentials(cors.allow_credentials)
-            .max_age(cors.max_age());
+            .max_age(cors.max_age);
 
         let mut router = self
             .layer(DefaultBodyLimit::max(DEFAULT_MAX_BODY_SIZE))
@@ -100,31 +97,18 @@ where
 ///
 /// Controls which origins can access your API and what HTTP methods
 /// and headers are allowed in cross-origin requests.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "config", derive(Args))]
+#[derive(Debug, Clone)]
 #[must_use = "config does nothing unless you use it"]
 pub struct CorsConfig {
     /// List of allowed CORS origins.
     ///
     /// If empty, defaults to localhost origins for development.
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "CORS_ORIGINS", value_delimiter = ',')
-    )]
     pub allowed_origins: Vec<String>,
 
-    /// Maximum age for CORS preflight requests in seconds.
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "CORS_MAX_AGE", default_value = "3600")
-    )]
-    pub max_age_seconds: u64,
+    /// Maximum age for CORS preflight caching.
+    pub max_age: Duration,
 
     /// Whether to allow credentials in CORS requests.
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "CORS_ALLOW_CREDENTIALS", default_value = "true")
-    )]
     pub allow_credentials: bool,
 }
 
@@ -132,18 +116,13 @@ impl Default for CorsConfig {
     fn default() -> Self {
         Self {
             allowed_origins: Vec::new(),
-            max_age_seconds: 3600,
+            max_age: Duration::from_secs(3600),
             allow_credentials: true,
         }
     }
 }
 
 impl CorsConfig {
-    /// Returns the CORS max age as a Duration.
-    pub fn max_age(&self) -> Duration {
-        Duration::from_secs(self.max_age_seconds)
-    }
-
     /// Converts configured origins to HeaderValue list, falling back to localhost for development.
     pub fn to_header_values(&self) -> Vec<HeaderValue> {
         if self.allowed_origins.is_empty() {
@@ -167,7 +146,7 @@ impl CorsConfig {
 ///
 /// Configures various HTTP security headers that protect against
 /// common web vulnerabilities including XSS, clickjacking, and MITM attacks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 #[must_use = "config does nothing unless you use it"]
 pub struct SecurityHeadersConfig {
     /// HSTS max age in seconds. Forces browsers to use HTTPS for this duration.
@@ -220,7 +199,7 @@ impl SecurityHeadersConfig {
 }
 
 /// X-Frame-Options header values controlling frame embedding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOptions {
     /// The page cannot be displayed in a frame, regardless of the site.
     Deny,
@@ -239,7 +218,7 @@ impl FrameOptions {
 }
 
 /// Referrer-Policy header values controlling referrer information.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReferrerPolicy {
     /// No referrer information is sent.
     NoReferrer,

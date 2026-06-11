@@ -11,10 +11,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
 use axum::response::{IntoResponse, Response};
-#[cfg(feature = "config")]
-use clap::Args;
 use futures::future::{BoxFuture, FutureExt};
-use serde::{Deserialize, Serialize};
 use tower::timeout::TimeoutLayer;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
@@ -34,38 +31,27 @@ type Panic = Box<dyn Any + Send + 'static>;
 ///
 /// This struct controls how the recovery middleware handles various
 /// error conditions including timeouts and panic recovery.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "config", derive(Args))]
+#[derive(Debug, Clone)]
 #[must_use = "config does nothing unless you use it"]
 pub struct RecoveryConfig {
-    /// Maximum duration in seconds to wait for a request to complete before timing out.
-    /// Requests exceeding this duration receive a 500 response with a timeout message.
-    #[cfg_attr(
-        feature = "config",
-        arg(long, env = "REQUEST_TIMEOUT", default_value = "30")
-    )]
-    pub request_timeout: u64,
+    /// Maximum duration to wait for a request to complete before timing out.
+    /// Requests exceeding this duration receive a 500 response with a timeout
+    /// message.
+    pub request_timeout: Duration,
 }
 
 impl Default for RecoveryConfig {
     fn default() -> Self {
         Self {
-            request_timeout: 30,
+            request_timeout: Duration::from_secs(30),
         }
     }
 }
 
 impl RecoveryConfig {
-    /// Creates a new configuration with the specified request timeout in seconds.
-    pub fn with_timeout_secs(secs: u64) -> Self {
-        Self {
-            request_timeout: secs,
-        }
-    }
-
-    /// Returns the request timeout as a Duration.
-    pub fn request_timeout(&self) -> Duration {
-        Duration::from_secs(self.request_timeout)
+    /// Creates a new configuration with the specified request timeout.
+    pub fn with_timeout(request_timeout: Duration) -> Self {
+        Self { request_timeout }
     }
 }
 
@@ -94,7 +80,7 @@ where
         let middlewares = ServiceBuilder::new()
             .layer(HandleErrorLayer::new(handle_error))
             .layer(CatchPanicLayer::custom(catch_panic))
-            .layer(TimeoutLayer::new(config.request_timeout()));
+            .layer(TimeoutLayer::new(config.request_timeout));
 
         self.layer(middlewares)
     }

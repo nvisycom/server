@@ -7,10 +7,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-#[cfg(any(test, feature = "config"))]
-use clap::Args;
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
@@ -18,37 +15,21 @@ use crate::{Error, Result};
 const TRACING_TARGET: &str = "nvisy_server::session_keys";
 
 /// Authentication key file paths configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "config"), derive(Args))]
+#[derive(Debug, Clone)]
 pub struct SessionKeysConfig {
     /// File path to the JWT decoding (public) key used for sessions.
-    #[cfg_attr(
-        any(test, feature = "config"),
-        arg(long, env = "AUTH_PUBLIC_PEM_FILEPATH", default_value = "./public.pem")
-    )]
-    #[serde(default = "SessionKeysConfig::default_decoding_key")]
     pub decoding_key: PathBuf,
 
     /// File path to the JWT encoding (private) key used for sessions.
-    #[cfg_attr(
-        any(test, feature = "config"),
-        arg(
-            long,
-            env = "AUTH_PRIVATE_PEM_FILEPATH",
-            default_value = "./private.pem"
-        )
-    )]
-    #[serde(default = "SessionKeysConfig::default_encoding_key")]
     pub encoding_key: PathBuf,
 }
 
-impl SessionKeysConfig {
-    fn default_decoding_key() -> PathBuf {
-        "./public.pem".into()
-    }
-
-    fn default_encoding_key() -> PathBuf {
-        "./private.pem".into()
+impl Default for SessionKeysConfig {
+    fn default() -> Self {
+        Self {
+            decoding_key: "./public.pem".into(),
+            encoding_key: "./private.pem".into(),
+        }
     }
 }
 

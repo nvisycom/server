@@ -36,7 +36,6 @@ pub use pgvector::Vector;
 pub(crate) use crate::client::PooledConnection;
 pub use crate::client::{
     ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientMigrationExt, PgConfig,
-    PgConn, PgPoolStatus, get_applied_migrations, get_migration_status, run_pending_migrations,
-    verify_schema_integrity,
+    PgConn, PgPoolStatus,
 };
 pub use crate::error::{DieselError, PgError, PgResult};

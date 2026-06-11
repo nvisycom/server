@@ -6,7 +6,7 @@ use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
 use diesel_migrations::MigrationHarness;
 use tokio::task::spawn_blocking;
 
-use super::{MigrationResult, custom_hooks, get_migration_status};
+use super::{MigrationResult, custom_hooks};
 use crate::{MIGRATIONS, PgClient, PgError, PgResult, TRACING_TARGET_MIGRATION};
 
 /// Run all pending migrations on the database.
@@ -19,21 +19,6 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
 
     let start_time = Instant::now();
     let mut conn = pg.get_pooled_connection().await?;
-    let initial_status = get_migration_status(&mut conn).await?;
-
-    if initial_status.is_up_to_date() {
-        tracing::info!(
-            target: TRACING_TARGET_MIGRATION,
-            "Database schema is already up to date, no migrations to apply"
-        );
-        return Ok(MigrationResult::success(start_time.elapsed(), vec![]));
-    }
-
-    tracing::info!(
-        target: TRACING_TARGET_MIGRATION,
-        pending_migrations = initial_status.pending_migrations(),
-        "Found pending migrations to apply"
-    );
 
     run_pre_migrate_hook(&mut conn).await?;
     let mut conn: AsyncConnectionWrapper<_> = conn.into();

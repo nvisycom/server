@@ -1,23 +1,21 @@
 //! Application state and dependency injection.
 
 mod cache;
-mod config;
 pub mod crypto;
 mod security;
 mod webhook;
 
-use nvisy_nats::NatsClient;
-use nvisy_postgres::PgClient;
+use nvisy_nats::{NatsClient, NatsConfig};
+use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
-use crate::Result;
 pub use crate::service::cache::HealthCache;
-pub use crate::service::config::ServiceConfig;
 pub use crate::service::security::{
     MasterKey, MasterKeyConfig, PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig,
     UserAgentParser,
 };
 pub use crate::service::webhook::WebhookEmitter;
+use crate::{Error, Result};
 
 /// Application state.
 ///
@@ -49,13 +47,17 @@ impl ServiceState {
     ///
     /// Connects to all external services and loads required resources.
     pub async fn from_config(
-        service_config: ServiceConfig,
+        postgres_config: PgConfig,
+        nats_config: NatsConfig,
+        session_config: SessionKeysConfig,
+        master_key_config: MasterKeyConfig,
         webhook_service: WebhookService,
     ) -> Result<Self> {
-        let postgres = service_config.connect_postgres().await?;
-        let nats = service_config.connect_nats().await?;
+        let postgres = connect_postgres(postgres_config).await?;
+        let nats = connect_nats(nats_config).await?;
 
-        let master_key = service_config.load_master_key().await?;
+        let master_key = MasterKey::from_config(&master_key_config).await?;
+        let session_keys = SessionKeys::from_config(&session_config).await?;
         let webhook_emitter = WebhookEmitter::new(postgres.clone(), nats.clone());
 
         let service_state = Self {
@@ -68,13 +70,33 @@ impl ServiceState {
             health_cache: HealthCache::new(),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
-            session_keys: service_config.load_session_keys().await?,
+            session_keys,
             user_agent_parser: UserAgentParser::new(),
             webhook_emitter,
         };
 
         Ok(service_state)
     }
+}
+
+/// Connects to Postgres and applies pending migrations.
+async fn connect_postgres(config: PgConfig) -> Result<PgClient> {
+    let pg_client = PgClient::new(config).map_err(|e| {
+        Error::external("postgres", "Failed to create database client").with_source(e)
+    })?;
+
+    pg_client.run_pending_migrations().await.map_err(|e| {
+        Error::external("postgres", "Failed to apply database migrations").with_source(e)
+    })?;
+
+    Ok(pg_client)
+}
+
+/// Connects to the NATS server.
+async fn connect_nats(config: NatsConfig) -> Result<NatsClient> {
+    NatsClient::connect(config)
+        .await
+        .map_err(|e| Error::external("NATS", "Failed to connect to NATS").with_source(e))
 }
 
 macro_rules! impl_di {

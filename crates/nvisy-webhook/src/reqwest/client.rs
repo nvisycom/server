@@ -13,8 +13,10 @@ use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_tracing::TracingMiddleware;
 use sha2::Sha256;
 
-use super::{Error, ReqwestConfig, TRACING_TARGET};
-use crate::{ServiceHealth, WebhookProvider, WebhookRequest, WebhookResponse, WebhookService};
+use super::error::Error;
+use super::{ReqwestConfig, TRACING_TARGET};
+use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
+use crate::{ServiceHealth, WebhookService};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -69,7 +71,7 @@ impl ReqwestClient {
             .expect("failed to create HTTP client");
 
         let retry_policy = ExponentialBackoff::builder()
-            .retry_bounds(config.min_retry_interval(), config.max_retry_interval())
+            .retry_bounds(config.min_retry_interval, config.max_retry_interval)
             .build_with_max_retries(config.max_retries);
 
         let http = ClientBuilder::new(base_client)
@@ -95,7 +97,7 @@ impl ReqwestClient {
     /// Signs a payload using HMAC-SHA256.
     ///
     /// The signature is computed over the raw bytes: `{timestamp}.{payload}`.
-    pub fn sign_payload(secret: &str, timestamp: i64, payload: &[u8]) -> String {
+    pub(crate) fn sign_payload(secret: &str, timestamp: i64, payload: &[u8]) -> String {
         let timestamp_bytes = timestamp.to_string();
 
         let mut mac =

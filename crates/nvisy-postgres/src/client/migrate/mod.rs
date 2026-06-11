@@ -22,4 +22,4 @@ mod run_utility;
 pub use client_ext::PgClientMigrationExt;
 pub use migrate_result::{MigrationResult, MigrationStatus};
 pub use run_migration::run_pending_migrations;
-pub use run_utility::{get_applied_migrations, get_migration_status, verify_schema_integrity};
+pub use run_utility::{get_migration_status, verify_schema_integrity};

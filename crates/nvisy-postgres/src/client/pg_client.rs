@@ -88,9 +88,9 @@ impl PgClient {
 
         let pool = Pool::builder(manager)
             .max_size(config.postgres_max_connections as usize)
-            .wait_timeout(config.connection_timeout())
-            .create_timeout(config.connection_timeout())
-            .recycle_timeout(config.idle_timeout())
+            .wait_timeout(config.postgres_connection_timeout)
+            .create_timeout(config.postgres_connection_timeout)
+            .recycle_timeout(config.postgres_idle_timeout)
             .runtime(Runtime::Tokio1)
             .post_create(Hook::sync_fn(custom_hooks::post_create))
             .pre_recycle(Hook::sync_fn(custom_hooks::pre_recycle))
@@ -160,8 +160,8 @@ impl PgClient {
         tracing::info!(
             target: TRACING_TARGET_CONNECTION,
             max_connections = this.inner.config.postgres_max_connections,
-            connection_timeout_secs = this.inner.config.postgres_connection_timeout,
-            idle_timeout_secs = this.inner.config.postgres_idle_timeout,
+            connection_timeout = ?this.inner.config.postgres_connection_timeout,
+            idle_timeout = ?this.inner.config.postgres_idle_timeout,
             "Database client initialized successfully"
         );
 
@@ -247,13 +247,10 @@ impl fmt::Debug for PgClient {
             .field("pool_available", &pool_status.available)
             .field("pool_waiting", &pool_status.waiting)
             .field(
-                "connection_timeout_secs",
+                "connection_timeout",
                 &self.inner.config.postgres_connection_timeout,
             )
-            .field(
-                "idle_timeout_secs",
-                &self.inner.config.postgres_idle_timeout,
-            )
+            .field("idle_timeout", &self.inner.config.postgres_idle_timeout)
             .finish()
     }
 }

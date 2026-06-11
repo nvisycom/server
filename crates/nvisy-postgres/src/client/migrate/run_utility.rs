@@ -76,14 +76,38 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<(
 }
 
 /// Gets list of applied migration versions from the database.
+///
+/// On a fresh database the `__diesel_schema_migrations` table does not exist
+/// yet; that case is reported as zero applied migrations rather than an error.
 #[tracing::instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
-pub async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<String>> {
+async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<String>> {
     use diesel::sql_query;
 
     tracing::debug!(
         target: TRACING_TARGET_MIGRATION,
         "Retrieving applied migrations",
     );
+
+    #[derive(diesel::QueryableByName)]
+    struct TableExists {
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        exists: bool,
+    }
+
+    let migration_table_exists: bool = sql_query(
+        "SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_name = '__diesel_schema_migrations'
+         ) as exists",
+    )
+    .get_result::<TableExists>(conn)
+    .await
+    .map_err(|e| PgError::Migration(format!("Failed to check migration table: {}", e).into()))?
+    .exists;
+
+    if !migration_table_exists {
+        return Ok(Vec::new());
+    }
 
     #[derive(diesel::QueryableByName)]
     struct MigrationVersion {

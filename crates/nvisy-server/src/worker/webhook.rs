@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{EventSubscriber, WebhookStream};
-use nvisy_webhook::{WebhookRequest, WebhookService};
+use nvisy_webhook::WebhookService;
+use nvisy_webhook::provider::WebhookRequest;
 use tokio_util::sync::CancellationToken;
 
 use crate::Result;

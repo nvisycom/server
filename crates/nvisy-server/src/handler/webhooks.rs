@@ -12,7 +12,8 @@ use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::{PgClient, PgConn};
-use nvisy_webhook::{WebhookRequest, WebhookService};
+use nvisy_webhook::WebhookService;
+use nvisy_webhook::provider::WebhookRequest;
 use url::Url;
 use uuid::Uuid;
 

@@ -118,18 +118,46 @@ mod test {
     use aide::axum::ApiRouter;
     use axum::Router;
     use axum_test::TestServer;
+    use nvisy_nats::NatsConfig;
+    use nvisy_postgres::PgConfig;
     use nvisy_webhook::reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
-    use crate::service::{ServiceConfig, ServiceState};
+    use crate::service::{MasterKeyConfig, ServiceState, SessionKeysConfig};
+
+    /// Builds the service sub-configs from the environment for integration tests.
+    fn configs_from_env()
+    -> anyhow::Result<(PgConfig, NatsConfig, SessionKeysConfig, MasterKeyConfig)> {
+        dotenvy::dotenv().ok();
+        let var = std::env::var;
+
+        let mut postgres = PgConfig::new(var("POSTGRES_URL")?);
+        if let Ok(v) = var("POSTGRES_MAX_CONNECTIONS") {
+            postgres = postgres.with_max_connections(v.parse()?);
+        }
+
+        let nats = NatsConfig::new(var("NATS_URL")?, var("NATS_TOKEN").unwrap_or_default());
+
+        let session = SessionKeysConfig {
+            decoding_key: var("AUTH_PUBLIC_PEM_FILEPATH")?.into(),
+            encoding_key: var("AUTH_PRIVATE_PEM_FILEPATH")?.into(),
+        };
+
+        let master_key = MasterKeyConfig {
+            key_path: var("ENCRYPTION_KEY_FILEPATH")?.into(),
+        };
+
+        Ok((postgres, nats, session, master_key))
+    }
 
     /// Returns a new [`TestServer`] with the given router.
     pub async fn create_test_server_with_router(
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
-        let config = ServiceConfig::from_env()?;
+        let (postgres, nats, session, master_key) = configs_from_env()?;
         let webhook_service = ReqwestClient::default().into_service();
-        let state = ServiceState::from_config(config, webhook_service).await?;
+        let state =
+            ServiceState::from_config(postgres, nats, session, master_key, webhook_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }
