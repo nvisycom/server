@@ -9,7 +9,7 @@ use std::time::Duration;
 use clap::Args;
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
-use nvisy_server::service::{MasterKeyConfig, SessionKeysConfig};
+use nvisy_server::service::{HealthConfig, MasterKeyConfig, SessionKeysConfig};
 
 /// Aggregated external-service arguments (database, NATS, auth keys).
 #[derive(Debug, Clone, Args)]
@@ -29,6 +29,10 @@ pub struct ServiceArgs {
     /// Master encryption key path.
     #[clap(flatten)]
     pub master_key: MasterKeyArgs,
+
+    /// Health monitoring configuration.
+    #[clap(flatten)]
+    pub health: HealthArgs,
 }
 
 /// Postgres connection arguments.
@@ -164,6 +168,27 @@ impl From<MasterKeyArgs> for MasterKeyConfig {
     fn from(args: MasterKeyArgs) -> Self {
         Self {
             key_path: args.key_path,
+        }
+    }
+}
+
+/// Health monitoring arguments.
+#[derive(Debug, Clone, Args)]
+pub struct HealthArgs {
+    /// How long cached health results stay valid (e.g. `30s`).
+    #[arg(
+        long = "health-cache-duration",
+        env = "HEALTH_CACHE_DURATION",
+        default_value = "30s",
+        value_parser = humantime::parse_duration,
+    )]
+    pub cache_duration: Duration,
+}
+
+impl From<HealthArgs> for HealthConfig {
+    fn from(args: HealthArgs) -> Self {
+        Self {
+            cache_duration: args.cache_duration,
         }
     }
 }

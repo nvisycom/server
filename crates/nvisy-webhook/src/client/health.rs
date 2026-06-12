@@ -1,34 +1,18 @@
-//! Health check result for webhook providers.
+//! [`HealthCheck`] implementation for [`WebhookService`].
 
-use std::time::Duration;
+use nvisy_core::health::{ComponentHealth, HealthCheck};
 
-/// Health check result from a webhook provider.
-#[derive(Debug, Clone)]
-pub struct ServiceHealth {
-    healthy: bool,
-    /// How long the health check took.
-    pub latency: Duration,
-}
+use super::WebhookService;
 
-impl ServiceHealth {
-    /// Creates a healthy result.
-    pub fn healthy(latency: Duration) -> Self {
-        Self {
-            healthy: true,
-            latency,
-        }
-    }
+/// Component name reported for the webhook health check.
+const COMPONENT_NAME: &str = "webhook";
 
-    /// Creates an unhealthy result.
-    pub fn unhealthy(latency: Duration) -> Self {
-        Self {
-            healthy: false,
-            latency,
-        }
-    }
-
-    /// Returns whether the service is operational.
-    pub fn is_healthy(&self) -> bool {
-        self.healthy
+#[async_trait::async_trait]
+impl HealthCheck for WebhookService {
+    /// Probes the webhook provider via its health check.
+    async fn check_health(&self) -> ComponentHealth {
+        self.health_check()
+            .await
+            .unwrap_or_else(|_| ComponentHealth::unhealthy(COMPONENT_NAME))
     }
 }

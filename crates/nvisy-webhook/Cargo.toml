@@ -27,43 +27,50 @@ default = []
 # Reqwest-based HTTP client for webhook delivery
 reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:reqwest-tracing", "dep:hmac", "dep:sha2", "dep:hex"]
 
-# JSON Schema support: enables JsonSchema derives on Postgres types
-# This allows Postgres types to be used directly in API documentation without
+# JSON Schema support: enables JsonSchema derives on webhook types
+# This allows webhook types to be used directly in API documentation without
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
 [dependencies]
+# Internal crates
+nvisy-core = { workspace = true }
+
 # Async runtime
 async-trait = { workspace = true }
 
-# Macros and utilities
-thiserror = { workspace = true }
-strum = { workspace = true, features = [] }
-
-# Observability
-tracing = { workspace = true }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = [] }
-schemars = { workspace = true, optional = true }
-uuid = { workspace = true, features = ["serde", "v4", "v7"] }
-jiff = { workspace = true, features = ["serde"] }
-url = { workspace = true, features = ["serde"] }
-
-# Commonly used datatypes
-hipstr = { workspace = true, features = [] }
-
-# Reqwest feature dependencies (optional)
+# HTTP client & middleware
 reqwest = { workspace = true, features = ["json"], optional = true }
 reqwest-middleware = { workspace = true, optional = true }
 reqwest-retry = { workspace = true, optional = true }
 reqwest-tracing = { workspace = true, optional = true }
 
-# Security
+# Observability
+tracing = { workspace = true }
+
+# Encryption & Cryptography
 hmac = { workspace = true, optional = true, features = [] }
 sha2 = { workspace = true, optional = true, features = [] }
+
+# Encoding
 hex = { workspace = true, optional = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+schemars = { workspace = true, optional = true }
+
+# Derive macros & utilities
+thiserror = { workspace = true }
+strum = { workspace = true, features = [] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+jiff = { workspace = true, features = ["serde"] }
+hipstr = { workspace = true, features = [] }
+
+# Domain datatypes & data structures
+url = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

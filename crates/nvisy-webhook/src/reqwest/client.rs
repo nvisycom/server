@@ -2,10 +2,10 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
 
 use hmac::{Hmac, KeyInit, Mac};
 use jiff::Timestamp;
+use nvisy_core::health::ComponentHealth;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
@@ -15,8 +15,8 @@ use sha2::Sha256;
 
 use super::error::Error;
 use super::{ReqwestConfig, TRACING_TARGET};
+use crate::WebhookService;
 use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
-use crate::{ServiceHealth, WebhookService};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -166,8 +166,8 @@ impl WebhookProvider for ReqwestClient {
         Ok(response)
     }
 
-    async fn health_check(&self) -> crate::Result<ServiceHealth> {
-        Ok(ServiceHealth::healthy(Duration::ZERO))
+    async fn health_check(&self) -> crate::Result<ComponentHealth> {
+        Ok(ComponentHealth::healthy("webhook"))
     }
 }
 
@@ -208,6 +208,6 @@ mod tests {
     async fn test_health_check() {
         let client = ReqwestClient::default();
         let health = client.health_check().await.unwrap();
-        assert!(health.is_healthy());
+        assert!(health.status.is_healthy());
     }
 }

@@ -1,15 +1,18 @@
 //! Application state and dependency injection.
 
-mod cache;
 pub mod crypto;
+mod health;
 mod security;
 mod webhook;
 
+use std::sync::Arc;
+
+use nvisy_core::health::HealthCheck;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
-pub use crate::service::cache::HealthCache;
+pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::security::{
     MasterKey, MasterKeyConfig, PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig,
     UserAgentParser,
@@ -51,23 +54,30 @@ impl ServiceState {
         nats_config: NatsConfig,
         session_config: SessionKeysConfig,
         master_key_config: MasterKeyConfig,
+        health_config: HealthConfig,
         webhook_service: WebhookService,
     ) -> Result<Self> {
-        let postgres = connect_postgres(postgres_config).await?;
-        let nats = connect_nats(nats_config).await?;
+        let postgres_client = connect_postgres(postgres_config).await?;
+        let nats_client = connect_nats(nats_config).await?;
 
         let master_key = MasterKey::from_config(&master_key_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
-        let webhook_emitter = WebhookEmitter::new(postgres.clone(), nats.clone());
+        let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
+
+        let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
+            Arc::new(postgres_client.clone()),
+            Arc::new(nats_client.clone()),
+            Arc::new(webhook_service.clone()),
+        ];
 
         let service_state = Self {
-            postgres,
-            nats,
+            postgres: postgres_client,
+            nats: nats_client,
             webhook: webhook_service,
 
             master_key,
 
-            health_cache: HealthCache::new(),
+            health_cache: HealthCache::new(&health_config, health_checkers),
             password_hasher: PasswordHasher::new(),
             password_strength: PasswordStrength::new(),
             session_keys,
@@ -110,17 +120,19 @@ macro_rules! impl_di {
 }
 
 // External services:
-impl_di!(postgres: PgClient);
-impl_di!(nats: NatsClient);
-impl_di!(webhook: WebhookService);
-
-// Security services:
-impl_di!(master_key: MasterKey);
+impl_di!(
+    postgres: PgClient,
+    nats: NatsClient,
+    webhook: WebhookService
+);
 
 // Internal services:
-impl_di!(health_cache: HealthCache);
-impl_di!(password_hasher: PasswordHasher);
-impl_di!(password_strength: PasswordStrength);
-impl_di!(session_keys: SessionKeys);
-impl_di!(user_agent_parser: UserAgentParser);
-impl_di!(webhook_emitter: WebhookEmitter);
+impl_di!(
+    master_key: MasterKey,
+    health_cache: HealthCache,
+    password_hasher: PasswordHasher,
+    password_strength: PasswordStrength,
+    session_keys: SessionKeys,
+    user_agent_parser: UserAgentParser,
+    webhook_emitter: WebhookEmitter
+);
