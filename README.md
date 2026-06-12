@@ -5,6 +5,12 @@
 Open-source multimodal redaction API. Detect and redact PII and sensitive data
 across documents, images, and audio.
 
+> [!WARNING]
+> **Active development: API not stable.** This project is under active
+> development. Public APIs, configuration shapes, on-disk formats, and
+> wire protocols may change without notice between releases. Pin a
+> specific commit if you depend on this in production.
+
 ## Features
 
 - **Multimodal Redaction:** Detect and remove sensitive data across PDFs, images, and audio
