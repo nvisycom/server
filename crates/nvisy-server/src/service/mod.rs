@@ -17,7 +17,7 @@ pub use crate::service::security::{
     MasterKey, MasterKeyConfig, PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig,
     UserAgentParser,
 };
-pub use crate::service::webhook::WebhookEmitter;
+pub use crate::service::webhook::{WebhookEmitter, WebhookWorker};
 use crate::{Error, Result};
 
 /// Application state.

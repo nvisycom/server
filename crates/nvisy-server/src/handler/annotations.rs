@@ -16,7 +16,7 @@ use crate::handler::request::{
     AnnotationPathParams, CreateAnnotation, CursorPagination, FilePathParams, UpdateAnnotation,
 };
 use crate::handler::response::{Annotation, AnnotationsPage, ErrorResponse};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for annotation operations.
@@ -29,22 +29,14 @@ async fn find_annotation(
 ) -> Result<WorkspaceFileAnnotation> {
     conn.find_workspace_file_annotation_by_id(annotation_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Annotation not found")
-                .with_resource("annotation")
-        })
+        .ok_or_else(|| Error::not_found("annotation"))
 }
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<WorkspaceFile> {
     conn.find_workspace_file_by_id(file_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("File not found")
-                .with_resource("file")
-        })
+        .ok_or_else(|| Error::not_found("file"))
 }
 
 /// Creates a new annotation on a file.

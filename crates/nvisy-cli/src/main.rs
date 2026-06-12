@@ -10,8 +10,7 @@ use std::process;
 use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::*;
-use nvisy_server::service::ServiceState;
-use nvisy_server::worker::WebhookWorker;
+use nvisy_server::service::{ServiceState, WebhookWorker};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{Cli, MiddlewareConfig};

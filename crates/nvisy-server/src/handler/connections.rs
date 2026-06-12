@@ -28,7 +28,7 @@ use crate::handler::request::{
     WorkspacePathParams,
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::crypto::encrypt_json;
 use crate::service::{MasterKey, ServiceState};
 
@@ -341,11 +341,7 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 async fn find_connection(conn: &mut PgConn, connection_id: Uuid) -> Result<WorkspaceConnection> {
     conn.find_workspace_connection_by_id(connection_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Connection not found")
-                .with_resource("connection")
-        })
+        .ok_or_else(|| Error::not_found("connection"))
 }
 
 /// Returns routes for workspace connection management.
