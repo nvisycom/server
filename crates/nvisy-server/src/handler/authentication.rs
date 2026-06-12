@@ -75,7 +75,7 @@ async fn login(
     };
 
     // Check for login failures and return appropriate errors
-    match &account {
+    let account = match account {
         None => {
             tracing::warn!(target: TRACING_TARGET, reason = "account_not_found", "Login failed");
             return Err(ErrorKind::Unauthorized
@@ -100,10 +100,9 @@ async fn login(
                 .with_resource("account")
                 .with_message("Account has been deleted"));
         }
-        _ => {}
-    }
+        Some(acc) => acc,
+    };
 
-    let account = account.unwrap(); // Safe because we verified above
     let expired_at = Timestamp::now() + Span::new().hours(90 * 24);
     let new_token = NewAccountApiToken {
         account_id: account.id,

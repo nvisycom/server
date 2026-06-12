@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::extract::{AuthProvider, AuthState, Json, Multipart, Path, Permission, Query};
 use crate::handler::request::{ContextPathParams, CursorPagination, WorkspacePathParams};
 use crate::handler::response::{Context, ContextsPage, ErrorResponse};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::crypto::encrypt;
 use crate::service::{MasterKey, ServiceState};
@@ -461,11 +461,7 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
 async fn find_context(conn: &mut PgConn, context_id: Uuid) -> Result<WorkspaceContext> {
     conn.find_workspace_context_by_id(context_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Context not found")
-                .with_resource("context")
-        })
+        .ok_or_else(|| Error::not_found("context"))
 }
 
 /// Returns routes for workspace context management.

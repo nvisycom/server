@@ -12,7 +12,7 @@ use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
@@ -30,7 +30,7 @@ use crate::handler::request::{
     CursorPagination, FilePathParams, ListFiles, UpdateFile, WorkspacePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{ServiceState, WebhookEmitter};
 
@@ -44,11 +44,7 @@ type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<FileModel> {
     conn.find_workspace_file_by_id(file_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("File not found")
-                .with_resource("file")
-        })
+        .ok_or_else(|| Error::not_found("file"))
 }
 
 /// Lists files in a workspace with cursor-based pagination.
@@ -476,15 +472,22 @@ async fn download_file(
             ErrorKind::NotFound.with_message("File content not found")
         })?;
 
-    // Set up response headers
-    let mut headers = HeaderMap::new();
+    // Set up response headers.
+    //
+    // The display name is user-controlled, so strip characters that are
+    // invalid in a quoted header value to avoid header injection and a
+    // failed parse; fall back to a generic disposition if it still fails.
+    let safe_name: String = file
+        .display_name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '"' && *c != '\\')
+        .collect();
+    let disposition = format!("attachment; filename=\"{safe_name}\"")
+        .parse()
+        .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
 
-    headers.insert(
-        "content-disposition",
-        format!("attachment; filename=\"{}\"", file.display_name)
-            .parse()
-            .unwrap(),
-    );
+    let mut headers = HeaderMap::new();
+    headers.insert("content-disposition", disposition);
     headers.insert(
         "content-length",
         get_result.size().to_string().parse().unwrap(),

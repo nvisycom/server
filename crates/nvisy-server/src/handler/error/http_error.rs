@@ -40,6 +40,13 @@ impl Error<'static> {
             suggestion: None,
         }
     }
+
+    /// Creates a [`NotFound`](ErrorKind::NotFound) error for the given resource.
+    pub fn not_found(resource: &'static str) -> Self {
+        Self::new(ErrorKind::NotFound)
+            .with_message(format!("{resource} not found"))
+            .with_resource(resource)
+    }
 }
 
 impl<'a> Error<'a> {

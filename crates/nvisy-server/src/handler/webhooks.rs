@@ -25,7 +25,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
 };
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for workspace webhook operations.
@@ -340,11 +340,7 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
 async fn find_webhook(conn: &mut PgConn, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
     conn.find_workspace_webhook_by_id(webhook_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Webhook not found")
-                .with_resource("webhook")
-        })
+        .ok_or_else(|| Error::not_found("webhook"))
 }
 
 /// Returns routes for workspace webhook management.

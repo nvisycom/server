@@ -17,7 +17,7 @@ use uuid::Uuid;
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse};
 use crate::extract::{AuthState, Json, Path, ValidateJson};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
 
 /// Tracing target for account operations.
@@ -183,11 +183,7 @@ async fn delete_own_account(
     let mut conn = pg_client.get_connection().await?;
     conn.delete_account(auth_claims.account_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Account not found.")
-                .with_resource("account")
-        })?;
+        .ok_or_else(|| Error::not_found("account"))?;
 
     tracing::info!(target: TRACING_TARGET, "Account deleted");
 
@@ -211,11 +207,9 @@ fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str)
 
 /// Finds an account by ID or returns NotFound error.
 async fn find_account(conn: &mut PgConn, account_id: Uuid) -> Result<AccountModel> {
-    conn.find_account_by_id(account_id).await?.ok_or_else(|| {
-        ErrorKind::NotFound
-            .with_message("Account not found")
-            .with_resource("account")
-    })
+    conn.find_account_by_id(account_id)
+        .await?
+        .ok_or_else(|| Error::not_found("account"))
 }
 
 /// Returns a [`Router`] with all related routes.
