@@ -12,10 +12,10 @@ use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
+pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::security::{
-    MasterKey, MasterKeyConfig, PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig,
-    UserAgentParser,
+    PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
 pub use crate::service::webhook::{WebhookEmitter, WebhookWorker};
 use crate::{Error, Result};
@@ -34,7 +34,7 @@ pub struct ServiceState {
     pub webhook: WebhookService,
 
     // Security services:
-    pub master_key: MasterKey,
+    pub crypto: CryptoService,
 
     // Internal services:
     pub health_cache: HealthCache,
@@ -53,14 +53,14 @@ impl ServiceState {
         postgres_config: PgConfig,
         nats_config: NatsConfig,
         session_config: SessionKeysConfig,
-        master_key_config: MasterKeyConfig,
+        crypto_config: CryptoConfig,
         health_config: HealthConfig,
         webhook_service: WebhookService,
     ) -> Result<Self> {
         let postgres_client = connect_postgres(postgres_config).await?;
         let nats_client = connect_nats(nats_config).await?;
 
-        let master_key = MasterKey::from_config(&master_key_config).await?;
+        let crypto = CryptoService::from_config(&crypto_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
         let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
 
@@ -75,7 +75,7 @@ impl ServiceState {
             nats: nats_client,
             webhook: webhook_service,
 
-            master_key,
+            crypto,
 
             health_cache: HealthCache::new(&health_config, health_checkers),
             password_hasher: PasswordHasher::new(),
@@ -128,7 +128,7 @@ impl_di!(
 
 // Internal services:
 impl_di!(
-    master_key: MasterKey,
+    crypto: CryptoService,
     health_cache: HealthCache,
     password_hasher: PasswordHasher,
     password_strength: PasswordStrength,

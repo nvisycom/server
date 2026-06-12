@@ -169,7 +169,7 @@ impl Cli {
             service.postgres.into(),
             service.nats.into(),
             service.session_keys.into(),
-            service.master_key.into(),
+            service.crypto.into(),
             service.health.into(),
             webhook,
         )

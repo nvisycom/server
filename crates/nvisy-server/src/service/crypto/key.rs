@@ -3,6 +3,7 @@
 use std::fmt;
 
 use hkdf::Hkdf;
+#[cfg(test)]
 use rand::Rng;
 use sha2::Sha256;
 use uuid::Uuid;
@@ -38,6 +39,7 @@ impl EncryptionKey {
     }
 
     /// Generates a new random encryption key using a cryptographically secure RNG.
+    #[cfg(test)]
     #[must_use]
     pub fn generate() -> Self {
         let mut bytes = [0u8; KEY_SIZE];
@@ -50,13 +52,6 @@ impl EncryptionKey {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; KEY_SIZE] {
         &self.bytes
-    }
-
-    /// Consumes the key and returns the raw bytes.
-    #[inline]
-    #[must_use]
-    pub fn into_bytes(self) -> [u8; KEY_SIZE] {
-        self.bytes
     }
 
     /// Derives a workspace-specific encryption key using HKDF-SHA256.

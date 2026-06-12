@@ -6,7 +6,9 @@
 mod cipher;
 mod error;
 mod key;
+mod service;
 
-pub use cipher::{decrypt, decrypt_json, encrypt, encrypt_json};
+pub(crate) use cipher::{decrypt, decrypt_json, encrypt, encrypt_json};
 pub use error::{CryptoError, CryptoResult};
-pub use key::EncryptionKey;
+pub(crate) use key::EncryptionKey;
+pub use service::{CryptoConfig, CryptoService};

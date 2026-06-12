@@ -22,8 +22,7 @@ use crate::handler::request::{ContextPathParams, CursorPagination, WorkspacePath
 use crate::handler::response::{Context, ContextsPage, ErrorResponse};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
-use crate::service::crypto::encrypt;
-use crate::service::{MasterKey, ServiceState};
+use crate::service::{CryptoService, ServiceState};
 
 /// Tracing target for workspace context operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::contexts";
@@ -44,7 +43,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::contexts";
 async fn create_context(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
-    State(master_key): State<MasterKey>,
+    State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     Multipart(mut multipart): Multipart,
@@ -119,14 +118,8 @@ async fn create_context(
     let content = file_content
         .ok_or_else(|| ErrorKind::BadRequest.with_message("Missing required 'file' field"))?;
 
-    // Encrypt the content with workspace-derived key
-    let workspace_key = master_key.derive_workspace_key(path_params.workspace_id);
-    let encrypted_content =
-        encrypt(&workspace_key, &content).map_err(|e: crate::service::crypto::CryptoError| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to encrypt context content")
-                .with_context(e.to_string())
-        })?;
+    // Encrypt the content with the workspace-derived key
+    let encrypted_content = crypto.encrypt(path_params.workspace_id, &content)?;
 
     // Generate the object store key
     let context_id = Uuid::now_v7();
@@ -288,7 +281,7 @@ fn read_context_docs(op: TransformOperation) -> TransformOperation {
 async fn update_context(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
-    State(master_key): State<MasterKey>,
+    State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ContextPathParams>,
     Multipart(mut multipart): Multipart,
@@ -357,14 +350,7 @@ async fn update_context(
 
     // If file content was provided, encrypt and store new content
     if let Some(content) = file_content {
-        let workspace_key = master_key.derive_workspace_key(existing.workspace_id);
-        let encrypted_content = encrypt(&workspace_key, &content).map_err(
-            |e: crate::service::crypto::CryptoError| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to encrypt context content")
-                    .with_context(e.to_string())
-            },
-        )?;
+        let encrypted_content = crypto.encrypt(existing.workspace_id, &content)?;
 
         let context_key = ContextKey::new(existing.workspace_id, existing.id);
         let context_store = nats_client

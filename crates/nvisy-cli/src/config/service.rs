@@ -9,7 +9,7 @@ use std::time::Duration;
 use clap::Args;
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
-use nvisy_server::service::{HealthConfig, MasterKeyConfig, SessionKeysConfig};
+use nvisy_server::service::{CryptoConfig, HealthConfig, SessionKeysConfig};
 
 /// Aggregated external-service arguments (database, NATS, auth keys).
 #[derive(Debug, Clone, Args)]
@@ -28,7 +28,7 @@ pub struct ServiceArgs {
 
     /// Master encryption key path.
     #[clap(flatten)]
-    pub master_key: MasterKeyArgs,
+    pub crypto: CryptoArgs,
 
     /// Health monitoring configuration.
     #[clap(flatten)]
@@ -152,9 +152,9 @@ impl From<SessionKeysArgs> for SessionKeysConfig {
     }
 }
 
-/// Master encryption key path arguments.
+/// Encryption key path arguments.
 #[derive(Debug, Clone, Args)]
-pub struct MasterKeyArgs {
+pub struct CryptoArgs {
     /// File path to the 32-byte master encryption key.
     #[arg(
         long,
@@ -164,8 +164,8 @@ pub struct MasterKeyArgs {
     pub key_path: PathBuf,
 }
 
-impl From<MasterKeyArgs> for MasterKeyConfig {
-    fn from(args: MasterKeyArgs) -> Self {
+impl From<CryptoArgs> for CryptoConfig {
+    fn from(args: CryptoArgs) -> Self {
         Self {
             key_path: args.key_path,
         }

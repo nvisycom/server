@@ -1,5 +1,6 @@
 //! [`Error`], [`ErrorKind`] and [`Result`].
 
+mod crypto_error;
 mod http_error;
 mod nats_error;
 mod pg_account;
