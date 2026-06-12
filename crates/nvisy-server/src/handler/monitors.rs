@@ -8,9 +8,10 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_core::health::HealthStatus;
 
 use super::request::CheckHealth;
-use super::response::{Health, ServiceStatus};
+use super::response::Health;
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
 use crate::service::{HealthCache, ServiceState};
@@ -42,7 +43,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
     )
 )]
 async fn health_status(
-    State(service_state): State<ServiceState>,
     State(health_service): State<HealthCache>,
     auth_state: Option<AuthState>,
     version: Version,
@@ -84,12 +84,12 @@ async fn health_status(
             target: TRACING_TARGET,
             "Performing real-time health check"
         );
-        health_service.check(&service_state).await
+        health_service.check().await
     };
 
     let status_code = match health.status {
-        ServiceStatus::Healthy | ServiceStatus::Degraded => StatusCode::OK,
-        ServiceStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
+        HealthStatus::Healthy | HealthStatus::Degraded => StatusCode::OK,
+        HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
     };
 
     tracing::info!(

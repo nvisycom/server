@@ -1,7 +1,6 @@
-//! Webhook service wrapper and health types.
+//! Webhook service wrapper.
 
 mod health;
 mod service;
 
-pub use health::ServiceHealth;
 pub use service::WebhookService;

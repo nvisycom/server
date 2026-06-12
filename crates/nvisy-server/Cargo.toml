@@ -28,6 +28,7 @@ default = []
 
 [dependencies]
 # Internal crates
+nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
@@ -39,7 +40,7 @@ tokio-stream = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
-# HTTP & Web server
+# HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
 axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
@@ -54,41 +55,45 @@ schemars = { workspace = true, features = [] }
 tracing = { workspace = true, features = [] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
-# Authentication & Security
+# Authentication
 jsonwebtoken = { workspace = true, features = [] }
 argon2 = { workspace = true, features = [] }
-rand = { workspace = true, features = [] }
-base64 = { workspace = true, features = [] }
+zxcvbn = { workspace = true, features = [] }
 sha2 = { workspace = true, features = [] }
 
-# Encryption
+# Encryption & Cryptography
 chacha20poly1305 = { workspace = true, features = [] }
 hkdf = { workspace = true, features = [] }
 
-# (De)serialization and Validation
+# Encoding
+base64 = { workspace = true, features = [] }
+
+# Randomness
+rand = { workspace = true, features = [] }
+
+# (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 validator = { workspace = true, features = [] }
-
-# Text processing
-regex = { workspace = true, features = [] }
-woothee = { workspace = true, features = [] }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
 strum = { workspace = true, features = ["derive"] }
+anyhow = { workspace = true, features = [] }
 
-# Data types
+# Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
-zxcvbn = { workspace = true, features = [] }
+
+# Domain datatypes & data structures
 url = { workspace = true, features = [] }
 
-# Error handling
-anyhow = { workspace = true, features = [] }
+# Text processing
+regex = { workspace = true, features = [] }
+woothee = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates

@@ -2462,17 +2462,24 @@ dependencies = [
 [[package]]
 name = "nvisy-core"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "schemars",
+ "serde",
+]
 
 [[package]]
 name = "nvisy-nats"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "async-trait",
  "base64",
  "derive_more",
  "futures",
  "hex",
  "jiff",
+ "nvisy-core",
  "pin-project-lite",
  "schemars",
  "serde",
@@ -2504,6 +2511,7 @@ dependencies = [
 name = "nvisy-postgres"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64",
  "bigdecimal",
  "deadpool",
@@ -2516,6 +2524,7 @@ dependencies = [
  "ipnet",
  "jiff",
  "jiff-diesel",
+ "nvisy-core",
  "pgtrgm",
  "pgvector",
  "schemars",
@@ -2550,6 +2559,7 @@ dependencies = [
  "ipnet",
  "jiff",
  "jsonwebtoken",
+ "nvisy-core",
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-webhook",
@@ -2585,6 +2595,7 @@ dependencies = [
  "hipstr",
  "hmac",
  "jiff",
+ "nvisy-core",
  "reqwest 0.13.4",
  "reqwest-middleware",
  "reqwest-retry",

@@ -32,11 +32,15 @@ default = []
 schema = ["dep:schemars"]
 
 [dependencies]
+# Internal crates
+nvisy-core = { workspace = true }
+
 # Async runtime
 tokio = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
+async-trait = { workspace = true }
 
-# ORM & Database
+# Relational database (Postgres)
 diesel = { workspace = true, features = ["postgres", "uuid", "ipnet-address", "serde_json", "numeric", "64-column-tables"] }
 diesel_migrations = { workspace = true, features = ["postgres"] }
 diesel-async = { workspace = true, features = ["postgres", "pool", "deadpool", "async-connection-wrapper"] }
@@ -51,19 +55,19 @@ tracing = { workspace = true, features = [] }
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
+schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 derive_more = { workspace = true, features = ["deref", "deref_mut"] }
 
-# Data types
+# Encoding
+base64 = { workspace = true, features = [] }
+
+# Primitive datatypes
 jiff = { workspace = true, features = ["serde"] }
 jiff-diesel = { workspace = true, features = ["postgres"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
-base64 = { workspace = true, features = [] }
-
-# OpenAPI documentation (optional)
-schemars = { workspace = true, features = [], optional = true }

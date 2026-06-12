@@ -1,5 +1,6 @@
 //! NATS client connection management and configuration.
 
+mod health;
 mod nats_client;
 mod nats_config;
 

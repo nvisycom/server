@@ -10,7 +10,7 @@ pub mod provider;
 #[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
 pub mod reqwest;
 
-pub use client::{ServiceHealth, WebhookService};
+pub use client::WebhookService;
 pub use error::{BoxedError, Error, ErrorKind, Result};
 
 /// Tracing target for webhook operations.

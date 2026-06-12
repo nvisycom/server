@@ -37,24 +37,22 @@ otel = ["tracing-subscriber/env-filter"]
 dotenv = ["dep:dotenvy"]
 
 [dependencies]
-# Internal and core services.
+# Internal crates
 nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = [] }
 nvisy-webhook = { workspace = true, features = ["reqwest"] }
-
-# Service implementations.
 nvisy-server = { workspace = true, features = [] }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = { workspace = true, features = [] }
 
-# CLI and environment
+# CLI
 clap = { workspace = true, features = ["derive", "env"] }
 humantime = { workspace = true, features = [] }
 dotenvy = { workspace = true, features = [], optional = true }
 
-# HTTP server
+# HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros"] }
 axum-server = { workspace = true, features = ["tls-rustls"], optional = true }
 
@@ -65,6 +63,6 @@ tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 
-# Error handling
+# Derive macros & utilities
 anyhow = { workspace = true, features = ["backtrace"] }
 thiserror = { workspace = true, features = [] }

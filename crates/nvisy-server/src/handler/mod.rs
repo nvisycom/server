@@ -123,7 +123,7 @@ mod test {
     use nvisy_webhook::reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
-    use crate::service::{MasterKeyConfig, ServiceState, SessionKeysConfig};
+    use crate::service::{HealthConfig, MasterKeyConfig, ServiceState, SessionKeysConfig};
 
     /// Builds the service sub-configs from the environment for integration tests.
     fn configs_from_env()
@@ -156,8 +156,15 @@ mod test {
     ) -> anyhow::Result<TestServer> {
         let (postgres, nats, session, master_key) = configs_from_env()?;
         let webhook_service = ReqwestClient::default().into_service();
-        let state =
-            ServiceState::from_config(postgres, nats, session, master_key, webhook_service).await?;
+        let state = ServiceState::from_config(
+            postgres,
+            nats,
+            session,
+            master_key,
+            HealthConfig::default(),
+            webhook_service,
+        )
+        .await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }

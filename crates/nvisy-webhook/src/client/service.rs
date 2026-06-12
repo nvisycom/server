@@ -3,7 +3,8 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::ServiceHealth;
+use nvisy_core::health::ComponentHealth;
+
 use crate::Result;
 use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
 
@@ -38,7 +39,7 @@ impl WebhookService {
     }
 
     /// Performs a health check on the underlying webhook provider.
-    pub async fn health_check(&self) -> Result<ServiceHealth> {
+    pub async fn health_check(&self) -> Result<ComponentHealth> {
         self.inner.health_check().await
     }
 }

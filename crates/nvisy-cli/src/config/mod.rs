@@ -170,6 +170,7 @@ impl Cli {
             service.nats.into(),
             service.session_keys.into(),
             service.master_key.into(),
+            service.health.into(),
             webhook,
         )
         .await?)

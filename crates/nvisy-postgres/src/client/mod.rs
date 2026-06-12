@@ -5,6 +5,7 @@
 //! error handling, observability through tracing, and production-ready configuration.
 
 pub(crate) mod custom_hooks;
+mod health;
 pub mod migrate;
 mod pg_client;
 mod pg_config;

@@ -24,4 +24,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
+# JSON Schema support: enables JsonSchema derives on core types
+# This allows core types to be used directly in API documentation without
+# manual schema implementations, while keeping the dependency optional
+schema = ["dep:schemars"]
+
 [dependencies]
+# Async runtime
+async-trait = { workspace = true }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true, optional = true }

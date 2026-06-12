@@ -5,11 +5,11 @@ mod request;
 mod response;
 
 pub use context::WebhookContext;
+use nvisy_core::health::ComponentHealth;
 pub use request::{WebhookPayload, WebhookRequest};
 pub use response::WebhookResponse;
 
 use crate::Result;
-use crate::client::ServiceHealth;
 
 /// Core trait for webhook delivery operations.
 ///
@@ -20,5 +20,5 @@ pub trait WebhookProvider: Send + Sync {
     async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse>;
 
     /// Performs a health check on the webhook provider.
-    async fn health_check(&self) -> Result<ServiceHealth>;
+    async fn health_check(&self) -> Result<ComponentHealth>;
 }
