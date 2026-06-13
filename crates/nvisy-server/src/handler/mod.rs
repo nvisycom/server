@@ -123,11 +123,11 @@ mod test {
     use nvisy_webhook::reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
-    use crate::service::{HealthConfig, MasterKeyConfig, ServiceState, SessionKeysConfig};
+    use crate::service::{CryptoConfig, HealthConfig, ServiceState, SessionKeysConfig};
 
     /// Builds the service sub-configs from the environment for integration tests.
-    fn configs_from_env()
-    -> anyhow::Result<(PgConfig, NatsConfig, SessionKeysConfig, MasterKeyConfig)> {
+    fn configs_from_env() -> anyhow::Result<(PgConfig, NatsConfig, SessionKeysConfig, CryptoConfig)>
+    {
         dotenvy::dotenv().ok();
         let var = std::env::var;
 
@@ -143,24 +143,24 @@ mod test {
             encoding_key: var("AUTH_PRIVATE_PEM_FILEPATH")?.into(),
         };
 
-        let master_key = MasterKeyConfig {
+        let crypto = CryptoConfig {
             key_path: var("ENCRYPTION_KEY_FILEPATH")?.into(),
         };
 
-        Ok((postgres, nats, session, master_key))
+        Ok((postgres, nats, session, crypto))
     }
 
     /// Returns a new [`TestServer`] with the given router.
     pub async fn create_test_server_with_router(
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
-        let (postgres, nats, session, master_key) = configs_from_env()?;
+        let (postgres, nats, session, crypto) = configs_from_env()?;
         let webhook_service = ReqwestClient::default().into_service();
         let state = ServiceState::from_config(
             postgres,
             nats,
             session,
-            master_key,
+            crypto,
             HealthConfig::default(),
             webhook_service,
         )

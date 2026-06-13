@@ -28,9 +28,8 @@ use crate::handler::request::{
     WorkspacePathParams,
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
-use crate::handler::{Error, ErrorKind, Result};
-use crate::service::crypto::encrypt_json;
-use crate::service::{MasterKey, ServiceState};
+use crate::handler::{Error, Result};
+use crate::service::{CryptoService, ServiceState};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -48,7 +47,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
 )]
 async fn create_connection(
     State(pg_client): State<PgClient>,
-    State(master_key): State<MasterKey>,
+    State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateConnection>,
@@ -65,14 +64,7 @@ async fn create_connection(
         )
         .await?;
 
-    let workspace_key = master_key.derive_workspace_key(path_params.workspace_id);
-    let encrypted_data = encrypt_json(&workspace_key, &request.data).map_err(
-        |e: crate::service::crypto::CryptoError| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to encrypt connection data")
-                .with_context(e.to_string())
-        },
-    )?;
+    let encrypted_data = crypto.encrypt_json(path_params.workspace_id, &request.data)?;
 
     let new_connection = NewWorkspaceConnection {
         workspace_id: path_params.workspace_id,
@@ -233,7 +225,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_connection(
     State(pg_client): State<PgClient>,
-    State(master_key): State<MasterKey>,
+    State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<UpdateConnection>,
@@ -255,14 +247,7 @@ async fn update_connection(
 
     let encrypted_data = request
         .data
-        .map(|data| {
-            let workspace_key = master_key.derive_workspace_key(existing.workspace_id);
-            encrypt_json(&workspace_key, &data).map_err(|e: crate::service::crypto::CryptoError| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to encrypt connection data")
-                    .with_context(e.to_string())
-            })
-        })
+        .map(|data| crypto.encrypt_json(existing.workspace_id, &data))
         .transpose()?;
 
     let update_data = UpdateWorkspaceConnection {
