@@ -1,78 +1,78 @@
-//! Workspace context model for PostgreSQL database operations.
+//! Workspace policy model for PostgreSQL database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
-use crate::schema::workspace_contexts;
+use crate::schema::workspace_policies;
 use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
-/// Workspace context representing structured reference-data for redaction.
+/// Workspace policy representing a structured redaction governance policy.
 ///
-/// The `definition` holds a `nvisy_schema` Context (typed reference-data
-/// entries) that the redaction engine consumes.
+/// The `definition` holds a `nvisy_schema` Policy (rules, labels, fallback,
+/// retention) that the redaction engine consumes.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = workspace_contexts)]
+#[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct WorkspaceContext {
-    /// Unique context identifier.
+pub struct WorkspacePolicy {
+    /// Unique policy identifier.
     pub id: Uuid,
-    /// Reference to the workspace this context belongs to.
+    /// Reference to the workspace this policy belongs to.
     pub workspace_id: Uuid,
-    /// Reference to the account that created this context.
+    /// Reference to the account that created this policy.
     pub account_id: Uuid,
-    /// Human-readable context name.
+    /// Human-readable policy name.
     pub name: String,
-    /// Context description.
+    /// Policy description.
     pub description: Option<String>,
-    /// Semver of the context body.
+    /// Semver of the policy body.
     pub version: String,
-    /// Context body (the engine's Context type as JSON).
+    /// Policy body (the engine's Policy type as JSON).
     pub definition: JsonValue,
     /// Metadata for filtering/display.
     pub metadata: JsonValue,
-    /// Timestamp when the context was created.
+    /// Timestamp when the policy was created.
     pub created_at: Timestamp,
-    /// Timestamp when the context was last updated.
+    /// Timestamp when the policy was last updated.
     pub updated_at: Timestamp,
-    /// Timestamp when the context was soft-deleted.
+    /// Timestamp when the policy was soft-deleted.
     pub deleted_at: Option<Timestamp>,
 }
 
-/// Data for creating a new workspace context.
+/// Data for creating a new workspace policy.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = workspace_contexts)]
+#[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewWorkspaceContext {
+pub struct NewWorkspacePolicy {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
-    /// Context name.
+    /// Policy name.
     pub name: String,
-    /// Context description.
+    /// Policy description.
     pub description: Option<String>,
-    /// Semver of the context body.
+    /// Semver of the policy body.
     pub version: String,
-    /// Context body (the engine's Context type as JSON).
+    /// Policy body (the engine's Policy type as JSON).
     pub definition: JsonValue,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
 }
 
-/// Data for updating a workspace context.
+/// Data for updating a workspace policy.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = workspace_contexts)]
+#[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateWorkspaceContext {
-    /// Context name.
+pub struct UpdateWorkspacePolicy {
+    /// Policy name.
     pub name: Option<String>,
-    /// Context description.
+    /// Policy description.
     pub description: Option<Option<String>>,
-    /// Semver of the context body.
+    /// Semver of the policy body.
     pub version: Option<String>,
-    /// Context body (the engine's Context type as JSON).
+    /// Policy body (the engine's Policy type as JSON).
     pub definition: Option<JsonValue>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
@@ -80,26 +80,26 @@ pub struct UpdateWorkspaceContext {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl WorkspaceContext {
-    /// Returns whether the context is deleted.
+impl WorkspacePolicy {
+    /// Returns whether the policy is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
     }
 }
 
-impl HasCreatedAt for WorkspaceContext {
+impl HasCreatedAt for WorkspacePolicy {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
     }
 }
 
-impl HasUpdatedAt for WorkspaceContext {
+impl HasUpdatedAt for WorkspacePolicy {
     fn updated_at(&self) -> jiff::Timestamp {
         self.updated_at.into()
     }
 }
 
-impl HasDeletedAt for WorkspaceContext {
+impl HasDeletedAt for WorkspacePolicy {
     fn deleted_at(&self) -> Option<jiff::Timestamp> {
         self.deleted_at.map(Into::into)
     }
