@@ -27,6 +27,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 [dependencies]
+# Runtime crates
+nvisy-engine = { workspace = true }
+nvisy-schema = { workspace = true }
+
 # Internal crates
 nvisy-base = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = ["schema"] }
