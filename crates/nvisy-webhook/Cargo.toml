@@ -34,7 +34,7 @@ schema = ["dep:schemars"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true }
+nvisy-base = { workspace = true }
 
 # Async runtime
 async-trait = { workspace = true }

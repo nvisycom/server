@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use jiff::Timestamp;
-use nvisy_core::health::{ComponentHealth, HealthCheck, HealthStatus};
+use nvisy_base::health::{ComponentHealth, HealthCheck, HealthStatus};
 
 use super::snapshot::{HealthCacheEntry, HealthSnapshot};
 use super::{HealthConfig, TRACING_TARGET};

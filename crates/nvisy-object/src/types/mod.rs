@@ -1,4 +1,4 @@
-//! Inlined types from `nvisy-core` to keep this crate self-contained.
+//! Inlined types from `nvisy-base` to keep this crate self-contained.
 
 pub mod content_data;
 pub mod content_source;

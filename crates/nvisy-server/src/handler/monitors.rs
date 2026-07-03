@@ -8,7 +8,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_core::health::HealthStatus;
+use nvisy_base::health::HealthStatus;
 
 use super::request::CheckHealth;
 use super::response::Health;

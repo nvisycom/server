@@ -4,7 +4,7 @@
 resolver = "3"
 members = [
     "./crates/nvisy-cli",
-    "./crates/nvisy-core",
+    "./crates/nvisy-base",
     "./crates/nvisy-nats",
     "./crates/nvisy-object",
     "./crates/nvisy-postgres",
@@ -31,7 +31,7 @@ documentation = "https://docs.rs/nvisy-server"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Internal crates
-nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
+nvisy-base = { path = "./crates/nvisy-base", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-object = { path = "./crates/nvisy-object", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }

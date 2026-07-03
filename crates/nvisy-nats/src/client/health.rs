@@ -1,6 +1,6 @@
 //! [`HealthCheck`] implementation for [`NatsClient`].
 
-use nvisy_core::health::{ComponentHealth, HealthCheck};
+use nvisy_base::health::{ComponentHealth, HealthCheck};
 
 use super::NatsClient;
 use crate::TRACING_TARGET_CONNECTION;

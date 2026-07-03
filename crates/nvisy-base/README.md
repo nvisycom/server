@@ -1,4 +1,4 @@
-# nvisy-core
+# nvisy-base
 
 Shared foundation types for the Nvisy platform.
 
