@@ -68,8 +68,8 @@ tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["full"] }
 
 # OpenAPI/Documentation
-aide = { version = "0.15", features = ["axum", "macros", "scalar"] }
-schemars = { version = "0.9", features = ["uuid1", "jiff02"] }
+aide = { version = "0.16.0-alpha.4", features = ["axum", "macros", "scalar"] }
+schemars = { version = "1.0", features = ["uuid1", "jiff02", "semver1"] }
 
 # Authentication
 jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
