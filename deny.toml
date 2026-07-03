@@ -24,6 +24,12 @@ ignore = [
     # proc-macro-error2 (build-time proc-macro) is unmaintained; pulled in by
     # validator_derive 0.20, the latest published version. No upstream fix yet.
     "RUSTSEC-2026-0173",
+    # quick-xml DoS advisories (fix requires >=0.41); pulled in transitively by
+    # object_store 0.14 for its AWS/Azure XML list parsing. The latest released
+    # object_store still caps quick-xml at 0.40 — no upstream release to bump to
+    # yet. Remove once object_store ships a quick-xml >=0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]

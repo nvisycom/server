@@ -1,8 +1,8 @@
 [package]
-name = "nvisy-core"
+name = "nvisy-base"
 description = "Shared foundation types for nvisy services"
 readme = "./README.md"
-keywords = ["nvisy", "core", "error", "foundation"]
+keywords = ["nvisy", "base", "foundation"]
 categories = ["rust-patterns"]
 
 version = { workspace = true }
