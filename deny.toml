@@ -15,7 +15,7 @@ targets = [
 db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for unmaintained crates
+# The lint level for unmaintained crates.
 unmaintained = "all"
 # The lint level for crates that have been yanked from their source registry
 yanked = "deny"
@@ -30,6 +30,12 @@ ignore = [
     # yet. Remove once object_store ships a quick-xml >=0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # Unmaintained crates pulled in transitively by the engine's codec stack
+    # (elide-codec): paste via its macros, ttf-parser via ab_glyph/imageproc
+    # text rendering. Both are advisory-only (not vulnerabilities) and vetted
+    # upstream in elide. Remove if elide drops them.
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0192",
 ]
 
 [licenses]
@@ -57,16 +63,31 @@ allow = [
     "OpenSSL",
     "bzip2-1.0.6",
     "CDLA-Permissive-2.0",
+    # Weak copyleft; pulled in transitively by the engine's HTML codec
+    # (cssparser, selectors) and audio codecs (symphonia). File-level
+    # copyleft only — using these crates as-is does not affect our source.
+    "MPL-2.0",
 ]
 
-# For compound licenses, we'll be permissive and only block if they contain denied licenses
-exceptions = []
+# LGPL-3.0, accepted only for the engine's opt-in `mp3` codec feature.
+# MP3 *encoding* has no permissively-licensed, production-quality alternative
+# in the ecosystem — LAME (libmp3lame) is effectively the only option, and
+# every substitute (incl. Shine) is also LGPL. The obligation is satisfiable
+# for proprietary use via dynamic/separate linking. Mirrors the carve-out in
+# the upstream elide repository.
+exceptions = [
+    { name = "mp3lame-encoder", allow = ["LGPL-3.0"] },
+    { name = "mp3lame-sys", allow = ["LGPL-3.0"] },
+]
 
 [bans]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "warn"
 # Lint level for when a crate version requirement is `*`
 wildcards = "deny"
+# First-party git/path dependencies (nvisy-engine, nvisy-schema) are pinned by
+# git ref, not a version requirement, so their `*` is not a real wildcard.
+allow-wildcard-paths = true
 # The graph highlighting used when creating dotgraphs for crates with multiple versions
 highlight = "all"
 
@@ -92,4 +113,7 @@ unknown-git = "deny"
 # List of URLs for allowed crate registries
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    "https://github.com/nvisycom/runtime",
+    "https://github.com/nvisycom/elide",
+]
