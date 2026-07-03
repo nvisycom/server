@@ -178,7 +178,7 @@ where
     fn inferred_early_responses(
         ctx: &mut GenContext,
         operation: &mut Operation,
-    ) -> Vec<(Option<u16>, Response)> {
+    ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
         AxumPath::<T>::inferred_early_responses(ctx, operation)
     }
 }

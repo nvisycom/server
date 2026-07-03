@@ -180,7 +180,7 @@ where
     fn inferred_early_responses(
         ctx: &mut GenContext,
         operation: &mut Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
         axum::Json::<T>::inferred_early_responses(ctx, operation)
     }
 }
@@ -201,7 +201,7 @@ where
     fn inferred_responses(
         ctx: &mut GenContext,
         operation: &mut Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
         AxumJson::<T>::inferred_responses(ctx, operation)
     }
 }

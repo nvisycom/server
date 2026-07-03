@@ -369,7 +369,7 @@ impl<'a> OperationOutput for Error<'a> {
     fn inferred_responses(
         _ctx: &mut GenContext,
         _operation: &mut Operation,
-    ) -> Vec<(Option<u16>, aide::openapi::Response)> {
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
         // Return empty vec to prevent aide from adding a default 200 response.
         // Error responses should be explicitly documented via TransformOperation.
         Vec::new()
