@@ -3,22 +3,6 @@
 version = 4
 
 [[package]]
-name = "ab_glyph"
-version = "0.2.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01c0457472c38ea5bd1c3b5ada5e368271cb550be7a4ca4a0b4634e9913f6cc2"
-dependencies = [
- "ab_glyph_rasterizer",
- "owned_ttf_parser",
-]
-
-[[package]]
-name = "ab_glyph_rasterizer"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -345,15 +329,6 @@ name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
-
-[[package]]
-name = "autotools"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef941527c41b0fc0dd48511a8154cd5fc7e29200a0ff8b7203c5d777dbc795cf"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "av-scenechange"
@@ -928,12 +903,6 @@ checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
  "thiserror",
 ]
-
-[[package]]
-name = "color_quant"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "colorchoice"
@@ -1712,7 +1681,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 [[package]]
 name = "elide"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "elide-codec",
@@ -1730,7 +1699,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#a85d6feed24f58bd0e20e4cdbfd8912bc3e0797e"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
 dependencies = [
  "async-trait",
  "base64",
@@ -1746,7 +1715,7 @@ dependencies = [
 [[package]]
 name = "elide-codec"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1757,7 +1726,6 @@ dependencies = [
  "hound",
  "image",
  "imageproc",
- "mp3lame-encoder",
  "quick-xml 0.41.0",
  "scraper",
  "serde_json",
@@ -1770,7 +1738,7 @@ dependencies = [
 [[package]]
 name = "elide-context"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -1781,7 +1749,7 @@ dependencies = [
 [[package]]
 name = "elide-core"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1799,7 +1767,7 @@ dependencies = [
 [[package]]
 name = "elide-detection"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -1812,7 +1780,7 @@ dependencies = [
 [[package]]
 name = "elide-lingua"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -1823,7 +1791,7 @@ dependencies = [
 [[package]]
 name = "elide-llm"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -1843,7 +1811,7 @@ dependencies = [
 [[package]]
 name = "elide-ner"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -1857,7 +1825,7 @@ dependencies = [
 [[package]]
 name = "elide-ocr"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -1867,7 +1835,7 @@ dependencies = [
 [[package]]
 name = "elide-orchestration"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "bytes",
  "elide-codec",
@@ -1881,7 +1849,7 @@ dependencies = [
 [[package]]
 name = "elide-pattern"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "aho-corasick",
  "async-trait",
@@ -1901,7 +1869,7 @@ dependencies = [
 [[package]]
 name = "elide-redaction"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1916,7 +1884,7 @@ dependencies = [
 [[package]]
 name = "elide-stt"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#39e3acc451fa1d3ab30ac4401de3b87e130dab8f"
+source = "git+https://github.com/nvisycom/elide?branch=main#5bc8557ff10c0d9a28413a11a932981582f16314"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -2341,16 +2309,6 @@ dependencies = [
  "wasip2",
  "wasip3",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "gif"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
-dependencies = [
- "color_quant",
- "weezl",
 ]
 
 [[package]]
@@ -2859,30 +2817,15 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
- "color_quant",
  "exr",
- "gif",
- "image-webp",
  "moxcms",
  "num-traits",
  "png",
- "qoi",
  "ravif",
  "rayon",
- "rgb",
  "tiff",
  "zune-core",
  "zune-jpeg",
-]
-
-[[package]]
-name = "image-webp"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
-dependencies = [
- "byteorder-lite",
- "quick-error",
 ]
 
 [[package]]
@@ -2891,7 +2834,6 @@ version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7b27bc0867dc40df08deb53d6e96342db6e0702e7ae33ed09a4eba33e594b05"
 dependencies = [
- "ab_glyph",
  "approx",
  "getrandom 0.4.2",
  "image",
@@ -2901,7 +2843,6 @@ dependencies = [
  "rand 0.10.1",
  "rand_distr",
  "rayon",
- "rustdct",
 ]
 
 [[package]]
@@ -3469,26 +3410,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mp3lame-encoder"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a3bb37607c4df224a0b7316897493fb49bd27312cb1b399fc4a43d2d7f2d3d8"
-dependencies = [
- "mp3lame-sys",
-]
-
-[[package]]
-name = "mp3lame-sys"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54e3b1772db47828840702e5a2e05694527f731abadf9b931355d54035f019d8"
-dependencies = [
- "autotools",
- "cc",
- "libc",
-]
-
-[[package]]
 name = "multer"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3753,7 +3674,7 @@ dependencies = [
 [[package]]
 name = "nvisy-core"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#a85d6feed24f58bd0e20e4cdbfd8912bc3e0797e"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
 dependencies = [
  "derive_builder",
  "derive_more",
@@ -3768,7 +3689,7 @@ dependencies = [
 [[package]]
 name = "nvisy-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#a85d6feed24f58bd0e20e4cdbfd8912bc3e0797e"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
 dependencies = [
  "bytes",
  "elide",
@@ -3857,7 +3778,7 @@ dependencies = [
 [[package]]
 name = "nvisy-schema"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#a85d6feed24f58bd0e20e4cdbfd8912bc3e0797e"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
 dependencies = [
  "bytes",
  "derive_builder",
@@ -4051,15 +3972,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "owned_ttf_parser"
-version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
-dependencies = [
- "ttf-parser",
-]
-
-[[package]]
 name = "oxilangtag"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4233,7 +4145,7 @@ dependencies = [
  "nom 7.1.3",
  "once_cell",
  "postcard",
- "quick-xml 0.40.1",
+ "quick-xml 0.41.0",
  "regex",
  "regex-cache",
  "serde",
@@ -4433,15 +4345,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "primal-check"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc0d895b311e3af9902528fbb8f928688abbd95872819320517cc24ca6b2bd08"
-dependencies = [
- "num-integer",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4515,15 +4418,6 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
-
-[[package]]
-name = "qoi"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
-dependencies = [
- "bytemuck",
-]
 
 [[package]]
 name = "quick-error"
@@ -5095,29 +4989,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
-]
-
-[[package]]
-name = "rustdct"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b61555105d6a9bf98797c063c362a1d24ed8ab0431655e38f1cf51e52089551"
-dependencies = [
- "rustfft",
-]
-
-[[package]]
-name = "rustfft"
-version = "6.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21db5f9893e91f41798c88680037dba611ca6674703c1a18601b01a72c8adb89"
-dependencies = [
- "num-complex",
- "num-integer",
- "num-traits",
- "primal-check",
- "strength_reduce",
- "transpose",
 ]
 
 [[package]]
@@ -5708,12 +5579,6 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
-
-[[package]]
-name = "strength_reduce"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
 name = "string_cache"
@@ -6402,16 +6267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "transpose"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
-dependencies = [
- "num-integer",
- "strength_reduce",
-]
-
-[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6426,12 +6281,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
-
-[[package]]
-name = "ttf-parser"
-version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tungstenite"

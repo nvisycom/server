@@ -25,17 +25,11 @@ ignore = [
     # validator_derive 0.20, the latest published version. No upstream fix yet.
     "RUSTSEC-2026-0173",
     # quick-xml DoS advisories (fix requires >=0.41); pulled in transitively by
-    # object_store 0.14 for its AWS/Azure XML list parsing. The latest released
-    # object_store still caps quick-xml at 0.40 — no upstream release to bump to
-    # yet. Remove once object_store ships a quick-xml >=0.41.
+    # object_store 0.14 for its AWS/Azure XML list parsing. The bump is merged
+    # upstream (apache/arrow-rs-object-store#785) but unreleased — v0.14.0 is
+    # still the latest crate. Remove once object_store ships it.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
-    # Unmaintained crates pulled in transitively by the engine's codec stack
-    # (elide-codec): paste via its macros, ttf-parser via ab_glyph/imageproc
-    # text rendering. Both are advisory-only (not vulnerabilities) and vetted
-    # upstream in elide. Remove if elide drops them.
-    "RUSTSEC-2024-0436",
-    "RUSTSEC-2026-0192",
 ]
 
 [licenses]
@@ -69,16 +63,8 @@ allow = [
     "MPL-2.0",
 ]
 
-# LGPL-3.0, accepted only for the engine's opt-in `mp3` codec feature.
-# MP3 *encoding* has no permissively-licensed, production-quality alternative
-# in the ecosystem — LAME (libmp3lame) is effectively the only option, and
-# every substitute (incl. Shine) is also LGPL. The obligation is satisfiable
-# for proprietary use via dynamic/separate linking. Mirrors the carve-out in
-# the upstream elide repository.
-exceptions = [
-    { name = "mp3lame-encoder", allow = ["LGPL-3.0"] },
-    { name = "mp3lame-sys", allow = ["LGPL-3.0"] },
-]
+# For compound licenses, we'll be permissive and only block if they contain denied licenses
+exceptions = []
 
 [bans]
 # Lint level for when multiple versions of the same crate are detected
