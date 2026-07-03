@@ -22,7 +22,7 @@ on:
       - "deny.toml"
       - ".github/workflows/security.yml"
   schedule:
-    - cron: "0 6 * * 1" # Weekly on Monday at 6 AM
+    - cron: "0 6 * * *" # Daily at 6 AM
   workflow_dispatch:
 
 env:
