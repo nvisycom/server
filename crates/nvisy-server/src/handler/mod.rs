@@ -16,6 +16,7 @@ mod monitors;
 mod notifications;
 mod pipeline_runs;
 mod pipelines;
+mod policies;
 pub mod request;
 pub mod response;
 mod tokens;
@@ -55,6 +56,7 @@ fn private_routes(
         .merge(annotations::routes())
         .merge(pipelines::routes())
         .merge(pipeline_runs::routes())
+        .merge(policies::routes())
         .merge(notifications::routes());
 
     if let Some(additional) = additional_routes {

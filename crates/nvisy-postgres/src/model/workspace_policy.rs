@@ -28,8 +28,8 @@ pub struct WorkspacePolicy {
     pub description: Option<String>,
     /// Semver of the policy body.
     pub version: String,
-    /// Policy body (the engine's Policy type as JSON).
-    pub definition: JsonValue,
+    /// Encrypted Policy body (the engine's Policy type as JSON).
+    pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: JsonValue,
     /// Timestamp when the policy was created.
@@ -55,8 +55,8 @@ pub struct NewWorkspacePolicy {
     pub description: Option<String>,
     /// Semver of the policy body.
     pub version: String,
-    /// Policy body (the engine's Policy type as JSON).
-    pub definition: JsonValue,
+    /// Encrypted Policy body (the engine's Policy type as JSON).
+    pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
 }
@@ -72,8 +72,8 @@ pub struct UpdateWorkspacePolicy {
     pub description: Option<Option<String>>,
     /// Semver of the policy body.
     pub version: Option<String>,
-    /// Policy body (the engine's Policy type as JSON).
-    pub definition: Option<JsonValue>,
+    /// Encrypted Policy body (the engine's Policy type as JSON).
+    pub definition: Option<Vec<u8>>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
     /// Soft delete timestamp.

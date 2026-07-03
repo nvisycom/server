@@ -111,10 +111,11 @@ CREATE TABLE workspace_policies (
     CONSTRAINT workspace_policies_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
 
     -- Policy body (nvisy_schema::policy::Policy as JSON: rules, labels,
-    -- fallback, retention, applies_when predicate).
-    definition      JSONB           NOT NULL,
+    -- fallback, retention, applies_when predicate). Stored XChaCha20-Poly1305
+    -- encrypted with the workspace-derived key.
+    definition      BYTEA           NOT NULL,
 
-    CONSTRAINT workspace_policies_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
+    CONSTRAINT workspace_policies_definition_size CHECK (length(definition) BETWEEN 1 AND 1048576),
 
     -- Metadata (for filtering/display)
     metadata        JSONB           NOT NULL DEFAULT '{}',
@@ -156,7 +157,7 @@ COMMENT ON COLUMN workspace_policies.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_policies.name IS 'Human-readable policy name (1-255 chars)';
 COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
 COMMENT ON COLUMN workspace_policies.version IS 'Semver of the policy body';
-COMMENT ON COLUMN workspace_policies.definition IS 'Policy body as JSON (rules, labels, fallback, retention)';
+COMMENT ON COLUMN workspace_policies.definition IS 'Encrypted policy body (XChaCha20-Poly1305, workspace-derived key)';
 COMMENT ON COLUMN workspace_policies.metadata IS 'Metadata for filtering/display';
 COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_policies.updated_at IS 'Last modification timestamp';
@@ -183,9 +184,10 @@ CREATE TABLE workspace_contexts (
 
     -- Context body (nvisy_schema::context::Context as JSON: typed
     -- reference-data entries — biometric, geospatial, temporal, ...).
-    definition      JSONB           NOT NULL,
+    -- Stored XChaCha20-Poly1305 encrypted with the workspace-derived key.
+    definition      BYTEA           NOT NULL,
 
-    CONSTRAINT workspace_contexts_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
+    CONSTRAINT workspace_contexts_definition_size CHECK (length(definition) BETWEEN 1 AND 1048576),
 
     -- Metadata (for filtering/display)
     metadata        JSONB           NOT NULL DEFAULT '{}',
@@ -227,7 +229,7 @@ COMMENT ON COLUMN workspace_contexts.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_contexts.name IS 'Human-readable context name (1-255 chars)';
 COMMENT ON COLUMN workspace_contexts.description IS 'Context description (up to 4096 chars)';
 COMMENT ON COLUMN workspace_contexts.version IS 'Semver of the context body';
-COMMENT ON COLUMN workspace_contexts.definition IS 'Context body as JSON (typed reference-data entries)';
+COMMENT ON COLUMN workspace_contexts.definition IS 'Encrypted context body (XChaCha20-Poly1305, workspace-derived key)';
 COMMENT ON COLUMN workspace_contexts.metadata IS 'Metadata for filtering/display';
 COMMENT ON COLUMN workspace_contexts.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_contexts.updated_at IS 'Last modification timestamp';

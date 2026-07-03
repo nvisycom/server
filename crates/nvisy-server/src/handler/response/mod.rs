@@ -19,6 +19,7 @@ mod monitors;
 mod notifications;
 mod pipeline_runs;
 mod pipelines;
+mod policies;
 mod tokens;
 mod webhooks;
 mod workspaces;
@@ -38,6 +39,7 @@ pub use monitors::*;
 pub use notifications::*;
 pub use pipeline_runs::*;
 pub use pipelines::*;
+pub use policies::*;
 pub use tokens::*;
 pub use webhooks::*;
 pub use workspaces::*;
@@ -107,5 +109,20 @@ impl<T> Page<T> {
             total: page.total,
             next_cursor: page.next_cursor,
         }
+    }
+
+    /// Creates a page from a cursor page, mapping items with a fallible function.
+    ///
+    /// Returns the first error encountered while mapping (e.g. a decryption
+    /// failure), otherwise the fully mapped page.
+    pub fn try_from_cursor_page<M, F, E>(page: CursorPage<M>, f: F) -> Result<Self, E>
+    where
+        F: FnMut(M) -> Result<T, E>,
+    {
+        Ok(Self {
+            items: page.items.into_iter().map(f).collect::<Result<_, _>>()?,
+            total: page.total,
+            next_cursor: page.next_cursor,
+        })
     }
 }

@@ -2,16 +2,15 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceContext;
+use nvisy_schema::context::Context as SchemaContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Page;
+use crate::service::CryptoService;
 
 /// Response type for a workspace context.
-///
-/// Note: The encrypted content is stored in NATS and never exposed
-/// in API responses. Only metadata is returned.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Context {
@@ -26,10 +25,10 @@ pub struct Context {
     /// Context description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Content MIME type.
-    pub mime_type: String,
-    /// Size of the content in bytes.
-    pub content_size: i64,
+    /// Semver of the context body.
+    pub version: String,
+    /// The structured context body consumed by the engine.
+    pub definition: SchemaContext,
     /// When the context was created.
     pub created_at: Timestamp,
     /// When the context was last updated.
@@ -40,18 +39,24 @@ pub struct Context {
 pub type ContextsPage = Page<Context>;
 
 impl Context {
-    /// Creates a response from a database model.
-    pub fn from_model(context: WorkspaceContext) -> Self {
-        Self {
+    /// Creates a response from a database model, decrypting the definition.
+    pub fn from_model(
+        context: WorkspaceContext,
+        crypto: &CryptoService,
+    ) -> crate::handler::Result<Self> {
+        let definition =
+            crypto.decrypt_json::<SchemaContext>(context.workspace_id, &context.definition)?;
+
+        Ok(Self {
             id: context.id,
             workspace_id: context.workspace_id,
             account_id: context.account_id,
             name: context.name,
             description: context.description,
-            mime_type: context.mime_type,
-            content_size: context.content_size,
+            version: context.version,
+            definition,
             created_at: context.created_at.into(),
             updated_at: context.updated_at.into(),
-        }
+        })
     }
 }

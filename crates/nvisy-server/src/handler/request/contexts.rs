@@ -1,5 +1,6 @@
 //! Context request types.
 
+use nvisy_schema::context::Context as SchemaContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,7 +15,25 @@ pub struct ContextPathParams {
     pub context_id: Uuid,
 }
 
+/// Request payload for creating a new workspace context.
+///
+/// The `definition` is a structured context the redaction engine consumes;
+/// its `name`, `description`, and `version` drive the stored columns unless
+/// overridden here.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateContext {
+    /// Optional display name override. Defaults to the context's own name.
+    pub name: Option<String>,
+    /// Optional description override. Defaults to the context's own description.
+    pub description: Option<String>,
+    /// The structured context body consumed by the engine.
+    pub definition: SchemaContext,
+}
+
 /// Request payload for updating an existing workspace context.
+///
+/// Replacing the `definition` replaces the whole context body.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateContext {
@@ -24,4 +43,6 @@ pub struct UpdateContext {
     /// Context description.
     #[validate(length(max = 4096))]
     pub description: Option<Option<String>>,
+    /// New context body (replaces the stored definition).
+    pub definition: Option<SchemaContext>,
 }

@@ -28,8 +28,8 @@ pub struct WorkspaceContext {
     pub description: Option<String>,
     /// Semver of the context body.
     pub version: String,
-    /// Context body (the engine's Context type as JSON).
-    pub definition: JsonValue,
+    /// Encrypted Context body (the engine's Context type as JSON).
+    pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: JsonValue,
     /// Timestamp when the context was created.
@@ -55,8 +55,8 @@ pub struct NewWorkspaceContext {
     pub description: Option<String>,
     /// Semver of the context body.
     pub version: String,
-    /// Context body (the engine's Context type as JSON).
-    pub definition: JsonValue,
+    /// Encrypted Context body (the engine's Context type as JSON).
+    pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
 }
@@ -72,8 +72,8 @@ pub struct UpdateWorkspaceContext {
     pub description: Option<Option<String>>,
     /// Semver of the context body.
     pub version: Option<String>,
-    /// Context body (the engine's Context type as JSON).
-    pub definition: Option<JsonValue>,
+    /// Encrypted Context body (the engine's Context type as JSON).
+    pub definition: Option<Vec<u8>>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
     /// Soft delete timestamp.
