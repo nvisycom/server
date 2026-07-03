@@ -91,7 +91,79 @@ COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft deletion timestamp';
 
--- Workspace context files table (metadata for encrypted context stored in NATS)
+-- Workspace redaction policies table (structured governance config)
+-- The definition holds a nvisy_schema::policy::Policy the engine consumes.
+CREATE TABLE workspace_policies (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Core attributes
+    name            TEXT            NOT NULL,
+    description     TEXT            DEFAULT NULL,
+    version         TEXT            NOT NULL,
+
+    CONSTRAINT workspace_policies_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_policies_description_length CHECK (description IS NULL OR length(description) <= 4096),
+    CONSTRAINT workspace_policies_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
+
+    -- Policy body (nvisy_schema::policy::Policy as JSON: rules, labels,
+    -- fallback, retention, applies_when predicate).
+    definition      JSONB           NOT NULL,
+
+    CONSTRAINT workspace_policies_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
+
+    -- Metadata (for filtering/display)
+    metadata        JSONB           NOT NULL DEFAULT '{}',
+
+    CONSTRAINT workspace_policies_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+
+    -- Lifecycle timestamps
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
+    deleted_at      TIMESTAMPTZ     DEFAULT NULL,
+
+    CONSTRAINT workspace_policies_updated_after_created CHECK (updated_at >= created_at),
+    CONSTRAINT workspace_policies_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
+);
+
+-- Triggers
+SELECT setup_updated_at('workspace_policies');
+
+-- Indexes
+CREATE INDEX workspace_policies_workspace_idx
+    ON workspace_policies (workspace_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX workspace_policies_account_idx
+    ON workspace_policies (account_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX workspace_policies_name_unique_idx
+    ON workspace_policies (workspace_id, lower(trim(name)))
+    WHERE deleted_at IS NULL;
+
+-- Comments
+COMMENT ON TABLE workspace_policies IS
+    'Structured redaction policies (nvisy_schema Policy) consumed by the engine.';
+
+COMMENT ON COLUMN workspace_policies.id IS 'Unique policy identifier';
+COMMENT ON COLUMN workspace_policies.workspace_id IS 'Parent workspace reference';
+COMMENT ON COLUMN workspace_policies.account_id IS 'Creator account reference';
+COMMENT ON COLUMN workspace_policies.name IS 'Human-readable policy name (1-255 chars)';
+COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
+COMMENT ON COLUMN workspace_policies.version IS 'Semver of the policy body';
+COMMENT ON COLUMN workspace_policies.definition IS 'Policy body as JSON (rules, labels, fallback, retention)';
+COMMENT ON COLUMN workspace_policies.metadata IS 'Metadata for filtering/display';
+COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
+COMMENT ON COLUMN workspace_policies.updated_at IS 'Last modification timestamp';
+COMMENT ON COLUMN workspace_policies.deleted_at IS 'Soft deletion timestamp';
+
+-- Workspace contexts table (structured reference-data for redaction)
+-- The definition holds a nvisy_schema::context::Context the engine consumes.
 CREATE TABLE workspace_contexts (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,25 +175,19 @@ CREATE TABLE workspace_contexts (
     -- Core attributes
     name            TEXT            NOT NULL,
     description     TEXT            DEFAULT NULL,
-    mime_type       TEXT            NOT NULL DEFAULT 'application/json',
+    version         TEXT            NOT NULL,
 
     CONSTRAINT workspace_contexts_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_contexts_description_length CHECK (description IS NULL OR length(description) <= 4096),
-    CONSTRAINT workspace_contexts_mime_type_length CHECK (length(trim(mime_type)) BETWEEN 1 AND 128),
+    CONSTRAINT workspace_contexts_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
 
-    -- Storage reference (NATS object store key)
-    storage_key     TEXT            NOT NULL,
+    -- Context body (nvisy_schema::context::Context as JSON: typed
+    -- reference-data entries — biometric, geospatial, temporal, ...).
+    definition      JSONB           NOT NULL,
 
-    CONSTRAINT workspace_contexts_storage_key_length CHECK (length(trim(storage_key)) BETWEEN 1 AND 512),
+    CONSTRAINT workspace_contexts_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
 
-    -- Content metadata
-    content_size    BIGINT          NOT NULL,
-    content_hash    BYTEA           NOT NULL,
-
-    CONSTRAINT workspace_contexts_content_size_positive CHECK (content_size > 0),
-    CONSTRAINT workspace_contexts_content_hash_length CHECK (length(content_hash) = 32),
-
-    -- Metadata (non-encrypted, for filtering/display)
+    -- Metadata (for filtering/display)
     metadata        JSONB           NOT NULL DEFAULT '{}',
 
     CONSTRAINT workspace_contexts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
@@ -153,18 +219,16 @@ CREATE UNIQUE INDEX workspace_contexts_name_unique_idx
 
 -- Comments
 COMMENT ON TABLE workspace_contexts IS
-    'Metadata for encrypted context files stored in NATS object storage.';
+    'Structured reference-data contexts (nvisy_schema Context) consumed by the engine.';
 
 COMMENT ON COLUMN workspace_contexts.id IS 'Unique context identifier';
 COMMENT ON COLUMN workspace_contexts.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_contexts.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_contexts.name IS 'Human-readable context name (1-255 chars)';
 COMMENT ON COLUMN workspace_contexts.description IS 'Context description (up to 4096 chars)';
-COMMENT ON COLUMN workspace_contexts.mime_type IS 'Content MIME type';
-COMMENT ON COLUMN workspace_contexts.storage_key IS 'NATS object store key for the encrypted content';
-COMMENT ON COLUMN workspace_contexts.content_size IS 'Size of the encrypted content in bytes';
-COMMENT ON COLUMN workspace_contexts.content_hash IS 'SHA-256 hash of the encrypted content';
-COMMENT ON COLUMN workspace_contexts.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN workspace_contexts.version IS 'Semver of the context body';
+COMMENT ON COLUMN workspace_contexts.definition IS 'Context body as JSON (typed reference-data entries)';
+COMMENT ON COLUMN workspace_contexts.metadata IS 'Metadata for filtering/display';
 COMMENT ON COLUMN workspace_contexts.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_contexts.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_contexts.deleted_at IS 'Soft deletion timestamp';

@@ -21,6 +21,9 @@ DROP TYPE IF EXISTS PIPELINE_STATUS;
 -- Workspace contexts
 DROP TABLE IF EXISTS workspace_contexts;
 
+-- Workspace policies
+DROP TABLE IF EXISTS workspace_policies;
+
 -- Workspace connections
 DROP TABLE IF EXISTS workspace_connections;
 
