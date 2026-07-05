@@ -1699,7 +1699,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
+source = "git+https://github.com/nvisycom/runtime?branch=main#a8655a33731f519a59c2aff01f5a06db53c829c0"
 dependencies = [
  "async-trait",
  "base64",
@@ -3672,9 +3672,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvisy-context"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/runtime?branch=main#a8655a33731f519a59c2aff01f5a06db53c829c0"
+dependencies = [
+ "derive_builder",
+ "derive_more",
+ "elide-core",
+ "jiff",
+ "schemars",
+ "semver",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "nvisy-core"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
+source = "git+https://github.com/nvisycom/runtime?branch=main#a8655a33731f519a59c2aff01f5a06db53c829c0"
 dependencies = [
  "derive_builder",
  "derive_more",
@@ -3689,7 +3704,7 @@ dependencies = [
 [[package]]
 name = "nvisy-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
+source = "git+https://github.com/nvisycom/runtime?branch=main#a8655a33731f519a59c2aff01f5a06db53c829c0"
 dependencies = [
  "bytes",
  "elide",
@@ -3746,6 +3761,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvisy-policy"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/runtime?branch=main#a8655a33731f519a59c2aff01f5a06db53c829c0"
+dependencies = [
+ "derive_more",
+ "elide-core",
+ "hipstr",
+ "schemars",
+ "semver",
+ "serde",
+ "strum 0.28.0",
+ "uuid",
+]
+
+[[package]]
 name = "nvisy-postgres"
 version = "0.1.0"
 dependencies = [
@@ -3778,19 +3808,17 @@ dependencies = [
 [[package]]
 name = "nvisy-schema"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#d993014f2a1bae6bb0c3738ffcdde59e3378528b"
+source = "git+https://github.com/nvisycom/runtime?branch=main#a8655a33731f519a59c2aff01f5a06db53c829c0"
 dependencies = [
  "bytes",
- "derive_builder",
- "derive_more",
  "elide-core",
  "hipstr",
  "jiff",
+ "nvisy-context",
+ "nvisy-policy",
  "schemars",
- "semver",
  "serde",
  "serde_json",
- "strum 0.28.0",
  "uuid",
 ]
 
@@ -4145,7 +4173,7 @@ dependencies = [
  "nom 7.1.3",
  "once_cell",
  "postcard",
- "quick-xml 0.41.0",
+ "quick-xml 0.40.1",
  "regex",
  "regex-cache",
  "serde",
