@@ -29,6 +29,7 @@ mod workspace_member;
 mod workspace_pipeline;
 mod workspace_pipeline_artifact;
 mod workspace_pipeline_run;
+mod workspace_policy;
 mod workspace_webhook;
 
 pub use account::AccountRepository;
@@ -47,4 +48,5 @@ pub use workspace_member::WorkspaceMemberRepository;
 pub use workspace_pipeline::WorkspacePipelineRepository;
 pub use workspace_pipeline_artifact::WorkspacePipelineArtifactRepository;
 pub use workspace_pipeline_run::WorkspacePipelineRunRepository;
+pub use workspace_policy::WorkspacePolicyRepository;
 pub use workspace_webhook::WorkspaceWebhookRepository;

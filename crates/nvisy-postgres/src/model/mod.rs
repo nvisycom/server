@@ -19,6 +19,7 @@ mod workspace_member;
 mod workspace_pipeline;
 mod workspace_pipeline_artifact;
 mod workspace_pipeline_run;
+mod workspace_policy;
 mod workspace_webhook;
 
 // Account models
@@ -53,4 +54,5 @@ pub use workspace_pipeline_artifact::{NewWorkspacePipelineArtifact, WorkspacePip
 pub use workspace_pipeline_run::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipelineRun,
 };
+pub use workspace_policy::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

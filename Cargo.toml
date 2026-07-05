@@ -30,6 +30,12 @@ documentation = "https://docs.rs/nvisy-server"
 #
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
+# Runtime crates (detection & redaction engine); tracks main.
+# The engine needs its default modality features (tabular/image/audio/
+# document); disabling them selects an uncompilable feature combination.
+nvisy-engine = { git = "https://github.com/nvisycom/runtime", branch = "main" }
+nvisy-schema = { git = "https://github.com/nvisycom/runtime", branch = "main", default-features = false }
+
 # Internal crates
 nvisy-base = { path = "./crates/nvisy-base", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }

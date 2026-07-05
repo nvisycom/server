@@ -15,7 +15,7 @@ targets = [
 db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for unmaintained crates
+# The lint level for unmaintained crates.
 unmaintained = "all"
 # The lint level for crates that have been yanked from their source registry
 yanked = "deny"
@@ -25,9 +25,9 @@ ignore = [
     # validator_derive 0.20, the latest published version. No upstream fix yet.
     "RUSTSEC-2026-0173",
     # quick-xml DoS advisories (fix requires >=0.41); pulled in transitively by
-    # object_store 0.14 for its AWS/Azure XML list parsing. The latest released
-    # object_store still caps quick-xml at 0.40 — no upstream release to bump to
-    # yet. Remove once object_store ships a quick-xml >=0.41.
+    # object_store 0.14 for its AWS/Azure XML list parsing. The bump is merged
+    # upstream (apache/arrow-rs-object-store#785) but unreleased — v0.14.0 is
+    # still the latest crate. Remove once object_store ships it.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 ]
@@ -57,6 +57,10 @@ allow = [
     "OpenSSL",
     "bzip2-1.0.6",
     "CDLA-Permissive-2.0",
+    # Weak copyleft; pulled in transitively by the engine's HTML codec
+    # (cssparser, selectors) and audio codecs (symphonia). File-level
+    # copyleft only — using these crates as-is does not affect our source.
+    "MPL-2.0",
 ]
 
 # For compound licenses, we'll be permissive and only block if they contain denied licenses
@@ -67,6 +71,9 @@ exceptions = []
 multiple-versions = "warn"
 # Lint level for when a crate version requirement is `*`
 wildcards = "deny"
+# First-party git/path dependencies (nvisy-engine, nvisy-schema) are pinned by
+# git ref, not a version requirement, so their `*` is not a real wildcard.
+allow-wildcard-paths = true
 # The graph highlighting used when creating dotgraphs for crates with multiple versions
 highlight = "all"
 
@@ -92,4 +99,7 @@ unknown-git = "deny"
 # List of URLs for allowed crate registries
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    "https://github.com/nvisycom/runtime",
+    "https://github.com/nvisycom/elide",
+]

@@ -166,27 +166,6 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
-
-    workspace_contexts (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        account_id -> Uuid,
-        name -> Text,
-        description -> Nullable<Text>,
-        mime_type -> Text,
-        storage_key -> Text,
-        content_size -> Int8,
-        content_hash -> Bytea,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
     use super::sql_types::SyncStatus;
 
     workspace_connections (id) {
@@ -199,6 +178,25 @@ diesel::table! {
         is_active -> Bool,
         last_sync_at -> Nullable<Timestamptz>,
         sync_status -> Nullable<SyncStatus>,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+
+    workspace_contexts (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        version -> Text,
+        definition -> Bytea,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -374,6 +372,25 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+
+    workspace_policies (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        version -> Text,
+        definition -> Bytea,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::WebhookEvent;
     use super::sql_types::WebhookStatus;
 
@@ -438,6 +455,8 @@ diesel::joinable!(workspace_pipeline_runs -> accounts (account_id));
 diesel::joinable!(workspace_pipeline_runs -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_pipelines -> accounts (account_id));
 diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));
+diesel::joinable!(workspace_policies -> accounts (account_id));
+diesel::joinable!(workspace_policies -> workspaces (workspace_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
 diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
@@ -458,6 +477,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_pipeline_artifacts,
     workspace_pipeline_runs,
     workspace_pipelines,
+    workspace_policies,
     workspace_webhooks,
     workspaces,
 );
