@@ -1,6 +1,6 @@
 //! Repository for a pipeline's policy and context references.
 //!
-//! References live in join tables (`pipeline_policies`, `pipeline_contexts`)
+//! References live in join tables (`workspace_pipeline_policies`, `workspace_pipeline_contexts`)
 //! rather than the pipeline's JSON definition, so foreign keys enforce that
 //! every referenced policy/context exists in the pipeline's workspace. The
 //! `replace_*` operations are delete-then-insert and expect to run inside a
@@ -21,7 +21,7 @@ pub trait PipelineReferenceRepository {
     ///
     /// Deletes existing references then inserts the new ones. Run inside a
     /// transaction with the pipeline write so the two stay consistent.
-    fn replace_pipeline_policies(
+    fn replace_workspace_pipeline_policies(
         &mut self,
         workspace_id: Uuid,
         pipeline_id: Uuid,
@@ -29,7 +29,7 @@ pub trait PipelineReferenceRepository {
     ) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Replaces a pipeline's context references with the given set.
-    fn replace_pipeline_contexts(
+    fn replace_workspace_pipeline_contexts(
         &mut self,
         workspace_id: Uuid,
         pipeline_id: Uuid,
@@ -50,15 +50,15 @@ pub trait PipelineReferenceRepository {
 }
 
 impl PipelineReferenceRepository for PgConnection {
-    async fn replace_pipeline_policies(
+    async fn replace_workspace_pipeline_policies(
         &mut self,
         workspace_id: Uuid,
         pipeline_id: Uuid,
         policy_ids: &[Uuid],
     ) -> PgResult<()> {
-        use schema::pipeline_policies::{self, dsl};
+        use schema::workspace_pipeline_policies::{self, dsl};
 
-        diesel::delete(pipeline_policies::table.filter(dsl::pipeline_id.eq(pipeline_id)))
+        diesel::delete(workspace_pipeline_policies::table.filter(dsl::pipeline_id.eq(pipeline_id)))
             .execute(self)
             .await
             .map_err(PgError::from)?;
@@ -73,7 +73,7 @@ impl PipelineReferenceRepository for PgConnection {
                 })
                 .collect();
 
-            diesel::insert_into(pipeline_policies::table)
+            diesel::insert_into(workspace_pipeline_policies::table)
                 .values(&rows)
                 .execute(self)
                 .await
@@ -83,15 +83,15 @@ impl PipelineReferenceRepository for PgConnection {
         Ok(())
     }
 
-    async fn replace_pipeline_contexts(
+    async fn replace_workspace_pipeline_contexts(
         &mut self,
         workspace_id: Uuid,
         pipeline_id: Uuid,
         context_ids: &[Uuid],
     ) -> PgResult<()> {
-        use schema::pipeline_contexts::{self, dsl};
+        use schema::workspace_pipeline_contexts::{self, dsl};
 
-        diesel::delete(pipeline_contexts::table.filter(dsl::pipeline_id.eq(pipeline_id)))
+        diesel::delete(workspace_pipeline_contexts::table.filter(dsl::pipeline_id.eq(pipeline_id)))
             .execute(self)
             .await
             .map_err(PgError::from)?;
@@ -106,7 +106,7 @@ impl PipelineReferenceRepository for PgConnection {
                 })
                 .collect();
 
-            diesel::insert_into(pipeline_contexts::table)
+            diesel::insert_into(workspace_pipeline_contexts::table)
                 .values(&rows)
                 .execute(self)
                 .await
@@ -117,18 +117,18 @@ impl PipelineReferenceRepository for PgConnection {
     }
 
     async fn list_pipeline_policy_ids(&mut self, pipeline_id: Uuid) -> PgResult<Vec<Uuid>> {
-        use schema::{pipeline_policies, workspace_policies};
+        use schema::{workspace_pipeline_policies, workspace_policies};
 
         // Join to the parent so soft-deleted policies (deleted_at set, join row
         // still present since CASCADE only fires on hard delete) are excluded.
-        let ids = pipeline_policies::table
+        let ids = workspace_pipeline_policies::table
             .inner_join(
                 workspace_policies::table
-                    .on(workspace_policies::id.eq(pipeline_policies::policy_id)),
+                    .on(workspace_policies::id.eq(workspace_pipeline_policies::policy_id)),
             )
-            .filter(pipeline_policies::pipeline_id.eq(pipeline_id))
+            .filter(workspace_pipeline_policies::pipeline_id.eq(pipeline_id))
             .filter(workspace_policies::deleted_at.is_null())
-            .select(pipeline_policies::policy_id)
+            .select(workspace_pipeline_policies::policy_id)
             .load(self)
             .await
             .map_err(PgError::from)?;
@@ -137,16 +137,16 @@ impl PipelineReferenceRepository for PgConnection {
     }
 
     async fn list_pipeline_context_ids(&mut self, pipeline_id: Uuid) -> PgResult<Vec<Uuid>> {
-        use schema::{pipeline_contexts, workspace_contexts};
+        use schema::{workspace_contexts, workspace_pipeline_contexts};
 
-        let ids = pipeline_contexts::table
+        let ids = workspace_pipeline_contexts::table
             .inner_join(
                 workspace_contexts::table
-                    .on(workspace_contexts::id.eq(pipeline_contexts::context_id)),
+                    .on(workspace_contexts::id.eq(workspace_pipeline_contexts::context_id)),
             )
-            .filter(pipeline_contexts::pipeline_id.eq(pipeline_id))
+            .filter(workspace_pipeline_contexts::pipeline_id.eq(pipeline_id))
             .filter(workspace_contexts::deleted_at.is_null())
-            .select(pipeline_contexts::context_id)
+            .select(workspace_pipeline_contexts::context_id)
             .load(self)
             .await
             .map_err(PgError::from)?;

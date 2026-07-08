@@ -126,41 +126,41 @@ COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft deletion timestamp';
 -- Pipeline → policy references (redaction rules applied by the pipeline).
 -- The shared workspace_id in both composite foreign keys enforces that a
 -- pipeline can only reference policies from its own workspace.
-CREATE TABLE pipeline_policies (
+CREATE TABLE workspace_pipeline_policies (
     workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     pipeline_id     UUID            NOT NULL,
     policy_id       UUID            NOT NULL,
 
     PRIMARY KEY (pipeline_id, policy_id),
 
-    CONSTRAINT pipeline_policies_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
+    CONSTRAINT workspace_pipeline_policies_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
         REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT pipeline_policies_policy_fkey FOREIGN KEY (workspace_id, policy_id)
+    CONSTRAINT workspace_pipeline_policies_policy_fkey FOREIGN KEY (workspace_id, policy_id)
         REFERENCES workspace_policies (workspace_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX pipeline_policies_policy_idx ON pipeline_policies (policy_id);
+CREATE INDEX workspace_pipeline_policies_policy_idx ON workspace_pipeline_policies (policy_id);
 
-COMMENT ON TABLE pipeline_policies IS
+COMMENT ON TABLE workspace_pipeline_policies IS
     'Policies a pipeline applies at redaction. CASCADE cleans up on hard delete.';
 
 -- Pipeline → context references (reference data supplied to detection).
-CREATE TABLE pipeline_contexts (
+CREATE TABLE workspace_pipeline_contexts (
     workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     pipeline_id     UUID            NOT NULL,
     context_id      UUID            NOT NULL,
 
     PRIMARY KEY (pipeline_id, context_id),
 
-    CONSTRAINT pipeline_contexts_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
+    CONSTRAINT workspace_pipeline_contexts_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
         REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT pipeline_contexts_context_fkey FOREIGN KEY (workspace_id, context_id)
+    CONSTRAINT workspace_pipeline_contexts_context_fkey FOREIGN KEY (workspace_id, context_id)
         REFERENCES workspace_contexts (workspace_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX pipeline_contexts_context_idx ON pipeline_contexts (context_id);
+CREATE INDEX workspace_pipeline_contexts_context_idx ON workspace_pipeline_contexts (context_id);
 
-COMMENT ON TABLE pipeline_contexts IS
+COMMENT ON TABLE workspace_pipeline_contexts IS
     'Contexts a pipeline supplies to detection. CASCADE cleans up on hard delete.';
 
 -- Pipeline runs table (execution instances)
