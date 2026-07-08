@@ -8,16 +8,19 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::query::{WorkspacePipelineArtifactRepository, WorkspacePipelineRepository};
+use nvisy_postgres::model::WorkspacePipeline;
+use nvisy_postgres::query::{
+    PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
+};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConnection, PgError, PgResult};
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
-    CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, UpdatePipeline,
-    WorkspacePathParams,
+    CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
+    UpdatePipeline, WorkspacePathParams,
 };
 use crate::handler::response::{ErrorResponse, Page, Pipeline, PipelineSummary};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for pipeline operations.
@@ -52,10 +55,22 @@ async fn create_pipeline(
         )
         .await?;
 
-    let new_pipeline = request.into_model(path_params.workspace_id, auth_state.account_id);
-    let pipeline = conn.create_workspace_pipeline(new_pipeline).await?;
+    let (new_pipeline, references) = request
+        .into_parts(path_params.workspace_id, auth_state.account_id)
+        .map_err(serialize_error)?;
 
-    let response = Pipeline::from_model(pipeline);
+    let pipeline = conn
+        .transaction(async |conn| {
+            let pipeline = conn.create_workspace_pipeline(new_pipeline).await?;
+            replace_references(conn, &pipeline, &references).await?;
+            Ok::<WorkspacePipeline, PgError>(pipeline)
+        })
+        .await?;
+
+    // The references were just written from the request, so build the response
+    // from them directly instead of reading the join tables back.
+    let response = Pipeline::from_model(pipeline, references.policy_ids, references.context_ids)
+        .map_err(serialize_error)?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -170,8 +185,12 @@ async fn get_pipeline(
     let artifacts = conn
         .list_workspace_pipeline_artifacts(path_params.pipeline_id)
         .await?;
+    let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
+    let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
 
-    let response = Pipeline::from_model_with_artifacts(pipeline, artifacts);
+    let response =
+        Pipeline::from_model_with_artifacts(pipeline, artifacts, policy_ids, context_ids)
+            .map_err(serialize_error)?;
 
     tracing::info!(target: TRACING_TARGET, "Pipeline retrieved");
 
@@ -225,12 +244,32 @@ async fn update_pipeline(
         )
         .await?;
 
-    let update_data = request.into_model();
+    let (update_data, references) = request.into_parts().map_err(serialize_error)?;
+    let pipeline_id = path_params.pipeline_id;
+    let references_for_response = references.clone();
+
     let pipeline = conn
-        .update_workspace_pipeline(path_params.pipeline_id, update_data)
+        .transaction(async |conn| {
+            let pipeline = conn
+                .update_workspace_pipeline(pipeline_id, update_data)
+                .await?;
+            // Only touch the join tables when the request supplied a definition.
+            if let Some(references) = references {
+                replace_references(conn, &pipeline, &references).await?;
+            }
+            Ok::<WorkspacePipeline, PgError>(pipeline)
+        })
         .await?;
 
-    let response = Pipeline::from_model(pipeline);
+    let response = match references_for_response {
+        // A definition was supplied: the references we just wrote are current.
+        Some(references) => {
+            Pipeline::from_model(pipeline, references.policy_ids, references.context_ids)
+                .map_err(serialize_error)?
+        }
+        // Partial update left the references untouched: read them back.
+        None => build_response(&mut conn, pipeline).await?,
+    };
 
     tracing::info!(target: TRACING_TARGET, "Pipeline updated");
 
@@ -299,6 +338,40 @@ fn delete_pipeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+}
+
+/// Replaces a pipeline's policy and context references in the join tables.
+///
+/// Run inside the same transaction as the pipeline write so the config JSON and
+/// its references stay consistent.
+async fn replace_references(
+    conn: &mut PgConnection,
+    pipeline: &WorkspacePipeline,
+    references: &PipelineReferences,
+) -> PgResult<()> {
+    conn.replace_pipeline_policies(pipeline.workspace_id, pipeline.id, &references.policy_ids)
+        .await?;
+    conn.replace_pipeline_contexts(pipeline.workspace_id, pipeline.id, &references.context_ids)
+        .await?;
+    Ok(())
+}
+
+/// Builds a [`Pipeline`] response, reading the pipeline's (live) references back
+/// from the join tables. Used when the caller did not just write them.
+async fn build_response(conn: &mut PgConnection, pipeline: WorkspacePipeline) -> Result<Pipeline> {
+    let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
+    let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
+    Pipeline::from_model(pipeline, policy_ids, context_ids).map_err(serialize_error)
+}
+
+/// Maps a definition (de)serialization failure to an internal error.
+///
+/// A stored definition that will not round-trip is a server-side data problem,
+/// not a client error.
+fn serialize_error(error: serde_json::Error) -> Error<'static> {
+    ErrorKind::InternalServerError
+        .with_message("Failed to process pipeline definition")
+        .with_context(error.to_string())
 }
 
 /// Returns a [`Router`] with all pipeline-related routes.

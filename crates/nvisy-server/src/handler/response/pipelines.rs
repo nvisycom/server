@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{Artifact, Page};
+use crate::handler::request::PipelineDefinition;
 
 /// Pipeline response.
 #[must_use]
@@ -26,8 +27,8 @@ pub struct Pipeline {
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
-    /// Pipeline definition (workflow graph).
-    pub definition: serde_json::Value,
+    /// Detection + redaction configuration.
+    pub definition: PipelineDefinition,
     /// Artifacts produced by pipeline runs.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<Artifact>,
@@ -38,39 +39,51 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Creates a new instance of [`Pipeline`] from the database model.
-    pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
-        Self {
-            pipeline_id: pipeline.id,
-            workspace_id: pipeline.workspace_id,
-            account_id: pipeline.account_id,
-            name: pipeline.name,
-            description: pipeline.description,
-            status: pipeline.status,
-            definition: pipeline.definition,
-            artifacts: Vec::new(),
-            created_at: pipeline.created_at.into(),
-            updated_at: pipeline.updated_at.into(),
-        }
+    /// Creates a response from the database model and its reference ids.
+    ///
+    /// The `policy_ids` / `context_ids` come from the join tables and are merged
+    /// with the stored engine config to rebuild the full definition. Fails if the
+    /// stored config JSON does not decode to the current schema.
+    pub fn from_model(
+        pipeline: model::WorkspacePipeline,
+        policy_ids: Vec<Uuid>,
+        context_ids: Vec<Uuid>,
+    ) -> serde_json::Result<Self> {
+        Self::assemble(pipeline, Vec::new(), policy_ids, context_ids)
     }
 
-    /// Creates a pipeline response with artifacts.
+    /// Creates a pipeline response with artifacts and reference ids.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
-    ) -> Self {
-        Self {
+        policy_ids: Vec<Uuid>,
+        context_ids: Vec<Uuid>,
+    ) -> serde_json::Result<Self> {
+        let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
+        Self::assemble(pipeline, artifacts, policy_ids, context_ids)
+    }
+
+    /// Shared assembly: decodes the stored config and merges the references.
+    fn assemble(
+        pipeline: model::WorkspacePipeline,
+        artifacts: Vec<Artifact>,
+        policy_ids: Vec<Uuid>,
+        context_ids: Vec<Uuid>,
+    ) -> serde_json::Result<Self> {
+        let definition =
+            PipelineDefinition::from_parts(pipeline.definition, policy_ids, context_ids)?;
+        Ok(Self {
             pipeline_id: pipeline.id,
             workspace_id: pipeline.workspace_id,
             account_id: pipeline.account_id,
             name: pipeline.name,
             description: pipeline.description,
             status: pipeline.status,
-            definition: pipeline.definition,
-            artifacts: artifacts.into_iter().map(Artifact::from_model).collect(),
+            definition,
+            artifacts,
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),
-        }
+        })
     }
 }
 

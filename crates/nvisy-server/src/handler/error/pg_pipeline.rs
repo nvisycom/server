@@ -1,8 +1,8 @@
 //! Pipeline-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    PipelineArtifactConstraints, PipelineConstraints, PipelineRunConstraints,
-    WorkspaceConnectionConstraints, WorkspaceContextConstraints,
+    PipelineArtifactConstraints, PipelineConstraints, PipelineReferenceConstraints,
+    PipelineRunConstraints, WorkspaceConnectionConstraints, WorkspaceContextConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -61,6 +61,31 @@ impl From<PipelineArtifactConstraints> for Error<'static> {
         };
 
         error.with_resource("pipeline_artifact")
+    }
+}
+
+impl From<PipelineReferenceConstraints> for Error<'static> {
+    fn from(c: PipelineReferenceConstraints) -> Self {
+        let (resource, error) = match c {
+            PipelineReferenceConstraints::PolicyReference => (
+                "policy",
+                ErrorKind::BadRequest
+                    .with_message("Referenced policy does not exist in this workspace"),
+            ),
+            PipelineReferenceConstraints::ContextReference => (
+                "context",
+                ErrorKind::BadRequest
+                    .with_message("Referenced context does not exist in this workspace"),
+            ),
+            // The pipeline side of the FK only fails if the pipeline row vanished
+            // mid-transaction, which is a server-side fault rather than bad input.
+            PipelineReferenceConstraints::PolicyPipelineReference
+            | PipelineReferenceConstraints::ContextPipelineReference => {
+                ("pipeline", ErrorKind::InternalServerError.into_error())
+            }
+        };
+
+        error.with_resource(resource)
     }
 }
 
