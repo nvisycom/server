@@ -349,10 +349,18 @@ async fn replace_references(
     pipeline: &WorkspacePipeline,
     references: &PipelineReferences,
 ) -> PgResult<()> {
-    conn.replace_pipeline_policies(pipeline.workspace_id, pipeline.id, &references.policy_ids)
-        .await?;
-    conn.replace_pipeline_contexts(pipeline.workspace_id, pipeline.id, &references.context_ids)
-        .await?;
+    conn.replace_workspace_pipeline_policies(
+        pipeline.workspace_id,
+        pipeline.id,
+        &references.policy_ids,
+    )
+    .await?;
+    conn.replace_workspace_pipeline_contexts(
+        pipeline.workspace_id,
+        pipeline.id,
+        &references.context_ids,
+    )
+    .await?;
     Ok(())
 }
 

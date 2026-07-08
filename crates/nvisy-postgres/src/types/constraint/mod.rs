@@ -157,10 +157,10 @@ impl ConstraintViolation {
                 FileChunkConstraints::new => FileChunk,
                 PipelineRunConstraints::new => PipelineRun,
                 PipelineArtifactConstraints::new => PipelineArtifact,
+                PipelineReferenceConstraints::new => PipelineReference,
             },
             "files" => try_parse!(FileConstraints::new => File),
             "pipelines" => try_parse!(PipelineConstraints::new => Pipeline),
-            "pipeline" => try_parse!(PipelineReferenceConstraints::new => PipelineReference),
             _ => None,
         }
     }

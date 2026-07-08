@@ -56,14 +56,14 @@ pub struct PipelineDefinition {
     pub default_scope: Option<ScopeParams>,
     /// Workspace policies applied at redaction, resolved live by id.
     ///
-    /// Stored relationally in the `pipeline_policies` join table, not the JSON
+    /// Stored relationally in the `workspace_pipeline_policies` join table, not the JSON
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
     pub policy_ids: Vec<Uuid>,
     /// Workspace contexts supplied to detection, resolved live by id.
     ///
-    /// Stored relationally in the `pipeline_contexts` join table, not the JSON
+    /// Stored relationally in the `workspace_pipeline_contexts` join table, not the JSON
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]

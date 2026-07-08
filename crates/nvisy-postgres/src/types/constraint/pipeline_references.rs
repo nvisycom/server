@@ -14,13 +14,13 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum PipelineReferenceConstraints {
     // Foreign-key constraints (referenced row must exist in the workspace)
-    #[strum(serialize = "pipeline_policies_policy_fkey")]
+    #[strum(serialize = "workspace_pipeline_policies_policy_fkey")]
     PolicyReference,
-    #[strum(serialize = "pipeline_contexts_context_fkey")]
+    #[strum(serialize = "workspace_pipeline_contexts_context_fkey")]
     ContextReference,
-    #[strum(serialize = "pipeline_policies_pipeline_fkey")]
+    #[strum(serialize = "workspace_pipeline_policies_pipeline_fkey")]
     PolicyPipelineReference,
-    #[strum(serialize = "pipeline_contexts_pipeline_fkey")]
+    #[strum(serialize = "workspace_pipeline_contexts_pipeline_fkey")]
     ContextPipelineReference,
 }
 

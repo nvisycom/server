@@ -1,245 +1,5 @@
--- Pipeline: Workflow definitions, connections, and execution tracking
--- This migration creates tables for redaction pipeline definitions
-
--- Sync status enum for connections
-CREATE TYPE SYNC_STATUS AS ENUM (
-    'pending',      -- Sync is pending
-    'running',      -- Sync is in progress
-    'cancelled'     -- Sync was cancelled
-);
-
-COMMENT ON TYPE SYNC_STATUS IS
-    'Status for connection sync operations.';
-
--- Workspace connections table (encrypted provider credentials + context)
-CREATE TABLE workspace_connections (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- Core attributes
-    name            TEXT            NOT NULL,
-    provider        TEXT            NOT NULL,
-
-    CONSTRAINT workspace_connections_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
-
-    -- Encrypted connection data (XChaCha20-Poly1305 encrypted JSON)
-    -- Contains: {"type": "postgres", "credentials": {...}, "context": {...}}
-    -- The context includes resumption state (last cursor, offset, etc.)
-    encrypted_data  BYTEA           NOT NULL,
-
-    CONSTRAINT workspace_connections_data_size CHECK (length(encrypted_data) BETWEEN 1 AND 65536),
-
-    -- Sync status
-    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
-    last_sync_at    TIMESTAMPTZ     DEFAULT NULL,
-    sync_status     SYNC_STATUS     DEFAULT NULL,
-
-    -- Metadata (non-encrypted, for filtering/display)
-    metadata        JSONB           NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_connections_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Lifecycle timestamps
-    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
-    deleted_at      TIMESTAMPTZ     DEFAULT NULL,
-
-    CONSTRAINT workspace_connections_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_connections_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
-);
-
--- Triggers
-SELECT setup_updated_at('workspace_connections');
-
--- Indexes
-CREATE INDEX workspace_connections_workspace_idx
-    ON workspace_connections (workspace_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX workspace_connections_provider_idx
-    ON workspace_connections (provider, workspace_id)
-    WHERE deleted_at IS NULL;
-
-CREATE UNIQUE INDEX workspace_connections_name_unique_idx
-    ON workspace_connections (workspace_id, lower(trim(name)))
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX workspace_connections_active_idx
-    ON workspace_connections (workspace_id, is_active)
-    WHERE deleted_at IS NULL AND is_active = TRUE;
-
--- Comments
-COMMENT ON TABLE workspace_connections IS
-    'Encrypted provider connections (credentials + context) scoped to workspaces.';
-
-COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
-COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_connections.name IS 'Human-readable connection name (1-255 chars)';
-COMMENT ON COLUMN workspace_connections.provider IS 'Provider type (openai, postgres, s3, pinecone, etc.)';
-COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with credentials and context';
-COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is active for syncing';
-COMMENT ON COLUMN workspace_connections.last_sync_at IS 'Last successful sync timestamp';
-COMMENT ON COLUMN workspace_connections.sync_status IS 'Current sync status';
-COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
-COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
-COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft deletion timestamp';
-
--- Workspace redaction policies table (structured governance config)
--- The definition holds a nvisy_schema::policy::Policy the engine consumes.
-CREATE TABLE workspace_policies (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- Composite key target for workspace-scoped foreign keys (join tables).
-    UNIQUE (workspace_id, id),
-
-    -- Core attributes
-    name            TEXT            NOT NULL,
-    description     TEXT            DEFAULT NULL,
-    version         TEXT            NOT NULL,
-
-    CONSTRAINT workspace_policies_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_policies_description_length CHECK (description IS NULL OR length(description) <= 4096),
-    CONSTRAINT workspace_policies_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
-
-    -- Policy body (nvisy_schema::policy::Policy as JSON: rules, labels,
-    -- fallback, retention, applies_when predicate). Stored XChaCha20-Poly1305
-    -- encrypted with the workspace-derived key.
-    definition      BYTEA           NOT NULL,
-
-    CONSTRAINT workspace_policies_definition_size CHECK (length(definition) BETWEEN 1 AND 1048576),
-
-    -- Metadata (for filtering/display)
-    metadata        JSONB           NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_policies_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Lifecycle timestamps
-    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
-    deleted_at      TIMESTAMPTZ     DEFAULT NULL,
-
-    CONSTRAINT workspace_policies_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_policies_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
-);
-
--- Triggers
-SELECT setup_updated_at('workspace_policies');
-
--- Indexes
-CREATE INDEX workspace_policies_workspace_idx
-    ON workspace_policies (workspace_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX workspace_policies_account_idx
-    ON workspace_policies (account_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE UNIQUE INDEX workspace_policies_name_unique_idx
-    ON workspace_policies (workspace_id, lower(trim(name)))
-    WHERE deleted_at IS NULL;
-
--- Comments
-COMMENT ON TABLE workspace_policies IS
-    'Structured redaction policies (nvisy_schema Policy) consumed by the engine.';
-
-COMMENT ON COLUMN workspace_policies.id IS 'Unique policy identifier';
-COMMENT ON COLUMN workspace_policies.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN workspace_policies.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_policies.name IS 'Human-readable policy name (1-255 chars)';
-COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
-COMMENT ON COLUMN workspace_policies.version IS 'Semver of the policy body';
-COMMENT ON COLUMN workspace_policies.definition IS 'Encrypted policy body (XChaCha20-Poly1305, workspace-derived key)';
-COMMENT ON COLUMN workspace_policies.metadata IS 'Metadata for filtering/display';
-COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
-COMMENT ON COLUMN workspace_policies.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_policies.deleted_at IS 'Soft deletion timestamp';
-
--- Workspace contexts table (structured reference-data for redaction)
--- The definition holds a nvisy_schema::context::Context the engine consumes.
-CREATE TABLE workspace_contexts (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- Composite key target for workspace-scoped foreign keys (join tables).
-    UNIQUE (workspace_id, id),
-
-    -- Core attributes
-    name            TEXT            NOT NULL,
-    description     TEXT            DEFAULT NULL,
-    version         TEXT            NOT NULL,
-
-    CONSTRAINT workspace_contexts_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_contexts_description_length CHECK (description IS NULL OR length(description) <= 4096),
-    CONSTRAINT workspace_contexts_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
-
-    -- Context body (nvisy_schema::context::Context as JSON: typed
-    -- reference-data entries — biometric, geospatial, temporal, ...).
-    -- Stored XChaCha20-Poly1305 encrypted with the workspace-derived key.
-    definition      BYTEA           NOT NULL,
-
-    CONSTRAINT workspace_contexts_definition_size CHECK (length(definition) BETWEEN 1 AND 1048576),
-
-    -- Metadata (for filtering/display)
-    metadata        JSONB           NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_contexts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Lifecycle timestamps
-    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
-    deleted_at      TIMESTAMPTZ     DEFAULT NULL,
-
-    CONSTRAINT workspace_contexts_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_contexts_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
-);
-
--- Triggers
-SELECT setup_updated_at('workspace_contexts');
-
--- Indexes
-CREATE INDEX workspace_contexts_workspace_idx
-    ON workspace_contexts (workspace_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX workspace_contexts_account_idx
-    ON workspace_contexts (account_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE UNIQUE INDEX workspace_contexts_name_unique_idx
-    ON workspace_contexts (workspace_id, lower(trim(name)))
-    WHERE deleted_at IS NULL;
-
--- Comments
-COMMENT ON TABLE workspace_contexts IS
-    'Structured reference-data contexts (nvisy_schema Context) consumed by the engine.';
-
-COMMENT ON COLUMN workspace_contexts.id IS 'Unique context identifier';
-COMMENT ON COLUMN workspace_contexts.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN workspace_contexts.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_contexts.name IS 'Human-readable context name (1-255 chars)';
-COMMENT ON COLUMN workspace_contexts.description IS 'Context description (up to 4096 chars)';
-COMMENT ON COLUMN workspace_contexts.version IS 'Semver of the context body';
-COMMENT ON COLUMN workspace_contexts.definition IS 'Encrypted context body (XChaCha20-Poly1305, workspace-derived key)';
-COMMENT ON COLUMN workspace_contexts.metadata IS 'Metadata for filtering/display';
-COMMENT ON COLUMN workspace_contexts.created_at IS 'Creation timestamp';
-COMMENT ON COLUMN workspace_contexts.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_contexts.deleted_at IS 'Soft deletion timestamp';
+-- Pipelines: redaction pipeline definitions, their policy/context
+-- references (join tables), runs, and artifacts.
 
 -- Pipeline status enum
 CREATE TYPE PIPELINE_STATUS AS ENUM (
@@ -366,41 +126,41 @@ COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft deletion timestamp';
 -- Pipeline → policy references (redaction rules applied by the pipeline).
 -- The shared workspace_id in both composite foreign keys enforces that a
 -- pipeline can only reference policies from its own workspace.
-CREATE TABLE pipeline_policies (
+CREATE TABLE workspace_pipeline_policies (
     workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     pipeline_id     UUID            NOT NULL,
     policy_id       UUID            NOT NULL,
 
     PRIMARY KEY (pipeline_id, policy_id),
 
-    CONSTRAINT pipeline_policies_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
+    CONSTRAINT workspace_pipeline_policies_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
         REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT pipeline_policies_policy_fkey FOREIGN KEY (workspace_id, policy_id)
+    CONSTRAINT workspace_pipeline_policies_policy_fkey FOREIGN KEY (workspace_id, policy_id)
         REFERENCES workspace_policies (workspace_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX pipeline_policies_policy_idx ON pipeline_policies (policy_id);
+CREATE INDEX workspace_pipeline_policies_policy_idx ON workspace_pipeline_policies (policy_id);
 
-COMMENT ON TABLE pipeline_policies IS
+COMMENT ON TABLE workspace_pipeline_policies IS
     'Policies a pipeline applies at redaction. CASCADE cleans up on hard delete.';
 
 -- Pipeline → context references (reference data supplied to detection).
-CREATE TABLE pipeline_contexts (
+CREATE TABLE workspace_pipeline_contexts (
     workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     pipeline_id     UUID            NOT NULL,
     context_id      UUID            NOT NULL,
 
     PRIMARY KEY (pipeline_id, context_id),
 
-    CONSTRAINT pipeline_contexts_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
+    CONSTRAINT workspace_pipeline_contexts_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
         REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT pipeline_contexts_context_fkey FOREIGN KEY (workspace_id, context_id)
+    CONSTRAINT workspace_pipeline_contexts_context_fkey FOREIGN KEY (workspace_id, context_id)
         REFERENCES workspace_contexts (workspace_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX pipeline_contexts_context_idx ON pipeline_contexts (context_id);
+CREATE INDEX workspace_pipeline_contexts_context_idx ON workspace_pipeline_contexts (context_id);
 
-COMMENT ON TABLE pipeline_contexts IS
+COMMENT ON TABLE workspace_pipeline_contexts IS
     'Contexts a pipeline supplies to detection. CASCADE cleans up on hard delete.';
 
 -- Pipeline runs table (execution instances)

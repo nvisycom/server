@@ -7,11 +7,11 @@
 use diesel::prelude::*;
 use uuid::Uuid;
 
-use crate::schema::{pipeline_contexts, pipeline_policies};
+use crate::schema::{workspace_pipeline_contexts, workspace_pipeline_policies};
 
 /// A pipeline → policy reference row.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable, Insertable)]
-#[diesel(table_name = pipeline_policies)]
+#[diesel(table_name = workspace_pipeline_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PipelinePolicy {
     /// Workspace both the pipeline and policy belong to.
@@ -24,7 +24,7 @@ pub struct PipelinePolicy {
 
 /// A pipeline → context reference row.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable, Insertable)]
-#[diesel(table_name = pipeline_contexts)]
+#[diesel(table_name = workspace_pipeline_contexts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PipelineContext {
     /// Workspace both the pipeline and context belong to.
