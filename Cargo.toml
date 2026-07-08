@@ -83,7 +83,7 @@ argon2 = { version = "0.6.0-rc.8", features = ["password-hash", "rand_core"] }
 zxcvbn = { version = "3.1", features = ["serde"] }
 
 # Encryption & Cryptography
-chacha20poly1305 = { version = "0.11", features = [] }
+chacha20poly1305 = { version = "0.11", features = ["getrandom"] }
 hkdf = { version = "0.13", features = [] }
 sha2 = { version = "0.11", features = [] }
 hmac = { version = "0.13", features = [] }
