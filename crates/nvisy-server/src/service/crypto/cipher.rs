@@ -5,7 +5,7 @@
 //! The ciphertext format is: `nonce (24 bytes) || ciphertext || tag (16 bytes)`
 
 use chacha20poly1305::XChaCha20Poly1305;
-use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
+use chacha20poly1305::aead::{Aead, Generate, KeyInit, Nonce};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -28,7 +28,7 @@ pub const MIN_CIPHERTEXT_SIZE: usize = NONCE_SIZE + TAG_SIZE;
 pub fn encrypt(key: &EncryptionKey, plaintext: &[u8]) -> CryptoResult<Vec<u8>> {
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
 
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let nonce = Nonce::<XChaCha20Poly1305>::generate();
 
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
@@ -52,10 +52,11 @@ pub fn decrypt(key: &EncryptionKey, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> 
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
 
     let (nonce_bytes, encrypted) = ciphertext.split_at(NONCE_SIZE);
-    let nonce = nonce_bytes.into();
+    let nonce = Nonce::<XChaCha20Poly1305>::try_from(nonce_bytes)
+        .map_err(|_| CryptoError::DecryptionFailed)?;
 
     cipher
-        .decrypt(nonce, encrypted)
+        .decrypt(&nonce, encrypted)
         .map_err(|_| CryptoError::DecryptionFailed)
 }
 
