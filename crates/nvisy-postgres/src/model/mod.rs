@@ -7,6 +7,7 @@ mod account;
 mod account_action_token;
 mod account_api_token;
 mod account_notification;
+mod pipeline_reference;
 mod workspace;
 mod workspace_activity;
 mod workspace_connection;
@@ -31,6 +32,7 @@ pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountAp
 pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
+pub use pipeline_reference::{PipelineContext, PipelinePolicy};
 // Workspace models
 pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};
 pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
