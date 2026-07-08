@@ -148,6 +148,28 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+
+    pipeline_contexts (pipeline_id, context_id) {
+        workspace_id -> Uuid,
+        pipeline_id -> Uuid,
+        context_id -> Uuid,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+
+    pipeline_policies (pipeline_id, policy_id) {
+        workspace_id -> Uuid,
+        pipeline_id -> Uuid,
+        policy_id -> Uuid,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -436,6 +458,8 @@ diesel::table! {
 diesel::joinable!(account_action_tokens -> accounts (account_id));
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
+diesel::joinable!(pipeline_contexts -> workspaces (workspace_id));
+diesel::joinable!(pipeline_policies -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
@@ -466,6 +490,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_api_tokens,
     account_notifications,
     accounts,
+    pipeline_contexts,
+    pipeline_policies,
     workspace_activities,
     workspace_connections,
     workspace_contexts,
