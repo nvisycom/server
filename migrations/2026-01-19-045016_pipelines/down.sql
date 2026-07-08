@@ -1,5 +1,9 @@
 -- Revert pipeline tables
 
+-- Pipeline → policy / context join tables (drop before their parents)
+DROP TABLE IF EXISTS workspace_pipeline_contexts;
+DROP TABLE IF EXISTS workspace_pipeline_policies;
+
 -- Artifacts
 DROP TABLE IF EXISTS workspace_pipeline_artifacts;
 DROP TYPE IF EXISTS ARTIFACT_TYPE;
@@ -17,14 +21,3 @@ DROP TABLE IF EXISTS workspace_pipelines;
 DROP TYPE IF EXISTS PIPELINE_TRIGGER_TYPE;
 DROP TYPE IF EXISTS PIPELINE_RUN_STATUS;
 DROP TYPE IF EXISTS PIPELINE_STATUS;
-
--- Workspace contexts
-DROP TABLE IF EXISTS workspace_contexts;
-
--- Workspace policies
-DROP TABLE IF EXISTS workspace_policies;
-
--- Workspace connections
-DROP TABLE IF EXISTS workspace_connections;
-
-DROP TYPE IF EXISTS SYNC_STATUS;

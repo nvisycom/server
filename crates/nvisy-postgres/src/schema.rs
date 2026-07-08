@@ -329,6 +329,28 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+
+    workspace_pipeline_contexts (pipeline_id, context_id) {
+        workspace_id -> Uuid,
+        pipeline_id -> Uuid,
+        context_id -> Uuid,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
+
+    workspace_pipeline_policies (pipeline_id, policy_id) {
+        workspace_id -> Uuid,
+        pipeline_id -> Uuid,
+        policy_id -> Uuid,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
     use super::sql_types::PipelineTriggerType;
     use super::sql_types::PipelineRunStatus;
 
@@ -451,6 +473,8 @@ diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_artifacts -> workspace_files (file_id));
 diesel::joinable!(workspace_pipeline_artifacts -> workspace_pipeline_runs (run_id));
+diesel::joinable!(workspace_pipeline_contexts -> workspaces (workspace_id));
+diesel::joinable!(workspace_pipeline_policies -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_runs -> accounts (account_id));
 diesel::joinable!(workspace_pipeline_runs -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_pipelines -> accounts (account_id));
@@ -475,6 +499,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_invites,
     workspace_members,
     workspace_pipeline_artifacts,
+    workspace_pipeline_contexts,
+    workspace_pipeline_policies,
     workspace_pipeline_runs,
     workspace_pipelines,
     workspace_policies,
