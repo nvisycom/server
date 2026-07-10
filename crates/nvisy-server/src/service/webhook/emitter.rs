@@ -6,6 +6,7 @@ use std::time::Duration;
 use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{EventPublisher, WebhookStream};
 use nvisy_postgres::PgClient;
+use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::WebhookEvent;
 use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
@@ -13,6 +14,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::Result;
+use crate::service::CryptoService;
 
 /// Type alias for webhook publisher.
 type WebhookPublisher = EventPublisher<WebhookRequest, WebhookStream>;
@@ -23,6 +25,16 @@ const TRACING_TARGET: &str = "nvisy_server::service::webhook";
 /// Default timeout for webhook delivery.
 const DEFAULT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The event details shared by every webhook request in one emission.
+struct EmitContext {
+    workspace_id: Uuid,
+    resource_id: Uuid,
+    resource_type: String,
+    event: String,
+    triggered_by: Option<Uuid>,
+    data: Option<serde_json::Value>,
+}
+
 /// Webhook event emitter for publishing domain events.
 ///
 /// This service queries webhooks subscribed to specific events and publishes
@@ -31,14 +43,16 @@ const DEFAULT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct WebhookEmitter {
     pg_client: PgClient,
     nats_client: NatsClient,
+    crypto: CryptoService,
 }
 
 impl WebhookEmitter {
     /// Create a new webhook emitter.
-    pub fn new(pg_client: PgClient, nats_client: NatsClient) -> Self {
+    pub fn new(pg_client: PgClient, nats_client: NatsClient, crypto: CryptoService) -> Self {
         Self {
             pg_client,
             nats_client,
+            crypto,
         }
     }
 
@@ -90,62 +104,20 @@ impl WebhookEmitter {
             "Found webhooks subscribed to event"
         );
 
-        // Create webhook requests
+        // Build a signed request per webhook, skipping any that can't be built.
         let event_subject = event.as_subject();
-        let event_str = event.to_string();
-        let resource_type = event.category().to_string();
+        let context = EmitContext {
+            workspace_id,
+            resource_id,
+            resource_type: event.category().to_string(),
+            event: event.to_string(),
+            triggered_by,
+            data,
+        };
 
         let requests: Vec<WebhookRequest> = webhooks
             .into_iter()
-            .filter_map(|webhook| {
-                // Parse URL - skip invalid URLs
-                let url: Url = match webhook.url.parse() {
-                    Ok(u) => u,
-                    Err(err) => {
-                        tracing::warn!(
-                            target: TRACING_TARGET,
-                            webhook_id = %webhook.id,
-                            url = %webhook.url,
-                            error = %err,
-                            "Skipping webhook with invalid URL"
-                        );
-                        return None;
-                    }
-                };
-
-                // Build context
-                let mut context = WebhookContext::new(webhook.id, workspace_id, resource_id)
-                    .with_resource_type(&resource_type);
-
-                if let Some(account_id) = triggered_by {
-                    context = context.with_account(account_id);
-                }
-
-                if let Some(ref metadata) = data {
-                    context = context.with_metadata(metadata.clone());
-                }
-
-                // Build request
-                let mut request =
-                    WebhookRequest::new(url, &event_str, format!("Event: {}", event_str), context)
-                        .with_timeout(DEFAULT_DELIVERY_TIMEOUT)
-                        .with_secret(webhook.secret);
-
-                // Add custom headers from webhook config
-                if !webhook.headers.is_null()
-                    && let Some(obj) = webhook.headers.as_object()
-                {
-                    let header_map: HashMap<String, String> = obj
-                        .iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect();
-                    if !header_map.is_empty() {
-                        request = request.with_headers(header_map);
-                    }
-                }
-
-                Some(request)
-            })
+            .filter_map(|webhook| self.build_request(webhook, &context))
             .collect();
 
         let request_count = requests.len();
@@ -170,6 +142,81 @@ impl WebhookEmitter {
         );
 
         Ok(request_count)
+    }
+
+    /// Builds a signed delivery request for one webhook.
+    ///
+    /// Returns `None` — logging the reason — when the webhook can't be turned
+    /// into a valid request (bad URL, unrecoverable secret), so a single
+    /// misconfigured webhook doesn't abort the whole emission.
+    fn build_request(
+        &self,
+        webhook: WorkspaceWebhook,
+        ctx: &EmitContext,
+    ) -> Option<WebhookRequest> {
+        let url: Url = webhook
+            .url
+            .parse()
+            .inspect_err(|err| {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    webhook_id = %webhook.id,
+                    url = %webhook.url,
+                    error = %err,
+                    "Skipping webhook with invalid URL"
+                );
+            })
+            .ok()?;
+
+        let secret = self.decrypt_secret(&webhook, ctx.workspace_id)?;
+
+        let mut context = WebhookContext::new(webhook.id, ctx.workspace_id, ctx.resource_id)
+            .with_resource_type(&ctx.resource_type);
+        if let Some(account_id) = ctx.triggered_by {
+            context = context.with_account(account_id);
+        }
+        if let Some(metadata) = &ctx.data {
+            context = context.with_metadata(metadata.clone());
+        }
+
+        let mut request =
+            WebhookRequest::new(url, &ctx.event, format!("Event: {}", ctx.event), context)
+                .with_timeout(DEFAULT_DELIVERY_TIMEOUT)
+                .with_secret(secret);
+
+        if let Some(headers) = parse_headers(&webhook.headers) {
+            request = request.with_headers(headers);
+        }
+
+        Some(request)
+    }
+
+    /// Decrypts a webhook's stored signing secret, returning `None` (and logging)
+    /// if it can't be recovered — the request is signed or not sent at all.
+    fn decrypt_secret(&self, webhook: &WorkspaceWebhook, workspace_id: Uuid) -> Option<String> {
+        let plaintext = self
+            .crypto
+            .decrypt(workspace_id, &webhook.encrypted_secret)
+            .inspect_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    webhook_id = %webhook.id,
+                    error = %err,
+                    "Skipping webhook with undecryptable secret"
+                );
+            })
+            .ok()?;
+
+        String::from_utf8(plaintext)
+            .inspect_err(|err| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    webhook_id = %webhook.id,
+                    error = %err,
+                    "Skipping webhook with non-UTF-8 secret"
+                );
+            })
+            .ok()
     }
 
     /// Emit a document created event.
@@ -437,4 +484,16 @@ impl WebhookEmitter {
         )
         .await
     }
+}
+
+/// Extracts a webhook's custom headers from its stored JSON, keeping only
+/// string values. Returns `None` when there are no usable headers.
+fn parse_headers(headers: &serde_json::Value) -> Option<HashMap<String, String>> {
+    let map: HashMap<String, String> = headers
+        .as_object()?
+        .iter()
+        .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
+        .collect();
+
+    (!map.is_empty()).then_some(map)
 }

@@ -19,9 +19,7 @@ use super::request::{Login, Signup};
 use super::response::{AuthToken, ErrorResponse};
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, TypedHeader, ValidateJson};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{
-    PasswordHasher, PasswordStrength, ServiceState, SessionKeys, UserAgentParser,
-};
+use crate::service::{PasswordService, ServiceState, SessionKeys, UserAgentParser};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -51,7 +49,7 @@ fn create_auth_header(
 #[tracing::instrument(skip_all)]
 async fn login(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<PasswordHasher>,
+    State(password): State<PasswordService>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
@@ -64,13 +62,13 @@ async fn login(
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
-        Some(acc) => auth_hasher
-            .verify_password(&request.password, &acc.password_hash)
+        Some(acc) => password
+            .verify(&request.password, &acc.password_hash)
             .is_ok(),
         None => {
             // Perform dummy hash verification to maintain consistent timing
             // and prevent account enumeration via timing attacks
-            auth_hasher.verify_dummy_password(&request.password)
+            password.verify_dummy(&request.password)
         }
     };
 
@@ -149,8 +147,7 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all)]
 async fn signup(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<PasswordHasher>,
-    State(password_strength): State<PasswordStrength>,
+    State(password): State<PasswordService>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
@@ -160,8 +157,7 @@ async fn signup(
 
     // Validate password strength and hash
     let user_inputs = build_password_user_inputs(&request.display_name, &request.email_address);
-    password_strength.validate_password(&request.password, &user_inputs)?;
-    let password_hash = auth_hasher.hash_password(&request.password)?;
+    let password_hash = password.validate_and_hash(&request.password, &user_inputs)?;
 
     let mut conn = pg_client.get_connection().await?;
 

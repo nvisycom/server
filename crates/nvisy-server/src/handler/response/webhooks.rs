@@ -84,8 +84,7 @@ pub struct WebhookCreated {
 }
 
 impl WebhookCreated {
-    pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
-        let secret = webhook.secret.clone();
+    pub fn from_model(webhook: model::WorkspaceWebhook, secret: String) -> Self {
         Self {
             webhook: Webhook::from_model(webhook),
             secret,

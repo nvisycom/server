@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use super::{
     CryptoResult, EncryptionKey, decrypt, decrypt_json, decrypt_reader, encrypt, encrypt_json,
-    encrypt_reader,
+    encrypt_reader, generate_secret,
 };
 use crate::{Error, Result};
 
@@ -112,6 +112,14 @@ impl CryptoService {
         R: AsyncRead + Unpin + Send,
     {
         decrypt_reader(self.workspace_key(workspace_id), reader)
+    }
+
+    /// Generates a fresh random secret token, hex-encoded.
+    ///
+    /// For shared secrets that must be recoverable in full (e.g. HMAC signing
+    /// keys) — hand the plaintext to the caller once, then store it encrypted.
+    pub fn generate_secret(&self) -> String {
+        generate_secret()
     }
 
     /// Derives the per-workspace key via HKDF-SHA256.

@@ -118,43 +118,22 @@ fn truncate(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
+    /// Our formatting composes woothee's fields into a "<name> <ver> on <os>
+    /// (<category>)" label.
     #[test]
-    fn parse_chrome_macos_user_agent() {
+    fn parse_formats_our_label() {
         let parser = UserAgentParser::new();
         let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-        let name = parser.parse(ua);
-        assert_eq!(name, "Chrome 120 on Mac OSX (Desktop)");
+        assert_eq!(parser.parse(ua), "Chrome 120 on Mac OSX (Desktop)");
     }
 
+    /// Our length cap keeps token names within the column limit.
     #[test]
-    fn parse_firefox_windows_user_agent() {
-        let parser = UserAgentParser::new();
-        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0";
-        let name = parser.parse(ua);
-        assert_eq!(name, "Firefox 121 on Windows 10 (Desktop)");
-    }
-
-    #[test]
-    fn parse_safari_ios_user_agent() {
-        let parser = UserAgentParser::new();
-        let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
-        let name = parser.parse(ua);
-        assert!(name.contains("Safari"));
-        assert!(name.contains("Mobile"));
-    }
-
-    #[test]
-    fn truncates_long_names() {
-        let long_string = "A".repeat(100);
-        let truncated = truncate(&long_string, TOKEN_NAME_MAX_LENGTH);
-        assert_eq!(truncated.len(), TOKEN_NAME_MAX_LENGTH);
-    }
-
-    #[test]
-    fn respects_max_length() {
-        let parser = UserAgentParser::new();
-        let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-        let name = parser.parse(ua);
-        assert!(name.len() <= TOKEN_NAME_MAX_LENGTH);
+    fn truncate_caps_length() {
+        let long = "A".repeat(100);
+        assert_eq!(
+            truncate(&long, TOKEN_NAME_MAX_LENGTH).len(),
+            TOKEN_NAME_MAX_LENGTH
+        );
     }
 }

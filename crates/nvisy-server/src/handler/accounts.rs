@@ -18,7 +18,7 @@ use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse};
 use crate::extract::{AuthState, Json, Path, ValidateJson};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{PasswordHasher, PasswordStrength, ServiceState};
+use crate::service::{PasswordService, ServiceState};
 
 /// Tracing target for account operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
@@ -109,8 +109,7 @@ fn get_account_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_own_account(
     State(pg_client): State<PgClient>,
-    State(auth_hasher): State<PasswordHasher>,
-    State(password_strength): State<PasswordStrength>,
+    State(password): State<PasswordService>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateAccount>,
 ) -> Result<(StatusCode, Json<Account>)> {
@@ -121,7 +120,7 @@ async fn update_own_account(
 
     // Validate and hash password if provided
     let password_hash = match request.password.as_ref() {
-        Some(password) => {
+        Some(new_password) => {
             let display_name = request
                 .display_name
                 .as_deref()
@@ -132,9 +131,7 @@ async fn update_own_account(
                 .unwrap_or(&current_account.email_address);
 
             let user_inputs = build_password_user_inputs(display_name, email_address);
-            password_strength.validate_password(password, &user_inputs)?;
-
-            Some(auth_hasher.hash_password(password)?)
+            Some(password.validate_and_hash(new_password, &user_inputs)?)
         }
         None => None,
     };
