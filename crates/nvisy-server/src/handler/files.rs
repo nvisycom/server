@@ -16,7 +16,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
-use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::{PgClient, PgConn};
@@ -36,9 +35,6 @@ use crate::service::{ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
-
-/// Type alias for file job publisher.
-type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<FileModel> {
@@ -106,7 +102,6 @@ struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
     file_store: ObjectStore<FilesBucket, FileKey>,
-    publisher: FileJobPublisher,
 }
 
 /// Processes a single file from a multipart upload using streaming.
@@ -154,7 +149,7 @@ async fn process_single_file(
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
         original_filename: Some(filename),
-        file_extension: Some(file_extension.clone()),
+        file_extension: Some(file_extension),
         file_size_bytes: put_result.size() as i64,
         file_hash_sha256: put_result.sha256().to_vec(),
         storage_path: file_key.to_string(),
@@ -163,25 +158,6 @@ async fn process_single_file(
     };
 
     let created_file = conn.create_workspace_file(file_record).await?;
-
-    // Step 3: Publish job to queue (use Postgres-generated file ID)
-    let job = FileJob::new(created_file.id, file_key.to_string(), file_extension, ());
-
-    if let Err(err) = ctx.publisher.publish(&job).await {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %err,
-            file_id = %created_file.id,
-            "Failed to publish file job, file stored but not queued for processing"
-        );
-    }
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        file_id = %created_file.id,
-        job_id = %job.id,
-        "File job published"
-    );
 
     Ok(created_file)
 }
@@ -212,13 +188,10 @@ async fn upload_file(
 
     let file_store = nats_client.object_store::<FilesBucket, FileKey>().await?;
 
-    let publisher: FileJobPublisher = nats_client.event_publisher().await?;
-
     let ctx = FileUploadContext {
         workspace_id: path_params.workspace_id,
         account_id: auth_claims.account_id,
         file_store,
-        publisher,
     };
 
     let mut uploaded_files = Vec::new();

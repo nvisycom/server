@@ -20,19 +20,6 @@ pub trait EventStream: Clone + Send + Sync + 'static {
     const CONSUMER_NAME: &'static str;
 }
 
-/// Stream for file processing jobs.
-///
-/// Messages expire after 7 days.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct FileStream;
-
-impl EventStream for FileStream {
-    const CONSUMER_NAME: &'static str = "file-worker";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(7 * 24 * 60 * 60));
-    const NAME: &'static str = "FILE_JOBS";
-    const SUBJECT: &'static str = "file.jobs";
-}
-
 /// Stream for webhook delivery.
 ///
 /// Messages expire after 1 day.
@@ -49,17 +36,6 @@ impl EventStream for WebhookStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_file_stream() {
-        assert_eq!(FileStream::NAME, "FILE_JOBS");
-        assert_eq!(FileStream::SUBJECT, "file.jobs");
-        assert_eq!(
-            FileStream::MAX_AGE,
-            Some(Duration::from_secs(7 * 24 * 60 * 60))
-        );
-        assert_eq!(FileStream::CONSUMER_NAME, "file-worker");
-    }
 
     #[test]
     fn test_webhook_stream() {
