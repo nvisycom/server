@@ -75,6 +75,7 @@ hkdf = { workspace = true, features = [] }
 
 # Encoding
 base64 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
 
 # Randomness
 rand = { workspace = true, features = [] }

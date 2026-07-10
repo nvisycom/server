@@ -425,7 +425,7 @@ diesel::table! {
         url -> Text,
         events -> Array<Nullable<WebhookEvent>>,
         headers -> Jsonb,
-        secret -> Text,
+        encrypted_secret -> Bytea,
         status -> WebhookStatus,
         last_triggered_at -> Nullable<Timestamptz>,
         created_by -> Uuid,

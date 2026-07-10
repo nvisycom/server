@@ -26,7 +26,7 @@ use crate::handler::response::{
     ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
 };
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::ServiceState;
+use crate::service::{CryptoService, ServiceState};
 
 /// Tracing target for workspace webhook operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
@@ -43,6 +43,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
 )]
 async fn create_webhook(
     State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateWebhook>,
@@ -59,7 +60,16 @@ async fn create_webhook(
         )
         .await?;
 
-    let new_webhook = request.into_model(path_params.workspace_id, auth_state.account_id);
+    // Generate the signing secret here so it is returned once and stored only
+    // encrypted; the server decrypts it to sign each delivery.
+    let secret = crypto.generate_secret();
+    let encrypted_secret = crypto.encrypt(path_params.workspace_id, secret.as_bytes())?;
+
+    let new_webhook = request.into_model(
+        path_params.workspace_id,
+        auth_state.account_id,
+        encrypted_secret,
+    );
     let webhook = conn.create_workspace_webhook(new_webhook).await?;
 
     tracing::info!(
@@ -71,7 +81,7 @@ async fn create_webhook(
     // Return WebhookCreated which includes the secret (visible only once)
     Ok((
         StatusCode::CREATED,
-        Json(WebhookCreated::from_model(webhook)),
+        Json(WebhookCreated::from_model(webhook, secret)),
     ))
 }
 

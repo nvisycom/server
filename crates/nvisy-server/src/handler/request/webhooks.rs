@@ -44,7 +44,12 @@ impl CreateWebhook {
     /// * `workspace_id` - The workspace this webhook belongs to.
     /// * `account_id` - The account creating the webhook.
     #[inline]
-    pub fn into_model(self, workspace_id: Uuid, account_id: Uuid) -> NewWorkspaceWebhook {
+    pub fn into_model(
+        self,
+        workspace_id: Uuid,
+        account_id: Uuid,
+        encrypted_secret: Vec<u8>,
+    ) -> NewWorkspaceWebhook {
         let events = self.events.into_iter().map(Some).collect();
         let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
         // Treat Disabled as Paused since users cannot set Disabled status
@@ -60,6 +65,7 @@ impl CreateWebhook {
             url: self.url,
             events,
             headers,
+            encrypted_secret,
             status,
             created_by: account_id,
         }

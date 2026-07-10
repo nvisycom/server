@@ -13,6 +13,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::Result;
+use crate::service::CryptoService;
 
 /// Type alias for webhook publisher.
 type WebhookPublisher = EventPublisher<WebhookRequest, WebhookStream>;
@@ -31,14 +32,16 @@ const DEFAULT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct WebhookEmitter {
     pg_client: PgClient,
     nats_client: NatsClient,
+    crypto: CryptoService,
 }
 
 impl WebhookEmitter {
     /// Create a new webhook emitter.
-    pub fn new(pg_client: PgClient, nats_client: NatsClient) -> Self {
+    pub fn new(pg_client: PgClient, nats_client: NatsClient, crypto: CryptoService) -> Self {
         Self {
             pg_client,
             nats_client,
+            crypto,
         }
     }
 
@@ -125,11 +128,37 @@ impl WebhookEmitter {
                     context = context.with_metadata(metadata.clone());
                 }
 
+                // Decrypt the signing secret; skip the webhook if it can't be
+                // recovered rather than sending an unsigned request.
+                let secret = match self.crypto.decrypt(workspace_id, &webhook.encrypted_secret) {
+                    Ok(bytes) => match String::from_utf8(bytes) {
+                        Ok(secret) => secret,
+                        Err(err) => {
+                            tracing::error!(
+                                target: TRACING_TARGET,
+                                webhook_id = %webhook.id,
+                                error = %err,
+                                "Skipping webhook with non-UTF-8 secret"
+                            );
+                            return None;
+                        }
+                    },
+                    Err(err) => {
+                        tracing::error!(
+                            target: TRACING_TARGET,
+                            webhook_id = %webhook.id,
+                            error = %err,
+                            "Skipping webhook with undecryptable secret"
+                        );
+                        return None;
+                    }
+                };
+
                 // Build request
                 let mut request =
                     WebhookRequest::new(url, &event_str, format!("Event: {}", event_str), context)
                         .with_timeout(DEFAULT_DELIVERY_TIMEOUT)
-                        .with_secret(webhook.secret);
+                        .with_secret(secret);
 
                 // Add custom headers from webhook config
                 if !webhook.headers.is_null()

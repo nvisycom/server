@@ -37,8 +37,8 @@ pub struct WorkspaceWebhook {
     pub events: Vec<Option<WebhookEvent>>,
     /// Custom headers to include in webhook requests.
     pub headers: serde_json::Value,
-    /// HMAC-SHA256 signing secret for webhook verification.
-    pub secret: String,
+    /// HMAC-SHA256 signing secret, encrypted under the workspace key.
+    pub encrypted_secret: Vec<u8>,
     /// Current status of the webhook.
     pub status: WebhookStatus,
     /// Timestamp of last webhook trigger.
@@ -70,6 +70,8 @@ pub struct NewWorkspaceWebhook {
     pub events: Vec<Option<WebhookEvent>>,
     /// Custom headers to include in webhook requests.
     pub headers: Option<serde_json::Value>,
+    /// HMAC-SHA256 signing secret, encrypted under the workspace key.
+    pub encrypted_secret: Vec<u8>,
     /// Initial status of the webhook.
     pub status: Option<WebhookStatus>,
     /// Account creating this webhook.

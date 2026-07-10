@@ -18,7 +18,7 @@ pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub use crate::service::engine::{EngineConfig, EngineService};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::security::{
-    PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
+    PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
 pub use crate::service::webhook::{WebhookEmitter, WebhookWorker};
 use crate::{Error, Result};
@@ -44,8 +44,7 @@ pub struct ServiceState {
 
     // Internal services:
     pub health_cache: HealthCache,
-    pub password_hasher: PasswordHasher,
-    pub password_strength: PasswordStrength,
+    pub password: PasswordService,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
     pub webhook_emitter: WebhookEmitter,
@@ -70,7 +69,8 @@ impl ServiceState {
         let crypto = CryptoService::from_config(&crypto_config).await?;
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
-        let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
+        let webhook_emitter =
+            WebhookEmitter::new(postgres_client.clone(), nats_client.clone(), crypto.clone());
 
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
             Arc::new(postgres_client.clone()),
@@ -87,8 +87,7 @@ impl ServiceState {
             engine,
 
             health_cache: HealthCache::new(&health_config, health_checkers),
-            password_hasher: PasswordHasher::new(),
-            password_strength: PasswordStrength::new(),
+            password: PasswordService::new(),
             session_keys,
             user_agent_parser: UserAgentParser::new(),
             webhook_emitter,
@@ -140,8 +139,7 @@ impl_di!(
     crypto: CryptoService,
     engine: EngineService,
     health_cache: HealthCache,
-    password_hasher: PasswordHasher,
-    password_strength: PasswordStrength,
+    password: PasswordService,
     session_keys: SessionKeys,
     user_agent_parser: UserAgentParser,
     webhook_emitter: WebhookEmitter
