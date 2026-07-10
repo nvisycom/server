@@ -406,7 +406,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .delete_with(delete_workspace, delete_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/notifications",
+            "/workspaces/{workspaceId}/notifications/",
             get_with(get_notification_settings, get_notification_settings_docs).patch_with(
                 update_notification_settings,
                 update_notification_settings_docs,

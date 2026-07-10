@@ -13,9 +13,9 @@ COMMENT ON TYPE PIPELINE_STATUS IS
 
 -- Pipeline run status enum
 CREATE TYPE PIPELINE_RUN_STATUS AS ENUM (
-    'queued',       -- Run is waiting to start
-    'running',      -- Run is in progress
-    'completed',    -- Run finished successfully
+    'running',      -- Detection in progress
+    'analyzed',     -- Detection done; awaiting reviewer verification
+    'completed',    -- Redaction applied; run finished
     'failed',       -- Run failed with error
     'cancelled'     -- Run was cancelled by user
 );
@@ -170,26 +170,30 @@ CREATE TABLE workspace_pipeline_runs (
 
     -- References
     pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
+    file_id         UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
     account_id      UUID                    REFERENCES accounts (id) ON DELETE SET NULL,
 
     -- Run attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
-    status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'queued',
+    status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'running',
 
-    -- Snapshot of pipeline definition at run time (for reproducibility)
-    definition_snapshot JSONB               NOT NULL DEFAULT '{}',
+    -- Object-store key for the engine's AnalyzedDocument, encrypted and held in
+    -- the intermediates bucket between the detect and redact calls. Null until
+    -- analysis writes it; redact reads it back as the source of truth.
+    analyzed_document_key TEXT             DEFAULT NULL,
 
-    CONSTRAINT workspace_pipeline_runs_definition_snapshot_size CHECK (length(definition_snapshot::TEXT) BETWEEN 2 AND 1048576),
+    CONSTRAINT workspace_pipeline_runs_analyzed_document_key_length CHECK (analyzed_document_key IS NULL OR length(analyzed_document_key) BETWEEN 1 AND 255),
+
+    -- Idempotency key from the initiating detect request; a repeat replays the
+    -- existing run instead of analyzing twice.
+    idempotency_key TEXT                    DEFAULT NULL,
+
+    CONSTRAINT workspace_pipeline_runs_idempotency_key_length CHECK (idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 255),
 
     -- Metadata (non-encrypted, for filtering/display)
     metadata        JSONB                   NOT NULL DEFAULT '{}',
 
     CONSTRAINT workspace_pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Execution logs
-    logs            JSONB                   NOT NULL DEFAULT '[]',
-
-    CONSTRAINT workspace_pipeline_runs_logs_size CHECK (length(logs::TEXT) BETWEEN 2 AND 1048576),
 
     -- Timing
     started_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
@@ -208,22 +212,31 @@ CREATE INDEX workspace_pipeline_runs_account_idx
 
 CREATE INDEX workspace_pipeline_runs_status_idx
     ON workspace_pipeline_runs (status, started_at DESC)
-    WHERE status IN ('queued', 'running');
+    WHERE status IN ('running', 'analyzed');
+
+CREATE INDEX workspace_pipeline_runs_file_idx
+    ON workspace_pipeline_runs (file_id, started_at DESC);
+
+-- Idempotent detect: at most one run per (pipeline, idempotency key).
+CREATE UNIQUE INDEX workspace_pipeline_runs_idempotency_idx
+    ON workspace_pipeline_runs (pipeline_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 -- Comments
 COMMENT ON TABLE workspace_pipeline_runs IS
-    'Pipeline execution instances with status tracking and logs.';
+    'Detect/redact runs: one analysis of a file through a pipeline, awaiting review then redaction.';
 
 COMMENT ON COLUMN workspace_pipeline_runs.id IS 'Unique run identifier';
-COMMENT ON COLUMN workspace_pipeline_runs.pipeline_id IS 'Reference to pipeline definition';
+COMMENT ON COLUMN workspace_pipeline_runs.pipeline_id IS 'Pipeline whose config drove the run';
+COMMENT ON COLUMN workspace_pipeline_runs.file_id IS 'File the run analyzes / redacts';
 COMMENT ON COLUMN workspace_pipeline_runs.account_id IS 'Account that triggered the run (optional)';
 COMMENT ON COLUMN workspace_pipeline_runs.trigger_type IS 'How the run was initiated';
-COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current execution status';
-COMMENT ON COLUMN workspace_pipeline_runs.definition_snapshot IS 'Pipeline definition snapshot at run time';
+COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current run status';
+COMMENT ON COLUMN workspace_pipeline_runs.analyzed_document_key IS 'Object-store key for the encrypted AnalyzedDocument held between detect and redact';
+COMMENT ON COLUMN workspace_pipeline_runs.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
-COMMENT ON COLUMN workspace_pipeline_runs.logs IS 'Execution logs as JSON array';
-COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When execution started';
-COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When execution completed';
+COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When the run started';
+COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When the run completed';
 
 -- View for active pipeline runs
 CREATE VIEW active_workspace_pipeline_runs AS
@@ -239,7 +252,7 @@ SELECT
     EXTRACT(EPOCH FROM (COALESCE(pr.completed_at, current_timestamp) - pr.started_at)) AS duration_seconds
 FROM workspace_pipeline_runs pr
     JOIN workspace_pipelines p ON pr.pipeline_id = p.id
-WHERE pr.status IN ('queued', 'running')
+WHERE pr.status IN ('running', 'analyzed')
 ORDER BY pr.started_at DESC NULLS LAST;
 
 COMMENT ON VIEW active_workspace_pipeline_runs IS

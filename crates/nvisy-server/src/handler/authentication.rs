@@ -147,7 +147,6 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
 
 /// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
-#[allow(clippy::too_many_arguments)]
 async fn signup(
     State(pg_client): State<PgClient>,
     State(auth_hasher): State<PasswordHasher>,

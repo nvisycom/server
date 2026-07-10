@@ -601,7 +601,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         // File-specific routes (file ID is globally unique)
         .api_route(
-            "/files/{fileId}",
+            "/files/{fileId}/",
             get_with(read_file, read_file_docs)
                 .patch_with(update_file, update_file_docs)
                 .delete_with(delete_file, delete_file_docs),

@@ -27,6 +27,13 @@ pub trait WorkspacePipelineRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
 
+    /// Finds a run by its `(pipeline, idempotency key)` pair, for detect replay.
+    fn find_pipeline_run_by_idempotency_key(
+        &mut self,
+        pipeline_id: Uuid,
+        idempotency_key: &str,
+    ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
+
     /// Lists all runs for a specific pipeline with offset pagination.
     fn offset_list_workspace_pipeline_runs(
         &mut self,
@@ -118,6 +125,25 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let run = workspace_pipeline_runs::table
             .filter(dsl::id.eq(run_id))
+            .select(WorkspacePipelineRun::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(run)
+    }
+
+    async fn find_pipeline_run_by_idempotency_key(
+        &mut self,
+        pipeline_id: Uuid,
+        idempotency_key: &str,
+    ) -> PgResult<Option<WorkspacePipelineRun>> {
+        use schema::workspace_pipeline_runs::{self, dsl};
+
+        let run = workspace_pipeline_runs::table
+            .filter(dsl::pipeline_id.eq(pipeline_id))
+            .filter(dsl::idempotency_key.eq(idempotency_key))
             .select(WorkspacePipelineRun::as_select())
             .first(self)
             .await
@@ -230,8 +256,8 @@ impl WorkspacePipelineRunRepository for PgConnection {
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .filter(
                 dsl::status
-                    .eq(PipelineRunStatus::Queued)
-                    .or(dsl::status.eq(PipelineRunStatus::Running)),
+                    .eq(PipelineRunStatus::Running)
+                    .or(dsl::status.eq(PipelineRunStatus::Analyzed)),
             )
             .order(dsl::started_at.desc())
             .select(WorkspacePipelineRun::as_select())

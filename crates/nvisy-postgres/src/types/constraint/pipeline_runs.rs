@@ -10,27 +10,15 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum PipelineRunConstraints {
-    // Pipeline run input/output config constraints
-    #[strum(serialize = "workspace_pipeline_runs_input_config_size")]
-    InputConfigSize,
-    #[strum(serialize = "workspace_pipeline_runs_output_config_size")]
-    OutputConfigSize,
+    // Size constraints
+    #[strum(serialize = "workspace_pipeline_runs_analyzed_document_key_length")]
+    AnalyzedDocumentKeyLength,
+    #[strum(serialize = "workspace_pipeline_runs_metadata_size")]
+    MetadataSize,
+    #[strum(serialize = "workspace_pipeline_runs_idempotency_key_length")]
+    IdempotencyKeyLength,
 
-    // Pipeline run definition snapshot constraints
-    #[strum(serialize = "workspace_pipeline_runs_definition_snapshot_size")]
-    DefinitionSnapshotSize,
-
-    // Pipeline run error constraints
-    #[strum(serialize = "workspace_pipeline_runs_error_size")]
-    ErrorSize,
-
-    // Pipeline run metrics constraints
-    #[strum(serialize = "workspace_pipeline_runs_metrics_size")]
-    MetricsSize,
-
-    // Pipeline run chronological constraints
-    #[strum(serialize = "workspace_pipeline_runs_started_after_created")]
-    StartedAfterCreated,
+    // Chronological constraints
     #[strum(serialize = "workspace_pipeline_runs_completed_after_started")]
     CompletedAfterStarted,
 }
@@ -44,14 +32,11 @@ impl PipelineRunConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            PipelineRunConstraints::InputConfigSize
-            | PipelineRunConstraints::OutputConfigSize
-            | PipelineRunConstraints::DefinitionSnapshotSize
-            | PipelineRunConstraints::ErrorSize
-            | PipelineRunConstraints::MetricsSize => ConstraintCategory::Validation,
+            PipelineRunConstraints::AnalyzedDocumentKeyLength
+            | PipelineRunConstraints::MetadataSize
+            | PipelineRunConstraints::IdempotencyKeyLength => ConstraintCategory::Validation,
 
-            PipelineRunConstraints::StartedAfterCreated
-            | PipelineRunConstraints::CompletedAfterStarted => ConstraintCategory::Chronological,
+            PipelineRunConstraints::CompletedAfterStarted => ConstraintCategory::Chronological,
         }
     }
 }

@@ -15,18 +15,18 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::PipelineRunStatus"]
 pub enum PipelineRunStatus {
-    /// Run is waiting to start
-    #[db_rename = "queued"]
-    #[serde(rename = "queued")]
-    #[default]
-    Queued,
-
-    /// Run is in progress
+    /// Detection in progress
     #[db_rename = "running"]
     #[serde(rename = "running")]
+    #[default]
     Running,
 
-    /// Run finished successfully
+    /// Detection done; awaiting reviewer verification
+    #[db_rename = "analyzed"]
+    #[serde(rename = "analyzed")]
+    Analyzed,
+
+    /// Redaction applied; run finished
     #[db_rename = "completed"]
     #[serde(rename = "completed")]
     Completed,
@@ -43,16 +43,16 @@ pub enum PipelineRunStatus {
 }
 
 impl PipelineRunStatus {
-    /// Returns whether the run is queued.
-    #[inline]
-    pub fn is_queued(self) -> bool {
-        matches!(self, PipelineRunStatus::Queued)
-    }
-
-    /// Returns whether the run is currently running.
+    /// Returns whether detection is in progress.
     #[inline]
     pub fn is_running(self) -> bool {
         matches!(self, PipelineRunStatus::Running)
+    }
+
+    /// Returns whether detection is done and the run awaits verification.
+    #[inline]
+    pub fn is_analyzed(self) -> bool {
+        matches!(self, PipelineRunStatus::Analyzed)
     }
 
     /// Returns whether the run completed successfully.
@@ -73,10 +73,13 @@ impl PipelineRunStatus {
         matches!(self, PipelineRunStatus::Cancelled)
     }
 
-    /// Returns whether the run is still active (queued or running).
+    /// Returns whether the run is still active (running or awaiting review).
     #[inline]
     pub fn is_active(self) -> bool {
-        matches!(self, PipelineRunStatus::Queued | PipelineRunStatus::Running)
+        matches!(
+            self,
+            PipelineRunStatus::Running | PipelineRunStatus::Analyzed
+        )
     }
 
     /// Returns whether the run has finished (completed, failed, or cancelled).
