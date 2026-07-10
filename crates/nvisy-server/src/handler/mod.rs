@@ -14,11 +14,11 @@ mod invites;
 mod members;
 mod monitors;
 mod notifications;
-mod pipeline_runs;
 mod pipelines;
 mod policies;
 pub mod request;
 pub mod response;
+mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -55,7 +55,7 @@ fn private_routes(
         .merge(files::routes())
         .merge(annotations::routes())
         .merge(pipelines::routes())
-        .merge(pipeline_runs::routes())
+        .merge(runs::routes())
         .merge(policies::routes())
         .merge(notifications::routes());
 
@@ -125,7 +125,9 @@ mod test {
     use nvisy_webhook::reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
-    use crate::service::{CryptoConfig, HealthConfig, ServiceState, SessionKeysConfig};
+    use crate::service::{
+        CryptoConfig, EngineConfig, HealthConfig, ServiceState, SessionKeysConfig,
+    };
 
     /// Builds the service sub-configs from the environment for integration tests.
     fn configs_from_env() -> anyhow::Result<(PgConfig, NatsConfig, SessionKeysConfig, CryptoConfig)>
@@ -163,6 +165,7 @@ mod test {
             nats,
             session,
             crypto,
+            EngineConfig::default(),
             HealthConfig::default(),
             webhook_service,
         )

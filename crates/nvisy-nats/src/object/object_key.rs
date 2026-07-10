@@ -239,6 +239,90 @@ impl FromStr for ContextKey {
     }
 }
 
+/// A validated key for intermediate pipeline objects in NATS object storage.
+///
+/// Addresses a run's analyzed document — the engine's detection result held
+/// between the detect and redact calls. Encoded as an `intermediate_` prefix
+/// followed by URL-safe base64 of the concatenated workspace ID and object ID
+/// (32 bytes -> base64), like [`FileKey`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IntermediateKey {
+    pub workspace_id: Uuid,
+    pub object_id: Uuid,
+}
+
+impl ObjectKey for IntermediateKey {
+    const PREFIX: &'static str = "intermediate_";
+}
+
+impl IntermediateKey {
+    /// Generates a new intermediate key with a fresh UUID v7 object ID.
+    pub fn generate(workspace_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            object_id: Uuid::now_v7(),
+        }
+    }
+
+    /// Creates an intermediate key from existing IDs (for parsing stored keys).
+    pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            object_id,
+        }
+    }
+
+    /// Encodes the key payload as URL-safe base64.
+    fn encode_payload(&self) -> String {
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(self.workspace_id.as_bytes());
+        bytes[16..].copy_from_slice(self.object_id.as_bytes());
+        BASE64_URL_SAFE_NO_PAD.encode(bytes)
+    }
+
+    /// Decodes a key payload from URL-safe base64.
+    fn decode_payload(s: &str) -> Result<Self> {
+        let bytes = BASE64_URL_SAFE_NO_PAD.decode(s).map_err(|e| {
+            Error::operation("parse_key", format!("Invalid base64 encoding: {}", e))
+        })?;
+
+        if bytes.len() != 32 {
+            return Err(Error::operation(
+                "parse_key",
+                format!("Invalid key length: expected 32 bytes, got {}", bytes.len()),
+            ));
+        }
+
+        let workspace_id = Uuid::from_slice(&bytes[..16])
+            .map_err(|e| Error::operation("parse_key", format!("Invalid workspace UUID: {}", e)))?;
+
+        let object_id = Uuid::from_slice(&bytes[16..])
+            .map_err(|e| Error::operation("parse_key", format!("Invalid object UUID: {}", e)))?;
+
+        Ok(Self::from_parts(workspace_id, object_id))
+    }
+}
+
+impl fmt::Display for IntermediateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", Self::PREFIX, self.encode_payload())
+    }
+}
+
+impl FromStr for IntermediateKey {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let payload = s.strip_prefix(Self::PREFIX).ok_or_else(|| {
+            Error::operation(
+                "parse_key",
+                format!("Invalid key prefix: expected '{}'", Self::PREFIX),
+            )
+        })?;
+        Self::decode_payload(payload)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

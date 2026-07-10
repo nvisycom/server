@@ -9,34 +9,20 @@ use async_nats::jetstream::object_store::{self, ObjectInfo};
 pub struct PutResult {
     /// Size in bytes as reported by NATS.
     size: u64,
-    /// SHA-256 hash computed during streaming.
-    sha256: Vec<u8>,
     /// NATS object unique identifier.
     nuid: String,
 }
 
 impl PutResult {
     /// Creates a new put result.
-    pub(crate) fn new(size: u64, sha256: Vec<u8>, nuid: String) -> Self {
-        Self { size, sha256, nuid }
+    pub(crate) fn new(size: u64, nuid: String) -> Self {
+        Self { size, nuid }
     }
 
     /// Returns the size in bytes.
     #[inline]
     pub fn size(&self) -> u64 {
         self.size
-    }
-
-    /// Returns the SHA-256 hash as bytes.
-    #[inline]
-    pub fn sha256(&self) -> &[u8] {
-        &self.sha256
-    }
-
-    /// Returns the SHA-256 hash as a hex string.
-    #[inline]
-    pub fn sha256_hex(&self) -> String {
-        hex::encode(&self.sha256)
     }
 
     /// Returns the NATS object unique identifier.
@@ -102,12 +88,9 @@ mod tests {
 
     #[test]
     fn test_put_result_getters() {
-        let result = PutResult::new(1024, vec![0u8; 32], "test-nuid".to_string());
+        let result = PutResult::new(1024, "test-nuid".to_string());
 
         assert_eq!(result.size(), 1024);
-        assert_eq!(result.sha256().len(), 32);
-        assert_eq!(result.sha256_hex().len(), 64);
-        assert_eq!(result.sha256_hex(), "0".repeat(64));
         assert_eq!(result.nuid(), "test-nuid");
     }
 }

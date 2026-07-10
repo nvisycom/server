@@ -33,6 +33,3 @@ pub async fn serve_http(app: Router, server_config: ServerConfig) -> io::Result<
     })
     .await
 }
-
-#[cfg(test)]
-mod tests {}

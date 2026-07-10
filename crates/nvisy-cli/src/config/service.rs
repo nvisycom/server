@@ -9,7 +9,7 @@ use std::time::Duration;
 use clap::Args;
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
-use nvisy_server::service::{CryptoConfig, HealthConfig, SessionKeysConfig};
+use nvisy_server::service::{CryptoConfig, EngineConfig, HealthConfig, SessionKeysConfig};
 
 /// Aggregated external-service arguments (database, NATS, auth keys).
 #[derive(Debug, Clone, Args)]
@@ -29,6 +29,10 @@ pub struct ServiceArgs {
     /// Master encryption key path.
     #[clap(flatten)]
     pub crypto: CryptoArgs,
+
+    /// Redaction engine configuration.
+    #[clap(flatten)]
+    pub engine: EngineArgs,
 
     /// Health monitoring configuration.
     #[clap(flatten)]
@@ -162,6 +166,24 @@ pub struct CryptoArgs {
         default_value = "./encryption.key"
     )]
     pub key_path: PathBuf,
+}
+
+/// Redaction engine arguments.
+#[derive(Debug, Clone, Args)]
+pub struct EngineArgs {
+    /// Optional path to a JSON file with the engine's NER/LLM recognizer
+    /// lineups. Absent means no NER/LLM recognizers (pattern recognizers still
+    /// run); the inference-backed lineups are supplied alongside the sidecars.
+    #[arg(long, env = "ENGINE_CONFIG_FILEPATH")]
+    pub config_path: Option<PathBuf>,
+}
+
+impl From<EngineArgs> for EngineConfig {
+    fn from(args: EngineArgs) -> Self {
+        Self {
+            config_path: args.config_path,
+        }
+    }
 }
 
 impl From<CryptoArgs> for CryptoConfig {

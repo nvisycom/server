@@ -16,7 +16,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
-use nvisy_nats::stream::{EventPublisher, FileJob, FileStream};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::{PgClient, PgConn};
@@ -32,13 +31,10 @@ use crate::handler::request::{
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
-use crate::service::{ServiceState, WebhookEmitter};
+use crate::service::{CryptoService, HashingReader, ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
-
-/// Type alias for file job publisher.
-type FileJobPublisher = EventPublisher<FileJob<()>, FileStream>;
 
 /// Finds a file by ID or returns NotFound error.
 async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<FileModel> {
@@ -106,7 +102,7 @@ struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
     file_store: ObjectStore<FilesBucket, FileKey>,
-    publisher: FileJobPublisher,
+    crypto: CryptoService,
 }
 
 /// Processes a single file from a multipart upload using streaming.
@@ -135,17 +131,19 @@ async fn process_single_file(
         "Streaming file to storage"
     );
 
-    // Step 1: Stream upload to NATS (computes SHA-256 on-the-fly)
-    let reader = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
+    // Step 1: Encrypt the plaintext as it streams to NATS. The measured reader
+    // captures the plaintext size and hash (NATS only sees ciphertext).
+    let source = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
+    let (measured, measurements) = HashingReader::new(source);
+    let encrypted = ctx.crypto.encrypt_reader(ctx.workspace_id, measured);
 
-    let put_result = ctx.file_store.put(&file_key, reader).await?;
+    ctx.file_store.put(&file_key, Box::pin(encrypted)).await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
         object_id = %file_key.object_id,
-        size = put_result.size(),
-        sha256 = %put_result.sha256_hex(),
-        "File streamed to storage"
+        size = measurements.bytes(),
+        "File encrypted and streamed to storage"
     );
 
     // Step 2: Create DB record with all storage info (Postgres generates its own id)
@@ -154,34 +152,15 @@ async fn process_single_file(
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
         original_filename: Some(filename),
-        file_extension: Some(file_extension.clone()),
-        file_size_bytes: put_result.size() as i64,
-        file_hash_sha256: put_result.sha256().to_vec(),
+        file_extension: Some(file_extension),
+        file_size_bytes: measurements.bytes() as i64,
+        file_hash_sha256: measurements.sha256().to_vec(),
         storage_path: file_key.to_string(),
         storage_bucket: ctx.file_store.bucket().to_owned(),
         ..Default::default()
     };
 
     let created_file = conn.create_workspace_file(file_record).await?;
-
-    // Step 3: Publish job to queue (use Postgres-generated file ID)
-    let job = FileJob::new(created_file.id, file_key.to_string(), file_extension, ());
-
-    if let Err(err) = ctx.publisher.publish(&job).await {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %err,
-            file_id = %created_file.id,
-            "Failed to publish file job, file stored but not queued for processing"
-        );
-    }
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        file_id = %created_file.id,
-        job_id = %job.id,
-        "File job published"
-    );
 
     Ok(created_file)
 }
@@ -198,6 +177,7 @@ async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     State(webhook_emitter): State<WebhookEmitter>,
+    State(crypto): State<CryptoService>,
     Path(path_params): Path<WorkspacePathParams>,
     AuthState(auth_claims): AuthState,
     Multipart(mut multipart): Multipart,
@@ -212,13 +192,11 @@ async fn upload_file(
 
     let file_store = nats_client.object_store::<FilesBucket, FileKey>().await?;
 
-    let publisher: FileJobPublisher = nats_client.event_publisher().await?;
-
     let ctx = FileUploadContext {
         workspace_id: path_params.workspace_id,
         account_id: auth_claims.account_id,
         file_store,
-        publisher,
+        crypto,
     };
 
     let mut uploaded_files = Vec::new();
@@ -410,6 +388,7 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
 async fn download_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
+    State(crypto): State<CryptoService>,
     Path(path_params): Path<FilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
@@ -488,21 +467,24 @@ async fn download_file(
 
     let mut headers = HeaderMap::new();
     headers.insert("content-disposition", disposition);
+    // Content-length is the plaintext size from the record; storage holds the
+    // larger ciphertext, which the decrypting reader unwraps as it streams.
     headers.insert(
         "content-length",
-        get_result.size().to_string().parse().unwrap(),
+        file.file_size_bytes.to_string().parse().unwrap(),
     );
     headers.insert("content-type", "application/octet-stream".parse().unwrap());
 
     tracing::debug!(
         target: TRACING_TARGET,
         file_id = %path_params.file_id,
-        size = get_result.size(),
+        size = file.file_size_bytes,
         "Streaming file download"
     );
 
-    // Stream the file content using ReaderStream
-    let stream = ReaderStream::new(get_result.into_reader());
+    // Decrypt the stored ciphertext as it streams to the client.
+    let decrypted = crypto.decrypt_reader(file.workspace_id, get_result.into_reader());
+    let stream = ReaderStream::new(Box::pin(decrypted));
     let body = Body::from_stream(stream);
 
     Ok((StatusCode::OK, headers, body))
@@ -601,7 +583,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         // File-specific routes (file ID is globally unique)
         .api_route(
-            "/files/{fileId}",
+            "/files/{fileId}/",
             get_with(read_file, read_file_docs)
                 .patch_with(update_file, update_file_docs)
                 .delete_with(delete_file, delete_file_docs),

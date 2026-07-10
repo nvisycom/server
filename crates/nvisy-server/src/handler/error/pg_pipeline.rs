@@ -32,18 +32,15 @@ impl From<PipelineConstraints> for Error<'static> {
 impl From<PipelineRunConstraints> for Error<'static> {
     fn from(c: PipelineRunConstraints) -> Self {
         let error = match c {
-            PipelineRunConstraints::InputConfigSize => ErrorKind::BadRequest
-                .with_message("Pipeline run input configuration size exceeds maximum limit"),
-            PipelineRunConstraints::OutputConfigSize => ErrorKind::BadRequest
-                .with_message("Pipeline run output configuration size exceeds maximum limit"),
-            PipelineRunConstraints::DefinitionSnapshotSize => ErrorKind::BadRequest
-                .with_message("Pipeline run definition snapshot size exceeds maximum limit"),
-            PipelineRunConstraints::ErrorSize => ErrorKind::BadRequest
-                .with_message("Pipeline run error details size exceeds maximum limit"),
-            PipelineRunConstraints::MetricsSize => ErrorKind::BadRequest
-                .with_message("Pipeline run metrics size exceeds maximum limit"),
-            PipelineRunConstraints::StartedAfterCreated
-            | PipelineRunConstraints::CompletedAfterStarted => {
+            PipelineRunConstraints::AnalyzedDocumentKeyLength => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            PipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
+                .with_message("Pipeline run metadata size exceeds maximum limit"),
+            PipelineRunConstraints::IdempotencyKeyLength => {
+                ErrorKind::BadRequest.with_message("Idempotency key must be 1 to 255 characters")
+            }
+            PipelineRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }
         };

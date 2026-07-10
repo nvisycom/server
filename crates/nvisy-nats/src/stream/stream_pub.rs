@@ -227,6 +227,3 @@ where
             .map(|info| (*info).clone())
     }
 }
-
-#[cfg(test)]
-mod tests {}

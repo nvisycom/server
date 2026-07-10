@@ -5,10 +5,14 @@
 
 mod cipher;
 mod error;
+mod hashing_reader;
 mod key;
 mod service;
 
-pub(crate) use cipher::{decrypt, decrypt_json, encrypt, encrypt_json};
+pub(crate) use cipher::{
+    decrypt, decrypt_json, decrypt_reader, encrypt, encrypt_json, encrypt_reader,
+};
 pub use error::{CryptoError, CryptoResult};
+pub(crate) use hashing_reader::HashingReader;
 pub(crate) use key::EncryptionKey;
 pub use service::{CryptoConfig, CryptoService};

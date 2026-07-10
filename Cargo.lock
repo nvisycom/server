@@ -19,6 +19,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aead-stream"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a901e5bcd15b4a9555a8f17a608d28ef92cf77bc4aa3b4a0c1a3fce1a9cc0bac"
+dependencies = [
+ "aead",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3753,14 +3762,12 @@ dependencies = [
  "base64",
  "derive_more",
  "futures",
- "hex",
  "jiff",
  "nvisy-base",
  "pin-project-lite",
  "schemars",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "thiserror",
  "tokio",
  "tracing",
@@ -3849,9 +3856,11 @@ dependencies = [
 name = "nvisy-server"
 version = "0.1.0"
 dependencies = [
+ "aead-stream",
  "aide",
  "anyhow",
  "argon2",
+ "async-stream",
  "async-trait",
  "axum",
  "axum-client-ip",
@@ -3859,6 +3868,7 @@ dependencies = [
  "axum-test",
  "base64",
  "bigdecimal",
+ "bytes",
  "chacha20poly1305",
  "derive_more",
  "dotenvy",
@@ -3868,11 +3878,13 @@ dependencies = [
  "jiff",
  "jsonwebtoken",
  "nvisy-base",
+ "nvisy-core",
  "nvisy-engine",
  "nvisy-nats",
  "nvisy-postgres",
  "nvisy-schema",
  "nvisy-webhook",
+ "pin-project-lite",
  "rand 0.10.2",
  "regex",
  "schemars",

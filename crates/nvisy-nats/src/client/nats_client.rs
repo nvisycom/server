@@ -46,7 +46,7 @@ use crate::object::{
     AccountKey, AvatarsBucket, ContextFilesBucket, ContextKey, FileKey, FilesBucket,
     IntermediatesBucket, ObjectBucket, ObjectKey, ObjectStore, ThumbnailsBucket,
 };
-use crate::stream::{EventPublisher, EventStream, EventSubscriber, FileStream, WebhookStream};
+use crate::stream::{EventPublisher, EventStream, EventSubscriber, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -283,24 +283,6 @@ impl NatsClient {
         S: EventStream,
     {
         EventSubscriber::new(&self.inner.jetstream).await
-    }
-
-    /// Create a file job publisher.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn file_publisher<T>(&self) -> Result<EventPublisher<T, FileStream>>
-    where
-        T: Serialize + Send + Sync + 'static,
-    {
-        self.event_publisher().await
-    }
-
-    /// Create a file job subscriber.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn file_subscriber<T>(&self) -> Result<EventSubscriber<T, FileStream>>
-    where
-        T: DeserializeOwned + Send + Sync + 'static,
-    {
-        self.event_subscriber().await
     }
 
     /// Create a webhook publisher.

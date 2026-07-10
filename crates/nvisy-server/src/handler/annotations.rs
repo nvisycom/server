@@ -279,7 +279,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_annotations, list_annotations_docs),
         )
         .api_route(
-            "/annotations/{annotationId}",
+            "/annotations/{annotationId}/",
             get_with(get_annotation, get_annotation_docs)
                 .patch_with(update_annotation, update_annotation_docs)
                 .delete_with(delete_annotation, delete_annotation_docs),

@@ -1,6 +1,7 @@
 //! Application state and dependency injection.
 
 pub mod crypto;
+pub mod engine;
 mod health;
 mod security;
 mod webhook;
@@ -12,7 +13,9 @@ use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
+pub(crate) use crate::service::crypto::HashingReader;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
+pub use crate::service::engine::{EngineConfig, EngineService};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::security::{
     PasswordHasher, PasswordStrength, SessionKeys, SessionKeysConfig, UserAgentParser,
@@ -36,6 +39,9 @@ pub struct ServiceState {
     // Security services:
     pub crypto: CryptoService,
 
+    // Redaction engine:
+    pub engine: EngineService,
+
     // Internal services:
     pub health_cache: HealthCache,
     pub password_hasher: PasswordHasher,
@@ -54,6 +60,7 @@ impl ServiceState {
         nats_config: NatsConfig,
         session_config: SessionKeysConfig,
         crypto_config: CryptoConfig,
+        engine_config: EngineConfig,
         health_config: HealthConfig,
         webhook_service: WebhookService,
     ) -> Result<Self> {
@@ -61,6 +68,7 @@ impl ServiceState {
         let nats_client = connect_nats(nats_config).await?;
 
         let crypto = CryptoService::from_config(&crypto_config).await?;
+        let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
         let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
 
@@ -76,6 +84,7 @@ impl ServiceState {
             webhook: webhook_service,
 
             crypto,
+            engine,
 
             health_cache: HealthCache::new(&health_config, health_checkers),
             password_hasher: PasswordHasher::new(),
@@ -129,6 +138,7 @@ impl_di!(
 // Internal services:
 impl_di!(
     crypto: CryptoService,
+    engine: EngineService,
     health_cache: HealthCache,
     password_hasher: PasswordHasher,
     password_strength: PasswordStrength,

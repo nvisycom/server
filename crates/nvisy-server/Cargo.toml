@@ -29,6 +29,7 @@ default = []
 [dependencies]
 # Runtime crates
 nvisy-engine = { workspace = true }
+nvisy-engine-core = { workspace = true }
 nvisy-schema = { workspace = true }
 
 # Internal crates
@@ -43,6 +44,8 @@ tokio-util = { workspace = true, features = [] }
 tokio-stream = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
+async-stream = { workspace = true, features = [] }
+pin-project-lite = { workspace = true, features = [] }
 
 # HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros", "multipart"] }
@@ -67,6 +70,7 @@ sha2 = { workspace = true, features = [] }
 
 # Encryption & Cryptography
 chacha20poly1305 = { workspace = true, features = [] }
+aead-stream = { workspace = true, features = ["alloc"] }
 hkdf = { workspace = true, features = [] }
 
 # Encoding
@@ -78,6 +82,7 @@ rand = { workspace = true, features = [] }
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
+bytes = { workspace = true, features = [] }
 validator = { workspace = true, features = [] }
 
 # Derive macros & utilities

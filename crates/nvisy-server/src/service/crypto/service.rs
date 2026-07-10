@@ -11,9 +11,13 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use tokio::io::AsyncRead;
 use uuid::Uuid;
 
-use super::{CryptoResult, EncryptionKey, decrypt, decrypt_json, encrypt, encrypt_json};
+use super::{
+    CryptoResult, EncryptionKey, decrypt, decrypt_json, decrypt_reader, encrypt, encrypt_json,
+    encrypt_reader,
+};
 use crate::{Error, Result};
 
 /// Tracing target for crypto service operations.
@@ -76,34 +80,38 @@ impl CryptoService {
         decrypt_json(&self.workspace_key(workspace_id), ciphertext)
     }
 
-    /// Encrypts raw bytes under the given workspace's key.
+    /// Encrypts an in-memory buffer under the given workspace's key.
+    ///
+    /// Produces the same chunked, authenticated framing that
+    /// [`encrypt_reader`](Self::encrypt_reader) streams, so a buffer sealed here
+    /// can be opened by either [`decrypt`](Self::decrypt) or `decrypt_reader`.
+    /// Use `encrypt_reader` when the data is file-sized and shouldn't be
+    /// buffered whole.
     pub fn encrypt(&self, workspace_id: Uuid, plaintext: &[u8]) -> CryptoResult<Vec<u8>> {
         encrypt(&self.workspace_key(workspace_id), plaintext)
     }
 
-    /// Decrypts raw bytes previously encrypted under the given workspace's key.
+    /// Decrypts a buffer previously encrypted under the given workspace's key.
     pub fn decrypt(&self, workspace_id: Uuid, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> {
         decrypt(&self.workspace_key(workspace_id), ciphertext)
     }
 
-    /// Encrypts a serializable value under the master key (not workspace-scoped).
-    pub fn encrypt_json_master<T: Serialize>(&self, value: &T) -> CryptoResult<Vec<u8>> {
-        encrypt_json(&self.master_key, value)
+    /// Wraps a plaintext reader so it streams out workspace-encrypted bytes,
+    /// for piping large uploads to storage without buffering.
+    pub fn encrypt_reader<R>(&self, workspace_id: Uuid, reader: R) -> impl AsyncRead + use<R>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        encrypt_reader(self.workspace_key(workspace_id), reader)
     }
 
-    /// Decrypts a value previously encrypted under the master key.
-    pub fn decrypt_json_master<T: DeserializeOwned>(&self, ciphertext: &[u8]) -> CryptoResult<T> {
-        decrypt_json(&self.master_key, ciphertext)
-    }
-
-    /// Encrypts raw bytes under the master key (not workspace-scoped).
-    pub fn encrypt_master(&self, plaintext: &[u8]) -> CryptoResult<Vec<u8>> {
-        encrypt(&self.master_key, plaintext)
-    }
-
-    /// Decrypts raw bytes previously encrypted under the master key.
-    pub fn decrypt_master(&self, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> {
-        decrypt(&self.master_key, ciphertext)
+    /// Wraps a ciphertext reader so it yields decrypted plaintext, for streaming
+    /// large downloads from storage without buffering.
+    pub fn decrypt_reader<R>(&self, workspace_id: Uuid, reader: R) -> impl AsyncRead + use<R>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        decrypt_reader(self.workspace_key(workspace_id), reader)
     }
 
     /// Derives the per-workspace key via HKDF-SHA256.

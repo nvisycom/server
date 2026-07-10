@@ -220,7 +220,7 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/account",
+            "/account/",
             get_with(get_own_account, get_own_account_docs)
                 .patch_with(update_own_account, update_own_account_docs)
                 .delete_with(delete_own_account, delete_own_account_docs),

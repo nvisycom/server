@@ -402,11 +402,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         .api_route(
             "/workspaces/{workspaceId}/members/{accountId}/",
-            get_with(get_member, get_member_docs).delete_with(delete_member, delete_member_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceId}/members/{accountId}/role",
-            patch_with(update_member, update_member_docs),
+            get_with(get_member, get_member_docs)
+                .patch_with(update_member, update_member_docs)
+                .delete_with(delete_member, delete_member_docs),
         )
         .with_path_items(|item| item.tag("Members"))
 }

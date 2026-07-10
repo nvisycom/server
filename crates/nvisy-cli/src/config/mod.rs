@@ -170,6 +170,7 @@ impl Cli {
             service.nats.into(),
             service.session_keys.into(),
             service.crypto.into(),
+            service.engine.into(),
             service.health.into(),
             webhook,
         )

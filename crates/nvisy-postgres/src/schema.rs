@@ -357,12 +357,13 @@ diesel::table! {
     workspace_pipeline_runs (id) {
         id -> Uuid,
         pipeline_id -> Uuid,
+        file_id -> Uuid,
         account_id -> Nullable<Uuid>,
         trigger_type -> PipelineTriggerType,
         status -> PipelineRunStatus,
-        definition_snapshot -> Jsonb,
+        analyzed_document_key -> Nullable<Text>,
+        idempotency_key -> Nullable<Text>,
         metadata -> Jsonb,
-        logs -> Jsonb,
         started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,
     }
@@ -476,6 +477,7 @@ diesel::joinable!(workspace_pipeline_artifacts -> workspace_pipeline_runs (run_i
 diesel::joinable!(workspace_pipeline_contexts -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_policies -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_runs -> accounts (account_id));
+diesel::joinable!(workspace_pipeline_runs -> workspace_files (file_id));
 diesel::joinable!(workspace_pipeline_runs -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_pipelines -> accounts (account_id));
 diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));

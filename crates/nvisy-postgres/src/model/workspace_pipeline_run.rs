@@ -7,30 +7,37 @@ use uuid::Uuid;
 use crate::schema::workspace_pipeline_runs;
 use crate::types::{PipelineRunStatus, PipelineTriggerType};
 
-/// Workspace pipeline run model representing an execution instance of a pipeline.
+/// A detect/redact run: one analysis of a file through a pipeline.
+///
+/// Detect creates the run and stores the engine's `AnalyzedDocument` in the
+/// object store, keeping its key here; the run then awaits reviewer
+/// verification before redact fetches it back and consumes it.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_pipeline_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspacePipelineRun {
     /// Unique run identifier.
     pub id: Uuid,
-    /// Reference to the pipeline definition.
+    /// Pipeline whose config drove the run.
     pub pipeline_id: Uuid,
+    /// File the run analyzes / redacts.
+    pub file_id: Uuid,
     /// Account that triggered the run (optional).
     pub account_id: Option<Uuid>,
     /// How the run was initiated.
     pub trigger_type: PipelineTriggerType,
-    /// Current execution status.
+    /// Current run status.
     pub status: PipelineRunStatus,
-    /// Pipeline definition snapshot at run time.
-    pub definition_snapshot: serde_json::Value,
+    /// Object-store key for the encrypted `AnalyzedDocument` held between detect
+    /// and redact. `None` until analysis writes it.
+    pub analyzed_document_key: Option<String>,
+    /// Detect idempotency key (dedupes retries).
+    pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: serde_json::Value,
-    /// Execution logs as JSON array.
-    pub logs: serde_json::Value,
-    /// When execution started.
+    /// When the run started.
     pub started_at: Timestamp,
-    /// When execution completed.
+    /// When the run completed.
     pub completed_at: Option<Timestamp>,
 }
 
@@ -41,18 +48,20 @@ pub struct WorkspacePipelineRun {
 pub struct NewWorkspacePipelineRun {
     /// Pipeline ID (required).
     pub pipeline_id: Uuid,
+    /// File ID (required).
+    pub file_id: Uuid,
     /// Account ID (optional).
     pub account_id: Option<Uuid>,
     /// Trigger type.
     pub trigger_type: Option<PipelineTriggerType>,
     /// Initial status.
     pub status: Option<PipelineRunStatus>,
-    /// Definition snapshot.
-    pub definition_snapshot: serde_json::Value,
+    /// Object-store key for the encrypted analysis result (set once analyzed).
+    pub analyzed_document_key: Option<String>,
+    /// Detect idempotency key.
+    pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<serde_json::Value>,
-    /// Execution logs as JSON array.
-    pub logs: Option<serde_json::Value>,
 }
 
 /// Data for updating a workspace pipeline run.
@@ -60,25 +69,25 @@ pub struct NewWorkspacePipelineRun {
 #[diesel(table_name = workspace_pipeline_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspacePipelineRun {
-    /// Execution status.
+    /// Run status.
     pub status: Option<PipelineRunStatus>,
+    /// Object-store key for the encrypted analysis result.
+    pub analyzed_document_key: Option<Option<String>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<serde_json::Value>,
-    /// Execution logs as JSON array.
-    pub logs: Option<serde_json::Value>,
-    /// When execution completed.
+    /// When the run completed.
     pub completed_at: Option<Option<Timestamp>>,
 }
 
 impl WorkspacePipelineRun {
-    /// Returns whether the run is queued.
-    pub fn is_queued(&self) -> bool {
-        self.status.is_queued()
-    }
-
-    /// Returns whether the run is currently running.
+    /// Returns whether detection is in progress.
     pub fn is_running(&self) -> bool {
         self.status.is_running()
+    }
+
+    /// Returns whether detection is done and the run awaits verification.
+    pub fn is_analyzed(&self) -> bool {
+        self.status.is_analyzed()
     }
 
     /// Returns whether the run completed successfully.
@@ -96,7 +105,7 @@ impl WorkspacePipelineRun {
         self.status.is_cancelled()
     }
 
-    /// Returns whether the run is still active (queued or running).
+    /// Returns whether the run is still active (running or awaiting review).
     pub fn is_active(&self) -> bool {
         self.status.is_active()
     }
@@ -127,25 +136,5 @@ impl WorkspacePipelineRun {
     /// Returns whether the run can be retried.
     pub fn is_retriable(&self) -> bool {
         self.status.is_retriable()
-    }
-
-    /// Returns the steps from the definition snapshot.
-    pub fn steps(&self) -> Option<&Vec<serde_json::Value>> {
-        self.definition_snapshot.get("steps")?.as_array()
-    }
-
-    /// Returns the number of steps in the run.
-    pub fn step_count(&self) -> usize {
-        self.steps().map_or(0, |s| s.len())
-    }
-
-    /// Returns the logs as an array, if available.
-    pub fn log_entries(&self) -> Option<&Vec<serde_json::Value>> {
-        self.logs.as_array()
-    }
-
-    /// Returns the number of log entries.
-    pub fn log_count(&self) -> usize {
-        self.log_entries().map_or(0, |l| l.len())
     }
 }
