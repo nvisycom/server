@@ -13,7 +13,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use super::{CryptoResult, EncryptionKey, decrypt, decrypt_json, encrypt, encrypt_json};
+use super::{
+    CryptoResult, EncryptionKey, decrypt, decrypt_json, decrypt_stream, encrypt, encrypt_json,
+    encrypt_stream,
+};
 use crate::{Error, Result};
 
 /// Tracing target for crypto service operations.
@@ -84,6 +87,17 @@ impl CryptoService {
     /// Decrypts raw bytes previously encrypted under the given workspace's key.
     pub fn decrypt(&self, workspace_id: Uuid, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> {
         decrypt(&self.workspace_key(workspace_id), ciphertext)
+    }
+
+    /// Encrypts a large payload under the given workspace's key as a chunked,
+    /// authenticated STREAM — for file-sized data that shouldn't be sealed whole.
+    pub fn encrypt_stream(&self, workspace_id: Uuid, plaintext: &[u8]) -> CryptoResult<Vec<u8>> {
+        encrypt_stream(&self.workspace_key(workspace_id), plaintext)
+    }
+
+    /// Decrypts a chunked STREAM previously encrypted under the workspace's key.
+    pub fn decrypt_stream(&self, workspace_id: Uuid, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> {
+        decrypt_stream(&self.workspace_key(workspace_id), ciphertext)
     }
 
     /// Encrypts a serializable value under the master key (not workspace-scoped).

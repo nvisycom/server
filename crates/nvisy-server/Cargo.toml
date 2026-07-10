@@ -68,6 +68,7 @@ sha2 = { workspace = true, features = [] }
 
 # Encryption & Cryptography
 chacha20poly1305 = { workspace = true, features = [] }
+aead-stream = { workspace = true, features = ["alloc"] }
 hkdf = { workspace = true, features = [] }
 
 # Encoding
