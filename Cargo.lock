@@ -1713,7 +1713,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2f038ec0359527a8f223282b019a7bccaa78583d"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d93213295bd7cee417acb251c2260fa156fff7b9"
 dependencies = [
  "async-trait",
  "base64",
@@ -3708,7 +3708,7 @@ dependencies = [
 [[package]]
 name = "nvisy-context"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2f038ec0359527a8f223282b019a7bccaa78583d"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d93213295bd7cee417acb251c2260fa156fff7b9"
 dependencies = [
  "derive_builder",
  "derive_more",
@@ -3723,7 +3723,7 @@ dependencies = [
 [[package]]
 name = "nvisy-core"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2f038ec0359527a8f223282b019a7bccaa78583d"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d93213295bd7cee417acb251c2260fa156fff7b9"
 dependencies = [
  "derive_builder",
  "derive_more",
@@ -3739,7 +3739,7 @@ dependencies = [
 [[package]]
 name = "nvisy-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2f038ec0359527a8f223282b019a7bccaa78583d"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d93213295bd7cee417acb251c2260fa156fff7b9"
 dependencies = [
  "bytes",
  "elide",
@@ -3793,7 +3793,7 @@ dependencies = [
 [[package]]
 name = "nvisy-policy"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2f038ec0359527a8f223282b019a7bccaa78583d"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d93213295bd7cee417acb251c2260fa156fff7b9"
 dependencies = [
  "derive_more",
  "elide-core",
@@ -3838,7 +3838,7 @@ dependencies = [
 [[package]]
 name = "nvisy-schema"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2f038ec0359527a8f223282b019a7bccaa78583d"
+source = "git+https://github.com/nvisycom/runtime?branch=main#d93213295bd7cee417acb251c2260fa156fff7b9"
 dependencies = [
  "bytes",
  "elide-core",
@@ -3879,7 +3879,6 @@ dependencies = [
  "jiff",
  "jsonwebtoken",
  "nvisy-base",
- "nvisy-core",
  "nvisy-engine",
  "nvisy-nats",
  "nvisy-postgres",
@@ -4203,7 +4202,7 @@ dependencies = [
  "nom 7.1.3",
  "once_cell",
  "postcard",
- "quick-xml 0.41.0",
+ "quick-xml 0.40.1",
  "regex",
  "regex-cache",
  "serde",
@@ -5844,7 +5843,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
