@@ -469,7 +469,7 @@ fn serialize_error(error: serde_json::Error) -> Error<'static> {
 }
 
 /// Maps an engine analyze/anonymize failure to an internal error.
-fn analysis_error(error: nvisy_engine_core::Error) -> Error<'static> {
+fn analysis_error(error: nvisy_engine::Error) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Redaction engine failed")
         .with_context(error.to_string())

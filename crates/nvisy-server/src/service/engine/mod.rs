@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use derive_more::Deref;
 use nvisy_engine::Engine;
-use nvisy_engine_core::llm::LlmConfig;
-use nvisy_engine_core::ner::NerConfig;
+use nvisy_engine::llm::LlmConfig;
+use nvisy_engine::ner::NerConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
