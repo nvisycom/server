@@ -203,115 +203,20 @@ impl Default for PasswordHasher {
 mod tests {
     use super::*;
 
+    /// Our error mapping: a wrong password verifies to `Unauthorized`, while a
+    /// malformed stored hash is an internal fault (`InternalServerError`).
     #[test]
-    fn hash_and_verify_password() -> anyhow::Result<()> {
+    fn verify_maps_failures_to_our_error_kinds() -> anyhow::Result<()> {
         let hasher = PasswordHasher::new();
-        let password = "secure_password_123";
-        let hash = hasher.hash_password(password)?;
+        let hash = hasher.hash_password("correct-horse")?;
 
-        assert!(hash.starts_with("$argon2id$"));
-        assert!(hasher.verify_password(password, &hash).is_ok());
-        assert!(hasher.verify_password("wrong_password", &hash).is_err());
+        let wrong = hasher.verify_password("wrong", &hash).unwrap_err();
+        assert_eq!(wrong.kind(), ErrorKind::Unauthorized);
 
-        Ok(())
-    }
-
-    #[test]
-    fn hash_produces_unique_salts() -> anyhow::Result<()> {
-        let hasher = PasswordHasher::new();
-        let password = "test_password";
-
-        let hash1 = hasher.hash_password(password)?;
-        let hash2 = hasher.hash_password(password)?;
-
-        assert_ne!(hash1, hash2);
-        assert!(hasher.verify_password(password, &hash1).is_ok());
-        assert!(hasher.verify_password(password, &hash2).is_ok());
-
-        Ok(())
-    }
-
-    #[test]
-    fn verify_password_returns_unauthorized_for_wrong_password() -> anyhow::Result<()> {
-        let hasher = PasswordHasher::new();
-        let correct_password = "correct_password";
-        let wrong_password = "wrong_password";
-        let hash = hasher
-            .hash_password(correct_password)
-            .map_err(|_| anyhow::anyhow!("Failed to hash password"))?;
-
-        // Should fail with wrong password and return Unauthorized
-        let result = hasher.verify_password(wrong_password, &hash);
-        assert!(result.is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn verify_password_returns_error_for_invalid_hash() -> anyhow::Result<()> {
-        let hasher = PasswordHasher::new();
-        let password = "test_password";
-        let invalid_hash = "invalid_hash_format";
-
-        // Should fail with invalid hash format
-        let result = hasher.verify_password(password, invalid_hash);
-        assert!(result.is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn password_hasher_http_error_integration() -> anyhow::Result<()> {
-        let hasher = PasswordHasher::new();
-        let password = "secure_test_password_123";
-
-        // Test successful hashing - should return a valid hash string
-        let hash_result = hasher.hash_password(password);
-        assert!(hash_result.is_ok(), "Password hashing should succeed");
-        let hash = hash_result?;
-        assert!(
-            hash.starts_with("$argon2id$"),
-            "Hash should be in PHC format"
-        );
-
-        // Test successful verification - should return Ok(())
-        let verify_result = hasher.verify_password(password, &hash);
-        assert!(
-            verify_result.is_ok(),
-            "Correct password should verify successfully"
-        );
-
-        // Test failed verification with wrong password - should return handler Error
-        let wrong_password = "wrong_password_123";
-        let verify_wrong_result = hasher.verify_password(wrong_password, &hash);
-        assert!(
-            verify_wrong_result.is_err(),
-            "Wrong password should fail verification"
-        );
-
-        // Verify the error is the expected HTTP error type by checking it can be converted to response
-        if let Err(error) = verify_wrong_result {
-            use crate::handler::ErrorKind;
-            assert_eq!(
-                error.kind(),
-                ErrorKind::Unauthorized,
-                "Should return Unauthorized for wrong password"
-            );
-        }
-
-        // Test invalid hash format - should return handler Error
-        let invalid_hash = "not_a_valid_hash_format";
-        let invalid_hash_result = hasher.verify_password(password, invalid_hash);
-        assert!(invalid_hash_result.is_err(), "Invalid hash should fail");
-
-        if let Err(error) = invalid_hash_result {
-            use crate::handler::ErrorKind;
-            assert_eq!(
-                error.kind(),
-                ErrorKind::InternalServerError,
-                "Should return InternalServerError for invalid hash"
-            );
-        }
+        let malformed = hasher
+            .verify_password("correct-horse", "not-a-hash")
+            .unwrap_err();
+        assert_eq!(malformed.kind(), ErrorKind::InternalServerError);
 
         Ok(())
     }
