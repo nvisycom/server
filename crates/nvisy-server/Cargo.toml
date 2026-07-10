@@ -44,6 +44,8 @@ tokio-util = { workspace = true, features = [] }
 tokio-stream = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
+async-stream = { workspace = true, features = [] }
+pin-project-lite = { workspace = true, features = [] }
 
 # HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros", "multipart"] }

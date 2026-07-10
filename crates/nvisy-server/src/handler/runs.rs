@@ -30,6 +30,7 @@ use nvisy_schema::context::Context as SchemaContext;
 use nvisy_schema::file::Document;
 use nvisy_schema::plan::{AnalyzerParams, ScopeParams};
 use nvisy_schema::policy::Policy as SchemaPolicy;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
@@ -115,7 +116,7 @@ async fn create_pipeline_run(
     let run = conn.create_workspace_pipeline_run(new_run).await?;
 
     // Assemble the engine inputs and analyze.
-    let document = build_document(&nats, &file, run.id).await?;
+    let document = build_document(&nats, &crypto, &file, run.id).await?;
     let params = build_analyzer_params(&definition, request.scope);
     let contexts = resolve_contexts(&mut conn, &crypto, pipeline.workspace_id, pipeline.id).await?;
 
@@ -379,7 +380,7 @@ async fn redact_pipeline_run(
     // The stored analysis is the source of truth for what gets redacted.
     let analyzed = load_analyzed_document(&nats, &crypto, pipeline.workspace_id, &run).await?;
     let policies = resolve_policies(&mut conn, &crypto, pipeline.workspace_id, pipeline.id).await?;
-    let document = build_document(&nats, &file, run.id).await?;
+    let document = build_document(&nats, &crypto, &file, run.id).await?;
 
     let anonymized = engine
         .anonymize_document(document, &policies, &analyzed)
@@ -390,6 +391,7 @@ async fn redact_pipeline_run(
     let artifact_file = store_redacted_file(
         &mut conn,
         &nats,
+        &crypto,
         &file,
         auth_state.account_id,
         anonymized.bytes,
@@ -504,6 +506,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 /// [`Document`], stamping the run's id as the correlation id.
 async fn build_document(
     nats: &NatsClient,
+    crypto: &CryptoService,
     file: &WorkspaceFile,
     correlation_id: Uuid,
 ) -> Result<Document> {
@@ -518,12 +521,20 @@ async fn build_document(
         ErrorKind::InternalServerError.with_message("File content is missing from storage")
     })?;
     let mut reader = data.into_reader();
-    let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).await.map_err(|err| {
+    let mut ciphertext = Vec::new();
+    reader.read_to_end(&mut ciphertext).await.map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Failed to read file content")
             .with_context(err.to_string())
     })?;
+
+    let bytes = crypto
+        .decrypt(file.workspace_id, &ciphertext)
+        .map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to decrypt file content")
+                .with_context(err.to_string())
+        })?;
 
     Ok(Document::new(bytes, file.file_extension.clone()).with_correlation_id(correlation_id))
 }
@@ -593,13 +604,24 @@ async fn resolve_policies(
 async fn store_redacted_file(
     conn: &mut PgConn,
     nats: &NatsClient,
+    crypto: &CryptoService,
     source: &WorkspaceFile,
     account_id: Uuid,
     bytes: Bytes,
 ) -> Result<WorkspaceFile> {
+    // Record the plaintext size and hash before encrypting; storage holds only
+    // the ciphertext.
+    let plaintext_size = bytes.len() as i64;
+    let plaintext_hash = Sha256::digest(&bytes).to_vec();
+    let ciphertext = crypto.encrypt(source.workspace_id, &bytes).map_err(|err| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to encrypt redacted file")
+            .with_context(err.to_string())
+    })?;
+
     let store = nats.object_store::<FilesBucket, FileKey>().await?;
     let key = FileKey::generate(source.workspace_id);
-    let put = store.put(&key, Cursor::new(bytes)).await?;
+    store.put(&key, Cursor::new(ciphertext)).await?;
 
     let redacted_name = format!("{}.redacted", source.display_name);
     let new_file = NewWorkspaceFile {
@@ -610,8 +632,8 @@ async fn store_redacted_file(
         original_filename: Some(source.original_filename.clone()),
         file_extension: Some(source.file_extension.clone()),
         mime_type: source.mime_type.clone(),
-        file_size_bytes: put.size() as i64,
-        file_hash_sha256: put.sha256().to_vec(),
+        file_size_bytes: plaintext_size,
+        file_hash_sha256: plaintext_hash,
         storage_path: key.to_string(),
         storage_bucket: store.bucket().to_owned(),
         ..Default::default()

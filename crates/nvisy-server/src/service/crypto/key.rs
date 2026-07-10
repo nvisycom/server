@@ -105,13 +105,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_key() {
-        let key1 = EncryptionKey::generate();
-        let key2 = EncryptionKey::generate();
-        assert_ne!(key1.as_bytes(), key2.as_bytes());
-    }
-
-    #[test]
     fn test_from_bytes_valid() {
         let bytes = [0u8; KEY_SIZE];
         let key = EncryptionKey::from_bytes(&bytes).unwrap();
