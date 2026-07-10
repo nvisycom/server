@@ -8,7 +8,6 @@ use async_nats::jetstream::context::ObjectStoreErrorKind;
 use async_nats::jetstream::object_store::{self, ObjectInfo};
 use tokio::io::AsyncRead;
 
-use super::hashing_reader::HashingReader;
 use super::object_bucket::ObjectBucket;
 use super::object_data::{GetResult, PutResult};
 use super::object_key::ObjectKey;
@@ -19,8 +18,7 @@ const TRACING_TARGET: &str = "nvisy_nats::object_store";
 
 /// A type-safe object store that manages objects in NATS object storage.
 ///
-/// This store provides streaming upload capabilities with on-the-fly
-/// SHA-256 hash computation.
+/// Uploads and downloads stream without buffering the whole object.
 ///
 /// The store is generic over:
 /// - `B`: The bucket type (determines storage location and TTL)
@@ -103,11 +101,8 @@ where
         B::NAME
     }
 
-    /// Streams data to the store while computing SHA-256 hash on-the-fly.
-    ///
-    /// This method does not buffer the entire content in memory, making it
-    /// suitable for large file uploads.
-    pub async fn put<R>(&self, key: &K, reader: R) -> Result<PutResult>
+    /// Streams data to the store without buffering it, suitable for large files.
+    pub async fn put<R>(&self, key: &K, mut reader: R) -> Result<PutResult>
     where
         R: AsyncRead + Unpin,
     {
@@ -125,23 +120,15 @@ where
             ..Default::default()
         };
 
-        let mut hashing_reader = HashingReader::new(reader);
-
-        let info = self
-            .inner
-            .put(meta, &mut hashing_reader)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    key = %key_str,
-                    error = %e,
-                    "Failed to upload object"
-                );
-                Error::operation("put", e.to_string())
-            })?;
-
-        let sha256 = hashing_reader.finalize();
+        let info = self.inner.put(meta, &mut reader).await.map_err(|e| {
+            tracing::error!(
+                target: TRACING_TARGET,
+                key = %key_str,
+                error = %e,
+                "Failed to upload object"
+            );
+            Error::operation("put", e.to_string())
+        })?;
 
         tracing::info!(
             target: TRACING_TARGET,
@@ -151,7 +138,7 @@ where
             "Streaming upload complete"
         );
 
-        Ok(PutResult::new(info.size as u64, sha256.to_vec(), info.nuid))
+        Ok(PutResult::new(info.size as u64, info.nuid))
     }
 
     /// Gets an object from the store as a stream.

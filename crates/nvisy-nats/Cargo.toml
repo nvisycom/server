@@ -56,9 +56,7 @@ schemars = { workspace = true, features = [], optional = true }
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into", "display"] }
 
-# Encryption & Cryptography
-sha2 = { workspace = true, features = [] }
-hex = { workspace = true, features = [] }
+# Encoding
 base64 = { workspace = true, features = [] }
 
 # Primitive datatypes
