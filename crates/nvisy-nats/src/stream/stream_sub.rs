@@ -557,6 +557,3 @@ impl<T> TypedMessage<T> {
             .map_err(|e| Error::operation("message_double_ack", e.to_string()))
     }
 }
-
-#[cfg(test)]
-mod tests {}
