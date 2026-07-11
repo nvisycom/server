@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 mod accounts;
 mod activities;
-mod annotations;
 mod artifacts;
 mod authentications;
 mod connections;
@@ -26,7 +25,6 @@ mod workspaces;
 
 pub use accounts::*;
 pub use activities::*;
-pub use annotations::*;
 pub use artifacts::*;
 pub use authentications::*;
 pub use connections::*;

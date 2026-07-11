@@ -18,7 +18,6 @@ pub mod webhook_status;
 pub mod workspace_role;
 
 // File-related enumerations
-pub mod annotation_type;
 pub mod file_source;
 
 // Pipeline-related enumerations
@@ -29,7 +28,6 @@ pub mod pipeline_trigger_type;
 
 pub use action_token_type::ActionTokenType;
 pub use activity_type::{ActivityCategory, ActivityType};
-pub use annotation_type::AnnotationType;
 pub use api_token_type::ApiTokenType;
 pub use artifact_type::ArtifactType;
 pub use file_source::FileSource;

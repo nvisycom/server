@@ -13,7 +13,6 @@ mod workspace_activity;
 mod workspace_connection;
 mod workspace_context;
 mod workspace_file;
-mod workspace_file_annotation;
 mod workspace_file_chunk;
 mod workspace_invite;
 mod workspace_member;
@@ -42,9 +41,6 @@ pub use workspace_connection::{
 pub use workspace_context::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 // File models
-pub use workspace_file_annotation::{
-    NewWorkspaceFileAnnotation, UpdateWorkspaceFileAnnotation, WorkspaceFileAnnotation,
-};
 pub use workspace_file_chunk::{
     NewWorkspaceFileChunk, ScoredWorkspaceFileChunk, UpdateWorkspaceFileChunk, WorkspaceFileChunk,
 };

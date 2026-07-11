@@ -1,4 +1,4 @@
--- This migration creates tables for files, chunks, and annotations
+-- This migration creates tables for files and chunks
 
 -- Create file source enum
 CREATE TYPE FILE_SOURCE AS ENUM (
@@ -217,75 +217,6 @@ COMMENT ON COLUMN workspace_file_chunks.embedding_model IS 'Model used to genera
 COMMENT ON COLUMN workspace_file_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
 COMMENT ON COLUMN workspace_file_chunks.created_at IS 'Chunk creation timestamp';
 COMMENT ON COLUMN workspace_file_chunks.updated_at IS 'Last modification timestamp';
-
--- Create annotation type enum
-CREATE TYPE ANNOTATION_TYPE AS ENUM (
-    'annotation',   -- General text annotation
-    'highlight'     -- Highlighted text selection
-);
-
-COMMENT ON TYPE ANNOTATION_TYPE IS
-    'Type classification for file annotations.';
-
--- Create file annotations table
-CREATE TABLE workspace_file_annotations (
-    -- Primary identifiers
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    file_id             UUID             NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
-    account_id          UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- Annotation content
-    content             TEXT             NOT NULL,
-    annotation_type     ANNOTATION_TYPE  NOT NULL DEFAULT 'annotation',
-
-    CONSTRAINT workspace_file_annotations_content_length CHECK (length(trim(content)) BETWEEN 1 AND 10000),
-
-    -- Metadata (position, page, bounds, etc.)
-    metadata            JSONB            NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_file_annotations_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
-
-    -- Lifecycle timestamps
-    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    deleted_at          TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT workspace_file_annotations_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_file_annotations_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
-    CONSTRAINT workspace_file_annotations_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at)
-);
-
--- Set up automatic updated_at trigger
-SELECT setup_updated_at('workspace_file_annotations');
-
--- Create indexes for file annotations
-CREATE INDEX workspace_file_annotations_file_idx
-    ON workspace_file_annotations (file_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX workspace_file_annotations_account_idx
-    ON workspace_file_annotations (account_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX workspace_file_annotations_type_idx
-    ON workspace_file_annotations (annotation_type, file_id)
-    WHERE deleted_at IS NULL;
-
--- Add table and column comments
-COMMENT ON TABLE workspace_file_annotations IS
-    'User annotations and highlights on file content.';
-
-COMMENT ON COLUMN workspace_file_annotations.id IS 'Unique annotation identifier';
-COMMENT ON COLUMN workspace_file_annotations.file_id IS 'Parent file reference';
-COMMENT ON COLUMN workspace_file_annotations.account_id IS 'Annotation author reference';
-COMMENT ON COLUMN workspace_file_annotations.content IS 'Annotation text content (1-10000 chars)';
-COMMENT ON COLUMN workspace_file_annotations.annotation_type IS 'Type of annotation (annotation, highlight)';
-COMMENT ON COLUMN workspace_file_annotations.metadata IS 'Extended metadata including position/location (JSON)';
-COMMENT ON COLUMN workspace_file_annotations.created_at IS 'Annotation creation timestamp';
-COMMENT ON COLUMN workspace_file_annotations.updated_at IS 'Last edit timestamp';
-COMMENT ON COLUMN workspace_file_annotations.deleted_at IS 'Soft deletion timestamp';
 
 -- Create duplicate detection function
 CREATE OR REPLACE FUNCTION find_duplicate_workspace_files(_workspace_id UUID DEFAULT NULL)

@@ -1,7 +1,6 @@
 //! Request types for HTTP handlers.
 
 mod accounts;
-mod annotations;
 mod authentications;
 mod connections;
 mod contexts;
@@ -20,7 +19,6 @@ mod webhooks;
 mod workspaces;
 
 pub use accounts::*;
-pub use annotations::*;
 pub use authentications::*;
 pub use connections::*;
 pub use contexts::*;

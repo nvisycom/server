@@ -4,7 +4,6 @@
 //! [`Handler`]: axum::handler::Handler
 
 mod accounts;
-mod annotations;
 mod authentication;
 mod connections;
 mod contexts;
@@ -53,7 +52,6 @@ fn private_routes(
         .merge(members::routes())
         .merge(webhooks::routes())
         .merge(files::routes())
-        .merge(annotations::routes())
         .merge(pipelines::routes())
         .merge(runs::routes())
         .merge(policies::routes())

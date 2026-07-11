@@ -1,6 +1,6 @@
 //! File-related constraint violation error handlers.
 
-use nvisy_postgres::types::{FileAnnotationConstraints, FileChunkConstraints, FileConstraints};
+use nvisy_postgres::types::{FileChunkConstraints, FileConstraints};
 
 use crate::handler::{Error, ErrorKind};
 
@@ -38,26 +38,6 @@ impl From<FileConstraints> for Error<'static> {
         };
 
         error.with_resource("file")
-    }
-}
-
-impl From<FileAnnotationConstraints> for Error<'static> {
-    fn from(c: FileAnnotationConstraints) -> Self {
-        let error = match c {
-            FileAnnotationConstraints::ContentLength => {
-                ErrorKind::BadRequest.with_message("Annotation content length is invalid")
-            }
-            FileAnnotationConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Annotation metadata size is invalid")
-            }
-            FileAnnotationConstraints::UpdatedAfterCreated
-            | FileAnnotationConstraints::DeletedAfterCreated
-            | FileAnnotationConstraints::DeletedAfterUpdated => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
-
-        error.with_resource("file_annotation")
     }
 }
 
