@@ -28,7 +28,7 @@ use nvisy_postgres::types::{ArtifactType, PipelineRunStatus};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_schema::context::Context as SchemaContext;
 use nvisy_schema::file::Document;
-use nvisy_schema::plan::{AnalyzerParams, ScopeParams};
+use nvisy_schema::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
 use nvisy_schema::policy::Policy as SchemaPolicy;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -558,6 +558,7 @@ fn build_analyzer_params(
         enrichers: definition.enrichers.clone(),
         deduplication: definition.deduplication.clone(),
         scope,
+        annotations: AnyAnnotations::default(),
     }
 }
 

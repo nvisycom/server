@@ -10,10 +10,6 @@ pub mod sql_types {
     pub struct ActivityType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "annotation_type"))]
-    pub struct AnnotationType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "api_token_type"))]
     pub struct ApiTokenType;
 
@@ -197,24 +193,6 @@ diesel::table! {
         description -> Nullable<Text>,
         version -> Text,
         definition -> Bytea,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use pgvector::sql_types::*;
-    use super::sql_types::AnnotationType;
-
-    workspace_file_annotations (id) {
-        id -> Uuid,
-        file_id -> Uuid,
-        account_id -> Uuid,
-        content -> Text,
-        annotation_type -> AnnotationType,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -465,8 +443,6 @@ diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_contexts -> accounts (account_id));
 diesel::joinable!(workspace_contexts -> workspaces (workspace_id));
-diesel::joinable!(workspace_file_annotations -> accounts (account_id));
-diesel::joinable!(workspace_file_annotations -> workspace_files (file_id));
 diesel::joinable!(workspace_file_chunks -> workspace_files (file_id));
 diesel::joinable!(workspace_files -> accounts (account_id));
 diesel::joinable!(workspace_files -> workspaces (workspace_id));
@@ -495,7 +471,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_activities,
     workspace_connections,
     workspace_contexts,
-    workspace_file_annotations,
     workspace_file_chunks,
     workspace_files,
     workspace_invites,

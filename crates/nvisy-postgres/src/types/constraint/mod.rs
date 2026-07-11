@@ -17,7 +17,6 @@ mod workspace_webhooks;
 mod workspaces;
 
 // File-related constraint modules
-mod file_annotations;
 mod file_chunks;
 mod files;
 
@@ -38,7 +37,6 @@ pub use self::account_action_tokens::AccountActionTokenConstraints;
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
-pub use self::file_annotations::FileAnnotationConstraints;
 pub use self::file_chunks::FileChunkConstraints;
 pub use self::files::FileConstraints;
 pub use self::pipeline_artifacts::PipelineArtifactConstraints;
@@ -76,7 +74,6 @@ pub enum ConstraintViolation {
 
     // File-related constraints
     File(FileConstraints),
-    FileAnnotation(FileAnnotationConstraints),
     FileChunk(FileChunkConstraints),
 
     // Pipeline-related constraints
@@ -153,7 +150,6 @@ impl ConstraintViolation {
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
                 WorkspaceConnectionConstraints::new => WorkspaceConnection,
                 WorkspaceContextConstraints::new => WorkspaceContext,
-                FileAnnotationConstraints::new => FileAnnotation,
                 FileChunkConstraints::new => FileChunk,
                 PipelineRunConstraints::new => PipelineRun,
                 PipelineArtifactConstraints::new => PipelineArtifact,
@@ -185,7 +181,6 @@ impl ConstraintViolation {
 
             // File-related tables
             ConstraintViolation::File(_) => "files",
-            ConstraintViolation::FileAnnotation(_) => "workspace_file_annotations",
             ConstraintViolation::FileChunk(_) => "workspace_file_chunks",
 
             // Pipeline-related tables
@@ -214,9 +209,7 @@ impl ConstraintViolation {
             | ConstraintViolation::WorkspaceActivityLog(_)
             | ConstraintViolation::WorkspaceWebhook(_) => "workspaces",
 
-            ConstraintViolation::File(_)
-            | ConstraintViolation::FileAnnotation(_)
-            | ConstraintViolation::FileChunk(_) => "files",
+            ConstraintViolation::File(_) | ConstraintViolation::FileChunk(_) => "files",
 
             ConstraintViolation::Pipeline(_)
             | ConstraintViolation::PipelineRun(_)
@@ -245,7 +238,6 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
 
             ConstraintViolation::File(c) => c.categorize(),
-            ConstraintViolation::FileAnnotation(c) => c.categorize(),
             ConstraintViolation::FileChunk(c) => c.categorize(),
 
             ConstraintViolation::Pipeline(c) => c.categorize(),
@@ -279,7 +271,6 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
 
             ConstraintViolation::File(c) => write!(f, "{}", c),
-            ConstraintViolation::FileAnnotation(c) => write!(f, "{}", c),
             ConstraintViolation::FileChunk(c) => write!(f, "{}", c),
 
             ConstraintViolation::Pipeline(c) => write!(f, "{}", c),

@@ -34,8 +34,6 @@ pub enum Permission {
     DownloadFiles,
     /// Can delete files from the workspace.
     DeleteFiles,
-    /// Can create and manage annotations on files.
-    AnnotateFiles,
 
     // Pipeline permissions
     /// Can view pipelines in the workspace.
@@ -119,7 +117,6 @@ impl Permission {
             | Self::UpdateFiles
             | Self::DownloadFiles
             | Self::DeleteFiles
-            | Self::AnnotateFiles
             | Self::CreatePipelines
             | Self::UpdatePipelines
             | Self::DeletePipelines

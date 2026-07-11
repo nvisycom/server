@@ -155,11 +155,6 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Annotations".into(),
-            description: Some("File annotations".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
             name: "Members".into(),
             description: Some("Workspace member management".into()),
             ..Default::default()
