@@ -33,6 +33,7 @@ pub struct Webhook {
     /// Current status of the webhook.
     pub status: WebhookStatus,
     /// Timestamp of the most recent webhook trigger.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_triggered_at: Option<Timestamp>,
     /// Account that originally created this webhook.
     pub created_by: Uuid,

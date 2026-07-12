@@ -273,7 +273,7 @@ filtering in production without relying on log levels alone.
 
 ### Health Checks
 
-The server exposes a `/health` endpoint that returns per-component status
+The server exposes a `/health/` endpoint that returns per-component status
 (PostgreSQL, NATS) with overall system health (healthy, degraded, unhealthy).
 Cached health checks serve load balancer probes; authenticated requests
 trigger real-time checks.

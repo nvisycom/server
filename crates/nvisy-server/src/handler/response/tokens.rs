@@ -77,7 +77,8 @@ pub struct ApiTokenWithJWT {
     pub session_type: ApiTokenType,
     /// Timestamp of token creation.
     pub issued_at: Timestamp,
-    /// Timestamp when the token expires (None = never expires).
+    /// Timestamp when the token expires (omitted = never expires).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expired_at: Option<Timestamp>,
     /// The JWT token string (only shown once on creation).
     pub token: String,

@@ -115,7 +115,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(list_notifications, list_notifications_docs),
         )
         .api_route(
-            "/notifications/unread",
+            "/notifications/unread/",
             get_with(get_unread_status, get_unread_status_docs),
         )
         .with_path_items(|item| item.tag("Notifications"))

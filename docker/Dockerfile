@@ -57,6 +57,6 @@ ENV RUST_LOG=info \
 USER nvisy
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:8080/health || exit 1
+    CMD curl -sf http://localhost:8080/health/ || exit 1
 
 ENTRYPOINT ["/usr/local/bin/nvisy-server"]

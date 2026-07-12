@@ -25,6 +25,7 @@ pub struct Account {
     /// Email address associated with the account.
     pub email_address: String,
     /// Company name (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub company_name: Option<String>,
 
     /// Timestamp when the account was created.
