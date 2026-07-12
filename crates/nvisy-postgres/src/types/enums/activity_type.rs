@@ -116,42 +116,26 @@ pub enum ActivityType {
     #[serde(rename = "webhook:triggered")]
     WebhookTriggered,
 
-    // Document activities
-    /// Document was created
-    #[db_rename = "document:created"]
-    #[serde(rename = "document:created")]
-    DocumentCreated,
+    // File activities
+    /// File was created
+    #[db_rename = "file:created"]
+    #[serde(rename = "file:created")]
+    FileCreated,
 
-    /// Document was updated
-    #[db_rename = "document:updated"]
-    #[serde(rename = "document:updated")]
-    DocumentUpdated,
+    /// File was updated
+    #[db_rename = "file:updated"]
+    #[serde(rename = "file:updated")]
+    FileUpdated,
 
-    /// Document was deleted
-    #[db_rename = "document:deleted"]
-    #[serde(rename = "document:deleted")]
-    DocumentDeleted,
+    /// File was deleted
+    #[db_rename = "file:deleted"]
+    #[serde(rename = "file:deleted")]
+    FileDeleted,
 
-    /// Document was verified
-    #[db_rename = "document:verified"]
-    #[serde(rename = "document:verified")]
-    DocumentVerified,
-
-    // Comment activities
-    /// Comment was added
-    #[db_rename = "comment:added"]
-    #[serde(rename = "comment:added")]
-    CommentAdded,
-
-    /// Comment was updated
-    #[db_rename = "comment:updated"]
-    #[serde(rename = "comment:updated")]
-    CommentUpdated,
-
-    /// Comment was deleted
-    #[db_rename = "comment:deleted"]
-    #[serde(rename = "comment:deleted")]
-    CommentDeleted,
+    /// File was verified
+    #[db_rename = "file:verified"]
+    #[serde(rename = "file:verified")]
+    FileVerified,
 
     // Custom activities
     /// Custom activity type for extensibility
@@ -189,14 +173,10 @@ impl ActivityType {
             | ActivityType::WebhookDeleted
             | ActivityType::WebhookTriggered => ActivityCategory::Webhook,
 
-            ActivityType::DocumentCreated
-            | ActivityType::DocumentUpdated
-            | ActivityType::DocumentDeleted
-            | ActivityType::DocumentVerified => ActivityCategory::Document,
-
-            ActivityType::CommentAdded
-            | ActivityType::CommentUpdated
-            | ActivityType::CommentDeleted => ActivityCategory::Comment,
+            ActivityType::FileCreated
+            | ActivityType::FileUpdated
+            | ActivityType::FileDeleted
+            | ActivityType::FileVerified => ActivityCategory::File,
 
             ActivityType::Custom => ActivityCategory::Custom,
         }
@@ -211,8 +191,7 @@ impl ActivityType {
                 | ActivityType::InviteCreated
                 | ActivityType::ConnectionCreated
                 | ActivityType::WebhookCreated
-                | ActivityType::DocumentCreated
-                | ActivityType::CommentAdded
+                | ActivityType::FileCreated
         )
     }
 
@@ -225,8 +204,7 @@ impl ActivityType {
                 | ActivityType::MemberDeleted
                 | ActivityType::ConnectionDeleted
                 | ActivityType::WebhookDeleted
-                | ActivityType::DocumentDeleted
-                | ActivityType::CommentDeleted
+                | ActivityType::FileDeleted
         )
     }
 
@@ -253,10 +231,8 @@ pub enum ActivityCategory {
     Connection,
     /// Webhook-related activities
     Webhook,
-    /// Document-related activities
-    Document,
-    /// Comment-related activities
-    Comment,
+    /// File-related activities
+    File,
     /// Custom activities
     Custom,
 }

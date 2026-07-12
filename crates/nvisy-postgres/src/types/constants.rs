@@ -10,11 +10,6 @@ pub const EXPIRY_WARNING_MINUTES: i64 = 15;
 /// Used in: `account_api_tokens`
 pub const LONG_LIVED_THRESHOLD_HOURS: i64 = 24;
 
-/// Number of seconds of grace period for detecting comment edits.
-///
-/// Used in: `document_comments`
-pub const EDIT_GRACE_PERIOD_SECONDS: i64 = 5;
-
 /// Number of hours within which a file is considered "recently uploaded".
 ///
 /// Used in: `document_files`

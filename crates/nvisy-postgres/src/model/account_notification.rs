@@ -26,7 +26,7 @@ pub struct AccountNotification {
     pub is_read: bool,
     /// Timestamp when notification was read.
     pub read_at: Option<Timestamp>,
-    /// ID of related entity (comment, document, etc.).
+    /// ID of related entity (document, member, etc.).
     pub related_id: Option<Uuid>,
     /// Type of related entity.
     pub related_type: Option<String>,
@@ -39,7 +39,7 @@ pub struct AccountNotification {
 }
 
 /// Data for creating a new account notification.
-#[derive(Debug, Default, Clone, Insertable)]
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = account_notifications)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountNotification {
@@ -134,7 +134,7 @@ impl AccountNotification {
 
     /// Returns whether this is a user activity notification.
     pub fn is_user_activity(&self) -> bool {
-        self.notify_type.is_comment_event() || self.notify_type.is_member_event()
+        self.notify_type.is_member_event()
     }
 
     /// Returns whether the notification can be dismissed.

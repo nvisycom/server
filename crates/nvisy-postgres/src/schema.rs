@@ -406,7 +406,6 @@ diesel::table! {
         description -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
         require_approval -> Bool,
-        enable_comments -> Bool,
         tags -> Array<Nullable<Text>>,
         metadata -> Jsonb,
         settings -> Jsonb,

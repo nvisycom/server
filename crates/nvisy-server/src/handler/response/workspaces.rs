@@ -25,8 +25,6 @@ pub struct Workspace {
     pub tags: Vec<String>,
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
-    /// Whether comments are enabled for this workspace.
-    pub enable_comments: bool,
     /// ID of the account that created the workspace.
     pub created_by: Uuid,
     /// Role of the member in the workspace.
@@ -47,7 +45,6 @@ impl Workspace {
             description: workspace.description,
             tags,
             require_approval: workspace.require_approval,
-            enable_comments: workspace.enable_comments,
             created_by: workspace.created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
@@ -67,7 +64,6 @@ impl Workspace {
             description: workspace.description,
             tags,
             require_approval: workspace.require_approval,
-            enable_comments: workspace.enable_comments,
             created_by: workspace.created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),

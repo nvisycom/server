@@ -152,13 +152,13 @@ mod tests {
         let context = WebhookContext::new(webhook_id, workspace_id, resource_id);
         let request = WebhookRequest::new(
             url.clone(),
-            "document:created",
-            "A new document was created",
+            "file:created",
+            "A new file was created",
             context,
         );
 
         assert_eq!(request.url, url);
-        assert_eq!(request.event, "document:created");
+        assert_eq!(request.event, "file:created");
         assert_eq!(request.context.webhook_id, webhook_id);
         assert!(request.timeout.is_none());
     }

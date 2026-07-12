@@ -15,22 +15,6 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::WebhookEvent"]
 pub enum WebhookEvent {
-    // Document events
-    /// A new document was created
-    #[db_rename = "document:created"]
-    #[serde(rename = "document:created")]
-    DocumentCreated,
-
-    /// A document was updated
-    #[db_rename = "document:updated"]
-    #[serde(rename = "document:updated")]
-    DocumentUpdated,
-
-    /// A document was deleted
-    #[db_rename = "document:deleted"]
-    #[serde(rename = "document:deleted")]
-    DocumentDeleted,
-
     // File events
     /// A new file was created
     #[db_rename = "file:created"]
@@ -91,17 +75,6 @@ pub enum WebhookEvent {
 }
 
 impl WebhookEvent {
-    /// Returns whether this is a document-related event.
-    #[inline]
-    pub fn is_document_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::DocumentCreated
-                | WebhookEvent::DocumentUpdated
-                | WebhookEvent::DocumentDeleted
-        )
-    }
-
     /// Returns whether this is a file-related event.
     #[inline]
     pub fn is_file_event(self) -> bool {
@@ -136,9 +109,6 @@ impl WebhookEvent {
     /// Returns the event category as a string.
     pub fn category(&self) -> &'static str {
         match self {
-            WebhookEvent::DocumentCreated
-            | WebhookEvent::DocumentUpdated
-            | WebhookEvent::DocumentDeleted => "document",
             WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted => {
                 "file"
             }
@@ -158,9 +128,6 @@ impl WebhookEvent {
     /// Format: `{category}.{action}` (e.g., "file.created", "member.deleted")
     pub fn as_subject(&self) -> &'static str {
         match self {
-            WebhookEvent::DocumentCreated => "document.created",
-            WebhookEvent::DocumentUpdated => "document.updated",
-            WebhookEvent::DocumentDeleted => "document.deleted",
             WebhookEvent::FileCreated => "file.created",
             WebhookEvent::FileUpdated => "file.updated",
             WebhookEvent::FileDeleted => "file.deleted",
