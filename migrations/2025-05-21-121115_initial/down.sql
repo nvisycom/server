@@ -13,8 +13,5 @@ DROP FUNCTION IF EXISTS trigger_updated_at();
 -- Drop pg_trgm extension
 DROP EXTENSION IF EXISTS pg_trgm;
 
--- Drop pgvector extension
-DROP EXTENSION IF EXISTS vector;
-
 -- Drop pgcrypto extension
 DROP EXTENSION IF EXISTS pgcrypto;

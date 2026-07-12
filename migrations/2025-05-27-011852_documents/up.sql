@@ -1,4 +1,4 @@
--- This migration creates tables for files and chunks
+-- This migration creates tables for files
 
 -- Create file source enum
 CREATE TYPE FILE_SOURCE AS ENUM (
@@ -145,78 +145,6 @@ COMMENT ON COLUMN workspace_files.metadata IS 'Extended metadata (JSON)';
 COMMENT ON COLUMN workspace_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN workspace_files.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft deletion timestamp';
-
--- Create file chunks table - Text chunks with vector embeddings for semantic search
-CREATE TABLE workspace_file_chunks (
-    -- Primary identifiers
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    file_id             UUID             NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
-
-    -- Chunk position and content info
-    chunk_index         INTEGER          NOT NULL DEFAULT 0,
-    content_sha256      BYTEA            NOT NULL,
-    content_size        INTEGER          NOT NULL DEFAULT 0,
-    token_count         INTEGER          NOT NULL DEFAULT 0,
-
-    CONSTRAINT workspace_file_chunks_chunk_index_min CHECK (chunk_index >= 0),
-    CONSTRAINT workspace_file_chunks_content_sha256_length CHECK (octet_length(content_sha256) = 32),
-    CONSTRAINT workspace_file_chunks_content_size_min CHECK (content_size >= 0),
-    CONSTRAINT workspace_file_chunks_token_count_min CHECK (token_count >= 0),
-
-    -- Vector embedding (1536 dimensions for OpenAI ada-002, adjust as needed)
-    embedding           VECTOR(1536)     NOT NULL,
-    embedding_model     TEXT             NOT NULL,
-
-    CONSTRAINT workspace_file_chunks_embedding_model_format CHECK (embedding_model ~ '^[a-zA-Z0-9_\-:/\.]+$'),
-
-    -- Chunk metadata (positions, page numbers, etc.)
-    metadata            JSONB            NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_file_chunks_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
-
-    -- Lifecycle timestamps
-    created_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    updated_at          TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-
-    CONSTRAINT workspace_file_chunks_updated_after_created CHECK (updated_at >= created_at),
-
-    -- Unique constraint on file + chunk index
-    CONSTRAINT workspace_file_chunks_file_chunk_unique UNIQUE (file_id, chunk_index)
-);
-
--- Set up automatic updated_at trigger
-SELECT setup_updated_at('workspace_file_chunks');
-
--- Create indexes for file chunks
-CREATE INDEX workspace_file_chunks_file_idx
-    ON workspace_file_chunks (file_id, chunk_index ASC);
-
-CREATE INDEX workspace_file_chunks_embedded_idx
-    ON workspace_file_chunks (file_id)
-    WHERE embedding IS NOT NULL;
-
--- Create HNSW index for vector similarity search (cosine distance)
-CREATE INDEX workspace_file_chunks_embedding_idx
-    ON workspace_file_chunks USING hnsw (embedding vector_cosine_ops)
-    WHERE embedding IS NOT NULL;
-
--- Add table and column comments
-COMMENT ON TABLE workspace_file_chunks IS
-    'Text chunks extracted from files with vector embeddings for semantic search.';
-
-COMMENT ON COLUMN workspace_file_chunks.id IS 'Unique chunk identifier';
-COMMENT ON COLUMN workspace_file_chunks.file_id IS 'Parent file reference';
-COMMENT ON COLUMN workspace_file_chunks.chunk_index IS 'Sequential index of chunk within file (0-based)';
-COMMENT ON COLUMN workspace_file_chunks.content_sha256 IS 'SHA-256 hash of chunk content';
-COMMENT ON COLUMN workspace_file_chunks.content_size IS 'Size of chunk content in bytes';
-COMMENT ON COLUMN workspace_file_chunks.token_count IS 'Approximate token count for the chunk';
-COMMENT ON COLUMN workspace_file_chunks.embedding IS 'Vector embedding (1536 dimensions)';
-COMMENT ON COLUMN workspace_file_chunks.embedding_model IS 'Model used to generate the embedding';
-COMMENT ON COLUMN workspace_file_chunks.metadata IS 'Extended metadata (positions, page numbers, etc.)';
-COMMENT ON COLUMN workspace_file_chunks.created_at IS 'Chunk creation timestamp';
-COMMENT ON COLUMN workspace_file_chunks.updated_at IS 'Last modification timestamp';
 
 -- Create duplicate detection function
 CREATE OR REPLACE FUNCTION find_duplicate_workspace_files(_workspace_id UUID DEFAULT NULL)

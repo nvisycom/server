@@ -29,11 +29,3 @@ pub const RECENTLY_SENT_HOURS: i64 = 24;
 ///
 /// Used in: `account_notifications`
 pub const DEFAULT_RETENTION_DAYS: i32 = 90;
-
-/// Number of dimensions for vector embeddings.
-///
-/// This value must match the `VECTOR(n)` dimension in the database schema.
-/// Currently configured for OpenAI text-embedding-3-small (1536 dimensions).
-///
-/// Used in: `document_chunks`
-pub const EMBEDDING_DIMENSIONS: usize = 1536;

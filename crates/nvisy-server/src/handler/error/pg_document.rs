@@ -1,6 +1,6 @@
 //! File-related constraint violation error handlers.
 
-use nvisy_postgres::types::{FileChunkConstraints, FileConstraints};
+use nvisy_postgres::types::FileConstraints;
 
 use crate::handler::{Error, ErrorKind};
 
@@ -38,38 +38,5 @@ impl From<FileConstraints> for Error<'static> {
         };
 
         error.with_resource("file")
-    }
-}
-
-impl From<FileChunkConstraints> for Error<'static> {
-    fn from(c: FileChunkConstraints) -> Self {
-        let error = match c {
-            FileChunkConstraints::ChunkIndexMin => {
-                ErrorKind::BadRequest.with_message("Chunk index must be at least 0")
-            }
-            FileChunkConstraints::ContentSha256Length => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            FileChunkConstraints::ContentSizeMin => {
-                ErrorKind::BadRequest.with_message("Chunk content size must be at least 0")
-            }
-            FileChunkConstraints::TokenCountMin => {
-                ErrorKind::BadRequest.with_message("Token count must be at least 0")
-            }
-            FileChunkConstraints::EmbeddingModelFormat => {
-                ErrorKind::BadRequest.with_message("Invalid embedding model format")
-            }
-            FileChunkConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Chunk metadata size is invalid")
-            }
-            FileChunkConstraints::UpdatedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            FileChunkConstraints::FileChunkUnique => {
-                ErrorKind::Conflict.with_message("Chunk with this index already exists for file")
-            }
-        };
-
-        error.with_resource("file_chunk")
     }
 }

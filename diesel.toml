@@ -2,9 +2,8 @@
 
 [print_schema]
 file = "./crates/nvisy-postgres/src/schema.rs"
-import_types = ["diesel::sql_types::*", "pgvector::sql_types::*"]
+import_types = ["diesel::sql_types::*"]
 custom_type_derives = ["diesel::query_builder::QueryId"]
-except_custom_type_definitions = ["Vector"]
 
 [migrations_directory]
 # The "./migrations" directory is copied from the root directory into

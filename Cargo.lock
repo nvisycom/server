@@ -3812,7 +3812,6 @@ dependencies = [
  "jiff-diesel",
  "nvisy-base",
  "pgtrgm",
- "pgvector",
  "schemars",
  "serde",
  "serde_json",
@@ -4101,15 +4100,6 @@ name = "pgtrgm"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f114db5c8742a971d637fc684e4656e7de293eb947a16b0145e05dc3d999a60"
-dependencies = [
- "diesel",
-]
-
-[[package]]
-name = "pgvector"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3673cba5b9a124916096a423b806a9f29620972c6c97b08db5f2053e9428b481"
 dependencies = [
  "diesel",
 ]

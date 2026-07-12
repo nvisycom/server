@@ -5,10 +5,6 @@
 -- Required for secure token generation (gen_random_bytes)
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Enable pgvector extension for vector similarity search
--- Required for embedding storage and semantic search capabilities
-CREATE EXTENSION IF NOT EXISTS vector;
-
 -- Enable pg_trgm extension for trigram-based text search
 -- Required for fuzzy filename matching
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

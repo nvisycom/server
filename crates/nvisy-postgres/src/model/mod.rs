@@ -14,7 +14,6 @@ mod workspace_connection;
 mod workspace_connection_run;
 mod workspace_context;
 mod workspace_file;
-mod workspace_file_chunk;
 mod workspace_invite;
 mod workspace_member;
 mod workspace_pipeline;
@@ -44,10 +43,6 @@ pub use workspace_connection_run::{
 };
 pub use workspace_context::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
-// File models
-pub use workspace_file_chunk::{
-    NewWorkspaceFileChunk, ScoredWorkspaceFileChunk, UpdateWorkspaceFileChunk, WorkspaceFileChunk,
-};
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
