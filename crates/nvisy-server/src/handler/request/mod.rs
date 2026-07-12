@@ -2,6 +2,7 @@
 
 mod accounts;
 mod authentications;
+mod connection_runs;
 mod connections;
 mod contexts;
 mod files;
@@ -10,9 +11,9 @@ mod members;
 mod monitors;
 mod paginations;
 mod paths;
+mod pipeline_runs;
 mod pipelines;
 mod policies;
-mod runs;
 mod tokens;
 mod validations;
 mod webhooks;
@@ -20,6 +21,7 @@ mod workspaces;
 
 pub use accounts::*;
 pub use authentications::*;
+pub use connection_runs::*;
 pub use connections::*;
 pub use contexts::*;
 pub use files::*;
@@ -28,9 +30,9 @@ pub use members::*;
 pub use monitors::*;
 pub use paginations::*;
 pub use paths::*;
+pub use pipeline_runs::*;
 pub use pipelines::*;
 pub use policies::*;
-pub use runs::*;
 pub use tokens::*;
 pub use validations::*;
 pub use webhooks::*;

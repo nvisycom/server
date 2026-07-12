@@ -2,7 +2,7 @@ name: nvisy-dev
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.2-pg18
+    image: postgres:18
     container_name: nvisy-postgres-dev
     restart: unless-stopped
     ports:

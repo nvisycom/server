@@ -5,6 +5,7 @@
 
 mod accounts;
 mod authentication;
+mod connection_runs;
 mod connections;
 mod contexts;
 mod error;
@@ -13,11 +14,11 @@ mod invites;
 mod members;
 mod monitors;
 mod notifications;
+mod pipeline_runs;
 mod pipelines;
 mod policies;
 pub mod request;
 pub mod response;
-mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -47,13 +48,14 @@ fn private_routes(
         .merge(tokens::routes())
         .merge(workspaces::routes())
         .merge(connections::routes())
+        .merge(connection_runs::routes())
         .merge(contexts::routes())
         .merge(invites::routes())
         .merge(members::routes())
         .merge(webhooks::routes())
         .merge(files::routes())
         .merge(pipelines::routes())
-        .merge(runs::routes())
+        .merge(pipeline_runs::routes())
         .merge(policies::routes())
         .merge(notifications::routes());
 

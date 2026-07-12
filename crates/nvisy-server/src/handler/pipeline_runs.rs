@@ -488,15 +488,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_pipeline_runs, list_pipeline_runs_docs),
         )
         .api_route(
-            "/runs/{runId}/",
+            "/pipeline-runs/{runId}/",
             get_with(get_pipeline_run, get_pipeline_run_docs),
         )
         .api_route(
-            "/runs/{runId}/detections/",
+            "/pipeline-runs/{runId}/detections/",
             get_with(get_pipeline_run_analysis, get_pipeline_run_analysis_docs),
         )
         .api_route(
-            "/runs/{runId}/redactions/",
+            "/pipeline-runs/{runId}/redactions/",
             post_with(redact_pipeline_run, redact_pipeline_run_docs),
         )
         .with_path_items(|item| item.tag("Pipeline Runs"))

@@ -32,7 +32,7 @@ The Rust workspace contains six crates, each with a single responsibility:
 | Layer      | Technology                                                         |
 | ---------- | ------------------------------------------------------------------ |
 | Language   | Rust                                                               |
-| Database   | PostgreSQL with pgvector for relational data and vector embeddings |
+| Database   | PostgreSQL for relational data                                     |
 | Messaging  | NATS with JetStream for pub/sub, job queues, and object storage    |
 | HTTP       | Axum with Tower middleware, Aide for OpenAPI, Scalar for docs UI   |
 | Auth       | JWT with Ed25519 signing, Argon2 for password hashing              |
