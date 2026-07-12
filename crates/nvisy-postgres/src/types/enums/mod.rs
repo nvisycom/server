@@ -5,7 +5,6 @@
 //! and database integration through Diesel.
 
 // Account-related enumerations
-pub mod action_token_type;
 pub mod api_token_type;
 pub mod notification_event;
 
@@ -27,7 +26,6 @@ pub mod pipeline_run_status;
 pub mod pipeline_status;
 pub mod pipeline_trigger_type;
 
-pub use action_token_type::ActionTokenType;
 pub use activity_type::{ActivityCategory, ActivityType};
 pub use api_token_type::ApiTokenType;
 pub use artifact_type::ArtifactType;

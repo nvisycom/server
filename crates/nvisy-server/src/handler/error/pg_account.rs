@@ -1,8 +1,7 @@
 //! Account-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    AccountActionTokenConstraints, AccountApiTokenConstraints, AccountConstraints,
-    AccountNotificationConstraints,
+    AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -86,26 +85,6 @@ impl From<AccountApiTokenConstraints> for Error<'static> {
         };
 
         error.with_resource("account_api_token")
-    }
-}
-
-impl From<AccountActionTokenConstraints> for Error<'static> {
-    fn from(c: AccountActionTokenConstraints) -> Self {
-        let error = match c {
-            AccountActionTokenConstraints::PrimaryKey => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            AccountActionTokenConstraints::ActionDataSize => {
-                ErrorKind::BadRequest.with_message("Action data size is invalid")
-            }
-            AccountActionTokenConstraints::ExpiredAfterIssued
-            | AccountActionTokenConstraints::UsedAfterIssued
-            | AccountActionTokenConstraints::UsedBeforeExpired => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
-
-        error.with_resource("account_action_token")
     }
 }
 

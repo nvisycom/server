@@ -2,10 +2,6 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "action_token_type"))]
-    pub struct ActionTokenType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "activity_type"))]
     pub struct ActivityType;
 
@@ -60,24 +56,6 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "workspace_role"))]
     pub struct WorkspaceRole;
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::ActionTokenType;
-
-    account_action_tokens (account_id, action_token) {
-        action_token -> Uuid,
-        account_id -> Uuid,
-        action_type -> ActionTokenType,
-        action_data -> Jsonb,
-        ip_address -> Nullable<Inet>,
-        user_agent -> Nullable<Text>,
-        device_id -> Nullable<Text>,
-        issued_at -> Timestamptz,
-        expired_at -> Timestamptz,
-        used_at -> Nullable<Timestamptz>,
-    }
 }
 
 diesel::table! {
@@ -416,7 +394,6 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(account_action_tokens -> accounts (account_id));
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
@@ -447,7 +424,6 @@ diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    account_action_tokens,
     account_api_tokens,
     account_notifications,
     accounts,

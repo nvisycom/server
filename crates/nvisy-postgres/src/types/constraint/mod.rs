@@ -4,7 +4,6 @@
 //! organized into logical groups for better maintainability.
 
 // Account-related constraint modules
-mod account_action_tokens;
 mod account_api_tokens;
 mod account_notifications;
 mod accounts;
@@ -33,7 +32,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub use self::account_action_tokens::AccountActionTokenConstraints;
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
@@ -63,7 +61,6 @@ pub enum ConstraintViolation {
     Account(AccountConstraints),
     AccountNotification(AccountNotificationConstraints),
     AccountApiToken(AccountApiTokenConstraints),
-    AccountActionToken(AccountActionTokenConstraints),
 
     // Workspace-related constraints
     Workspace(WorkspaceConstraints),
@@ -140,7 +137,6 @@ impl ConstraintViolation {
             "account" => try_parse! {
                 AccountNotificationConstraints::new => AccountNotification,
                 AccountApiTokenConstraints::new => AccountApiToken,
-                AccountActionTokenConstraints::new => AccountActionToken,
             },
             "workspaces" => try_parse!(WorkspaceConstraints::new => Workspace),
             "workspace" => try_parse! {
@@ -170,7 +166,6 @@ impl ConstraintViolation {
             ConstraintViolation::Account(_) => "accounts",
             ConstraintViolation::AccountNotification(_) => "account_notifications",
             ConstraintViolation::AccountApiToken(_) => "account_api_tokens",
-            ConstraintViolation::AccountActionToken(_) => "account_action_tokens",
 
             // Workspace-related tables
             ConstraintViolation::Workspace(_) => "workspaces",
@@ -200,8 +195,7 @@ impl ConstraintViolation {
         match self {
             ConstraintViolation::Account(_)
             | ConstraintViolation::AccountNotification(_)
-            | ConstraintViolation::AccountApiToken(_)
-            | ConstraintViolation::AccountActionToken(_) => "accounts",
+            | ConstraintViolation::AccountApiToken(_) => "accounts",
 
             ConstraintViolation::Workspace(_)
             | ConstraintViolation::WorkspaceMember(_)
@@ -230,7 +224,6 @@ impl ConstraintViolation {
             ConstraintViolation::Account(c) => c.categorize(),
             ConstraintViolation::AccountNotification(c) => c.categorize(),
             ConstraintViolation::AccountApiToken(c) => c.categorize(),
-            ConstraintViolation::AccountActionToken(c) => c.categorize(),
 
             ConstraintViolation::Workspace(c) => c.categorize(),
             ConstraintViolation::WorkspaceMember(c) => c.categorize(),
@@ -263,7 +256,6 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::Account(c) => write!(f, "{}", c),
             ConstraintViolation::AccountNotification(c) => write!(f, "{}", c),
             ConstraintViolation::AccountApiToken(c) => write!(f, "{}", c),
-            ConstraintViolation::AccountActionToken(c) => write!(f, "{}", c),
 
             ConstraintViolation::Workspace(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceMember(c) => write!(f, "{}", c),
