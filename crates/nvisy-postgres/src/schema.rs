@@ -46,6 +46,10 @@ pub mod sql_types {
     pub struct SyncStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "sync_trigger_type"))]
+    pub struct SyncTriggerType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
     pub struct WebhookEvent;
 
@@ -162,7 +166,26 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use pgvector::sql_types::*;
+    use super::sql_types::SyncTriggerType;
     use super::sql_types::SyncStatus;
+
+    workspace_connection_runs (id) {
+        id -> Uuid,
+        connection_id -> Uuid,
+        account_id -> Nullable<Uuid>,
+        trigger_type -> SyncTriggerType,
+        status -> SyncStatus,
+        records_synced -> Int8,
+        error_message -> Nullable<Text>,
+        metadata -> Jsonb,
+        started_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use pgvector::sql_types::*;
 
     workspace_connections (id) {
         id -> Uuid,
@@ -172,8 +195,6 @@ diesel::table! {
         provider -> Text,
         encrypted_data -> Bytea,
         is_active -> Bool,
-        last_sync_at -> Nullable<Timestamptz>,
-        sync_status -> Nullable<SyncStatus>,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -439,6 +460,8 @@ diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
+diesel::joinable!(workspace_connection_runs -> accounts (account_id));
+diesel::joinable!(workspace_connection_runs -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_contexts -> accounts (account_id));
@@ -469,6 +492,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_notifications,
     accounts,
     workspace_activities,
+    workspace_connection_runs,
     workspace_connections,
     workspace_contexts,
     workspace_file_chunks,

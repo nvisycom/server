@@ -11,6 +11,7 @@ mod pipeline_reference;
 mod workspace;
 mod workspace_activity;
 mod workspace_connection;
+mod workspace_connection_run;
 mod workspace_context;
 mod workspace_file;
 mod workspace_file_chunk;
@@ -37,6 +38,9 @@ pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};
 pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_connection::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
+};
+pub use workspace_connection_run::{
+    NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
 };
 pub use workspace_context::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};

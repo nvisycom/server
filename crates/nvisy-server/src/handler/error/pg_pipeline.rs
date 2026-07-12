@@ -2,7 +2,8 @@
 
 use nvisy_postgres::types::{
     PipelineArtifactConstraints, PipelineConstraints, PipelineReferenceConstraints,
-    PipelineRunConstraints, WorkspaceConnectionConstraints, WorkspaceContextConstraints,
+    PipelineRunConstraints, WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints,
+    WorkspaceContextConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -105,6 +106,24 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
         };
 
         error.with_resource("workspace_connection")
+    }
+}
+
+impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
+    fn from(c: WorkspaceConnectionRunConstraints) -> Self {
+        let error = match c {
+            WorkspaceConnectionRunConstraints::ErrorMessageLength => ErrorKind::BadRequest
+                .with_message("Sync error message must be between 1 and 4096 characters"),
+            WorkspaceConnectionRunConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Sync run metadata size exceeds maximum limit")
+            }
+            WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
+            | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("workspace_connection_run")
     }
 }
 

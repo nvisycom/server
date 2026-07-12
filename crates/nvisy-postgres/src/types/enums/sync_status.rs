@@ -6,16 +6,16 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// Defines the status of a connection sync operation.
+/// Defines the execution status of a connection sync run.
 ///
-/// This enumeration corresponds to the `SYNC_STATUS` PostgreSQL enum and is used
-/// to track the current state of connection synchronization.
+/// This enumeration corresponds to the `SYNC_STATUS` PostgreSQL enum and tracks
+/// the state of an individual synchronization run.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::SyncStatus"]
 pub enum SyncStatus {
-    /// Sync is pending
+    /// Sync is queued
     #[db_rename = "pending"]
     #[serde(rename = "pending")]
     #[default]
@@ -25,6 +25,16 @@ pub enum SyncStatus {
     #[db_rename = "running"]
     #[serde(rename = "running")]
     Running,
+
+    /// Sync finished successfully
+    #[db_rename = "completed"]
+    #[serde(rename = "completed")]
+    Completed,
+
+    /// Sync failed with error
+    #[db_rename = "failed"]
+    #[serde(rename = "failed")]
+    Failed,
 
     /// Sync was cancelled
     #[db_rename = "cancelled"]
@@ -45,6 +55,18 @@ impl SyncStatus {
         matches!(self, SyncStatus::Running)
     }
 
+    /// Returns whether the sync finished successfully.
+    #[inline]
+    pub fn is_completed(self) -> bool {
+        matches!(self, SyncStatus::Completed)
+    }
+
+    /// Returns whether the sync failed.
+    #[inline]
+    pub fn is_failed(self) -> bool {
+        matches!(self, SyncStatus::Failed)
+    }
+
     /// Returns whether the sync was cancelled.
     #[inline]
     pub fn is_cancelled(self) -> bool {
@@ -55,5 +77,14 @@ impl SyncStatus {
     #[inline]
     pub fn is_in_progress(self) -> bool {
         matches!(self, SyncStatus::Pending | SyncStatus::Running)
+    }
+
+    /// Returns whether the sync reached a terminal state.
+    #[inline]
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            SyncStatus::Completed | SyncStatus::Failed | SyncStatus::Cancelled
+        )
     }
 }

@@ -26,8 +26,8 @@ pub struct PipelineRun {
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
     ///
-    /// The analysis is available to fetch from the run's `analysis` endpoint
-    /// once this reaches `analyzed`.
+    /// The detections are available to fetch from the run's `detections`
+    /// endpoint once this reaches `analyzed`.
     pub status: PipelineRunStatus,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: serde_json::Value,
