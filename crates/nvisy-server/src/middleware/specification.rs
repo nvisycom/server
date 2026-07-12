@@ -30,6 +30,7 @@ use aide::scalar::Scalar;
 use aide::transform::TransformOpenApi;
 use axum::routing::{Router, get};
 use axum::{Extension, Json};
+use serde_json::Value;
 
 /// OpenAPI configuration for aide integration.
 ///
@@ -102,10 +103,76 @@ where
             .route(&config.scalar_ui, scalar.axum_route())
             .route(&config.open_api_json, get(serve_openapi));
 
-        // Generate the OpenAPI specification with tags and add it as extension
-        router
-            .finish_api_with(&mut api, api_docs)
-            .layer(Extension(api))
+        let router = router.finish_api_with(&mut api, api_docs);
+        collapse_null_types(&mut api);
+        router.layer(Extension(api))
+    }
+}
+
+/// Removes the `null` variant that schemars adds to optional-field schemas
+/// across every component schema.
+///
+/// schemars encodes `Option<T>` in one of two ways: for primitives as the union
+/// `type: [T, null]`, and for referenced types (enums, structs) as
+/// `anyOf: [T, { type: null }]`. Both rely on absence from `required` to signal
+/// optionality. Optional response fields are omitted when absent rather than
+/// serialized as `null` (each carries `skip_serializing_if = "Option::is_none"`),
+/// so the `null` variant describes a value the API never emits and only widens
+/// generated clients to `T | null`. Dropping it tightens each schema to match
+/// what is actually sent.
+///
+/// This runs after schema generation because aide accumulates the component
+/// schemas into `api.components` only once the router is finished.
+fn collapse_null_types(api: &mut OpenApi) {
+    let Some(components) = api.components.as_mut() else {
+        return;
+    };
+
+    for schema in components.schemas.values_mut() {
+        if let Some(object) = schema.json_schema.as_object_mut() {
+            collapse_in_object(object);
+        }
+    }
+}
+
+/// Recursively removes null variants from optional-field schemas within a value.
+fn collapse_in_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => collapse_in_object(map),
+        Value::Array(items) => items.iter_mut().for_each(collapse_in_value),
+        _ => {}
+    }
+}
+
+/// Removes the `null` variant a schema object gained from an `Option<T>`, in
+/// both the `type: [T, null]` and `anyOf: [T, { type: null }]` forms, then
+/// recurses into nested schemas.
+///
+/// A `type` array that collapses to a single member becomes that member as a
+/// plain string. An `anyOf` whose only remaining branch is a single schema is
+/// hoisted into this object, preserving sibling keywords such as `description`.
+fn collapse_in_object(map: &mut serde_json::Map<String, Value>) {
+    if let Some(Value::Array(types)) = map.get_mut("type") {
+        types.retain(|entry| entry != "null");
+        if let [only] = types.as_slice() {
+            let only = only.clone();
+            map.insert("type".to_owned(), only);
+        }
+    }
+
+    if let Some(Value::Array(variants)) = map.get_mut("anyOf") {
+        variants.retain(|variant| variant.get("type") != Some(&Value::String("null".to_owned())));
+        if let [Value::Object(only)] = variants.as_slice() {
+            let only = only.clone();
+            map.remove("anyOf");
+            for (key, value) in only {
+                map.entry(key).or_insert(value);
+            }
+        }
+    }
+
+    for nested in map.values_mut() {
+        collapse_in_value(nested);
     }
 }
 
@@ -179,4 +246,134 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             description: Some("Webhook configuration".into()),
             ..Default::default()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use aide::openapi::{Components, OpenApi, SchemaObject};
+    use serde_json::json;
+
+    use super::collapse_null_types;
+
+    #[test]
+    fn collapses_null_unions_across_nested_schemas() {
+        let mut api = OpenApi::default();
+        let mut components = Components::default();
+        components.schemas.insert(
+            "Sample".to_owned(),
+            SchemaObject {
+                json_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "required": { "type": "string" },
+                        "optional": { "type": ["string", "null"] },
+                        "enumeration": {
+                            "description": "field description",
+                            "anyOf": [
+                                { "$ref": "#/components/schemas/SortOrder" },
+                                { "type": "null" }
+                            ]
+                        },
+                        "nested": {
+                            "type": "object",
+                            "properties": {
+                                "count": { "type": ["integer", "null"] }
+                            }
+                        }
+                    },
+                    "required": ["required"]
+                })
+                .try_into()
+                .expect("valid schema"),
+                external_docs: None,
+                example: None,
+            },
+        );
+        api.components = Some(components);
+
+        collapse_null_types(&mut api);
+
+        let schema = api.components.as_ref().unwrap().schemas["Sample"]
+            .json_schema
+            .as_value();
+
+        assert_eq!(
+            schema.pointer("/properties/optional/type"),
+            Some(&json!("string")),
+            "optional primitive collapses to a plain string"
+        );
+        assert_eq!(
+            schema.pointer("/properties/enumeration/$ref"),
+            Some(&json!("#/components/schemas/SortOrder")),
+            "optional referenced type hoists the non-null anyOf branch"
+        );
+        assert!(
+            schema.pointer("/properties/enumeration/anyOf").is_none(),
+            "the anyOf wrapper is removed once null is stripped"
+        );
+        assert_eq!(
+            schema.pointer("/properties/enumeration/description"),
+            Some(&json!("field description")),
+            "the field's own description survives hoisting"
+        );
+        assert_eq!(
+            schema.pointer("/properties/nested/properties/count/type"),
+            Some(&json!("integer")),
+            "null is stripped from nested schemas too"
+        );
+        assert_eq!(
+            schema.pointer("/properties/required/type"),
+            Some(&json!("string")),
+            "non-nullable fields are unaffected"
+        );
+    }
+
+    /// Guards the invariant [`collapse_null_types`] relies on: because the spec
+    /// strips `null` from every optional field's type, a response field that
+    /// serialized `null` would make the schema lie. Every `Option<T>` field in
+    /// a response type must therefore either omit itself when `None`
+    /// (`skip_serializing_if`) or never serialize at all (`skip`).
+    #[test]
+    fn response_optionals_never_serialize_null() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/handler/response");
+
+        let mut offenders = Vec::new();
+        for entry in std::fs::read_dir(dir).expect("response dir is readable") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+
+            let source = std::fs::read_to_string(&path).expect("source is readable");
+            let lines: Vec<&str> = source.lines().collect();
+            for (index, line) in lines.iter().enumerate() {
+                let trimmed = line.trim_start();
+                let is_optional_field = trimmed.starts_with("pub ")
+                    && !trimmed.starts_with("pub fn ")
+                    && trimmed.contains(": Option<")
+                    && !trimmed.contains("//");
+                if !is_optional_field {
+                    continue;
+                }
+
+                let start = index.saturating_sub(4);
+                let context = lines[start..index].join("\n");
+                let skipped = context.contains("skip_serializing_if")
+                    || context.contains("serde(skip)")
+                    || context.contains("serde(skip,")
+                    || context.contains("serde(skip ");
+                if !skipped {
+                    let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    offenders.push(format!("{file}:{}  {}", index + 1, trimmed));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "response Option<T> fields missing `skip_serializing_if`/`skip` \
+             (they would serialize null, which the OpenAPI schema strips):\n{}",
+            offenders.join("\n")
+        );
+    }
 }

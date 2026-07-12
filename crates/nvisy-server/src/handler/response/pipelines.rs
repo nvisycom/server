@@ -24,6 +24,7 @@ pub struct Pipeline {
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
@@ -100,6 +101,7 @@ pub struct PipelineSummary {
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,

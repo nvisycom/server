@@ -22,7 +22,8 @@ pub struct Invite {
     pub invite_id: Uuid,
     /// ID of the workspace the invitation is for.
     pub workspace_id: Uuid,
-    /// Email address of the invitee (null for open invite codes).
+    /// Email address of the invitee (omitted for open invite codes).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub invitee_email: Option<String>,
     /// Invite token (only included for open invitations without invitee_email).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,6 +106,7 @@ pub struct InvitePreview {
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Tags associated with the workspace.
     pub tags: Vec<String>,

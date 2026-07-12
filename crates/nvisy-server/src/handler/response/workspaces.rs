@@ -19,6 +19,7 @@ pub struct Workspace {
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Tags associated with the workspace.
     pub tags: Vec<String>,
