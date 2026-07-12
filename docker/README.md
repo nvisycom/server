@@ -106,6 +106,32 @@ Adjust these values based on expected workload. The memory store is used for
 ephemeral streams; the file store is used for durable subscriptions and object
 storage.
 
+## Encryption at Rest
+
+The server encrypts sensitive payloads at the application layer with
+XChaCha20-Poly1305 under per-workspace keys before they reach storage — file
+bytes, redacted output, analyzed documents, webhook signing secrets, and
+policy/context definitions. This protects those payloads even against a live
+read of the datastore.
+
+For everything else on disk — NATS stream/consumer metadata and KV entries,
+Postgres rows, backups — provision the data volumes on **encrypted storage**.
+This is the NATS-recommended approach over the server's built-in JetStream
+encryption: it adds no runtime overhead, keeps key management out of NATS, and
+covers the whole volume.
+
+The persistent volumes to encrypt are `nats_data` and `postgres_data`:
+
+- **Cloud:** back the volumes with an encrypted block device (e.g. an encrypted
+  EBS volume, or a cloud disk with default SSE enabled), or bind-mount them onto
+  an encrypted filesystem.
+- **Self-hosted:** place the Docker data root (or a bind mount for these
+  volumes) on a LUKS-encrypted partition.
+
+Volume encryption guards against stolen disks, snapshots, and backups. It does
+not protect against a compromised running host — which is why the sensitive
+payloads above are additionally encrypted at the application layer.
+
 ## Health Checks
 
 All services expose health check endpoints:
