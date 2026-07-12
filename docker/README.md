@@ -92,7 +92,7 @@ The Dockerfile uses a multi-stage build:
 3. **Runtime:** minimal Debian image with only the binary and runtime libraries
 
 The runtime image runs as a non-root user (`nvisy`, UID 1000) and includes a
-health check endpoint at `/health`.
+health check endpoint at `/health/`.
 
 ## NATS Configuration
 
@@ -138,7 +138,7 @@ All services expose health check endpoints:
 
 | Service    | Endpoint                | Method   |
 | ---------- | ----------------------- | -------- |
-| Server     | `/health`               | HTTP GET |
+| Server     | `/health/`              | HTTP GET |
 | PostgreSQL | `pg_isready`            | CLI      |
 | NATS       | `/healthz` on port 8222 | HTTP GET |
 

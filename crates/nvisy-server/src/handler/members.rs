@@ -397,7 +397,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(list_members, list_members_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/members/leave",
+            "/workspaces/{workspaceId}/members/leave/",
             post_with(leave_workspace, leave_workspace_docs),
         )
         .api_route(

@@ -318,7 +318,7 @@ async fn get_pipeline_run_analysis(
 }
 
 fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get run analysis")
+    op.summary("Get run detections")
         .description("Returns the run's detected findings (the analyzed document) for review.")
         .response::<200, Json<AnalyzedDocument>>()
         .response::<401, Json<ErrorResponse>>()
@@ -492,11 +492,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(get_pipeline_run, get_pipeline_run_docs),
         )
         .api_route(
-            "/runs/{runId}/analysis",
+            "/runs/{runId}/detections/",
             get_with(get_pipeline_run_analysis, get_pipeline_run_analysis_docs),
         )
         .api_route(
-            "/runs/{runId}/redact/",
+            "/runs/{runId}/redactions/",
             post_with(redact_pipeline_run, redact_pipeline_run_docs),
         )
         .with_path_items(|item| item.tag("Pipeline Runs"))

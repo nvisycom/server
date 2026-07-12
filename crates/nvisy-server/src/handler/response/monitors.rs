@@ -5,7 +5,7 @@ use nvisy_base::health::{ComponentHealth, HealthStatus};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-/// Response body for `GET /health`.
+/// Response body for `GET /health/`.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Health {

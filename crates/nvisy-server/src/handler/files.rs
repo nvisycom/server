@@ -589,7 +589,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .delete_with(delete_file, delete_file_docs),
         )
         .api_route(
-            "/files/{fileId}/content",
+            "/files/{fileId}/content/",
             get_with(download_file, download_file_docs),
         )
         .with_path_items(|item| item.tag("Files"))

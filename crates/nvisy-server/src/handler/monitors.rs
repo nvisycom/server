@@ -117,6 +117,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/health", get_with(health_status, health_status_docs))
+        .api_route("/health/", get_with(health_status, health_status_docs))
         .with_path_items(|item| item.tag("Health"))
 }
