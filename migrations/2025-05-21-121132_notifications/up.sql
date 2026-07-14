@@ -3,22 +3,18 @@
 
 -- Create notification event enum
 CREATE TYPE NOTIFICATION_EVENT AS ENUM (
-    -- Comment events
-    'comment:mention',        -- User was mentioned in a comment
-    'comment:reply',          -- Someone replied to user's comment
-
-    -- Document events
-    'document:uploaded',      -- Document was uploaded
-    'document:downloaded',    -- Document was downloaded
-    'document:verified',      -- Document verification completed
+    -- File events
+    'file:uploaded',          -- File was uploaded
+    'file:downloaded',        -- File was downloaded
+    'file:verified',          -- File verification completed
 
     -- Member events
     'member:invited',         -- User was invited to a workspace
     'member:joined',          -- A new member joined a workspace
 
-    -- Integration events
-    'integration:synced',     -- Integration sync completed
-    'integration:desynced',   -- Integration sync failed or disconnected
+    -- Connection events
+    'connection:synced',      -- Connection sync completed
+    'connection:desynced',    -- Connection sync failed or disconnected
 
     -- System events
     'system:announcement',    -- System-wide announcement

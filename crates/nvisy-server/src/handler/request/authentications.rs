@@ -68,24 +68,3 @@ pub struct ConfirmPasswordReset {
     #[validate(length(min = 8, max = 128))]
     pub new_password: String,
 }
-
-/// Request payload for email verification.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyEmail {
-    /// Email verification token.
-    #[validate(length(min = 10, max = 200))]
-    pub token: String,
-}
-
-/// Request payload for resending email verification.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ResendEmailVerification {
-    /// Email address to resend verification to.
-    #[validate(email)]
-    #[validate(length(min = 5, max = 254))]
-    pub email_address: String,
-}

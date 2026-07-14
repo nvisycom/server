@@ -230,7 +230,7 @@ impl WebhookEmitter {
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::DocumentCreated,
+            WebhookEvent::FileCreated,
             document_id,
             triggered_by,
             data,
@@ -249,7 +249,7 @@ impl WebhookEmitter {
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::DocumentUpdated,
+            WebhookEvent::FileUpdated,
             document_id,
             triggered_by,
             data,
@@ -268,7 +268,7 @@ impl WebhookEmitter {
     ) -> Result<usize> {
         self.emit(
             workspace_id,
-            WebhookEvent::DocumentDeleted,
+            WebhookEvent::FileDeleted,
             document_id,
             triggered_by,
             data,

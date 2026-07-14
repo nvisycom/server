@@ -13,11 +13,6 @@ COMMENT ON TYPE WEBHOOK_STATUS IS
 
 -- Webhook event types enum
 CREATE TYPE WEBHOOK_EVENT AS ENUM (
-    -- Document events
-    'document:created',
-    'document:updated',
-    'document:deleted',
-
     -- File events
     'file:created',
     'file:updated',

@@ -158,81 +158,6 @@ COMMENT ON COLUMN account_api_tokens.expired_at IS 'Timestamp when the token exp
 COMMENT ON COLUMN account_api_tokens.last_used_at IS 'Timestamp of most recent token usage';
 COMMENT ON COLUMN account_api_tokens.deleted_at IS 'Timestamp when the token was revoked (NULL if active)';
 
--- Create comprehensive action token type enum
-CREATE TYPE ACTION_TOKEN_TYPE AS ENUM (
-    'activate_account',     -- Email verification for new accounts
-    'deactivate_account',   -- Account suspension/deactivation
-    'update_email',         -- Email address change verification
-    'reset_password',       -- Password reset via email
-    'change_password',      -- Password change verification
-    'enable_2fa',           -- Two-factor authentication setup
-    'disable_2fa',          -- Two-factor authentication removal
-    'login_verification',   -- Additional login verification
-    'api_access',           -- API access tokens
-    'import_data',          -- Data import authorization
-    'export_data'           -- Data export authorization
-);
-
-COMMENT ON TYPE ACTION_TOKEN_TYPE IS
-    'Comprehensive enumeration of all token-based action operations and verifications.';
-
--- Create account action tokens table
-CREATE TABLE account_action_tokens (
-    -- Token identifiers
-    action_token          UUID        NOT NULL DEFAULT gen_random_uuid(),
-    account_id            UUID        NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    CONSTRAINT account_action_tokens_pkey PRIMARY KEY (account_id, action_token),
-
-    -- Token purpose and data
-    action_type           ACTION_TOKEN_TYPE NOT NULL,
-    action_data           JSONB       NOT NULL DEFAULT '{}',
-
-    CONSTRAINT account_action_tokens_action_data_size CHECK (length(action_data::TEXT) BETWEEN 2 AND 4096),
-
-    -- Security context
-    ip_address            INET        DEFAULT NULL,
-    user_agent            TEXT        DEFAULT NULL,
-    device_id             TEXT        DEFAULT NULL,
-
-    -- Token lifecycle
-    issued_at             TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    expired_at            TIMESTAMPTZ NOT NULL DEFAULT current_timestamp + INTERVAL '24 hours',
-    used_at               TIMESTAMPTZ DEFAULT NULL,
-
-    CONSTRAINT account_action_tokens_expired_after_issued CHECK (expired_at > issued_at),
-    CONSTRAINT account_action_tokens_used_after_issued CHECK (used_at IS NULL OR used_at >= issued_at),
-    CONSTRAINT account_action_tokens_used_before_expired CHECK (used_at IS NULL OR used_at <= expired_at)
-);
-
--- Create indexes for action token management
-CREATE INDEX account_action_tokens_action_type_idx
-    ON account_action_tokens (action_type, account_id, expired_at)
-    WHERE used_at IS NULL;
-
-CREATE INDEX account_action_tokens_cleanup_idx
-    ON account_action_tokens (expired_at)
-    WHERE used_at IS NULL;
-
-CREATE INDEX account_action_tokens_device_tracking_idx
-    ON account_action_tokens (account_id, device_id, issued_at DESC)
-    WHERE device_id IS NOT NULL;
-
--- Add table and column comments
-COMMENT ON TABLE account_action_tokens IS
-    'Secure, time-limited tokens for various account operations with comprehensive tracking and rate limiting.';
-
-COMMENT ON COLUMN account_action_tokens.action_token IS 'Unique identifier for the token (UUID)';
-COMMENT ON COLUMN account_action_tokens.account_id IS 'Reference to the account this token belongs to';
-COMMENT ON COLUMN account_action_tokens.action_type IS 'Type of action this token authorizes (from ACTION_TOKEN_TYPE enum)';
-COMMENT ON COLUMN account_action_tokens.action_data IS 'Additional context data for the token action (JSON, 2B-4KB)';
-COMMENT ON COLUMN account_action_tokens.ip_address IS 'IP address where the token was generated';
-COMMENT ON COLUMN account_action_tokens.user_agent IS 'User agent of the client that generated the token';
-COMMENT ON COLUMN account_action_tokens.device_id IS 'Optional device identifier for additional security tracking';
-COMMENT ON COLUMN account_action_tokens.issued_at IS 'Timestamp when the token was created';
-COMMENT ON COLUMN account_action_tokens.expired_at IS 'Timestamp after which the token becomes invalid';
-COMMENT ON COLUMN account_action_tokens.used_at IS 'Timestamp when the token was successfully used (NULL if unused)';
-
 -- Create a view for active user sessions
 CREATE VIEW active_user_sessions AS
 SELECT
@@ -256,16 +181,14 @@ WHERE t.deleted_at IS NULL
 COMMENT ON VIEW active_user_sessions IS
     'View of currently active user sessions with account information for monitoring and security purposes.';
 
--- Create a function to clean up expired sessions and tokens
+-- Create a function to clean up expired sessions
 CREATE OR REPLACE FUNCTION cleanup_expired_auth_data()
 RETURNS TABLE (
-    sessions_cleaned INTEGER,
-    tokens_cleaned INTEGER
+    sessions_cleaned INTEGER
 )
 LANGUAGE plpgsql AS $$
 DECLARE
     sessions_count INTEGER;
-    tokens_count INTEGER;
 BEGIN
     -- Clean up expired sessions
     WITH deleted_sessions AS (
@@ -279,19 +202,8 @@ BEGIN
     INTO sessions_count
     FROM deleted_sessions;
 
-    -- Clean up expired and used tokens
-    WITH deleted_tokens AS (
-        DELETE FROM account_action_tokens
-        WHERE expired_at < current_timestamp
-            OR used_at IS NOT NULL
-        RETURNING 1
-    )
-    SELECT count(*)
-    INTO tokens_count
-    FROM deleted_tokens;
-
     -- Return cleanup results
-    RETURN QUERY SELECT sessions_count, tokens_count;
+    RETURN QUERY SELECT sessions_count;
 END;
 $$;
 

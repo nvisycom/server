@@ -4,7 +4,6 @@
 //! including structs for querying, inserting, and updating records.
 
 mod account;
-mod account_action_token;
 mod account_api_token;
 mod account_notification;
 mod pipeline_reference;
@@ -24,9 +23,6 @@ mod workspace_webhook;
 
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
-pub use account_action_token::{
-    AccountActionToken, NewAccountActionToken, UpdateAccountActionToken,
-};
 pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
 pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,

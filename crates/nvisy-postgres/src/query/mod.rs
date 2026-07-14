@@ -14,7 +14,6 @@
 //! [`OffsetPagination`]: crate::types::OffsetPagination
 
 mod account;
-mod account_action_token;
 mod account_api_token;
 mod account_notification;
 mod pipeline_reference;
@@ -33,7 +32,6 @@ mod workspace_policy;
 mod workspace_webhook;
 
 pub use account::AccountRepository;
-pub use account_action_token::AccountActionTokenRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
 pub use pipeline_reference::PipelineReferenceRepository;

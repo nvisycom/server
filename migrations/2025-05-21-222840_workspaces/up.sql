@@ -15,7 +15,6 @@ CREATE TABLE workspaces (
 
     -- Workspace settings
     require_approval BOOLEAN            NOT NULL DEFAULT TRUE,
-    enable_comments  BOOLEAN            NOT NULL DEFAULT TRUE,
 
     -- Tags and extended metadata
     tags             TEXT[]             NOT NULL DEFAULT '{}',
@@ -76,7 +75,6 @@ COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (3-3
 COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 2000 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
 COMMENT ON COLUMN workspaces.require_approval IS 'Require approval for new member requests';
-COMMENT ON COLUMN workspaces.enable_comments IS 'Enable commenting features within the workspace';
 COMMENT ON COLUMN workspaces.tags IS 'Array of tags for workspace classification and search';
 COMMENT ON COLUMN workspaces.metadata IS 'Extended workspace metadata (JSON, 2B-8KB)';
 COMMENT ON COLUMN workspaces.settings IS 'Workspace-specific settings and preferences (JSON, 2B-8KB)';

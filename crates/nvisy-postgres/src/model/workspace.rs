@@ -22,8 +22,6 @@ pub struct Workspace {
     pub avatar_url: Option<String>,
     /// Whether approval is required.
     pub require_approval: bool,
-    /// Whether comments are enabled.
-    pub enable_comments: bool,
     /// Workspace tags.
     pub tags: Vec<Option<String>>,
     /// Additional workspace metadata.
@@ -53,8 +51,6 @@ pub struct NewWorkspace {
     pub avatar_url: Option<String>,
     /// Require approval.
     pub require_approval: Option<bool>,
-    /// Enable comments.
-    pub enable_comments: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -78,8 +74,6 @@ pub struct UpdateWorkspace {
     pub avatar_url: Option<Option<String>>,
     /// Require approval.
     pub require_approval: Option<bool>,
-    /// Enable comments.
-    pub enable_comments: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -143,11 +137,6 @@ impl Workspace {
     /// Returns whether the workspace allows file uploads.
     pub fn allows_file_uploads(&self) -> bool {
         !self.is_deleted()
-    }
-
-    /// Returns whether the workspace allows collaboration.
-    pub fn allows_collaboration(&self) -> bool {
-        !self.is_deleted() && self.enable_comments
     }
 
     /// Returns the age of the workspace since creation.

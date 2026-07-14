@@ -108,7 +108,7 @@ impl WorkspaceActivity {
     pub fn is_user_action(&self) -> bool {
         matches!(
             self.category(),
-            ActivityCategory::Member | ActivityCategory::Document
+            ActivityCategory::Member | ActivityCategory::File
         )
     }
 

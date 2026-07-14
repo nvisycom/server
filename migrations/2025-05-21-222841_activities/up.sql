@@ -32,16 +32,11 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'webhook:deleted',
     'webhook:triggered',
 
-    -- Document activities
-    'document:created',
-    'document:updated',
-    'document:deleted',
-    'document:verified',
-
-    -- Comment activities
-    'comment:added',
-    'comment:updated',
-    'comment:deleted',
+    -- File activities
+    'file:created',
+    'file:updated',
+    'file:deleted',
+    'file:verified',
 
     -- Custom activities
     'custom'

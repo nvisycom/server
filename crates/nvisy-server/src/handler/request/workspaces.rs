@@ -29,8 +29,6 @@ pub struct CreateWorkspace {
     pub description: Option<String>,
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
-    /// Whether comments are enabled for this workspace.
-    pub enable_comments: Option<bool>,
 }
 
 impl CreateWorkspace {
@@ -45,7 +43,6 @@ impl CreateWorkspace {
             display_name: self.display_name,
             description: self.description,
             require_approval: self.require_approval,
-            enable_comments: self.enable_comments,
             created_by: account_id,
             ..Default::default()
         }
@@ -67,8 +64,6 @@ pub struct UpdateWorkspace {
     pub description: Option<String>,
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
-    /// Whether comments are enabled for this workspace.
-    pub enable_comments: Option<bool>,
 }
 
 impl UpdateWorkspace {
@@ -77,7 +72,6 @@ impl UpdateWorkspace {
             display_name: self.display_name,
             description: self.description.map(Some),
             require_approval: self.require_approval,
-            enable_comments: self.enable_comments,
             ..Default::default()
         }
     }
