@@ -16,7 +16,8 @@ pub struct Login {
     /// Password of the account.
     #[validate(length(min = 1, max = 1000))]
     pub password: String,
-    /// Whether to remember this device for extended session.
+    /// Whether to remember this device for extended session. Defaults to false.
+    #[serde(default)]
     pub remember_me: bool,
 }
 
@@ -38,7 +39,8 @@ pub struct Signup {
     #[validate(length(min = 8, max = 128))]
     pub password: String,
 
-    /// Whether to remember the device for extended session.
+    /// Whether to remember the device for extended session. Defaults to false.
+    #[serde(default)]
     pub remember_me: bool,
 }
 
