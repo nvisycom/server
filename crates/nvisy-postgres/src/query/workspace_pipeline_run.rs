@@ -27,6 +27,17 @@ pub trait WorkspacePipelineRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
 
+    /// Finds a run by ID, scoped to a workspace via its owning pipeline.
+    ///
+    /// Runs carry no workspace column, so this joins through the pipeline and
+    /// filters on its workspace. A run whose pipeline is in another workspace
+    /// is not found.
+    fn find_pipeline_run_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        run_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
+
     /// Finds a run by its `(pipeline, idempotency key)` pair, for detect replay.
     fn find_pipeline_run_by_idempotency_key(
         &mut self,
@@ -140,6 +151,27 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let run = workspace_pipeline_runs::table
             .filter(dsl::id.eq(run_id))
+            .select(WorkspacePipelineRun::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(run)
+    }
+
+    async fn find_pipeline_run_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        run_id: Uuid,
+    ) -> PgResult<Option<WorkspacePipelineRun>> {
+        use schema::workspace_pipeline_runs::dsl as runs;
+        use schema::workspace_pipelines::dsl as pipelines;
+
+        let run = runs::workspace_pipeline_runs
+            .inner_join(pipelines::workspace_pipelines)
+            .filter(runs::id.eq(run_id))
+            .filter(pipelines::workspace_id.eq(workspace_id))
             .select(WorkspacePipelineRun::as_select())
             .first(self)
             .await

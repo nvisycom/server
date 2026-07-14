@@ -25,14 +25,15 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspaceInvite(c) => c.into(),
             ConstraintViolation::WorkspaceActivityLog(c) => c.into(),
             ConstraintViolation::WorkspaceWebhook(c) => c.into(),
-            ConstraintViolation::File(c) => c.into(),
-            ConstraintViolation::Pipeline(c) => c.into(),
-            ConstraintViolation::PipelineRun(c) => c.into(),
-            ConstraintViolation::PipelineArtifact(c) => c.into(),
-            ConstraintViolation::PipelineReference(c) => c.into(),
+            ConstraintViolation::WorkspaceFile(c) => c.into(),
+            ConstraintViolation::WorkspacePipeline(c) => c.into(),
+            ConstraintViolation::WorkspacePipelineRun(c) => c.into(),
+            ConstraintViolation::WorkspacePipelineArtifact(c) => c.into(),
+            ConstraintViolation::WorkspacePipelineReference(c) => c.into(),
             ConstraintViolation::WorkspaceConnection(c) => c.into(),
             ConstraintViolation::WorkspaceConnectionRun(c) => c.into(),
             ConstraintViolation::WorkspaceContext(c) => c.into(),
+            ConstraintViolation::WorkspacePolicy(c) => c.into(),
         }
     }
 }

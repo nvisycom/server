@@ -28,6 +28,8 @@ pub struct WorkspaceConnectionRun {
     pub trigger_type: SyncTriggerType,
     /// Current run status.
     pub status: SyncStatus,
+    /// Human-facing sequence number within the connection (assigned at insert).
+    pub run_number: i32,
     /// Number of records processed.
     pub records_synced: i64,
     /// Failure detail when status is failed.

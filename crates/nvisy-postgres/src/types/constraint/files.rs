@@ -9,48 +9,52 @@ use super::ConstraintCategory;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
-pub enum FileConstraints {
+pub enum WorkspaceFileConstraints {
     // File identity validation constraints
-    #[strum(serialize = "files_display_name_length")]
+    #[strum(serialize = "workspace_files_display_name_length")]
     DisplayNameLength,
-    #[strum(serialize = "files_original_filename_length")]
+    #[strum(serialize = "workspace_files_original_filename_length")]
     OriginalFilenameLength,
-    #[strum(serialize = "files_file_extension_format")]
+    #[strum(serialize = "workspace_files_file_extension_format")]
     FileExtensionFormat,
-    #[strum(serialize = "files_mime_type_format")]
+    #[strum(serialize = "workspace_files_mime_type_format")]
     MimeTypeFormat,
-    #[strum(serialize = "files_tags_count_max")]
+    #[strum(serialize = "workspace_files_tags_count_max")]
     TagsCountMax,
 
     // File storage constraints
-    #[strum(serialize = "files_file_size_min")]
+    #[strum(serialize = "workspace_files_file_size_min")]
     FileSizeMin,
-    #[strum(serialize = "files_storage_path_not_empty")]
+    #[strum(serialize = "workspace_files_storage_path_not_empty")]
     StoragePathNotEmpty,
-    #[strum(serialize = "files_storage_bucket_not_empty")]
+    #[strum(serialize = "workspace_files_storage_bucket_not_empty")]
     StorageBucketNotEmpty,
-    #[strum(serialize = "files_file_hash_sha256_length")]
+    #[strum(serialize = "workspace_files_file_hash_sha256_length")]
     FileHashSha256Length,
 
     // File metadata constraints
-    #[strum(serialize = "files_metadata_size")]
+    #[strum(serialize = "workspace_files_metadata_size")]
     MetadataSize,
 
     // File version constraints
-    #[strum(serialize = "files_version_number_min")]
+    #[strum(serialize = "workspace_files_version_number_min")]
     VersionNumberMin,
 
+    // Uniqueness constraints
+    #[strum(serialize = "workspace_files_workspace_id_id_key")]
+    WorkspaceIdIdUnique,
+
     // File chronological constraints
-    #[strum(serialize = "files_updated_after_created")]
+    #[strum(serialize = "workspace_files_updated_after_created")]
     UpdatedAfterCreated,
-    #[strum(serialize = "files_deleted_after_created")]
+    #[strum(serialize = "workspace_files_deleted_after_created")]
     DeletedAfterCreated,
-    #[strum(serialize = "files_deleted_after_updated")]
+    #[strum(serialize = "workspace_files_deleted_after_updated")]
     DeletedAfterUpdated,
 }
 
-impl FileConstraints {
-    /// Creates a new [`FileConstraints`] from the constraint name.
+impl WorkspaceFileConstraints {
+    /// Creates a new [`WorkspaceFileConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
     }
@@ -58,33 +62,35 @@ impl FileConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            FileConstraints::DisplayNameLength
-            | FileConstraints::OriginalFilenameLength
-            | FileConstraints::FileExtensionFormat
-            | FileConstraints::MimeTypeFormat
-            | FileConstraints::TagsCountMax
-            | FileConstraints::FileSizeMin
-            | FileConstraints::StoragePathNotEmpty
-            | FileConstraints::StorageBucketNotEmpty
-            | FileConstraints::FileHashSha256Length
-            | FileConstraints::MetadataSize
-            | FileConstraints::VersionNumberMin => ConstraintCategory::Validation,
+            WorkspaceFileConstraints::DisplayNameLength
+            | WorkspaceFileConstraints::OriginalFilenameLength
+            | WorkspaceFileConstraints::FileExtensionFormat
+            | WorkspaceFileConstraints::MimeTypeFormat
+            | WorkspaceFileConstraints::TagsCountMax
+            | WorkspaceFileConstraints::FileSizeMin
+            | WorkspaceFileConstraints::StoragePathNotEmpty
+            | WorkspaceFileConstraints::StorageBucketNotEmpty
+            | WorkspaceFileConstraints::FileHashSha256Length
+            | WorkspaceFileConstraints::MetadataSize
+            | WorkspaceFileConstraints::VersionNumberMin => ConstraintCategory::Validation,
 
-            FileConstraints::UpdatedAfterCreated
-            | FileConstraints::DeletedAfterCreated
-            | FileConstraints::DeletedAfterUpdated => ConstraintCategory::Chronological,
+            WorkspaceFileConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+
+            WorkspaceFileConstraints::UpdatedAfterCreated
+            | WorkspaceFileConstraints::DeletedAfterCreated
+            | WorkspaceFileConstraints::DeletedAfterUpdated => ConstraintCategory::Chronological,
         }
     }
 }
 
-impl From<FileConstraints> for String {
+impl From<WorkspaceFileConstraints> for String {
     #[inline]
-    fn from(val: FileConstraints) -> Self {
+    fn from(val: WorkspaceFileConstraints) -> Self {
         val.to_string()
     }
 }
 
-impl TryFrom<String> for FileConstraints {
+impl TryFrom<String> for WorkspaceFileConstraints {
     type Error = strum::ParseError;
 
     #[inline]

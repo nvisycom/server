@@ -29,6 +29,8 @@ pub struct PipelineRun {
     /// The detections are available to fetch from the run's `detections`
     /// endpoint once this reaches `analyzed`.
     pub status: PipelineRunStatus,
+    /// Sequence number within the pipeline (display only).
+    pub run_number: i32,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: serde_json::Value,
     /// When the run started.
@@ -51,6 +53,7 @@ impl PipelineRun {
             account_id: run.account_id,
             trigger_type: run.trigger_type,
             status: run.status,
+            run_number: run.run_number,
             metadata: run.metadata,
             started_at: run.started_at.into(),
             completed_at: run.completed_at.map(Into::into),

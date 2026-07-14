@@ -13,6 +13,8 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionRunPathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the connection sync run.
     pub run_id: Uuid,
 }

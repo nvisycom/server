@@ -15,6 +15,9 @@ DROP VIEW IF EXISTS active_workspace_pipeline_runs;
 -- Pipeline runs
 DROP TABLE IF EXISTS workspace_pipeline_runs;
 
+-- Drop the run_number trigger function (its trigger dropped with the table above).
+DROP FUNCTION IF EXISTS set_workspace_pipeline_run_number();
+
 -- Workspace pipelines
 DROP TABLE IF EXISTS workspace_pipelines;
 

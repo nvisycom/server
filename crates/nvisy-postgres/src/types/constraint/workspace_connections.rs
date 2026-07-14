@@ -22,9 +22,13 @@ pub enum WorkspaceConnectionConstraints {
     #[strum(serialize = "workspace_connections_data_size")]
     DataSize,
 
+    // Metadata validation constraints
+    #[strum(serialize = "workspace_connections_metadata_size")]
+    MetadataSize,
+
     // Uniqueness constraints
-    #[strum(serialize = "workspace_connections_name_unique_idx")]
-    NameUnique,
+    #[strum(serialize = "workspace_connections_workspace_id_id_key")]
+    WorkspaceIdIdUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_connections_updated_after_created")]
@@ -44,9 +48,10 @@ impl WorkspaceConnectionConstraints {
         match self {
             WorkspaceConnectionConstraints::NameLength
             | WorkspaceConnectionConstraints::ProviderLength
-            | WorkspaceConnectionConstraints::DataSize => ConstraintCategory::Validation,
+            | WorkspaceConnectionConstraints::DataSize
+            | WorkspaceConnectionConstraints::MetadataSize => ConstraintCategory::Validation,
 
-            WorkspaceConnectionConstraints::NameUnique => ConstraintCategory::Uniqueness,
+            WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceConnectionConstraints::UpdatedAfterCreated
             | WorkspaceConnectionConstraints::DeletedAfterCreated => {

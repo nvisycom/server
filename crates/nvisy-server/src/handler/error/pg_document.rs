@@ -1,40 +1,51 @@
 //! File-related constraint violation error handlers.
 
-use nvisy_postgres::types::FileConstraints;
+use nvisy_postgres::types::WorkspaceFileConstraints;
 
 use crate::handler::{Error, ErrorKind};
 
-impl From<FileConstraints> for Error<'static> {
-    fn from(c: FileConstraints) -> Self {
+impl From<WorkspaceFileConstraints> for Error<'static> {
+    fn from(c: WorkspaceFileConstraints) -> Self {
         let error = match c {
-            FileConstraints::DisplayNameLength => ErrorKind::BadRequest
+            WorkspaceFileConstraints::DisplayNameLength => ErrorKind::BadRequest
                 .with_message("File name must be between 1 and 255 characters long"),
-            FileConstraints::OriginalFilenameLength => ErrorKind::BadRequest
+            WorkspaceFileConstraints::OriginalFilenameLength => ErrorKind::BadRequest
                 .with_message("Original filename must be between 1 and 255 characters long"),
-            FileConstraints::FileExtensionFormat => {
+            WorkspaceFileConstraints::FileExtensionFormat => {
                 ErrorKind::BadRequest.with_message("Invalid file extension format")
             }
-            FileConstraints::MimeTypeFormat => {
+            WorkspaceFileConstraints::MimeTypeFormat => {
                 ErrorKind::BadRequest.with_message("Invalid MIME type format")
             }
-            FileConstraints::FileSizeMin => {
+            WorkspaceFileConstraints::FileSizeMin => {
                 ErrorKind::BadRequest.with_message("File size must be greater than or equal to 0")
             }
-            FileConstraints::StoragePathNotEmpty => ErrorKind::InternalServerError.into_error(),
-            FileConstraints::StorageBucketNotEmpty => ErrorKind::InternalServerError.into_error(),
-            FileConstraints::FileHashSha256Length => ErrorKind::InternalServerError.into_error(),
-            FileConstraints::MetadataSize => {
+            WorkspaceFileConstraints::StoragePathNotEmpty => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            WorkspaceFileConstraints::StorageBucketNotEmpty => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            WorkspaceFileConstraints::FileHashSha256Length => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            WorkspaceFileConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("File metadata size is invalid")
             }
-            FileConstraints::TagsCountMax => {
+            WorkspaceFileConstraints::TagsCountMax => {
                 ErrorKind::BadRequest.with_message("Maximum number of tags exceeded")
             }
-            FileConstraints::VersionNumberMin => {
+            WorkspaceFileConstraints::VersionNumberMin => {
                 ErrorKind::BadRequest.with_message("Version number must be at least 1")
             }
-            FileConstraints::UpdatedAfterCreated
-            | FileConstraints::DeletedAfterCreated
-            | FileConstraints::DeletedAfterUpdated => ErrorKind::InternalServerError.into_error(),
+            WorkspaceFileConstraints::WorkspaceIdIdUnique => {
+                ErrorKind::Conflict.with_message("A file with this identifier already exists")
+            }
+            WorkspaceFileConstraints::UpdatedAfterCreated
+            | WorkspaceFileConstraints::DeletedAfterCreated
+            | WorkspaceFileConstraints::DeletedAfterUpdated => {
+                ErrorKind::InternalServerError.into_error()
+            }
         };
 
         error.with_resource("file")

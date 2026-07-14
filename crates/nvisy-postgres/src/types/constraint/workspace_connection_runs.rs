@@ -17,6 +17,12 @@ pub enum WorkspaceConnectionRunConstraints {
     ErrorMessageLength,
     #[strum(serialize = "workspace_connection_runs_metadata_size")]
     MetadataSize,
+    #[strum(serialize = "workspace_connection_runs_run_number_positive")]
+    RunNumberPositive,
+
+    // Uniqueness constraints
+    #[strum(serialize = "workspace_connection_runs_connection_id_run_number_key")]
+    RunNumberUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_connection_runs_completed_after_started")]
@@ -34,7 +40,12 @@ impl WorkspaceConnectionRunConstraints {
         match self {
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
             | WorkspaceConnectionRunConstraints::ErrorMessageLength
-            | WorkspaceConnectionRunConstraints::MetadataSize => ConstraintCategory::Validation,
+            | WorkspaceConnectionRunConstraints::MetadataSize
+            | WorkspaceConnectionRunConstraints::RunNumberPositive => {
+                ConstraintCategory::Validation
+            }
+
+            WorkspaceConnectionRunConstraints::RunNumberUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
                 ConstraintCategory::Chronological

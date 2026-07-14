@@ -15,12 +15,6 @@ pub enum AccountApiTokenConstraints {
     NameNotEmpty,
     #[strum(serialize = "account_api_tokens_name_length")]
     NameLength,
-    #[strum(serialize = "account_api_tokens_description_length")]
-    DescriptionLength,
-    #[strum(serialize = "account_api_tokens_region_code_valid")]
-    RegionCodeValid,
-    #[strum(serialize = "account_api_tokens_country_code_valid")]
-    CountryCodeValid,
 
     // Token chronological constraints
     #[strum(serialize = "account_api_tokens_expired_after_issued")]
@@ -29,12 +23,6 @@ pub enum AccountApiTokenConstraints {
     DeletedAfterIssued,
     #[strum(serialize = "account_api_tokens_last_used_after_issued")]
     LastUsedAfterIssued,
-
-    // Token unique constraints
-    #[strum(serialize = "account_api_tokens_access_seq_unique_idx")]
-    AccessSeqUnique,
-    #[strum(serialize = "account_api_tokens_refresh_seq_unique_idx")]
-    RefreshSeqUnique,
 }
 
 impl AccountApiTokenConstraints {
@@ -46,18 +34,13 @@ impl AccountApiTokenConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            AccountApiTokenConstraints::NameNotEmpty
-            | AccountApiTokenConstraints::NameLength
-            | AccountApiTokenConstraints::DescriptionLength
-            | AccountApiTokenConstraints::RegionCodeValid
-            | AccountApiTokenConstraints::CountryCodeValid => ConstraintCategory::Validation,
+            AccountApiTokenConstraints::NameNotEmpty | AccountApiTokenConstraints::NameLength => {
+                ConstraintCategory::Validation
+            }
 
             AccountApiTokenConstraints::ExpiredAfterIssued
             | AccountApiTokenConstraints::DeletedAfterIssued
             | AccountApiTokenConstraints::LastUsedAfterIssued => ConstraintCategory::Chronological,
-
-            AccountApiTokenConstraints::AccessSeqUnique
-            | AccountApiTokenConstraints::RefreshSeqUnique => ConstraintCategory::Uniqueness,
         }
     }
 }

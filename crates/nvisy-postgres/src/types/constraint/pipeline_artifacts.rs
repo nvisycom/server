@@ -9,14 +9,14 @@ use super::ConstraintCategory;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
-pub enum PipelineArtifactConstraints {
+pub enum WorkspacePipelineArtifactConstraints {
     // Metadata validation constraints
     #[strum(serialize = "workspace_pipeline_artifacts_metadata_size")]
     MetadataSize,
 }
 
-impl PipelineArtifactConstraints {
-    /// Creates a new [`PipelineArtifactConstraints`] from the constraint name.
+impl WorkspacePipelineArtifactConstraints {
+    /// Creates a new [`WorkspacePipelineArtifactConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
     }
@@ -24,19 +24,19 @@ impl PipelineArtifactConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            PipelineArtifactConstraints::MetadataSize => ConstraintCategory::Validation,
+            WorkspacePipelineArtifactConstraints::MetadataSize => ConstraintCategory::Validation,
         }
     }
 }
 
-impl From<PipelineArtifactConstraints> for String {
+impl From<WorkspacePipelineArtifactConstraints> for String {
     #[inline]
-    fn from(val: PipelineArtifactConstraints) -> Self {
+    fn from(val: WorkspacePipelineArtifactConstraints) -> Self {
         val.to_string()
     }
 }
 
-impl TryFrom<String> for PipelineArtifactConstraints {
+impl TryFrom<String> for WorkspacePipelineArtifactConstraints {
     type Error = strum::ParseError;
 
     #[inline]

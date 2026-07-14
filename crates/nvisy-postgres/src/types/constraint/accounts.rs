@@ -29,6 +29,8 @@ pub enum AccountConstraints {
     TimezoneFormat,
     #[strum(serialize = "accounts_locale_format")]
     LocaleFormat,
+    #[strum(serialize = "accounts_suspended_not_admin")]
+    SuspendedNotAdmin,
 
     // Account chronological constraints
     #[strum(serialize = "accounts_updated_after_created")]
@@ -39,16 +41,6 @@ pub enum AccountConstraints {
     DeletedAfterUpdated,
     #[strum(serialize = "accounts_password_changed_after_created")]
     PasswordChangedAfterCreated,
-    #[strum(serialize = "accounts_last_login_after_created")]
-    LastLoginAfterCreated,
-
-    // Account business logic constraints
-    #[strum(serialize = "accounts_suspended_not_admin")]
-    SuspendedNotAdmin,
-
-    // Account unique constraints
-    #[strum(serialize = "accounts_email_address_unique_idx")]
-    EmailAddressUnique,
 }
 
 impl AccountConstraints {
@@ -68,17 +60,13 @@ impl AccountConstraints {
             | AccountConstraints::PasswordHashLengthMin
             | AccountConstraints::CompanyNameLengthMax
             | AccountConstraints::TimezoneFormat
-            | AccountConstraints::LocaleFormat => ConstraintCategory::Validation,
+            | AccountConstraints::LocaleFormat
+            | AccountConstraints::SuspendedNotAdmin => ConstraintCategory::Validation,
 
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
             | AccountConstraints::DeletedAfterUpdated
-            | AccountConstraints::PasswordChangedAfterCreated
-            | AccountConstraints::LastLoginAfterCreated => ConstraintCategory::Chronological,
-
-            AccountConstraints::SuspendedNotAdmin => ConstraintCategory::BusinessLogic,
-
-            AccountConstraints::EmailAddressUnique => ConstraintCategory::Uniqueness,
+            | AccountConstraints::PasswordChangedAfterCreated => ConstraintCategory::Chronological,
         }
     }
 }

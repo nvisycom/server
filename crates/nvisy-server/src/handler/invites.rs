@@ -172,6 +172,7 @@ fn list_invites_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         invite_id = %path_params.invite_id,
     )
 )]
@@ -184,12 +185,16 @@ async fn cancel_invite(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the invite first to get workspace context for authorization
-    let invite = find_invite(&mut conn, path_params.invite_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, invite.workspace_id, Permission::InviteMembers)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::InviteMembers,
+        )
         .await?;
+
+    // Confirm the invite exists in this workspace before cancelling.
+    find_invite(&mut conn, path_params.workspace_id, path_params.invite_id).await?;
 
     conn.cancel_workspace_invite(path_params.invite_id, auth_state.account_id)
         .await?;
@@ -217,6 +222,7 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         invite_id = %path_params.invite_id,
         accept = request.accept_invite,
     )
@@ -231,7 +237,7 @@ async fn reply_to_invite(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let invite = find_invite(&mut conn, path_params.invite_id).await?;
+    let invite = find_invite(&mut conn, path_params.workspace_id, path_params.invite_id).await?;
 
     // Verify invitation is still valid
     if !invite.can_be_used() {
@@ -510,9 +516,13 @@ fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Finds an invite by ID or returns NotFound error.
-async fn find_invite(conn: &mut PgConn, invite_id: Uuid) -> Result<WorkspaceInvite> {
-    conn.find_workspace_invite_by_id(invite_id)
+/// Finds an invite within a workspace or returns NotFound error.
+async fn find_invite(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    invite_id: Uuid,
+) -> Result<WorkspaceInvite> {
+    conn.find_invite_in_workspace(workspace_id, invite_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -537,13 +547,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceId}/invites/code/",
             post_with(generate_invite_code, generate_invite_code_docs),
         )
-        // Invite-specific routes (invite ID is globally unique)
         .api_route(
-            "/invites/{inviteId}/",
+            "/workspaces/{workspaceId}/invites/{inviteId}/",
             delete_with(cancel_invite, cancel_invite_docs),
         )
         .api_route(
-            "/invites/{inviteId}/",
+            "/workspaces/{workspaceId}/invites/{inviteId}/",
             post_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(

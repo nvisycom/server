@@ -12,7 +12,7 @@ use super::ConstraintCategory;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
-pub enum PipelineReferenceConstraints {
+pub enum WorkspacePipelineReferenceConstraints {
     // Foreign-key constraints (referenced row must exist in the workspace)
     #[strum(serialize = "workspace_pipeline_policies_policy_fkey")]
     PolicyReference,
@@ -24,8 +24,8 @@ pub enum PipelineReferenceConstraints {
     ContextPipelineReference,
 }
 
-impl PipelineReferenceConstraints {
-    /// Creates a new [`PipelineReferenceConstraints`] from the constraint name.
+impl WorkspacePipelineReferenceConstraints {
+    /// Creates a new [`WorkspacePipelineReferenceConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
     }
@@ -36,14 +36,14 @@ impl PipelineReferenceConstraints {
     }
 }
 
-impl From<PipelineReferenceConstraints> for String {
+impl From<WorkspacePipelineReferenceConstraints> for String {
     #[inline]
-    fn from(val: PipelineReferenceConstraints) -> Self {
+    fn from(val: WorkspacePipelineReferenceConstraints) -> Self {
         val.to_string()
     }
 }
 
-impl TryFrom<String> for PipelineReferenceConstraints {
+impl TryFrom<String> for WorkspacePipelineReferenceConstraints {
     type Error = strum::ParseError;
 
     #[inline]

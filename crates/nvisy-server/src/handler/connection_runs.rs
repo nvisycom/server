@@ -33,6 +33,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_runs";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -45,15 +46,20 @@ async fn create_connection_run(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let connection = find_connection(&mut conn, path_params.connection_id).await?;
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            connection.workspace_id,
+            path_params.workspace_id,
             Permission::ManageConnections,
         )
         .await?;
+
+    let connection = find_connection(
+        &mut conn,
+        path_params.workspace_id,
+        path_params.connection_id,
+    )
+    .await?;
 
     let run = conn
         .create_workspace_connection_run(NewWorkspaceConnectionRun {
@@ -85,6 +91,7 @@ fn create_connection_run_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -99,15 +106,20 @@ async fn list_connection_runs(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let connection = find_connection(&mut conn, path_params.connection_id).await?;
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            connection.workspace_id,
+            path_params.workspace_id,
             Permission::ViewConnections,
         )
         .await?;
+
+    let connection = find_connection(
+        &mut conn,
+        path_params.workspace_id,
+        path_params.connection_id,
+    )
+    .await?;
 
     let page = conn
         .cursor_list_workspace_connection_runs(connection.id, pagination.into(), query.status)
@@ -145,6 +157,7 @@ fn list_connection_runs_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         run_id = %path_params.run_id,
     )
 )]
@@ -157,20 +170,18 @@ async fn read_connection_run(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let run = conn
-        .find_workspace_connection_run_by_id(path_params.run_id)
-        .await?
-        .ok_or_else(|| Error::not_found("connection_run"))?;
-
-    let connection = find_connection(&mut conn, run.connection_id).await?;
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            connection.workspace_id,
+            path_params.workspace_id,
             Permission::ViewConnections,
         )
         .await?;
+
+    let run = conn
+        .find_connection_run_in_workspace(path_params.workspace_id, path_params.run_id)
+        .await?
+        .ok_or_else(|| Error::not_found("connection_run"))?;
 
     tracing::debug!(target: TRACING_TARGET, "Connection sync run retrieved");
 
@@ -186,9 +197,13 @@ fn read_connection_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Loads a connection by ID, mapping a missing row to a not-found error.
-async fn find_connection(conn: &mut PgConn, connection_id: Uuid) -> Result<WorkspaceConnection> {
-    conn.find_workspace_connection_by_id(connection_id)
+/// Loads a connection within a workspace, mapping a missing row to not-found.
+async fn find_connection(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+) -> Result<WorkspaceConnection> {
+    conn.find_connection_in_workspace(workspace_id, connection_id)
         .await?
         .ok_or_else(|| Error::not_found("connection"))
 }
@@ -198,15 +213,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        // Connection-scoped routes (create + list under the parent connection)
         .api_route(
-            "/connections/{connectionId}/runs/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/runs/",
             post_with(create_connection_run, create_connection_run_docs)
                 .get_with(list_connection_runs, list_connection_runs_docs),
         )
-        // Run-specific route (run ID is globally unique)
         .api_route(
-            "/connection-runs/{runId}/",
+            "/workspaces/{workspaceId}/connection-runs/{runId}/",
             get_with(read_connection_run, read_connection_run_docs),
         )
         .with_path_items(|item| item.tag("Connections"))

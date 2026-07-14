@@ -150,6 +150,7 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -163,11 +164,15 @@ async fn read_policy(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let policy = find_policy(&mut conn, path_params.policy_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, policy.workspace_id, Permission::ViewPolicies)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewPolicies,
+        )
         .await?;
+
+    let policy = find_policy(&mut conn, path_params.workspace_id, path_params.policy_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
 
@@ -191,6 +196,7 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -205,15 +211,20 @@ async fn update_policy(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let existing = find_policy(&mut conn, path_params.policy_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, existing.workspace_id, Permission::ManagePolicies)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ManagePolicies,
+        )
         .await?;
+
+    // Confirm the policy exists in this workspace before mutating.
+    find_policy(&mut conn, path_params.workspace_id, path_params.policy_id).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
-            let encrypted = crypto.encrypt_json(existing.workspace_id, definition)?;
+            let encrypted = crypto.encrypt_json(path_params.workspace_id, definition)?;
             (Some(definition.version.to_string()), Some(encrypted))
         }
         None => (None, None),
@@ -251,6 +262,7 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -263,11 +275,16 @@ async fn delete_policy(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let policy = find_policy(&mut conn, path_params.policy_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, policy.workspace_id, Permission::ManagePolicies)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ManagePolicies,
+        )
         .await?;
+
+    // Confirm the policy exists in this workspace before deleting.
+    find_policy(&mut conn, path_params.workspace_id, path_params.policy_id).await?;
 
     conn.delete_workspace_policy(path_params.policy_id).await?;
 
@@ -285,9 +302,13 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a policy by ID or returns NotFound error.
-async fn find_policy(conn: &mut PgConn, policy_id: Uuid) -> Result<WorkspacePolicy> {
-    conn.find_workspace_policy_by_id(policy_id)
+/// Finds a policy within a workspace or returns NotFound error.
+async fn find_policy(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    policy_id: Uuid,
+) -> Result<WorkspacePolicy> {
+    conn.find_policy_in_workspace(workspace_id, policy_id)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
 }
@@ -303,7 +324,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_policies, list_policies_docs),
         )
         .api_route(
-            "/policies/{policyId}/",
+            "/workspaces/{workspaceId}/policies/{policyId}/",
             get_with(read_policy, read_policy_docs)
                 .put_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),

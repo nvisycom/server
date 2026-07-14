@@ -37,6 +37,13 @@ pub trait WorkspaceInviteRepository {
         invite_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
 
+    /// Finds an invitation by ID, scoped to its workspace.
+    fn find_invite_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        invite_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
+
     /// Updates a workspace invitation with new values and status changes.
     fn update_workspace_invite(
         &mut self,
@@ -154,6 +161,25 @@ impl WorkspaceInviteRepository for PgConnection {
 
         let invite = workspace_invites
             .filter(id.eq(invite_id))
+            .select(WorkspaceInvite::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(invite)
+    }
+
+    async fn find_invite_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        invite_id: Uuid,
+    ) -> PgResult<Option<WorkspaceInvite>> {
+        use schema::workspace_invites::{self, dsl};
+
+        let invite = workspace_invites::table
+            .filter(dsl::id.eq(invite_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
             .select(WorkspaceInvite::as_select())
             .first(self)
             .await

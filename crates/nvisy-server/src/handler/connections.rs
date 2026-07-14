@@ -176,6 +176,7 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -188,16 +189,20 @@ async fn read_connection(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the connection first to get workspace context for authorization
-    let connection = find_connection(&mut conn, path_params.connection_id).await?;
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            connection.workspace_id,
+            path_params.workspace_id,
             Permission::ViewConnections,
         )
         .await?;
+
+    let connection = find_connection(
+        &mut conn,
+        path_params.workspace_id,
+        path_params.connection_id,
+    )
+    .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
@@ -220,6 +225,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -234,20 +240,25 @@ async fn update_connection(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the connection first to get workspace context for authorization
-    let existing = find_connection(&mut conn, path_params.connection_id).await?;
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            existing.workspace_id,
+            path_params.workspace_id,
             Permission::ManageConnections,
         )
         .await?;
 
+    // Confirm the connection exists in this workspace before mutating.
+    find_connection(
+        &mut conn,
+        path_params.workspace_id,
+        path_params.connection_id,
+    )
+    .await?;
+
     let encrypted_data = request
         .data
-        .map(|data| crypto.encrypt_json(existing.workspace_id, &data))
+        .map(|data| crypto.encrypt_json(path_params.workspace_id, &data))
         .transpose()?;
 
     let update_data = UpdateWorkspaceConnection {
@@ -282,6 +293,7 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -294,16 +306,21 @@ async fn delete_connection(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the connection first to get workspace context for authorization
-    let connection = find_connection(&mut conn, path_params.connection_id).await?;
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            connection.workspace_id,
+            path_params.workspace_id,
             Permission::ManageConnections,
         )
         .await?;
+
+    // Confirm the connection exists in this workspace before deleting.
+    find_connection(
+        &mut conn,
+        path_params.workspace_id,
+        path_params.connection_id,
+    )
+    .await?;
 
     conn.delete_workspace_connection(path_params.connection_id)
         .await?;
@@ -322,9 +339,13 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a connection by ID or returns NotFound error.
-async fn find_connection(conn: &mut PgConn, connection_id: Uuid) -> Result<WorkspaceConnection> {
-    conn.find_workspace_connection_by_id(connection_id)
+/// Finds a connection within a workspace or returns NotFound error.
+async fn find_connection(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+) -> Result<WorkspaceConnection> {
+    conn.find_connection_in_workspace(workspace_id, connection_id)
         .await?
         .ok_or_else(|| Error::not_found("connection"))
 }
@@ -334,15 +355,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspaceId}/connections/",
             post_with(create_connection, create_connection_docs)
                 .get_with(list_connections, list_connections_docs),
         )
-        // Connection-specific routes (connection ID is globally unique)
         .api_route(
-            "/connections/{connectionId}/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/",
             get_with(read_connection, read_connection_docs)
                 .put_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),

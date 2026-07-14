@@ -15,13 +15,6 @@ impl From<WorkspaceConstraints> for Error<'static> {
             WorkspaceConstraints::DescriptionLengthMax => {
                 ErrorKind::BadRequest.with_message("Workspace description is too long")
             }
-            WorkspaceConstraints::KeepForSecRange => ErrorKind::BadRequest
-                .with_message("Retention period must be between 1 hour and 1 year"),
-            WorkspaceConstraints::MaxMembersMin => ErrorKind::InternalServerError.into_error(),
-            WorkspaceConstraints::MaxMembersMax => {
-                ErrorKind::BadRequest.with_message("Maximum number of members exceeded")
-            }
-            WorkspaceConstraints::MaxStorageMin => ErrorKind::InternalServerError.into_error(),
             WorkspaceConstraints::TagsCountMax => {
                 ErrorKind::BadRequest.with_message("Too many tags")
             }
@@ -33,16 +26,8 @@ impl From<WorkspaceConstraints> for Error<'static> {
             }
             WorkspaceConstraints::UpdatedAfterCreated
             | WorkspaceConstraints::DeletedAfterCreated
-            | WorkspaceConstraints::DeletedAfterUpdated
-            | WorkspaceConstraints::ArchivedAfterCreated
-            | WorkspaceConstraints::DeletedAfterArchived => {
+            | WorkspaceConstraints::DeletedAfterUpdated => {
                 ErrorKind::InternalServerError.into_error()
-            }
-            WorkspaceConstraints::ActiveStatusNotArchived => {
-                ErrorKind::BadRequest.with_message("Active workspaces cannot be archived")
-            }
-            WorkspaceConstraints::ArchiveStatusConsistency => {
-                ErrorKind::BadRequest.with_message("Workspace archive status is inconsistent")
             }
         };
 
@@ -53,13 +38,7 @@ impl From<WorkspaceConstraints> for Error<'static> {
 impl From<WorkspaceMemberConstraints> for Error<'static> {
     fn from(c: WorkspaceMemberConstraints) -> Self {
         let error = match c {
-            WorkspaceMemberConstraints::CustomPermissionsSize => {
-                ErrorKind::BadRequest.with_message("Custom permissions data size is invalid")
-            }
-            WorkspaceMemberConstraints::ShowOrderRange => ErrorKind::BadRequest
-                .with_message("Show order value must be between -1000 and 1000"),
-            WorkspaceMemberConstraints::UpdatedAfterCreated
-            | WorkspaceMemberConstraints::LastAccessedAfterCreated => {
+            WorkspaceMemberConstraints::UpdatedAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
@@ -71,8 +50,11 @@ impl From<WorkspaceMemberConstraints> for Error<'static> {
 impl From<WorkspaceInviteConstraints> for Error<'static> {
     fn from(c: WorkspaceInviteConstraints) -> Self {
         let error = match c {
-            WorkspaceInviteConstraints::InviteMessageLengthMax => {
-                ErrorKind::BadRequest.with_message("Invite message is too long")
+            WorkspaceInviteConstraints::InviteeEmailFormat => {
+                ErrorKind::BadRequest.with_message("Invalid invitee email format")
+            }
+            WorkspaceInviteConstraints::WorkspaceIdIdUnique => {
+                ErrorKind::Conflict.with_message("An invite with this identifier already exists")
             }
             WorkspaceInviteConstraints::InviteTokenNotEmpty => {
                 ErrorKind::InternalServerError.into_error()
@@ -117,18 +99,14 @@ impl From<WorkspaceWebhookConstraints> for Error<'static> {
             WorkspaceWebhookConstraints::UrlFormat => {
                 ErrorKind::BadRequest.with_message("Webhook URL must be a valid HTTPS URL")
             }
-            WorkspaceWebhookConstraints::SecretLength => {
-                ErrorKind::BadRequest.with_message("Webhook secret length is invalid")
-            }
             WorkspaceWebhookConstraints::EventsNotEmpty => {
                 ErrorKind::BadRequest.with_message("Webhook must have at least one event")
             }
             WorkspaceWebhookConstraints::HeadersSize => {
                 ErrorKind::BadRequest.with_message("Webhook headers size is too large")
             }
-            WorkspaceWebhookConstraints::FailureCountPositive
-            | WorkspaceWebhookConstraints::MaxFailuresPositive => {
-                ErrorKind::InternalServerError.into_error()
+            WorkspaceWebhookConstraints::WorkspaceIdIdUnique => {
+                ErrorKind::Conflict.with_message("A webhook with this identifier already exists")
             }
             WorkspaceWebhookConstraints::UpdatedAfterCreated
             | WorkspaceWebhookConstraints::DeletedAfterCreated => {

@@ -27,6 +27,7 @@ mod pipelines;
 mod workspace_connection_runs;
 mod workspace_connections;
 mod workspace_contexts;
+mod workspace_policies;
 
 use std::fmt;
 
@@ -35,17 +36,18 @@ use serde::{Deserialize, Serialize};
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
-pub use self::files::FileConstraints;
-pub use self::pipeline_artifacts::PipelineArtifactConstraints;
-pub use self::pipeline_references::PipelineReferenceConstraints;
-pub use self::pipeline_runs::PipelineRunConstraints;
-pub use self::pipelines::PipelineConstraints;
+pub use self::files::WorkspaceFileConstraints;
+pub use self::pipeline_artifacts::WorkspacePipelineArtifactConstraints;
+pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
+pub use self::pipeline_runs::WorkspacePipelineRunConstraints;
+pub use self::pipelines::WorkspacePipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_connection_runs::WorkspaceConnectionRunConstraints;
 pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_contexts::WorkspaceContextConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
+pub use self::workspace_policies::WorkspacePolicyConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
 pub use self::workspaces::WorkspaceConstraints;
 
@@ -70,16 +72,17 @@ pub enum ConstraintViolation {
     WorkspaceWebhook(WorkspaceWebhookConstraints),
 
     // File-related constraints
-    File(FileConstraints),
+    WorkspaceFile(WorkspaceFileConstraints),
 
     // Pipeline-related constraints
-    Pipeline(PipelineConstraints),
-    PipelineRun(PipelineRunConstraints),
-    PipelineArtifact(PipelineArtifactConstraints),
-    PipelineReference(PipelineReferenceConstraints),
+    WorkspacePipeline(WorkspacePipelineConstraints),
+    WorkspacePipelineRun(WorkspacePipelineRunConstraints),
+    WorkspacePipelineArtifact(WorkspacePipelineArtifactConstraints),
+    WorkspacePipelineReference(WorkspacePipelineReferenceConstraints),
     WorkspaceConnection(WorkspaceConnectionConstraints),
     WorkspaceConnectionRun(WorkspaceConnectionRunConstraints),
     WorkspaceContext(WorkspaceContextConstraints),
+    WorkspacePolicy(WorkspacePolicyConstraints),
 }
 
 /// Categories of database constraint violations.
@@ -118,7 +121,7 @@ impl ConstraintViolation {
     /// ```
     /// use nvisy_postgres::types::ConstraintViolation;
     ///
-    /// let violation = ConstraintViolation::new("accounts_email_address_unique_idx");
+    /// let violation = ConstraintViolation::new("accounts_email_format");
     /// assert!(violation.is_some());
     ///
     /// let unknown = ConstraintViolation::new("unknown_constraint");
@@ -139,6 +142,9 @@ impl ConstraintViolation {
                 AccountApiTokenConstraints::new => AccountApiToken,
             },
             "workspaces" => try_parse!(WorkspaceConstraints::new => Workspace),
+            // Every workspace-owned table is prefixed `workspace_*`, so all of
+            // their constraints dispatch here. strum matches the full name, so
+            // the order of these parsers does not matter.
             "workspace" => try_parse! {
                 WorkspaceMemberConstraints::new => WorkspaceMember,
                 WorkspaceInviteConstraints::new => WorkspaceInvite,
@@ -147,12 +153,13 @@ impl ConstraintViolation {
                 WorkspaceConnectionRunConstraints::new => WorkspaceConnectionRun,
                 WorkspaceConnectionConstraints::new => WorkspaceConnection,
                 WorkspaceContextConstraints::new => WorkspaceContext,
-                PipelineRunConstraints::new => PipelineRun,
-                PipelineArtifactConstraints::new => PipelineArtifact,
-                PipelineReferenceConstraints::new => PipelineReference,
+                WorkspacePolicyConstraints::new => WorkspacePolicy,
+                WorkspaceFileConstraints::new => WorkspaceFile,
+                WorkspacePipelineRunConstraints::new => WorkspacePipelineRun,
+                WorkspacePipelineConstraints::new => WorkspacePipeline,
+                WorkspacePipelineArtifactConstraints::new => WorkspacePipelineArtifact,
+                WorkspacePipelineReferenceConstraints::new => WorkspacePipelineReference,
             },
-            "files" => try_parse!(FileConstraints::new => File),
-            "pipelines" => try_parse!(PipelineConstraints::new => Pipeline),
             _ => None,
         }
     }
@@ -175,16 +182,17 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceWebhook(_) => "workspace_webhooks",
 
             // File-related tables
-            ConstraintViolation::File(_) => "files",
+            ConstraintViolation::WorkspaceFile(_) => "workspace_files",
 
             // Pipeline-related tables
-            ConstraintViolation::Pipeline(_) => "pipelines",
-            ConstraintViolation::PipelineRun(_) => "workspace_pipeline_runs",
-            ConstraintViolation::PipelineArtifact(_) => "workspace_pipeline_artifacts",
-            ConstraintViolation::PipelineReference(_) => "pipeline_references",
+            ConstraintViolation::WorkspacePipeline(_) => "workspace_pipelines",
+            ConstraintViolation::WorkspacePipelineRun(_) => "workspace_pipeline_runs",
+            ConstraintViolation::WorkspacePipelineArtifact(_) => "workspace_pipeline_artifacts",
+            ConstraintViolation::WorkspacePipelineReference(_) => "pipeline_references",
             ConstraintViolation::WorkspaceConnection(_) => "workspace_connections",
             ConstraintViolation::WorkspaceConnectionRun(_) => "workspace_connection_runs",
             ConstraintViolation::WorkspaceContext(_) => "workspace_contexts",
+            ConstraintViolation::WorkspacePolicy(_) => "workspace_policies",
         }
     }
 
@@ -203,16 +211,17 @@ impl ConstraintViolation {
             | ConstraintViolation::WorkspaceActivityLog(_)
             | ConstraintViolation::WorkspaceWebhook(_) => "workspaces",
 
-            ConstraintViolation::File(_) => "files",
+            ConstraintViolation::WorkspaceFile(_) => "files",
 
-            ConstraintViolation::Pipeline(_)
-            | ConstraintViolation::PipelineRun(_)
-            | ConstraintViolation::PipelineArtifact(_)
-            | ConstraintViolation::PipelineReference(_) => "pipelines",
+            ConstraintViolation::WorkspacePipeline(_)
+            | ConstraintViolation::WorkspacePipelineRun(_)
+            | ConstraintViolation::WorkspacePipelineArtifact(_)
+            | ConstraintViolation::WorkspacePipelineReference(_) => "pipelines",
 
             ConstraintViolation::WorkspaceConnection(_)
             | ConstraintViolation::WorkspaceConnectionRun(_) => "connections",
             ConstraintViolation::WorkspaceContext(_) => "contexts",
+            ConstraintViolation::WorkspacePolicy(_) => "policies",
         }
     }
 
@@ -231,15 +240,16 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceActivityLog(c) => c.categorize(),
             ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
 
-            ConstraintViolation::File(c) => c.categorize(),
+            ConstraintViolation::WorkspaceFile(c) => c.categorize(),
 
-            ConstraintViolation::Pipeline(c) => c.categorize(),
-            ConstraintViolation::PipelineRun(c) => c.categorize(),
-            ConstraintViolation::PipelineArtifact(c) => c.categorize(),
-            ConstraintViolation::PipelineReference(c) => c.categorize(),
+            ConstraintViolation::WorkspacePipeline(c) => c.categorize(),
+            ConstraintViolation::WorkspacePipelineRun(c) => c.categorize(),
+            ConstraintViolation::WorkspacePipelineArtifact(c) => c.categorize(),
+            ConstraintViolation::WorkspacePipelineReference(c) => c.categorize(),
             ConstraintViolation::WorkspaceConnection(c) => c.categorize(),
             ConstraintViolation::WorkspaceConnectionRun(c) => c.categorize(),
             ConstraintViolation::WorkspaceContext(c) => c.categorize(),
+            ConstraintViolation::WorkspacePolicy(c) => c.categorize(),
         }
     }
 
@@ -263,15 +273,16 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::WorkspaceActivityLog(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
 
-            ConstraintViolation::File(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspaceFile(c) => write!(f, "{}", c),
 
-            ConstraintViolation::Pipeline(c) => write!(f, "{}", c),
-            ConstraintViolation::PipelineRun(c) => write!(f, "{}", c),
-            ConstraintViolation::PipelineArtifact(c) => write!(f, "{}", c),
-            ConstraintViolation::PipelineReference(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspacePipeline(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspacePipelineRun(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspacePipelineArtifact(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspacePipelineReference(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceConnection(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceConnectionRun(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceContext(c) => write!(f, "{}", c),
+            ConstraintViolation::WorkspacePolicy(c) => write!(f, "{}", c),
         }
     }
 }
@@ -298,15 +309,37 @@ mod tests {
     #[test]
     fn test_constraint_parsing() {
         assert_eq!(
-            ConstraintViolation::new("accounts_email_address_unique_idx"),
+            ConstraintViolation::new("accounts_email_format"),
             Some(ConstraintViolation::Account(
-                AccountConstraints::EmailAddressUnique
+                AccountConstraints::EmailFormat
             ))
         );
 
+        // Workspace-owned tables all share the `workspace_*` prefix and dispatch
+        // through the same arm; the file/pipeline enums live there too.
         assert_eq!(
-            ConstraintViolation::new("files_version_number_min"),
-            Some(ConstraintViolation::File(FileConstraints::VersionNumberMin))
+            ConstraintViolation::new("workspace_files_version_number_min"),
+            Some(ConstraintViolation::WorkspaceFile(
+                WorkspaceFileConstraints::VersionNumberMin
+            ))
+        );
+        assert_eq!(
+            ConstraintViolation::new("workspace_pipelines_name_length"),
+            Some(ConstraintViolation::WorkspacePipeline(
+                WorkspacePipelineConstraints::NameLength
+            ))
+        );
+        assert_eq!(
+            ConstraintViolation::new("workspace_policies_workspace_id_id_key"),
+            Some(ConstraintViolation::WorkspacePolicy(
+                WorkspacePolicyConstraints::WorkspaceIdIdUnique
+            ))
+        );
+        assert_eq!(
+            ConstraintViolation::new("workspace_pipeline_runs_pipeline_id_run_number_key"),
+            Some(ConstraintViolation::WorkspacePipelineRun(
+                WorkspacePipelineRunConstraints::RunNumberUnique
+            ))
         );
 
         assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
@@ -314,31 +347,33 @@ mod tests {
 
     #[test]
     fn test_table_name_extraction() {
-        let violation = ConstraintViolation::Account(AccountConstraints::EmailAddressUnique);
+        let violation = ConstraintViolation::Account(AccountConstraints::EmailFormat);
         assert_eq!(violation.table_name(), "accounts");
 
         let violation = ConstraintViolation::Workspace(WorkspaceConstraints::DisplayNameLength);
         assert_eq!(violation.table_name(), "workspaces");
 
-        let violation = ConstraintViolation::File(FileConstraints::StoragePathNotEmpty);
-        assert_eq!(violation.table_name(), "files");
+        let violation =
+            ConstraintViolation::WorkspaceFile(WorkspaceFileConstraints::StoragePathNotEmpty);
+        assert_eq!(violation.table_name(), "workspace_files");
+
+        let violation =
+            ConstraintViolation::WorkspacePolicy(WorkspacePolicyConstraints::NameLength);
+        assert_eq!(violation.table_name(), "workspace_policies");
     }
 
     #[test]
     fn test_functional_area_extraction() {
-        let violation = ConstraintViolation::Account(AccountConstraints::EmailAddressUnique);
+        let violation = ConstraintViolation::Account(AccountConstraints::EmailFormat);
         assert_eq!(violation.functional_area(), "accounts");
 
         let violation =
-            ConstraintViolation::AccountApiToken(AccountApiTokenConstraints::AccessSeqUnique);
-        assert_eq!(violation.functional_area(), "accounts");
-
-        let violation =
-            ConstraintViolation::WorkspaceMember(WorkspaceMemberConstraints::ShowOrderRange);
-        assert_eq!(violation.functional_area(), "workspaces");
-
-        let violation = ConstraintViolation::File(FileConstraints::VersionNumberMin);
+            ConstraintViolation::WorkspaceFile(WorkspaceFileConstraints::VersionNumberMin);
         assert_eq!(violation.functional_area(), "files");
+
+        let violation =
+            ConstraintViolation::WorkspacePolicy(WorkspacePolicyConstraints::NameLength);
+        assert_eq!(violation.functional_area(), "policies");
     }
 
     #[test]
@@ -354,15 +389,23 @@ mod tests {
             violation.constraint_category(),
             ConstraintCategory::Chronological
         );
+
+        let violation = ConstraintViolation::WorkspacePipelineRun(
+            WorkspacePipelineRunConstraints::RunNumberUnique,
+        );
+        assert_eq!(
+            violation.constraint_category(),
+            ConstraintCategory::Uniqueness
+        );
     }
 
     #[test]
     fn test_constraint_name_method() {
         let violation =
-            ConstraintViolation::Workspace(WorkspaceConstraints::ActiveStatusNotArchived);
+            ConstraintViolation::WorkspaceFile(WorkspaceFileConstraints::WorkspaceIdIdUnique);
         assert_eq!(
             violation.constraint_name(),
-            "workspaces_active_status_not_archived"
+            "workspace_files_workspace_id_id_key"
         );
     }
 }

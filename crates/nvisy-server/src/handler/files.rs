@@ -26,7 +26,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, ValidateJson,
 };
 use crate::handler::request::{
-    CursorPagination, FilePathParams, ListFiles, UpdateFile, WorkspacePathParams,
+    CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams, WorkspacePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::{Error, ErrorKind, Result};
@@ -36,9 +36,9 @@ use crate::service::{CryptoService, HashingReader, ServiceState, WebhookEmitter}
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 
-/// Finds a file by ID or returns NotFound error.
-async fn find_file(conn: &mut PgConn, file_id: Uuid) -> Result<FileModel> {
-    conn.find_workspace_file_by_id(file_id)
+/// Finds a file within a workspace or returns NotFound error.
+async fn find_file(conn: &mut PgConn, workspace_id: Uuid, file_id: Uuid) -> Result<FileModel> {
+    conn.find_file_in_workspace(workspace_id, file_id)
         .await?
         .ok_or_else(|| Error::not_found("file"))
 }
@@ -270,23 +270,24 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
 async fn read_file(
     State(pg_client): State<PgClient>,
-    Path(path_params): Path<FilePathParams>,
+    Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading file metadata");
 
     let mut conn = pg_client.get_connection().await?;
 
-    let file = find_file(&mut conn, path_params.file_id).await?;
-
     auth_claims
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::ViewFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewFiles)
         .await?;
+
+    let file = find_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "File metadata retrieved");
 
@@ -307,13 +308,14 @@ fn read_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
     State(webhook_emitter): State<WebhookEmitter>,
-    Path(path_params): Path<FilePathParams>,
+    Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
@@ -321,12 +323,12 @@ async fn update_file(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the file first to get workspace context for authorization
-    let file = find_file(&mut conn, path_params.file_id).await?;
-
     auth_claims
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::UpdateFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::UpdateFiles)
         .await?;
+
+    // Confirm the file exists in this workspace before mutating.
+    find_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     let updates = request.into_model();
 
@@ -344,7 +346,7 @@ async fn update_file(
     });
     if let Err(err) = webhook_emitter
         .emit_file_updated(
-            file.workspace_id,
+            path_params.workspace_id,
             path_params.file_id,
             Some(auth_claims.account_id),
             Some(data),
@@ -382,6 +384,7 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
@@ -389,19 +392,22 @@ async fn download_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
     State(crypto): State<CryptoService>,
-    Path(path_params): Path<FilePathParams>,
+    Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading file");
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the file first to get workspace context for authorization
-    let file = find_file(&mut conn, path_params.file_id).await?;
-
     auth_claims
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::DownloadFiles)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::DownloadFiles,
+        )
         .await?;
+
+    let file = find_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     let file_store = nats_client
         .object_store::<FilesBucket, FileKey>()
@@ -504,25 +510,26 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_claims.account_id,
+        workspace_id = %path_params.workspace_id,
         file_id = %path_params.file_id,
     )
 )]
 async fn delete_file(
     State(pg_client): State<PgClient>,
     State(webhook_emitter): State<WebhookEmitter>,
-    Path(path_params): Path<FilePathParams>,
+    Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "File Deleting");
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Fetch the file first to get workspace context for authorization
-    let file = find_file(&mut conn, path_params.file_id).await?;
-
     auth_claims
-        .authorize_workspace(&mut conn, file.workspace_id, Permission::DeleteFiles)
+        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::DeleteFiles)
         .await?;
+
+    // Confirm the file exists in this workspace before deleting.
+    let file = find_file(&mut conn, path_params.workspace_id, path_params.file_id).await?;
 
     conn.delete_workspace_file(path_params.file_id)
         .await
@@ -539,7 +546,7 @@ async fn delete_file(
     });
     if let Err(err) = webhook_emitter
         .emit_file_deleted(
-            file.workspace_id,
+            path_params.workspace_id,
             path_params.file_id,
             Some(auth_claims.account_id),
             Some(data),
@@ -581,15 +588,14 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE))
                 .get_with(list_files, list_files_docs),
         )
-        // File-specific routes (file ID is globally unique)
         .api_route(
-            "/files/{fileId}/",
+            "/workspaces/{workspaceId}/files/{fileId}/",
             get_with(read_file, read_file_docs)
                 .patch_with(update_file, update_file_docs)
                 .delete_with(delete_file, delete_file_docs),
         )
         .api_route(
-            "/files/{fileId}/content/",
+            "/workspaces/{workspaceId}/files/{fileId}/content/",
             get_with(download_file, download_file_docs),
         )
         .with_path_items(|item| item.tag("Files"))

@@ -11,6 +11,8 @@ use validator::Validate;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextPathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the context.
     pub context_id: Uuid,
 }

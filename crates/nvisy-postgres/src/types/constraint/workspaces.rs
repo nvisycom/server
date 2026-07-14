@@ -15,14 +15,6 @@ pub enum WorkspaceConstraints {
     DisplayNameLength,
     #[strum(serialize = "workspaces_description_length_max")]
     DescriptionLengthMax,
-    #[strum(serialize = "workspaces_keep_for_sec_range")]
-    KeepForSecRange,
-    #[strum(serialize = "workspaces_max_members_min")]
-    MaxMembersMin,
-    #[strum(serialize = "workspaces_max_members_max")]
-    MaxMembersMax,
-    #[strum(serialize = "workspaces_max_storage_min")]
-    MaxStorageMin,
     #[strum(serialize = "workspaces_tags_count_max")]
     TagsCountMax,
     #[strum(serialize = "workspaces_metadata_size")]
@@ -37,16 +29,6 @@ pub enum WorkspaceConstraints {
     DeletedAfterCreated,
     #[strum(serialize = "workspaces_deleted_after_updated")]
     DeletedAfterUpdated,
-    #[strum(serialize = "workspaces_archived_after_created")]
-    ArchivedAfterCreated,
-    #[strum(serialize = "workspaces_deleted_after_archived")]
-    DeletedAfterArchived,
-
-    // Workspace business logic constraints
-    #[strum(serialize = "workspaces_active_status_not_archived")]
-    ActiveStatusNotArchived,
-    #[strum(serialize = "workspaces_archive_status_consistency")]
-    ArchiveStatusConsistency,
 }
 
 impl WorkspaceConstraints {
@@ -60,22 +42,13 @@ impl WorkspaceConstraints {
         match self {
             WorkspaceConstraints::DisplayNameLength
             | WorkspaceConstraints::DescriptionLengthMax
-            | WorkspaceConstraints::KeepForSecRange
-            | WorkspaceConstraints::MaxMembersMin
-            | WorkspaceConstraints::MaxMembersMax
-            | WorkspaceConstraints::MaxStorageMin
             | WorkspaceConstraints::TagsCountMax
             | WorkspaceConstraints::MetadataSize
             | WorkspaceConstraints::SettingsSize => ConstraintCategory::Validation,
 
             WorkspaceConstraints::UpdatedAfterCreated
             | WorkspaceConstraints::DeletedAfterCreated
-            | WorkspaceConstraints::DeletedAfterUpdated
-            | WorkspaceConstraints::ArchivedAfterCreated
-            | WorkspaceConstraints::DeletedAfterArchived => ConstraintCategory::Chronological,
-
-            WorkspaceConstraints::ActiveStatusNotArchived
-            | WorkspaceConstraints::ArchiveStatusConsistency => ConstraintCategory::BusinessLogic,
+            | WorkspaceConstraints::DeletedAfterUpdated => ConstraintCategory::Chronological,
         }
     }
 }

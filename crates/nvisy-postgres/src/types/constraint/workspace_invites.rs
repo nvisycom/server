@@ -10,11 +10,15 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceInviteConstraints {
+    // Invite unique constraints
+    #[strum(serialize = "workspace_invites_workspace_id_id_key")]
+    WorkspaceIdIdUnique,
+
     // Invite validation constraints
-    #[strum(serialize = "workspace_invites_invite_message_length_max")]
-    InviteMessageLengthMax,
     #[strum(serialize = "workspace_invites_invite_token_not_empty")]
     InviteTokenNotEmpty,
+    #[strum(serialize = "workspace_invites_invitee_email_format")]
+    InviteeEmailFormat,
 
     // Invite chronological constraints
     #[strum(serialize = "workspace_invites_expires_after_created")]
@@ -34,8 +38,10 @@ impl WorkspaceInviteConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceInviteConstraints::InviteMessageLengthMax
-            | WorkspaceInviteConstraints::InviteTokenNotEmpty => ConstraintCategory::Validation,
+            WorkspaceInviteConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+
+            WorkspaceInviteConstraints::InviteTokenNotEmpty
+            | WorkspaceInviteConstraints::InviteeEmailFormat => ConstraintCategory::Validation,
 
             WorkspaceInviteConstraints::ExpiresAfterCreated
             | WorkspaceInviteConstraints::UpdatedAfterCreated
