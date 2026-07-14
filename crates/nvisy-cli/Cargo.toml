@@ -65,4 +65,3 @@ serde = { workspace = true, features = ["derive"] }
 
 # Derive macros & utilities
 anyhow = { workspace = true, features = ["backtrace"] }
-thiserror = { workspace = true, features = [] }

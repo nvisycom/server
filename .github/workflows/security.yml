@@ -53,23 +53,6 @@ jobs:
       - name: Run deny
         run: cargo deny check all
 
-  audit:
-    name: Audit
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install cargo-audit
-        run: cargo binstall cargo-audit --no-confirm --no-symlinks
-
-      - name: Run audit
-        run: cargo audit
-
   unused:
     name: Unused Dependencies
     runs-on: ubuntu-latest

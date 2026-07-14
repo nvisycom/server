@@ -33,7 +33,7 @@ nvisy-schema = { workspace = true }
 
 # Internal crates
 nvisy-base = { workspace = true, features = ["schema"] }
-nvisy-nats = { workspace = true, features = ["schema"] }
+nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
@@ -100,7 +100,7 @@ woothee = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates
-nvisy-nats = { workspace = true, features = ["schema"] }
+nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["reqwest"] }
 
