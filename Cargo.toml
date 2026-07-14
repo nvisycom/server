@@ -4,7 +4,7 @@
 resolver = "3"
 members = [
     "./crates/nvisy-cli",
-    "./crates/nvisy-base",
+    "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-object",
     "./crates/nvisy-postgres",
@@ -35,7 +35,7 @@ nvisy-engine = { git = "https://github.com/nvisycom/runtime", branch = "main" }
 nvisy-schema = { git = "https://github.com/nvisycom/runtime", branch = "main", default-features = false }
 
 # Internal crates
-nvisy-base = { path = "./crates/nvisy-base", version = "0.1.0" }
+nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-object = { path = "./crates/nvisy-object", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }

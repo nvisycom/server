@@ -5,7 +5,7 @@ mod request;
 mod response;
 
 pub use context::WebhookContext;
-use nvisy_base::health::ComponentHealth;
+use nvisy_core::health::ComponentHealth;
 pub use request::{WebhookPayload, WebhookRequest};
 pub use response::WebhookResponse;
 

@@ -24,7 +24,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-nvisy-base = { workspace = true }
+nvisy-core = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

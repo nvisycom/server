@@ -3,7 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use nvisy_base::health::ComponentHealth;
+use nvisy_core::health::ComponentHealth;
 
 use crate::Result;
 use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};

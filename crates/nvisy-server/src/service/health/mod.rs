@@ -1,6 +1,6 @@
 //! Health monitoring service.
 //!
-//! Aggregates the [`HealthCheck`](nvisy_base::health::HealthCheck) results of
+//! Aggregates the [`HealthCheck`](nvisy_core::health::HealthCheck) results of
 //! all registered components ([`HealthCache`]), caching them with a TTL to
 //! balance responsiveness against the cost of repeated probes.
 

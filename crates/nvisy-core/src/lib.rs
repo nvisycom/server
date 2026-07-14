@@ -5,4 +5,4 @@
 pub mod health;
 
 /// Tracing target for core operations.
-pub const TRACING_TARGET: &str = "nvisy_base";
+pub const TRACING_TARGET: &str = "nvisy_core";

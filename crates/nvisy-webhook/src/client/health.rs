@@ -1,6 +1,6 @@
 //! [`HealthCheck`] implementation for [`WebhookService`].
 
-use nvisy_base::health::{ComponentHealth, HealthCheck};
+use nvisy_core::health::{ComponentHealth, HealthCheck};
 
 use super::WebhookService;
 

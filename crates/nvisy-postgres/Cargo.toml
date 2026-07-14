@@ -33,7 +33,7 @@ schema = ["dep:schemars"]
 
 [dependencies]
 # Internal crates
-nvisy-base = { workspace = true }
+nvisy-core = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = [] }

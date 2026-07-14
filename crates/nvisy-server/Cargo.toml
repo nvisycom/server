@@ -32,7 +32,7 @@ nvisy-engine = { workspace = true }
 nvisy-schema = { workspace = true }
 
 # Internal crates
-nvisy-base = { workspace = true, features = ["schema"] }
+nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }

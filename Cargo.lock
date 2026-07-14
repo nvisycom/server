@@ -3675,15 +3675,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvisy-base"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "schemars",
- "serde",
-]
-
-[[package]]
 name = "nvisy-cli"
 version = "0.1.0"
 dependencies = [
@@ -3720,6 +3711,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvisy-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "nvisy-engine"
 version = "0.1.0"
 source = "git+https://github.com/nvisycom/runtime?branch=main#176de813651ddad9dd0e5664d360b88e155429ad"
@@ -3750,7 +3750,7 @@ dependencies = [
  "derive_more",
  "futures",
  "jiff",
- "nvisy-base",
+ "nvisy-core",
  "serde",
  "serde_json",
  "thiserror",
@@ -3807,7 +3807,7 @@ dependencies = [
  "ipnet",
  "jiff",
  "jiff-diesel",
- "nvisy-base",
+ "nvisy-core",
  "pgtrgm",
  "schemars",
  "serde",
@@ -3859,7 +3859,7 @@ dependencies = [
  "hkdf",
  "jiff",
  "jsonwebtoken",
- "nvisy-base",
+ "nvisy-core",
  "nvisy-engine",
  "nvisy-nats",
  "nvisy-postgres",
@@ -3895,7 +3895,7 @@ dependencies = [
  "hipstr",
  "hmac",
  "jiff",
- "nvisy-base",
+ "nvisy-core",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
