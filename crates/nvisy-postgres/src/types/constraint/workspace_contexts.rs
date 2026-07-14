@@ -18,27 +18,21 @@ pub enum WorkspaceContextConstraints {
     #[strum(serialize = "workspace_contexts_description_length")]
     DescriptionLength,
 
-    // MIME type validation constraints
-    #[strum(serialize = "workspace_contexts_mime_type_length")]
-    MimeTypeLength,
+    // Definition validation constraints
+    #[strum(serialize = "workspace_contexts_definition_size")]
+    DefinitionSize,
 
-    // Storage key validation constraints
-    #[strum(serialize = "workspace_contexts_storage_key_length")]
-    StorageKeyLength,
-
-    // Content validation constraints
-    #[strum(serialize = "workspace_contexts_content_size_positive")]
-    ContentSizePositive,
-    #[strum(serialize = "workspace_contexts_content_hash_length")]
-    ContentHashLength,
+    // Version validation constraints
+    #[strum(serialize = "workspace_contexts_version_length")]
+    VersionLength,
 
     // Metadata validation constraints
     #[strum(serialize = "workspace_contexts_metadata_size")]
     MetadataSize,
 
     // Uniqueness constraints
-    #[strum(serialize = "workspace_contexts_name_unique_idx")]
-    NameUnique,
+    #[strum(serialize = "workspace_contexts_workspace_id_id_key")]
+    WorkspaceIdIdUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_contexts_updated_after_created")]
@@ -58,13 +52,11 @@ impl WorkspaceContextConstraints {
         match self {
             WorkspaceContextConstraints::NameLength
             | WorkspaceContextConstraints::DescriptionLength
-            | WorkspaceContextConstraints::MimeTypeLength
-            | WorkspaceContextConstraints::StorageKeyLength
-            | WorkspaceContextConstraints::ContentSizePositive
-            | WorkspaceContextConstraints::ContentHashLength
+            | WorkspaceContextConstraints::DefinitionSize
+            | WorkspaceContextConstraints::VersionLength
             | WorkspaceContextConstraints::MetadataSize => ConstraintCategory::Validation,
 
-            WorkspaceContextConstraints::NameUnique => ConstraintCategory::Uniqueness,
+            WorkspaceContextConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceContextConstraints::UpdatedAfterCreated
             | WorkspaceContextConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,

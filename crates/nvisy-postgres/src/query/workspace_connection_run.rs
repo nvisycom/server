@@ -29,6 +29,17 @@ pub trait WorkspaceConnectionRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
+    /// Finds a run by ID, scoped to a workspace via its owning connection.
+    ///
+    /// Runs carry no workspace column, so this joins through the connection and
+    /// filters on its workspace. A run whose connection is in another workspace
+    /// is not found.
+    fn find_connection_run_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        run_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+
     /// Lists runs for a specific connection with cursor pagination.
     fn cursor_list_workspace_connection_runs(
         &mut self,
@@ -95,6 +106,27 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let run = workspace_connection_runs::table
             .filter(dsl::id.eq(run_id))
+            .select(WorkspaceConnectionRun::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(run)
+    }
+
+    async fn find_connection_run_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        run_id: Uuid,
+    ) -> PgResult<Option<WorkspaceConnectionRun>> {
+        use schema::workspace_connection_runs::dsl as runs;
+        use schema::workspace_connections::dsl as connections;
+
+        let run = runs::workspace_connection_runs
+            .inner_join(connections::workspace_connections)
+            .filter(runs::id.eq(run_id))
+            .filter(connections::workspace_id.eq(workspace_id))
             .select(WorkspaceConnectionRun::as_select())
             .first(self)
             .await

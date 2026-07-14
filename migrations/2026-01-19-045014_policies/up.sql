@@ -12,7 +12,7 @@ CREATE TABLE workspace_policies (
     account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Composite key target for workspace-scoped foreign keys (join tables).
-    UNIQUE (workspace_id, id),
+    CONSTRAINT workspace_policies_workspace_id_id_key UNIQUE (workspace_id, id),
 
     -- Core attributes
     name            TEXT            NOT NULL,

@@ -24,14 +24,13 @@ pub struct MemberPathParams {
     pub account_id: Uuid,
 }
 
-/// Path parameters for invite operations (invite ID only).
-///
-/// Since invite IDs are globally unique UUIDs, workspace context can be
-/// derived from the invite record itself for authorization purposes.
+/// Path parameters for invite operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InvitePathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the invite.
     pub invite_id: Uuid,
 }
@@ -77,14 +76,13 @@ pub struct VersionPathParams {
     pub version_id: Uuid,
 }
 
-/// Path parameters for webhook operations (webhook ID only).
-///
-/// Since webhook IDs are globally unique UUIDs, workspace context can be
-/// derived from the webhook record itself for authorization purposes.
+/// Path parameters for webhook operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebhookPathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the webhook.
     pub webhook_id: Uuid,
 }
@@ -114,13 +112,12 @@ pub struct AccountPathParams {
 }
 
 /// Path parameters for pipeline operations.
-///
-/// Since pipeline IDs are globally unique UUIDs, workspace context can be
-/// derived from the pipeline record itself for authorization purposes.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelinePathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the pipeline.
     pub pipeline_id: Uuid,
 }
@@ -130,6 +127,8 @@ pub struct PipelinePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunPathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the pipeline run.
     pub run_id: Uuid,
 }

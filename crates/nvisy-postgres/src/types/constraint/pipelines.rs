@@ -9,32 +9,44 @@ use super::ConstraintCategory;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
-pub enum PipelineConstraints {
+pub enum WorkspacePipelineConstraints {
     // Pipeline name validation constraints
-    #[strum(serialize = "pipelines_name_length")]
+    #[strum(serialize = "workspace_pipelines_name_length")]
     NameLength,
 
     // Pipeline description validation constraints
-    #[strum(serialize = "pipelines_description_length")]
+    #[strum(serialize = "workspace_pipelines_description_length")]
     DescriptionLength,
 
     // Pipeline definition constraints
-    #[strum(serialize = "pipelines_definition_size")]
+    #[strum(serialize = "workspace_pipelines_definition_size")]
     DefinitionSize,
 
     // Pipeline metadata constraints
-    #[strum(serialize = "pipelines_metadata_size")]
+    #[strum(serialize = "workspace_pipelines_metadata_size")]
     MetadataSize,
 
+    // Pipeline schedule validation constraints
+    #[strum(serialize = "workspace_pipelines_schedule_cron_length")]
+    ScheduleCronLength,
+    #[strum(serialize = "workspace_pipelines_schedule_requires_cron")]
+    ScheduleRequiresCron,
+    #[strum(serialize = "workspace_pipelines_schedule_tz_length")]
+    ScheduleTzLength,
+
+    // Uniqueness constraints
+    #[strum(serialize = "workspace_pipelines_workspace_id_id_key")]
+    WorkspaceIdIdUnique,
+
     // Pipeline chronological constraints
-    #[strum(serialize = "pipelines_updated_after_created")]
+    #[strum(serialize = "workspace_pipelines_updated_after_created")]
     UpdatedAfterCreated,
-    #[strum(serialize = "pipelines_deleted_after_created")]
+    #[strum(serialize = "workspace_pipelines_deleted_after_created")]
     DeletedAfterCreated,
 }
 
-impl PipelineConstraints {
-    /// Creates a new [`PipelineConstraints`] from the constraint name.
+impl WorkspacePipelineConstraints {
+    /// Creates a new [`WorkspacePipelineConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
     }
@@ -42,26 +54,32 @@ impl PipelineConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            PipelineConstraints::NameLength
-            | PipelineConstraints::DescriptionLength
-            | PipelineConstraints::DefinitionSize
-            | PipelineConstraints::MetadataSize => ConstraintCategory::Validation,
+            WorkspacePipelineConstraints::NameLength
+            | WorkspacePipelineConstraints::DescriptionLength
+            | WorkspacePipelineConstraints::DefinitionSize
+            | WorkspacePipelineConstraints::MetadataSize
+            | WorkspacePipelineConstraints::ScheduleCronLength
+            | WorkspacePipelineConstraints::ScheduleRequiresCron
+            | WorkspacePipelineConstraints::ScheduleTzLength => ConstraintCategory::Validation,
 
-            PipelineConstraints::UpdatedAfterCreated | PipelineConstraints::DeletedAfterCreated => {
+            WorkspacePipelineConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+
+            WorkspacePipelineConstraints::UpdatedAfterCreated
+            | WorkspacePipelineConstraints::DeletedAfterCreated => {
                 ConstraintCategory::Chronological
             }
         }
     }
 }
 
-impl From<PipelineConstraints> for String {
+impl From<WorkspacePipelineConstraints> for String {
     #[inline]
-    fn from(val: PipelineConstraints) -> Self {
+    fn from(val: WorkspacePipelineConstraints) -> Self {
         val.to_string()
     }
 }
 
-impl TryFrom<String> for PipelineConstraints {
+impl TryFrom<String> for WorkspacePipelineConstraints {
     type Error = strum::ParseError;
 
     #[inline]

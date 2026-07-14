@@ -38,15 +38,12 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
             | AccountConstraints::DeletedAfterUpdated
-            | AccountConstraints::PasswordChangedAfterCreated
-            | AccountConstraints::LastLoginAfterCreated => {
+            | AccountConstraints::PasswordChangedAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
             }
             AccountConstraints::SuspendedNotAdmin => {
                 ErrorKind::BadRequest.with_message("Admin accounts cannot be suspended")
             }
-            AccountConstraints::EmailAddressUnique => ErrorKind::Conflict
-                .with_message("An account with this email address already exists"),
         };
 
         error.with_resource("account")
@@ -62,24 +59,9 @@ impl From<AccountApiTokenConstraints> for Error<'static> {
             AccountApiTokenConstraints::NameLength => {
                 ErrorKind::BadRequest.with_message("Token name is too long")
             }
-            AccountApiTokenConstraints::DescriptionLength => {
-                ErrorKind::BadRequest.with_message("Token description is too long")
-            }
-            AccountApiTokenConstraints::RegionCodeValid => {
-                ErrorKind::BadRequest.with_message("Invalid region code")
-            }
-            AccountApiTokenConstraints::CountryCodeValid => {
-                ErrorKind::BadRequest.with_message("Invalid country code")
-            }
             AccountApiTokenConstraints::ExpiredAfterIssued
             | AccountApiTokenConstraints::DeletedAfterIssued
             | AccountApiTokenConstraints::LastUsedAfterIssued => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            AccountApiTokenConstraints::AccessSeqUnique => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            AccountApiTokenConstraints::RefreshSeqUnique => {
                 ErrorKind::InternalServerError.into_error()
             }
         };

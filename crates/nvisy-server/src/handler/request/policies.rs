@@ -11,6 +11,8 @@ use validator::Validate;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyPathParams {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
     /// Unique identifier of the policy.
     pub policy_id: Uuid,
 }

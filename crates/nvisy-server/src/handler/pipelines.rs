@@ -12,7 +12,8 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::{AsyncConnection, PgClient, PgConnection, PgError, PgResult};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
+use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
@@ -150,12 +151,12 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
 
 /// Retrieves a pipeline by ID.
 ///
-/// The workspace is derived from the pipeline record for authorization.
 /// Returns the pipeline with all artifacts from its runs.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         pipeline_id = %path_params.pipeline_id,
     )
 )]
@@ -168,18 +169,16 @@ async fn get_pipeline(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(pipeline) = conn
-        .find_workspace_pipeline_by_id(path_params.pipeline_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message("Pipeline not found")
-            .with_resource("pipeline"));
-    };
-
     auth_state
-        .authorize_workspace(&mut conn, pipeline.workspace_id, Permission::ViewPipelines)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewPipelines,
+        )
         .await?;
+
+    let pipeline =
+        find_pipeline(&mut conn, path_params.workspace_id, path_params.pipeline_id).await?;
 
     // Fetch artifacts for all runs of this pipeline
     let artifacts = conn
@@ -214,6 +213,7 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         pipeline_id = %path_params.pipeline_id,
     )
 )]
@@ -227,22 +227,16 @@ async fn update_pipeline(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(existing) = conn
-        .find_workspace_pipeline_by_id(path_params.pipeline_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message("Pipeline not found")
-            .with_resource("pipeline"));
-    };
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            existing.workspace_id,
+            path_params.workspace_id,
             Permission::UpdatePipelines,
         )
         .await?;
+
+    // Confirm the pipeline exists in this workspace before mutating.
+    find_pipeline(&mut conn, path_params.workspace_id, path_params.pipeline_id).await?;
 
     let (update_data, references) = request.into_parts().map_err(serialize_error)?;
     let pipeline_id = path_params.pipeline_id;
@@ -294,6 +288,7 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         pipeline_id = %path_params.pipeline_id,
     )
 )]
@@ -306,22 +301,16 @@ async fn delete_pipeline(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(pipeline) = conn
-        .find_workspace_pipeline_by_id(path_params.pipeline_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message("Pipeline not found")
-            .with_resource("pipeline"));
-    };
-
     auth_state
         .authorize_workspace(
             &mut conn,
-            pipeline.workspace_id,
+            path_params.workspace_id,
             Permission::DeletePipelines,
         )
         .await?;
+
+    // Confirm the pipeline exists in this workspace before deleting.
+    find_pipeline(&mut conn, path_params.workspace_id, path_params.pipeline_id).await?;
 
     conn.delete_workspace_pipeline(path_params.pipeline_id)
         .await?;
@@ -338,6 +327,17 @@ fn delete_pipeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+}
+
+/// Finds a pipeline within a workspace or returns NotFound error.
+async fn find_pipeline(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    pipeline_id: Uuid,
+) -> Result<WorkspacePipeline> {
+    conn.find_pipeline_in_workspace(workspace_id, pipeline_id)
+        .await?
+        .ok_or_else(|| Error::not_found("pipeline"))
 }
 
 /// Replaces a pipeline's policy and context references in the join tables.
@@ -397,7 +397,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         // Pipeline operations by ID
         .api_route(
-            "/pipelines/{pipelineId}/",
+            "/workspaces/{workspaceId}/pipelines/{pipelineId}/",
             get_with(get_pipeline, get_pipeline_docs)
                 .patch_with(update_pipeline, update_pipeline_docs)
                 .delete_with(delete_pipeline, delete_pipeline_docs),

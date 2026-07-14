@@ -150,6 +150,7 @@ fn list_contexts_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         context_id = %path_params.context_id,
     )
 )]
@@ -163,11 +164,15 @@ async fn read_context(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let context = find_context(&mut conn, path_params.context_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, context.workspace_id, Permission::ViewContexts)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewContexts,
+        )
         .await?;
+
+    let context = find_context(&mut conn, path_params.workspace_id, path_params.context_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace context read");
 
@@ -191,6 +196,7 @@ fn read_context_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         context_id = %path_params.context_id,
     )
 )]
@@ -205,15 +211,20 @@ async fn update_context(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let existing = find_context(&mut conn, path_params.context_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, existing.workspace_id, Permission::ManageContexts)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ManageContexts,
+        )
         .await?;
+
+    // Confirm the context exists in this workspace before mutating.
+    find_context(&mut conn, path_params.workspace_id, path_params.context_id).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
-            let encrypted = crypto.encrypt_json(existing.workspace_id, definition)?;
+            let encrypted = crypto.encrypt_json(path_params.workspace_id, definition)?;
             (Some(definition.version.to_string()), Some(encrypted))
         }
         None => (None, None),
@@ -251,6 +262,7 @@ fn update_context_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
         context_id = %path_params.context_id,
     )
 )]
@@ -263,11 +275,16 @@ async fn delete_context(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let context = find_context(&mut conn, path_params.context_id).await?;
-
     auth_state
-        .authorize_workspace(&mut conn, context.workspace_id, Permission::ManageContexts)
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ManageContexts,
+        )
         .await?;
+
+    // Confirm the context exists in this workspace before deleting.
+    find_context(&mut conn, path_params.workspace_id, path_params.context_id).await?;
 
     conn.delete_workspace_context(path_params.context_id)
         .await?;
@@ -286,9 +303,13 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a context by ID or returns NotFound error.
-async fn find_context(conn: &mut PgConn, context_id: Uuid) -> Result<WorkspaceContext> {
-    conn.find_workspace_context_by_id(context_id)
+/// Finds a context within a workspace or returns NotFound error.
+async fn find_context(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    context_id: Uuid,
+) -> Result<WorkspaceContext> {
+    conn.find_context_in_workspace(workspace_id, context_id)
         .await?
         .ok_or_else(|| Error::not_found("context"))
 }
@@ -304,7 +325,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_contexts, list_contexts_docs),
         )
         .api_route(
-            "/contexts/{contextId}/",
+            "/workspaces/{workspaceId}/contexts/{contextId}/",
             get_with(read_context, read_context_docs)
                 .put_with(update_context, update_context_docs)
                 .delete_with(delete_context, delete_context_docs),

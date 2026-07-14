@@ -24,6 +24,8 @@ pub struct ConnectionRun {
     pub trigger_type: SyncTriggerType,
     /// Current run status.
     pub status: SyncStatus,
+    /// Sequence number within the connection (display only).
+    pub run_number: i32,
     /// Number of records processed by the run.
     pub records_synced: i64,
     /// Failure detail when the run failed.
@@ -50,6 +52,7 @@ impl ConnectionRun {
             account_id: run.account_id,
             trigger_type: run.trigger_type,
             status: run.status,
+            run_number: run.run_number,
             records_synced: run.records_synced,
             error_message: run.error_message,
             metadata: run.metadata,

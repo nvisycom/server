@@ -42,6 +42,9 @@ CREATE TABLE workspace_webhooks (
     -- Reference
     workspace_id     UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
 
+    -- Composite key target for workspace-scoped access and foreign keys.
+    CONSTRAINT workspace_webhooks_workspace_id_id_key UNIQUE (workspace_id, id),
+
     -- Webhook details
     display_name     TEXT             NOT NULL,
     description      TEXT             NOT NULL DEFAULT '',

@@ -1,47 +1,63 @@
 //! Pipeline-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    PipelineArtifactConstraints, PipelineConstraints, PipelineReferenceConstraints,
-    PipelineRunConstraints, WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints,
-    WorkspaceContextConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints, WorkspaceContextConstraints,
+    WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
+    WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
+    WorkspacePolicyConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
 
-impl From<PipelineConstraints> for Error<'static> {
-    fn from(c: PipelineConstraints) -> Self {
-        let error = match c {
-            PipelineConstraints::NameLength => ErrorKind::BadRequest
-                .with_message("Pipeline name must be between 1 and 255 characters long"),
-            PipelineConstraints::DescriptionLength => ErrorKind::BadRequest
-                .with_message("Pipeline description must be at most 4096 characters long"),
-            PipelineConstraints::DefinitionSize => {
-                ErrorKind::BadRequest.with_message("Pipeline definition size exceeds maximum limit")
-            }
-            PipelineConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Pipeline metadata size exceeds maximum limit")
-            }
-            PipelineConstraints::UpdatedAfterCreated | PipelineConstraints::DeletedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
+impl From<WorkspacePipelineConstraints> for Error<'static> {
+    fn from(c: WorkspacePipelineConstraints) -> Self {
+        let error =
+            match c {
+                WorkspacePipelineConstraints::NameLength => ErrorKind::BadRequest
+                    .with_message("Pipeline name must be between 1 and 255 characters long"),
+                WorkspacePipelineConstraints::DescriptionLength => ErrorKind::BadRequest
+                    .with_message("Pipeline description must be at most 4096 characters long"),
+                WorkspacePipelineConstraints::DefinitionSize => ErrorKind::BadRequest
+                    .with_message("Pipeline definition size exceeds maximum limit"),
+                WorkspacePipelineConstraints::MetadataSize => ErrorKind::BadRequest
+                    .with_message("Pipeline metadata size exceeds maximum limit"),
+                WorkspacePipelineConstraints::ScheduleCronLength => {
+                    ErrorKind::BadRequest.with_message("Pipeline schedule cron length is invalid")
+                }
+                WorkspacePipelineConstraints::ScheduleRequiresCron => ErrorKind::BadRequest
+                    .with_message("A scheduled pipeline requires a cron expression"),
+                WorkspacePipelineConstraints::ScheduleTzLength => ErrorKind::BadRequest
+                    .with_message("Pipeline schedule timezone length is invalid"),
+                WorkspacePipelineConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
+                    .with_message("A pipeline with this identifier already exists"),
+                WorkspacePipelineConstraints::UpdatedAfterCreated
+                | WorkspacePipelineConstraints::DeletedAfterCreated => {
+                    ErrorKind::InternalServerError.into_error()
+                }
+            };
 
         error.with_resource("pipeline")
     }
 }
 
-impl From<PipelineRunConstraints> for Error<'static> {
-    fn from(c: PipelineRunConstraints) -> Self {
+impl From<WorkspacePipelineRunConstraints> for Error<'static> {
+    fn from(c: WorkspacePipelineRunConstraints) -> Self {
         let error = match c {
-            PipelineRunConstraints::AnalyzedDocumentKeyLength => {
+            WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength => {
                 ErrorKind::InternalServerError.into_error()
             }
-            PipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
+            WorkspacePipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
                 .with_message("Pipeline run metadata size exceeds maximum limit"),
-            PipelineRunConstraints::IdempotencyKeyLength => {
+            WorkspacePipelineRunConstraints::IdempotencyKeyLength => {
                 ErrorKind::BadRequest.with_message("Idempotency key must be 1 to 255 characters")
             }
-            PipelineRunConstraints::CompletedAfterStarted => {
+            WorkspacePipelineRunConstraints::RunNumberPositive => {
+                ErrorKind::BadRequest.with_message("Run number must be greater than zero")
+            }
+            WorkspacePipelineRunConstraints::RunNumberUnique => {
+                ErrorKind::Conflict.with_message("A run with this number already exists")
+            }
+            WorkspacePipelineRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
@@ -50,10 +66,10 @@ impl From<PipelineRunConstraints> for Error<'static> {
     }
 }
 
-impl From<PipelineArtifactConstraints> for Error<'static> {
-    fn from(c: PipelineArtifactConstraints) -> Self {
+impl From<WorkspacePipelineArtifactConstraints> for Error<'static> {
+    fn from(c: WorkspacePipelineArtifactConstraints) -> Self {
         let error = match c {
-            PipelineArtifactConstraints::MetadataSize => {
+            WorkspacePipelineArtifactConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Artifact metadata size exceeds maximum limit")
             }
         };
@@ -62,23 +78,23 @@ impl From<PipelineArtifactConstraints> for Error<'static> {
     }
 }
 
-impl From<PipelineReferenceConstraints> for Error<'static> {
-    fn from(c: PipelineReferenceConstraints) -> Self {
+impl From<WorkspacePipelineReferenceConstraints> for Error<'static> {
+    fn from(c: WorkspacePipelineReferenceConstraints) -> Self {
         let (resource, error) = match c {
-            PipelineReferenceConstraints::PolicyReference => (
+            WorkspacePipelineReferenceConstraints::PolicyReference => (
                 "policy",
                 ErrorKind::BadRequest
                     .with_message("Referenced policy does not exist in this workspace"),
             ),
-            PipelineReferenceConstraints::ContextReference => (
+            WorkspacePipelineReferenceConstraints::ContextReference => (
                 "context",
                 ErrorKind::BadRequest
                     .with_message("Referenced context does not exist in this workspace"),
             ),
             // The pipeline side of the FK only fails if the pipeline row vanished
             // mid-transaction, which is a server-side fault rather than bad input.
-            PipelineReferenceConstraints::PolicyPipelineReference
-            | PipelineReferenceConstraints::ContextPipelineReference => {
+            WorkspacePipelineReferenceConstraints::PolicyPipelineReference
+            | WorkspacePipelineReferenceConstraints::ContextPipelineReference => {
                 ("pipeline", ErrorKind::InternalServerError.into_error())
             }
         };
@@ -89,21 +105,24 @@ impl From<PipelineReferenceConstraints> for Error<'static> {
 
 impl From<WorkspaceConnectionConstraints> for Error<'static> {
     fn from(c: WorkspaceConnectionConstraints) -> Self {
-        let error = match c {
-            WorkspaceConnectionConstraints::NameLength => ErrorKind::BadRequest
-                .with_message("Connection name must be between 1 and 255 characters"),
-            WorkspaceConnectionConstraints::ProviderLength => ErrorKind::BadRequest
-                .with_message("Provider name must be between 1 and 64 characters"),
-            WorkspaceConnectionConstraints::DataSize => {
-                ErrorKind::BadRequest.with_message("Connection data size exceeds maximum limit")
-            }
-            WorkspaceConnectionConstraints::NameUnique => ErrorKind::Conflict
-                .with_message("A connection with this name already exists in the workspace"),
-            WorkspaceConnectionConstraints::UpdatedAfterCreated
-            | WorkspaceConnectionConstraints::DeletedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
+        let error =
+            match c {
+                WorkspaceConnectionConstraints::NameLength => ErrorKind::BadRequest
+                    .with_message("Connection name must be between 1 and 255 characters"),
+                WorkspaceConnectionConstraints::ProviderLength => ErrorKind::BadRequest
+                    .with_message("Provider name must be between 1 and 64 characters"),
+                WorkspaceConnectionConstraints::DataSize => {
+                    ErrorKind::BadRequest.with_message("Connection data size exceeds maximum limit")
+                }
+                WorkspaceConnectionConstraints::MetadataSize => ErrorKind::BadRequest
+                    .with_message("Connection metadata size exceeds maximum limit"),
+                WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
+                    .with_message("A connection with this identifier already exists"),
+                WorkspaceConnectionConstraints::UpdatedAfterCreated
+                | WorkspaceConnectionConstraints::DeletedAfterCreated => {
+                    ErrorKind::InternalServerError.into_error()
+                }
+            };
 
         error.with_resource("workspace_connection")
     }
@@ -116,6 +135,12 @@ impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
                 .with_message("Sync error message must be between 1 and 4096 characters"),
             WorkspaceConnectionRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Sync run metadata size exceeds maximum limit")
+            }
+            WorkspaceConnectionRunConstraints::RunNumberPositive => {
+                ErrorKind::BadRequest.with_message("Run number must be greater than zero")
+            }
+            WorkspaceConnectionRunConstraints::RunNumberUnique => {
+                ErrorKind::Conflict.with_message("A run with this number already exists")
             }
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
             | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
@@ -135,21 +160,14 @@ impl From<WorkspaceContextConstraints> for Error<'static> {
                     .with_message("Context name must be between 1 and 255 characters"),
                 WorkspaceContextConstraints::DescriptionLength => ErrorKind::BadRequest
                     .with_message("Context description must be at most 4096 characters"),
-                WorkspaceContextConstraints::MimeTypeLength => ErrorKind::BadRequest
-                    .with_message("MIME type must be between 1 and 128 characters"),
-                WorkspaceContextConstraints::StorageKeyLength => {
-                    ErrorKind::BadRequest.with_message("Storage key length exceeds maximum limit")
-                }
-                WorkspaceContextConstraints::ContentSizePositive => {
-                    ErrorKind::BadRequest.with_message("Content size must be greater than zero")
-                }
-                WorkspaceContextConstraints::ContentHashLength => {
-                    ErrorKind::BadRequest.with_message("Content hash must be exactly 32 bytes")
-                }
+                WorkspaceContextConstraints::DefinitionSize => ErrorKind::BadRequest
+                    .with_message("Context definition size exceeds maximum limit"),
+                WorkspaceContextConstraints::VersionLength => ErrorKind::BadRequest
+                    .with_message("Context version must be between 1 and 64 characters"),
                 WorkspaceContextConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Context metadata size exceeds maximum limit"),
-                WorkspaceContextConstraints::NameUnique => ErrorKind::Conflict
-                    .with_message("A context with this name already exists in the workspace"),
+                WorkspaceContextConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
+                    .with_message("A context with this identifier already exists"),
                 WorkspaceContextConstraints::UpdatedAfterCreated
                 | WorkspaceContextConstraints::DeletedAfterCreated => {
                     ErrorKind::InternalServerError.into_error()
@@ -157,5 +175,33 @@ impl From<WorkspaceContextConstraints> for Error<'static> {
             };
 
         error.with_resource("workspace_context")
+    }
+}
+
+impl From<WorkspacePolicyConstraints> for Error<'static> {
+    fn from(c: WorkspacePolicyConstraints) -> Self {
+        let error = match c {
+            WorkspacePolicyConstraints::NameLength => ErrorKind::BadRequest
+                .with_message("Policy name must be between 1 and 255 characters"),
+            WorkspacePolicyConstraints::DescriptionLength => ErrorKind::BadRequest
+                .with_message("Policy description must be at most 4096 characters"),
+            WorkspacePolicyConstraints::VersionLength => ErrorKind::BadRequest
+                .with_message("Policy version must be between 1 and 64 characters"),
+            WorkspacePolicyConstraints::DefinitionSize => {
+                ErrorKind::BadRequest.with_message("Policy definition size exceeds maximum limit")
+            }
+            WorkspacePolicyConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Policy metadata size exceeds maximum limit")
+            }
+            WorkspacePolicyConstraints::WorkspaceIdIdUnique => {
+                ErrorKind::Conflict.with_message("A policy with this identifier already exists")
+            }
+            WorkspacePolicyConstraints::UpdatedAfterCreated
+            | WorkspacePolicyConstraints::DeletedAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
+        };
+
+        error.with_resource("workspace_policy")
     }
 }

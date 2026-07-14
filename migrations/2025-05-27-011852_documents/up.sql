@@ -20,6 +20,9 @@ CREATE TABLE workspace_files (
     account_id              UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     parent_id               UUID             DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
 
+    -- Composite key target for workspace-scoped access and foreign keys.
+    CONSTRAINT workspace_files_workspace_id_id_key UNIQUE (workspace_id, id),
+
     -- Version tracking (parent_id links to previous version, version_number tracks sequence)
     version_number          INTEGER          NOT NULL DEFAULT 1,
 

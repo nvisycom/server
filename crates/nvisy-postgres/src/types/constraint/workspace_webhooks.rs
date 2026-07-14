@@ -10,6 +10,10 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceWebhookConstraints {
+    // Webhook unique constraints
+    #[strum(serialize = "workspace_webhooks_workspace_id_id_key")]
+    WorkspaceIdIdUnique,
+
     // Webhook validation constraints
     #[strum(serialize = "workspace_webhooks_display_name_length")]
     DisplayNameLength,
@@ -19,16 +23,10 @@ pub enum WorkspaceWebhookConstraints {
     UrlLength,
     #[strum(serialize = "workspace_webhooks_url_format")]
     UrlFormat,
-    #[strum(serialize = "workspace_webhooks_secret_length")]
-    SecretLength,
     #[strum(serialize = "workspace_webhooks_events_not_empty")]
     EventsNotEmpty,
     #[strum(serialize = "workspace_webhooks_headers_size")]
     HeadersSize,
-    #[strum(serialize = "workspace_webhooks_failure_count_positive")]
-    FailureCountPositive,
-    #[strum(serialize = "workspace_webhooks_max_failures_positive")]
-    MaxFailuresPositive,
 
     // Webhook chronological constraints
     #[strum(serialize = "workspace_webhooks_updated_after_created")]
@@ -46,15 +44,14 @@ impl WorkspaceWebhookConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
+            WorkspaceWebhookConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+
             WorkspaceWebhookConstraints::DisplayNameLength
             | WorkspaceWebhookConstraints::DescriptionLength
             | WorkspaceWebhookConstraints::UrlLength
             | WorkspaceWebhookConstraints::UrlFormat
-            | WorkspaceWebhookConstraints::SecretLength
             | WorkspaceWebhookConstraints::EventsNotEmpty
-            | WorkspaceWebhookConstraints::HeadersSize
-            | WorkspaceWebhookConstraints::FailureCountPositive
-            | WorkspaceWebhookConstraints::MaxFailuresPositive => ConstraintCategory::Validation,
+            | WorkspaceWebhookConstraints::HeadersSize => ConstraintCategory::Validation,
 
             WorkspaceWebhookConstraints::UpdatedAfterCreated
             | WorkspaceWebhookConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,

@@ -9,22 +9,28 @@ use super::ConstraintCategory;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
-pub enum PipelineRunConstraints {
-    // Size constraints
+pub enum WorkspacePipelineRunConstraints {
+    // Size / validation constraints
     #[strum(serialize = "workspace_pipeline_runs_analyzed_document_key_length")]
     AnalyzedDocumentKeyLength,
     #[strum(serialize = "workspace_pipeline_runs_metadata_size")]
     MetadataSize,
     #[strum(serialize = "workspace_pipeline_runs_idempotency_key_length")]
     IdempotencyKeyLength,
+    #[strum(serialize = "workspace_pipeline_runs_run_number_positive")]
+    RunNumberPositive,
+
+    // Uniqueness constraints
+    #[strum(serialize = "workspace_pipeline_runs_pipeline_id_run_number_key")]
+    RunNumberUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_pipeline_runs_completed_after_started")]
     CompletedAfterStarted,
 }
 
-impl PipelineRunConstraints {
-    /// Creates a new [`PipelineRunConstraints`] from the constraint name.
+impl WorkspacePipelineRunConstraints {
+    /// Creates a new [`WorkspacePipelineRunConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
     }
@@ -32,23 +38,28 @@ impl PipelineRunConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            PipelineRunConstraints::AnalyzedDocumentKeyLength
-            | PipelineRunConstraints::MetadataSize
-            | PipelineRunConstraints::IdempotencyKeyLength => ConstraintCategory::Validation,
+            WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength
+            | WorkspacePipelineRunConstraints::MetadataSize
+            | WorkspacePipelineRunConstraints::IdempotencyKeyLength
+            | WorkspacePipelineRunConstraints::RunNumberPositive => ConstraintCategory::Validation,
 
-            PipelineRunConstraints::CompletedAfterStarted => ConstraintCategory::Chronological,
+            WorkspacePipelineRunConstraints::RunNumberUnique => ConstraintCategory::Uniqueness,
+
+            WorkspacePipelineRunConstraints::CompletedAfterStarted => {
+                ConstraintCategory::Chronological
+            }
         }
     }
 }
 
-impl From<PipelineRunConstraints> for String {
+impl From<WorkspacePipelineRunConstraints> for String {
     #[inline]
-    fn from(val: PipelineRunConstraints) -> Self {
+    fn from(val: WorkspacePipelineRunConstraints) -> Self {
         val.to_string()
     }
 }
 
-impl TryFrom<String> for PipelineRunConstraints {
+impl TryFrom<String> for WorkspacePipelineRunConstraints {
     type Error = strum::ParseError;
 
     #[inline]
