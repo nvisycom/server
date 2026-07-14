@@ -1,10 +1,19 @@
 //! Pipeline run request types (detect).
 
+use nvisy_postgres::types::PipelineRunStatus;
 use nvisy_schema::plan::ScopeParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
+
+/// Query parameters for listing runs across a workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRunsQuery {
+    /// Filter by run status.
+    pub status: Option<PipelineRunStatus>,
+}
 
 /// Request payload to start a run (detect) over a file.
 ///

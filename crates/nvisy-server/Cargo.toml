@@ -32,15 +32,14 @@ nvisy-engine = { workspace = true }
 nvisy-schema = { workspace = true }
 
 # Internal crates
-nvisy-base = { workspace = true, features = ["schema"] }
-nvisy-nats = { workspace = true, features = ["schema"] }
+nvisy-core = { workspace = true, features = ["schema"] }
+nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
 tokio-util = { workspace = true, features = [] }
-tokio-stream = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 async-stream = { workspace = true, features = [] }
@@ -59,7 +58,6 @@ schemars = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # Authentication
 jsonwebtoken = { workspace = true, features = [] }
@@ -73,7 +71,6 @@ aead-stream = { workspace = true, features = ["alloc"] }
 hkdf = { workspace = true, features = [] }
 
 # Encoding
-base64 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
 
 # Randomness
@@ -94,19 +91,16 @@ anyhow = { workspace = true, features = [] }
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
-ipnet = { workspace = true, features = ["serde"] }
-bigdecimal = { workspace = true, features = ["serde"] }
 
 # Domain datatypes & data structures
 url = { workspace = true, features = [] }
 
 # Text processing
-regex = { workspace = true, features = [] }
 woothee = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates
-nvisy-nats = { workspace = true, features = ["schema"] }
+nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["reqwest"] }
 

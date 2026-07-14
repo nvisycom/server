@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
-use nvisy_base::health::ComponentHealth;
+use nvisy_core::health::ComponentHealth;
 use tokio::sync::RwLock;
 
 /// Cached health snapshot containing per-component results and a timestamp.

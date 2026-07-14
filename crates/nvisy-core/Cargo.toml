@@ -1,5 +1,5 @@
 [package]
-name = "nvisy-base"
+name = "nvisy-core"
 description = "Shared foundation types for nvisy services"
 readme = "./README.md"
 keywords = ["nvisy", "base", "foundation"]

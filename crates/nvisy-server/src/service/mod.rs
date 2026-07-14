@@ -8,7 +8,7 @@ mod webhook;
 
 use std::sync::Arc;
 
-use nvisy_base::health::HealthCheck;
+use nvisy_core::health::HealthCheck;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;

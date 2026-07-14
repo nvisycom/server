@@ -37,7 +37,7 @@ use uuid::Uuid;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
 use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
-    PipelineRunPathParams,
+    PipelineRunPathParams, WorkspacePathParams, WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::{Error, ErrorKind, Result};
@@ -214,6 +214,67 @@ async fn list_pipeline_runs(
 fn list_pipeline_runs_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List pipeline runs")
         .description("Returns all runs for a specific pipeline.")
+        .response::<200, Json<PipelineRunsPage>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Lists all runs across the workspace's pipelines.
+///
+/// Aggregates runs from every pipeline in the workspace, most recent first,
+/// with optional status and pipeline filters. Requires `ViewPipelines`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %path_params.workspace_id,
+    )
+)]
+async fn list_workspace_runs(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_state): AuthState,
+    Path(path_params): Path<WorkspacePathParams>,
+    Query(pagination): Query<CursorPagination>,
+    Query(query): Query<WorkspaceRunsQuery>,
+) -> Result<(StatusCode, Json<PipelineRunsPage>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace runs");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(
+            &mut conn,
+            path_params.workspace_id,
+            Permission::ViewPipelines,
+        )
+        .await?;
+
+    let page = conn
+        .cursor_list_workspace_runs(path_params.workspace_id, pagination.into(), query.status)
+        .await?;
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        run_count = page.items.len(),
+        "Workspace runs listed"
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(PipelineRunsPage::from_cursor_page(
+            page,
+            PipelineRun::from_model,
+        )),
+    ))
+}
+
+fn list_workspace_runs_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List workspace runs")
+        .description(
+            "Returns all pipeline runs across the workspace, most recent first, \
+             with optional status and pipeline filters.",
+        )
         .response::<200, Json<PipelineRunsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -482,6 +543,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
+        .api_route(
+            "/workspaces/{workspaceId}/runs/",
+            get_with(list_workspace_runs, list_workspace_runs_docs),
+        )
         .api_route(
             "/pipelines/{pipelineId}/runs/",
             post_with(create_pipeline_run, create_pipeline_run_docs)

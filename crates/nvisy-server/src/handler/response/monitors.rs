@@ -1,7 +1,7 @@
 //! Monitor response types.
 
 use jiff::Timestamp;
-use nvisy_base::health::{ComponentHealth, HealthStatus};
+use nvisy_core::health::{ComponentHealth, HealthStatus};
 use schemars::JsonSchema;
 use serde::Serialize;
 
