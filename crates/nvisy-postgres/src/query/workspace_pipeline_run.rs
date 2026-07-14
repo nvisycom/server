@@ -49,6 +49,21 @@ pub trait WorkspacePipelineRunRepository {
         status_filter: Option<PipelineRunStatus>,
     ) -> impl Future<Output = PgResult<CursorPage<WorkspacePipelineRun>>> + Send;
 
+    /// Lists all runs across a workspace's pipelines with cursor pagination.
+    ///
+    /// Runs carry no workspace reference of their own, so this joins through the
+    /// owning pipeline and filters on its workspace. An optional status filter
+    /// narrows the result; use [`cursor_list_workspace_pipeline_runs`] for a
+    /// single pipeline.
+    ///
+    /// [`cursor_list_workspace_pipeline_runs`]: Self::cursor_list_workspace_pipeline_runs
+    fn cursor_list_workspace_runs(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination,
+        status_filter: Option<PipelineRunStatus>,
+    ) -> impl Future<Output = PgResult<CursorPage<WorkspacePipelineRun>>> + Send;
+
     /// Lists active runs (queued or running) for a specific pipeline.
     fn list_active_workspace_pipeline_runs(
         &mut self,
@@ -232,6 +247,74 @@ impl WorkspacePipelineRunRepository for PgConnection {
             query
                 .select(WorkspacePipelineRun::as_select())
                 .order((dsl::started_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
+
+        Ok(CursorPage::new(
+            items,
+            total,
+            pagination.limit,
+            |r: &WorkspacePipelineRun| (r.started_at.into(), r.id),
+        ))
+    }
+
+    async fn cursor_list_workspace_runs(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination,
+        status_filter: Option<PipelineRunStatus>,
+    ) -> PgResult<CursorPage<WorkspacePipelineRun>> {
+        use schema::workspace_pipeline_runs::dsl as runs;
+        use schema::workspace_pipelines::dsl as pipelines;
+
+        // Runs have no workspace column; scope them through the owning pipeline.
+        let scoped = || {
+            let mut query = runs::workspace_pipeline_runs
+                .inner_join(pipelines::workspace_pipelines)
+                .filter(pipelines::workspace_id.eq(workspace_id))
+                .into_boxed();
+            if let Some(status) = status_filter {
+                query = query.filter(runs::status.eq(status));
+            }
+            query
+        };
+
+        let total = if pagination.include_count {
+            Some(
+                scoped()
+                    .count()
+                    .get_result::<i64>(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        let limit = pagination.limit + 1;
+
+        let items: Vec<WorkspacePipelineRun> = if let Some(cursor) = &pagination.after {
+            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+
+            scoped()
+                .filter(
+                    runs::started_at.lt(&cursor_time).or(runs::started_at
+                        .eq(&cursor_time)
+                        .and(runs::id.lt(cursor.id))),
+                )
+                .select(WorkspacePipelineRun::as_select())
+                .order((runs::started_at.desc(), runs::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            scoped()
+                .select(WorkspacePipelineRun::as_select())
+                .order((runs::started_at.desc(), runs::id.desc()))
                 .limit(limit)
                 .load(self)
                 .await
