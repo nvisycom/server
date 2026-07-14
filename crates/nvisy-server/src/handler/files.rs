@@ -369,7 +369,7 @@ async fn update_file(
 
 fn update_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update file")
-        .description("Updates file metadata such as display name or processing priority.")
+        .description("Updates file metadata such as display name, tags, or metadata.")
         .response::<200, Json<File>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
