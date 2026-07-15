@@ -1,8 +1,52 @@
 //! Custom routes utilities for extending the API router.
 
+use std::collections::HashSet;
+
 use aide::axum::ApiRouter;
 
 use crate::service::ServiceState;
+
+/// A built-in handler module whose routes can be excluded from the router.
+///
+/// A wrapping binary (e.g. the hosted edition) that needs to replace a
+/// built-in endpoint excludes its module via [`CustomRoutes::exclude`], then
+/// mounts its own routes with [`CustomRoutes::add_private_routes`] /
+/// [`CustomRoutes::add_public_routes`]. This is required because merging a
+/// second route for the same method and path panics; excluding the built-in
+/// one first leaves the path free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuiltinModule {
+    /// Account management (`/account`, `/accounts/{id}`).
+    Accounts,
+    /// API tokens.
+    Tokens,
+    /// Workspaces.
+    Workspaces,
+    /// Provider connections.
+    Connections,
+    /// Connection sync runs.
+    ConnectionRuns,
+    /// Detection contexts.
+    Contexts,
+    /// Workspace invitations.
+    Invites,
+    /// Workspace members.
+    Members,
+    /// Webhooks.
+    Webhooks,
+    /// Files.
+    Files,
+    /// Pipelines.
+    Pipelines,
+    /// Pipeline runs.
+    PipelineRuns,
+    /// Redaction policies.
+    Policies,
+    /// Account notifications.
+    Notifications,
+    /// Authentication (`/auth/*`, public).
+    Authentication,
+}
 
 /// Type alias for a function that maps/transforms an ApiRouter.
 ///
@@ -38,6 +82,9 @@ pub struct CustomRoutes {
     pub public_after_middleware: Option<RouterMapFn>,
     /// Flag to disable authentication routes.
     pub disable_authentication: bool,
+    /// Built-in modules to exclude from the router so their routes can be
+    /// replaced by custom ones.
+    pub excluded_modules: HashSet<BuiltinModule>,
 }
 
 impl CustomRoutes {
@@ -87,6 +134,22 @@ impl CustomRoutes {
     pub fn with_disable_authentication(mut self, disable: bool) -> Self {
         self.disable_authentication = disable;
         self
+    }
+
+    /// Excludes a built-in module's routes from the router.
+    ///
+    /// Use this to replace a built-in endpoint: exclude its module, then mount
+    /// a custom router with [`Self::add_private_routes`] /
+    /// [`Self::add_public_routes`]. Merging a replacement without excluding the
+    /// original first panics on the route collision.
+    pub fn exclude(mut self, module: BuiltinModule) -> Self {
+        self.excluded_modules.insert(module);
+        self
+    }
+
+    /// Returns true if the given built-in module has been excluded.
+    pub fn is_excluded(&self, module: BuiltinModule) -> bool {
+        self.excluded_modules.contains(&module)
     }
 
     /// Returns true if there are any private routes configured.

@@ -26,10 +26,10 @@ pub struct CreateInvite {
 
 impl CreateInvite {
     /// Converts to database model.
-    pub fn into_model(self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
+    pub fn to_model(&self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
         NewWorkspaceInvite {
             workspace_id,
-            invitee_email: Some(self.invitee_email),
+            invitee_email: Some(self.invitee_email.clone()),
             invited_role: Some(self.invited_role),
             expires_at: self.expires_in.to_expiry_timestamp().map(Into::into),
             created_by,
@@ -135,5 +135,38 @@ impl ListInvites {
         let order = self.order.unwrap_or_default();
         let field = self.sort_by.unwrap_or_default();
         InviteSortBy::new(field, order)
+    }
+}
+
+#[cfg(test)]
+mod create_invite_tests {
+    use nvisy_postgres::types::WorkspaceRole;
+    use uuid::Uuid;
+
+    use super::{CreateInvite, InviteExpiration};
+
+    #[test]
+    fn to_model_carries_email_and_actor_without_consuming_request() {
+        let workspace_id = Uuid::now_v7();
+        let actor_id = Uuid::now_v7();
+        let request = CreateInvite {
+            invitee_email: "invitee@example.com".to_owned(),
+            invited_role: WorkspaceRole::Member,
+            expires_in: InviteExpiration::In7Days,
+        };
+
+        let model = request.to_model(workspace_id, actor_id);
+
+        assert_eq!(model.workspace_id, workspace_id);
+        assert_eq!(model.invitee_email.as_deref(), Some("invitee@example.com"));
+        assert_eq!(model.invited_role, Some(WorkspaceRole::Member));
+        assert_eq!(model.created_by, actor_id);
+        assert_eq!(model.updated_by, actor_id);
+        // The DB default supplies the token; the request never sets one.
+        assert!(model.invite_token.is_none());
+        assert!(model.expires_at.is_some());
+
+        // `to_model` borrows, so the request is still usable afterwards.
+        assert_eq!(request.invitee_email, "invitee@example.com");
     }
 }

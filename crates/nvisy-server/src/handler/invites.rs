@@ -9,10 +9,12 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceMember, WorkspaceInvite};
+use nvisy_postgres::model::{Account, NewAccountNotification, NewWorkspaceMember, WorkspaceInvite};
 use nvisy_postgres::query::{
-    WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
+    AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
+    WorkspaceMemberRepository, WorkspaceRepository,
 };
+use nvisy_postgres::types::NotificationEvent;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
@@ -22,7 +24,7 @@ use crate::handler::request::{
     ListInvites, ReplyInvite, WorkspacePathParams,
 };
 use crate::handler::response::{
-    ErrorResponse, Invite, InviteCode, InvitePreview, InvitesPage, Member,
+    ErrorResponse, Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -30,11 +32,113 @@ use crate::service::ServiceState;
 /// Tracing target for workspace invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::invites";
 
+/// Outcome of [`create_invite`].
+///
+/// The invitee must already be a platform account, since the only delivery
+/// this server performs is an in-app notification. An email that maps to no
+/// account produces [`InviteOutcome::UnknownEmail`] and no invite row is
+/// created — the caller reports success either way so the response cannot be
+/// used to probe whether an account exists.
+#[must_use]
+pub enum InviteOutcome {
+    /// The invite (and its notification) were created for an existing account.
+    ///
+    /// Boxed so this variant does not dominate the enum's size over the empty
+    /// [`InviteOutcome::UnknownEmail`].
+    Created(Box<CreatedInvite>),
+    /// No account matches the email; nothing was created.
+    UnknownEmail,
+}
+
+/// The invitation created by [`create_invite`] together with its recipient.
+pub struct CreatedInvite {
+    /// The persisted invitation.
+    pub invite: WorkspaceInvite,
+    /// The account the invitation was addressed to. Unused by this crate;
+    /// exposed for callers that deliver email out-of-band (e.g. the hosted
+    /// edition) and need the recipient's account details.
+    #[allow(dead_code)]
+    pub account: Account,
+}
+
+/// Creates a workspace invitation for an existing platform account.
+///
+/// Assumes the caller has already authorized `InviteMembers` on the workspace.
+/// Rejects an email that already belongs to a member or has a pending invite.
+/// If the email resolves to an account, the invite and an in-app notification
+/// are created together in one transaction and returned as
+/// [`InviteOutcome::Created`]; otherwise [`InviteOutcome::UnknownEmail`] is
+/// returned without creating anything.
+///
+/// A deployment that can deliver email out-of-band (e.g. the hosted edition)
+/// can call this, then send its own message on `Created` and handle
+/// `UnknownEmail` however it chooses.
+pub async fn create_invite(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    actor_id: Uuid,
+    request: &CreateInvite,
+) -> Result<InviteOutcome> {
+    if conn
+        .find_workspace_member_by_email(workspace_id, &request.invitee_email)
+        .await?
+        .is_some()
+    {
+        return Err(ErrorKind::Conflict
+            .with_message("User is already a member of this workspace")
+            .with_resource("workspace_member"));
+    }
+
+    let Some(account) = conn.find_account_by_email(&request.invitee_email).await? else {
+        return Ok(InviteOutcome::UnknownEmail);
+    };
+
+    if conn
+        .find_pending_workspace_invite_by_email(workspace_id, &request.invitee_email)
+        .await?
+        .is_some()
+    {
+        return Err(ErrorKind::Conflict
+            .with_message("A pending invitation already exists for this email")
+            .with_resource("workspace_invite"));
+    }
+
+    let new_invite = request.to_model(workspace_id, actor_id);
+    let account_id = account.id;
+
+    let invite = conn
+        .transaction(async |conn| {
+            let invite = conn.create_workspace_invite(new_invite).await?;
+
+            conn.create_account_notification(NewAccountNotification {
+                account_id,
+                notify_type: NotificationEvent::MemberInvited,
+                title: "Workspace invitation".to_owned(),
+                message: "You've been invited to join a workspace.".to_owned(),
+                related_id: Some(invite.id),
+                related_type: Some("workspace_invite".to_owned()),
+                metadata: None,
+                expires_at: None,
+            })
+            .await?;
+
+            Ok::<_, PgError>(invite)
+        })
+        .await?;
+
+    Ok(InviteOutcome::Created(Box::new(CreatedInvite {
+        invite,
+        account,
+    })))
+}
+
 /// Creates a new workspace invitation.
 ///
-/// Sends an invitation to join a workspace to the specified email address.
-/// The invitee will receive an email with instructions to accept or decline.
-/// Requires `InviteMembers` permission.
+/// Invites an existing platform user to the workspace and delivers an in-app
+/// notification. This server sends no email; if the address does not belong to
+/// a known account, the request still succeeds but nothing is created, so the
+/// response cannot reveal whether an account exists. Requires `InviteMembers`
+/// permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -48,7 +152,7 @@ async fn send_invite(
     AuthState(auth_state): AuthState,
     Path(path_params): Path<WorkspacePathParams>,
     ValidateJson(request): ValidateJson<CreateInvite>,
-) -> Result<(StatusCode, Json<Invite>)> {
+) -> Result<(StatusCode, Json<InviteSent>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace invitation");
 
     let mut conn = pg_client.get_connection().await?;
@@ -61,48 +165,38 @@ async fn send_invite(
         )
         .await?;
 
-    // Check if invitee is already a member (by email)
-    if conn
-        .find_workspace_member_by_email(path_params.workspace_id, &request.invitee_email)
-        .await?
-        .is_some()
+    match create_invite(
+        &mut conn,
+        path_params.workspace_id,
+        auth_state.account_id,
+        &request,
+    )
+    .await?
     {
-        return Err(ErrorKind::Conflict
-            .with_message("User is already a member of this workspace")
-            .with_resource("workspace_member"));
+        InviteOutcome::Created(created) => {
+            tracing::info!(
+                target: TRACING_TARGET,
+                invite_id = %created.invite.id,
+                "Workspace invitation created",
+            );
+        }
+        InviteOutcome::UnknownEmail => {
+            tracing::debug!(target: TRACING_TARGET, "Invite email has no account; no-op");
+        }
     }
 
-    // Check for existing pending invite for this email
-    if conn
-        .find_pending_workspace_invite_by_email(path_params.workspace_id, &request.invitee_email)
-        .await?
-        .is_some()
-    {
-        return Err(ErrorKind::Conflict
-            .with_message("A pending invitation already exists for this email")
-            .with_resource("workspace_invite"));
-    }
-
-    let workspace_invite = conn
-        .create_workspace_invite(
-            request.into_model(path_params.workspace_id, auth_state.account_id),
-        )
-        .await?;
-    let response = Invite::from_model(workspace_invite);
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        invite_id = %response.invite_id,
-        "Workspace invitation created",
-    );
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((StatusCode::OK, Json(InviteSent::new())))
 }
 
 fn send_invite_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Send invitation")
-        .description("Sends an invitation to join a workspace to the specified email address.")
-        .response::<201, Json<Invite>>()
+        .description(
+            "Invites an existing platform user to the workspace and delivers an in-app \
+             notification. No email is sent by this server. The response is identical whether \
+             or not the address belongs to a known account, so it cannot be used to determine \
+             whether an account exists.",
+        )
+        .response::<200, Json<InviteSent>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

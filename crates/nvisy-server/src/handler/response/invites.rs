@@ -66,6 +66,60 @@ impl Invite {
 /// Paginated response for workspace invitations.
 pub type InvitesPage = Page<Invite>;
 
+/// Acknowledgement returned after sending a workspace invitation.
+///
+/// The response is deliberately uniform: it carries no invite identifier or
+/// status, so it is identical whether or not the address belonged to a known
+/// account and cannot be used to probe for account existence.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteSent {
+    /// Human-readable confirmation message.
+    pub detail: String,
+}
+
+impl InviteSent {
+    /// Creates the standard invitation acknowledgement.
+    pub fn new() -> Self {
+        Self {
+            detail: "If the address belongs to a user, they have been invited.".to_owned(),
+        }
+    }
+}
+
+impl Default for InviteSent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod invite_sent_tests {
+    use super::InviteSent;
+
+    #[test]
+    fn serializes_with_only_a_detail_field() {
+        // The acknowledgement must not leak an invite id, status, or account
+        // hint — otherwise the response could be used to probe for account
+        // existence. It carries exactly one field.
+        let value = serde_json::to_value(InviteSent::new()).unwrap();
+        let object = value.as_object().unwrap();
+        assert_eq!(object.len(), 1);
+        assert!(object.contains_key("detail"));
+    }
+
+    #[test]
+    fn is_identical_for_every_invocation() {
+        // Known and unknown emails produce the same value, so the two cannot be
+        // distinguished by the caller.
+        assert_eq!(
+            serde_json::to_value(InviteSent::new()).unwrap(),
+            serde_json::to_value(InviteSent::default()).unwrap(),
+        );
+    }
+}
+
 /// Response containing a generated shareable invite code.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

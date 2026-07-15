@@ -2,4 +2,4 @@
 
 mod custom_routes;
 
-pub use custom_routes::{CustomRoutes, RouterMapFn};
+pub use custom_routes::{BuiltinModule, CustomRoutes, RouterMapFn};
