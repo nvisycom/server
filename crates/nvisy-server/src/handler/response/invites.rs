@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{self, WorkspaceInvite};
-use nvisy_postgres::types::{InviteStatus, WorkspaceRole, WorkspaceSlug};
+use nvisy_postgres::types::{InviteStatus, Slug, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,7 +21,7 @@ pub struct Invite {
     /// Unique identifier of the invitation.
     pub invite_id: Uuid,
     /// Slug of the workspace the invitation is for.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Email address of the invitee (omitted for open invite codes).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invitee_email: Option<String>,
@@ -41,7 +41,7 @@ pub struct Invite {
 }
 
 impl Invite {
-    pub fn from_model(invite: WorkspaceInvite, workspace_slug: WorkspaceSlug) -> Self {
+    pub fn from_model(invite: WorkspaceInvite, workspace_slug: Slug) -> Self {
         // Only include invite_token for open invitations (no invitee_email)
         let invite_token = if invite.invitee_email.is_none() {
             Some(invite.invite_token.clone())
@@ -102,7 +102,7 @@ pub struct InviteCode {
     /// The generated invite code that can be shared.
     pub invite_code: String,
     /// Slug of the workspace this invite code is for.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Role assigned when someone joins via this code.
     pub role: WorkspaceRole,
     /// When the invite code expires.
@@ -111,7 +111,7 @@ pub struct InviteCode {
 
 impl InviteCode {
     /// Creates a new invite code response from a workspace invite.
-    pub fn from_invite(invite: &model::WorkspaceInvite, workspace_slug: WorkspaceSlug) -> Self {
+    pub fn from_invite(invite: &model::WorkspaceInvite, workspace_slug: Slug) -> Self {
         Self {
             invite_code: invite.invite_token.clone(),
             workspace_slug,
@@ -130,7 +130,7 @@ impl InviteCode {
 #[serde(rename_all = "camelCase")]
 pub struct InvitePreview {
     /// Slug of the workspace.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.

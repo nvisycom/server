@@ -34,6 +34,13 @@ CREATE TABLE workspace_connections (
     -- Composite key target for workspace-scoped access and foreign keys.
     CONSTRAINT workspace_connections_workspace_id_id_key UNIQUE (workspace_id, id),
 
+    -- Immutable URL identity, unique within the workspace. Mirrors the Slug
+    -- newtype: lowercase alphanumeric with single internal dashes, 3-32 chars.
+    slug            TEXT            NOT NULL,
+    CONSTRAINT workspace_connections_workspace_id_slug_key UNIQUE (workspace_id, slug),
+    CONSTRAINT workspace_connections_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
+    CONSTRAINT workspace_connections_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+
     -- Core attributes
     name            TEXT            NOT NULL,
     provider        TEXT            NOT NULL,

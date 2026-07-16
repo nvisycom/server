@@ -10,7 +10,7 @@ use diesel::result::{ConnectionError, Error};
 use diesel_async::pooled_connection::PoolError as DieselPoolError;
 use diesel_async::pooled_connection::deadpool::PoolError as DeadpoolError;
 
-use crate::types::{ConstraintViolation, WorkspaceConstraints};
+use crate::types::ConstraintViolation;
 
 /// Type-erased error type for dynamic error handling.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -115,15 +115,16 @@ impl PgError {
         Self::Unexpected(message.into())
     }
 
-    /// Returns whether this error is a violation of the workspace slug
-    /// uniqueness constraint.
+    /// Returns whether this error is a violation of a slug uniqueness
+    /// constraint on any resource (workspace or workspace-scoped config).
+    ///
+    /// Matches by constraint name so a single check covers every table's slug
+    /// unique index without enumerating each constraint enum. Slug uniqueness
+    /// constraints are named `*_slug_key` (global) or `*_workspace_id_slug_key`
+    /// (per workspace).
     pub fn is_slug_conflict(&self) -> bool {
-        matches!(
-            self.constraint_violation(),
-            Some(ConstraintViolation::Workspace(
-                WorkspaceConstraints::SlugUnique
-            ))
-        )
+        self.constraint()
+            .is_some_and(|name| name.ends_with("_slug_key"))
     }
 
     /// Returns whether this error indicates a transient failure that might succeed on retry.

@@ -12,7 +12,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::WorkspaceSlug;
+use nvisy_postgres::types::Slug;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -79,7 +79,7 @@ async fn create_pipeline(
 
     tracing::info!(
         target: TRACING_TARGET,
-        pipeline_id = %response.pipeline_id,
+        pipeline_slug = %response.slug,
         "Pipeline created",
     );
 
@@ -157,7 +157,7 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_id = %path_params.pipeline_id,
+        pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn get_pipeline(
@@ -174,12 +174,10 @@ async fn get_pipeline(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let pipeline = find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
+    let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     // Fetch artifacts for all runs of this pipeline
-    let artifacts = conn
-        .list_workspace_pipeline_artifacts(path_params.pipeline_id)
-        .await?;
+    let artifacts = conn.list_workspace_pipeline_artifacts(pipeline.id).await?;
     let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
     let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
 
@@ -215,7 +213,7 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_id = %path_params.pipeline_id,
+        pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn update_pipeline(
@@ -234,10 +232,10 @@ async fn update_pipeline(
         .await?;
 
     // Confirm the pipeline exists in this workspace before mutating.
-    find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
+    let existing = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let (update_data, references) = request.into_parts().map_err(serialize_error)?;
-    let pipeline_id = path_params.pipeline_id;
+    let pipeline_id = existing.id;
     let references_for_response = references.clone();
 
     let pipeline = conn
@@ -290,7 +288,7 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_id = %path_params.pipeline_id,
+        pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn delete_pipeline(
@@ -308,10 +306,9 @@ async fn delete_pipeline(
         .await?;
 
     // Confirm the pipeline exists in this workspace before deleting.
-    find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
+    let existing = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
-    conn.delete_workspace_pipeline(path_params.pipeline_id)
-        .await?;
+    conn.delete_workspace_pipeline(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Pipeline deleted");
 
@@ -327,13 +324,13 @@ fn delete_pipeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a pipeline within a workspace or returns NotFound error.
+/// Finds a pipeline within a workspace by slug or returns NotFound error.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    pipeline_id: Uuid,
+    pipeline_slug: &str,
 ) -> Result<WorkspacePipeline> {
-    conn.find_pipeline_in_workspace(workspace_id, pipeline_id)
+    conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
 }
@@ -367,7 +364,7 @@ async fn replace_references(
 async fn build_response(
     conn: &mut PgConnection,
     pipeline: WorkspacePipeline,
-    workspace_slug: WorkspaceSlug,
+    workspace_slug: Slug,
 ) -> Result<Pipeline> {
     let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
     let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
@@ -397,9 +394,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(create_pipeline, create_pipeline_docs)
                 .get_with(list_pipelines, list_pipelines_docs),
         )
-        // Pipeline operations by ID
+        // Pipeline operations by slug
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineId}/",
+            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/",
             get_with(get_pipeline, get_pipeline_docs)
                 .patch_with(update_pipeline, update_pipeline_docs)
                 .delete_with(delete_pipeline, delete_pipeline_docs),

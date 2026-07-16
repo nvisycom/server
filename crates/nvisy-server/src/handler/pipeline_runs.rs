@@ -62,7 +62,7 @@ const IDEMPOTENCY_HEADER: &str = "idempotency-key";
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_id = %path_params.pipeline_id,
+        pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn create_pipeline_run(
@@ -84,18 +84,25 @@ async fn create_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
         .await?;
 
-    let pipeline = find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
+    let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let idempotency_key = idempotency_key(&headers)?;
 
     // Idempotent replay: a repeated key returns the run created the first time.
     if let Some(key) = &idempotency_key
         && let Some(existing) = conn
-            .find_pipeline_run_by_idempotency_key(path_params.pipeline_id, key)
+            .find_pipeline_run_by_idempotency_key(pipeline.id, key)
             .await?
     {
         tracing::debug!(target: TRACING_TARGET, "Replaying run for idempotency key");
-        return Ok((StatusCode::OK, Json(PipelineRun::from_model(existing))));
+        return Ok((
+            StatusCode::OK,
+            Json(PipelineRun::from_model(
+                existing,
+                pipeline.slug.clone(),
+                workspace.slug.clone(),
+            )),
+        ));
     }
 
     let file = conn
@@ -145,9 +152,12 @@ async fn create_pipeline_run(
         )
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Pipeline run analyzed");
+    tracing::info!(target: TRACING_TARGET, run_number = run.run_number, "Pipeline run analyzed");
 
-    Ok((StatusCode::CREATED, Json(PipelineRun::from_model(run))))
+    Ok((
+        StatusCode::CREATED,
+        Json(PipelineRun::from_model(run, pipeline.slug, workspace.slug)),
+    ))
 }
 
 fn create_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
@@ -169,7 +179,7 @@ fn create_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_id = %path_params.pipeline_id,
+        pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn list_pipeline_runs(
@@ -187,7 +197,7 @@ async fn list_pipeline_runs(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let pipeline = find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
+    let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let page = conn
         .cursor_list_workspace_pipeline_runs(pipeline.id, pagination.into(), None)
@@ -201,10 +211,9 @@ async fn list_pipeline_runs(
 
     Ok((
         StatusCode::OK,
-        Json(PipelineRunsPage::from_cursor_page(
-            page,
-            PipelineRun::from_model,
-        )),
+        Json(PipelineRunsPage::from_cursor_page(page, |run| {
+            PipelineRun::from_model(run, pipeline.slug.clone(), workspace.slug.clone())
+        })),
     ))
 }
 
@@ -257,7 +266,9 @@ async fn list_workspace_runs(
         StatusCode::OK,
         Json(PipelineRunsPage::from_cursor_page(
             page,
-            PipelineRun::from_model,
+            |(run, pipeline_slug)| {
+                PipelineRun::from_model(run, pipeline_slug, workspace.slug.clone())
+            },
         )),
     ))
 }
@@ -280,7 +291,8 @@ fn list_workspace_runs_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        run_id = %path_params.run_id,
+        pipeline_slug = %path_params.pipeline_slug,
+        run_number = path_params.run_number,
     )
 )]
 async fn get_pipeline_run(
@@ -297,11 +309,20 @@ async fn get_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let run = find_pipeline_run(&mut conn, workspace.id, path_params.run_id).await?;
+    let (pipeline, run) = find_pipeline_run(
+        &mut conn,
+        workspace.id,
+        &path_params.pipeline_slug,
+        path_params.run_number,
+    )
+    .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");
 
-    Ok((StatusCode::OK, Json(PipelineRun::from_model(run))))
+    Ok((
+        StatusCode::OK,
+        Json(PipelineRun::from_model(run, pipeline.slug, workspace.slug)),
+    ))
 }
 
 fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
@@ -322,7 +343,8 @@ fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        run_id = %path_params.run_id,
+        pipeline_slug = %path_params.pipeline_slug,
+        run_number = path_params.run_number,
     )
 )]
 async fn get_pipeline_run_analysis(
@@ -341,7 +363,13 @@ async fn get_pipeline_run_analysis(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let run = find_pipeline_run(&mut conn, workspace.id, path_params.run_id).await?;
+    let (_pipeline, run) = find_pipeline_run(
+        &mut conn,
+        workspace.id,
+        &path_params.pipeline_slug,
+        path_params.run_number,
+    )
+    .await?;
 
     let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
 
@@ -369,7 +397,9 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        run_id = %path_params.run_id,
+        workspace_id = %workspace.id,
+        pipeline_slug = %path_params.pipeline_slug,
+        run_number = path_params.run_number,
     )
 )]
 async fn redact_pipeline_run(
@@ -389,7 +419,13 @@ async fn redact_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
         .await?;
 
-    let run = find_pipeline_run(&mut conn, workspace.id, path_params.run_id).await?;
+    let (pipeline, run) = find_pipeline_run(
+        &mut conn,
+        workspace.id,
+        &path_params.pipeline_slug,
+        path_params.run_number,
+    )
+    .await?;
 
     // A run can only be redacted once, after detection.
     if !run.is_analyzed() {
@@ -405,7 +441,7 @@ async fn redact_pipeline_run(
 
     // The stored analysis is the source of truth for what gets redacted.
     let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
-    let policies = resolve_policies(&mut conn, &crypto, workspace.id, run.pipeline_id).await?;
+    let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
     let document = build_document(&nats, &crypto, &file, run.id).await?;
 
     let anonymized = engine
@@ -438,12 +474,15 @@ async fn redact_pipeline_run(
 
     tracing::info!(
         target: TRACING_TARGET,
-        run_id = %run.id,
+        run_number = run.run_number,
         artifact_file_id = %artifact_file.id,
         "Pipeline run redacted"
     );
 
-    Ok((StatusCode::OK, Json(PipelineRun::from_model(run))))
+    Ok((
+        StatusCode::OK,
+        Json(PipelineRun::from_model(run, pipeline.slug, workspace.slug)),
+    ))
 }
 
 fn redact_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
@@ -501,26 +540,33 @@ fn analysis_error(error: nvisy_engine::Error) -> Error<'static> {
         .with_context(error.to_string())
 }
 
-/// Finds a pipeline within a workspace or returns NotFound.
+/// Finds a pipeline within a workspace by slug or returns NotFound.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    pipeline_id: Uuid,
+    pipeline_slug: &str,
 ) -> Result<WorkspacePipeline> {
-    conn.find_pipeline_in_workspace(workspace_id, pipeline_id)
+    conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
 }
 
-/// Finds a pipeline run within a workspace or returns NotFound.
+/// Resolves a run addressed as `(pipeline slug, run number)` within a workspace.
+///
+/// Returns both the owning pipeline and the run, or NotFound if either the
+/// pipeline slug or the run number does not resolve.
 async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    run_id: Uuid,
-) -> Result<WorkspacePipelineRun> {
-    conn.find_pipeline_run_in_workspace(workspace_id, run_id)
+    pipeline_slug: &str,
+    run_number: i32,
+) -> Result<(WorkspacePipeline, WorkspacePipelineRun)> {
+    let pipeline = find_pipeline(conn, workspace_id, pipeline_slug).await?;
+    let run = conn
+        .find_pipeline_run_by_number(pipeline.id, run_number)
         .await?
-        .ok_or_else(|| Error::not_found("pipeline_run"))
+        .ok_or_else(|| Error::not_found("pipeline_run"))?;
+    Ok((pipeline, run))
 }
 
 /// Returns a [`Router`] with all pipeline run routes.
@@ -531,24 +577,24 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/runs/",
+            "/workspaces/{workspaceSlug}/pipelines/runs/",
             get_with(list_workspace_runs, list_workspace_runs_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineId}/runs/",
+            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/",
             post_with(create_pipeline_run, create_pipeline_run_docs)
                 .get_with(list_pipeline_runs, list_pipeline_runs_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipeline-runs/{runId}/",
+            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/{runNumber}/",
             get_with(get_pipeline_run, get_pipeline_run_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipeline-runs/{runId}/detections/",
+            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/{runNumber}/detections/",
             get_with(get_pipeline_run_analysis, get_pipeline_run_analysis_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipeline-runs/{runId}/redactions/",
+            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/{runNumber}/redactions/",
             post_with(redact_pipeline_run, redact_pipeline_run_docs),
         )
         .with_path_items(|item| item.tag("Pipeline Runs"))

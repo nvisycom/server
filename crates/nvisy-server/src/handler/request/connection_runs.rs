@@ -3,7 +3,6 @@
 use nvisy_postgres::types::SyncStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Path parameters for connection sync run operations.
 ///
@@ -15,8 +14,10 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionRunPathParams {
-    /// Unique identifier of the connection sync run.
-    pub run_id: Uuid,
+    /// URL slug of the connection the run belongs to.
+    pub connection_slug: String,
+    /// Per-connection sequential run number.
+    pub run_number: i32,
 }
 
 /// Query parameters for listing connection sync runs.

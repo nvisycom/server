@@ -1,4 +1,4 @@
-//! Workspace slug: a URL-safe, human-readable workspace identifier.
+//! Slug: a URL-safe, human-readable resource identifier.
 
 use std::str::FromStr;
 
@@ -10,13 +10,13 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use serde::{Deserialize, Serialize};
 
-/// Minimum length of a workspace slug, in characters.
+/// Minimum length of a slug, in characters.
 pub const SLUG_MIN_LENGTH: usize = 3;
 
-/// Maximum length of a workspace slug, in characters.
+/// Maximum length of a slug, in characters.
 pub const SLUG_MAX_LENGTH: usize = 32;
 
-/// Error returned when a string is not a valid [`WorkspaceSlug`].
+/// Error returned when a string is not a valid [`Slug`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SlugError {
     /// The slug is shorter than [`SLUG_MIN_LENGTH`] or longer than
@@ -29,23 +29,24 @@ pub enum SlugError {
     Format,
 }
 
-/// A validated workspace slug.
+/// A validated, URL-safe resource slug.
 ///
-/// A slug is the human-readable identifier for a workspace in URLs
-/// (`/workspaces/{slug}/...`). It is lowercase, dash-separated, and unique
-/// across the platform. The invariants — `[a-z0-9]` with single internal
-/// dashes, length [`SLUG_MIN_LENGTH`]–[`SLUG_MAX_LENGTH`] — are enforced on
-/// construction, so an existing `WorkspaceSlug` is always valid. The matching
-/// database `CHECK` mirrors this exact shape.
+/// A slug is the human-readable identifier for a resource in URLs (workspaces,
+/// pipelines, connections, and so on). It is lowercase and dash-separated. The
+/// invariants — `[a-z0-9]` with single internal dashes, length
+/// [`SLUG_MIN_LENGTH`]–[`SLUG_MAX_LENGTH`] — are enforced on construction, so an
+/// existing `Slug` is always valid; the matching database `CHECK` mirrors this
+/// exact shape. Uniqueness scope (global vs per-parent) is enforced by each
+/// table's constraint, not by this type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display, AsRef, Into)]
 #[derive(Serialize, Deserialize, AsExpression, FromSqlRow)]
 #[as_ref(str)]
 #[diesel(sql_type = Text)]
 #[serde(try_from = "String", into = "String")]
-pub struct WorkspaceSlug(String);
+pub struct Slug(String);
 
-impl WorkspaceSlug {
-    /// Validates `value` and wraps it as a [`WorkspaceSlug`].
+impl Slug {
+    /// Validates `value` and wraps it as a [`Slug`].
     ///
     /// # Errors
     ///
@@ -134,7 +135,7 @@ fn truncate_on_dash(slug: &str, max: usize) -> String {
     }
 }
 
-impl FromStr for WorkspaceSlug {
+impl FromStr for Slug {
     type Err = SlugError;
 
     #[inline]
@@ -143,7 +144,7 @@ impl FromStr for WorkspaceSlug {
     }
 }
 
-impl TryFrom<String> for WorkspaceSlug {
+impl TryFrom<String> for Slug {
     type Error = SlugError;
 
     #[inline]
@@ -152,7 +153,7 @@ impl TryFrom<String> for WorkspaceSlug {
     }
 }
 
-impl<DB> ToSql<Text, DB> for WorkspaceSlug
+impl<DB> ToSql<Text, DB> for Slug
 where
     DB: Backend,
     str: ToSql<Text, DB>,
@@ -162,7 +163,7 @@ where
     }
 }
 
-impl<DB> FromSql<Text, DB> for WorkspaceSlug
+impl<DB> FromSql<Text, DB> for Slug
 where
     DB: Backend,
     String: FromSql<Text, DB>,
@@ -174,9 +175,9 @@ where
 }
 
 #[cfg(feature = "schema")]
-impl schemars::JsonSchema for WorkspaceSlug {
+impl schemars::JsonSchema for Slug {
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        "WorkspaceSlug".into()
+        "Slug".into()
     }
 
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -185,7 +186,7 @@ impl schemars::JsonSchema for WorkspaceSlug {
             "pattern": r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
             "minLength": SLUG_MIN_LENGTH,
             "maxLength": SLUG_MAX_LENGTH,
-            "description": "Lowercase, dash-separated workspace identifier used in URLs.",
+            "description": "Lowercase, dash-separated resource identifier used in URLs.",
         })
     }
 }
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn accepts_canonical_slugs() {
         for value in ["acme", "acme-corp", "a1-b2-c3", "team-42"] {
-            assert!(WorkspaceSlug::parse(value).is_ok(), "should accept {value}");
+            assert!(Slug::parse(value).is_ok(), "should accept {value}");
         }
     }
 
@@ -214,18 +215,15 @@ mod tests {
             ("acme corp", SlugError::Format),     // space
         ];
         for (value, expected) in cases {
-            assert_eq!(WorkspaceSlug::parse(value), Err(expected), "value: {value}");
+            assert_eq!(Slug::parse(value), Err(expected), "value: {value}");
         }
     }
 
     #[test]
     fn derives_from_display_name() {
+        assert_eq!(Slug::derive("Acme Corp").unwrap().as_str(), "acme-corp");
         assert_eq!(
-            WorkspaceSlug::derive("Acme Corp").unwrap().as_str(),
-            "acme-corp"
-        );
-        assert_eq!(
-            WorkspaceSlug::derive("  Hello_World  ").unwrap().as_str(),
+            Slug::derive("  Hello_World  ").unwrap().as_str(),
             "hello-world"
         );
     }
@@ -233,7 +231,7 @@ mod tests {
     #[test]
     fn derive_truncates_on_a_dash_boundary() {
         // 40 chars of words; truncated to <=32 without a trailing dash.
-        let slug = WorkspaceSlug::derive("alpha beta gamma delta epsilon zeta").unwrap();
+        let slug = Slug::derive("alpha beta gamma delta epsilon zeta").unwrap();
         assert!(slug.as_str().len() <= SLUG_MAX_LENGTH);
         assert!(!slug.as_str().ends_with('-'));
         assert!(!slug.as_str().contains("--"));
@@ -241,20 +239,20 @@ mod tests {
 
     #[test]
     fn derive_returns_none_without_sluggable_characters() {
-        assert!(WorkspaceSlug::derive("!!!").is_none());
-        assert!(WorkspaceSlug::derive("").is_none());
+        assert!(Slug::derive("!!!").is_none());
+        assert!(Slug::derive("").is_none());
     }
 
     #[test]
     fn round_trips_through_string() {
-        let slug = WorkspaceSlug::parse("acme-corp").unwrap();
+        let slug = Slug::parse("acme-corp").unwrap();
         let string: String = slug.clone().into();
-        assert_eq!(WorkspaceSlug::try_from(string).unwrap(), slug);
+        assert_eq!(Slug::try_from(string).unwrap(), slug);
     }
 
     #[test]
     fn numeric_suffix_appends_and_stays_valid() {
-        let slug = WorkspaceSlug::parse("acme").unwrap();
+        let slug = Slug::parse("acme").unwrap();
         assert_eq!(slug.with_numeric_suffix(2).unwrap().as_str(), "acme-2");
         assert_eq!(slug.with_numeric_suffix(17).unwrap().as_str(), "acme-17");
     }
@@ -262,7 +260,7 @@ mod tests {
     #[test]
     fn numeric_suffix_truncates_long_base_to_fit() {
         // 32-char base leaves no room for "-2" without truncation.
-        let slug = WorkspaceSlug::parse("a".repeat(SLUG_MAX_LENGTH)).unwrap();
+        let slug = Slug::parse("a".repeat(SLUG_MAX_LENGTH)).unwrap();
         let suffixed = slug.with_numeric_suffix(2).unwrap();
         assert!(suffixed.as_str().len() <= SLUG_MAX_LENGTH);
         assert!(suffixed.as_str().ends_with("-2"));

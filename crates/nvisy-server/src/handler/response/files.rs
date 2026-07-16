@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceFile as FileModel;
-use nvisy_postgres::types::{FileSource, WorkspaceSlug};
+use nvisy_postgres::types::{FileSource, Slug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -17,7 +17,7 @@ pub struct File {
     /// Unique file identifier.
     pub id: Uuid,
     /// Slug of the workspace this file belongs to.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Display name.
     pub display_name: String,
     /// Original filename when uploaded.
@@ -47,7 +47,7 @@ pub struct File {
 }
 
 impl File {
-    pub fn from_model(file: FileModel, workspace_slug: WorkspaceSlug) -> Self {
+    pub fn from_model(file: FileModel, workspace_slug: Slug) -> Self {
         Self {
             id: file.id,
             workspace_slug,

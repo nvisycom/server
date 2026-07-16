@@ -64,6 +64,7 @@ async fn create_policy(
     let new_policy = NewWorkspacePolicy {
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
+        slug: request.slug,
         name,
         description,
         version,
@@ -73,7 +74,7 @@ async fn create_policy(
 
     let policy = conn.create_workspace_policy(new_policy).await?;
 
-    tracing::info!(target: TRACING_TARGET, policy_id = %policy.id, "Policy created");
+    tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
     Ok((
         StatusCode::CREATED,
@@ -144,7 +145,7 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        policy_id = %path_params.policy_id,
+        policy_slug = %path_params.policy_slug,
     )
 )]
 async fn read_policy(
@@ -162,7 +163,7 @@ async fn read_policy(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPolicies)
         .await?;
 
-    let policy = find_policy(&mut conn, workspace.id, path_params.policy_id).await?;
+    let policy = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
 
@@ -190,7 +191,7 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        policy_id = %path_params.policy_id,
+        policy_slug = %path_params.policy_slug,
     )
 )]
 async fn update_policy(
@@ -210,7 +211,7 @@ async fn update_policy(
         .await?;
 
     // Confirm the policy exists in this workspace before mutating.
-    find_policy(&mut conn, workspace.id, path_params.policy_id).await?;
+    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
@@ -228,9 +229,7 @@ async fn update_policy(
         ..Default::default()
     };
 
-    let policy = conn
-        .update_workspace_policy(path_params.policy_id, updates)
-        .await?;
+    let policy = conn.update_workspace_policy(existing.id, updates).await?;
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
@@ -256,7 +255,7 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        policy_id = %path_params.policy_id,
+        policy_slug = %path_params.policy_slug,
     )
 )]
 async fn delete_policy(
@@ -274,9 +273,9 @@ async fn delete_policy(
         .await?;
 
     // Confirm the policy exists in this workspace before deleting.
-    find_policy(&mut conn, workspace.id, path_params.policy_id).await?;
+    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
-    conn.delete_workspace_policy(path_params.policy_id).await?;
+    conn.delete_workspace_policy(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Policy deleted");
 
@@ -292,13 +291,13 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a policy within a workspace or returns NotFound error.
+/// Finds a policy within a workspace by slug or returns NotFound error.
 async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    policy_id: Uuid,
+    policy_slug: &str,
 ) -> Result<WorkspacePolicy> {
-    conn.find_policy_in_workspace(workspace_id, policy_id)
+    conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
 }
@@ -314,7 +313,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_policies, list_policies_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/policies/{policyId}/",
+            "/workspaces/{workspaceSlug}/policies/{policySlug}/",
             get_with(read_policy, read_policy_docs)
                 .put_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),

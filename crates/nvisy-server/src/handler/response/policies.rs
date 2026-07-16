@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspacePolicy;
-use nvisy_postgres::types::WorkspaceSlug;
+use nvisy_postgres::types::Slug;
 use nvisy_schema::policy::Policy as SchemaPolicy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,10 +15,10 @@ use crate::service::CryptoService;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Policy {
-    /// Unique policy identifier.
-    pub id: Uuid,
+    /// URL slug of the policy, unique within its workspace.
+    pub slug: Slug,
     /// Slug of the workspace this policy belongs to.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Account that created this policy.
     pub account_id: Uuid,
     /// Human-readable policy name.
@@ -43,14 +43,14 @@ impl Policy {
     /// Creates a response from a database model, decrypting the definition.
     pub fn from_model(
         policy: WorkspacePolicy,
-        workspace_slug: WorkspaceSlug,
+        workspace_slug: Slug,
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =
             crypto.decrypt_json::<SchemaPolicy>(policy.workspace_id, &policy.definition)?;
 
         Ok(Self {
-            id: policy.id,
+            slug: policy.slug,
             workspace_slug,
             account_id: policy.account_id,
             name: policy.name,

@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{NotificationEvent, WorkspaceRole, WorkspaceSlug};
+use nvisy_postgres::types::{NotificationEvent, Slug, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -15,7 +15,7 @@ use super::Page;
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     /// URL-safe workspace identifier.
-    pub slug: WorkspaceSlug,
+    pub slug: Slug,
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.

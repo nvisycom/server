@@ -5,7 +5,7 @@
 //! and validation.
 
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
-use nvisy_postgres::types::PipelineStatus;
+use nvisy_postgres::types::{PipelineStatus, Slug};
 use nvisy_schema::plan::{
     DeduplicationParams, EnricherParams, LabelCatalogParams, RecognizerParams, ScopeParams,
 };
@@ -107,12 +107,14 @@ impl PipelineDefinition {
 /// Creates a new pipeline with the specified name and optional description.
 /// The definition can be added later via update.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePipeline {
     /// Pipeline name (3-100 characters).
     #[validate(length(min = 3, max = 100))]
     pub name: String,
+    /// URL slug, unique within the workspace and immutable after creation.
+    pub slug: Slug,
     /// Optional description of the pipeline (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
@@ -152,10 +154,15 @@ impl CreatePipeline {
         let model = NewWorkspacePipeline {
             workspace_id,
             account_id,
+            slug: self.slug,
             name: self.name,
             description: self.description,
+            status: None,
             definition: Some(definition),
-            ..Default::default()
+            metadata: None,
+            schedule_cron: None,
+            schedule_tz: None,
+            next_run_at: None,
         };
         Ok((model, references))
     }

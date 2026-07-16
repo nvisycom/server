@@ -28,6 +28,14 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
                     .with_message("A scheduled pipeline requires a cron expression"),
                 WorkspacePipelineConstraints::ScheduleTzLength => ErrorKind::BadRequest
                     .with_message("Pipeline schedule timezone length is invalid"),
+                WorkspacePipelineConstraints::SlugLength => ErrorKind::BadRequest
+                    .with_message("Pipeline slug must be between 3 and 32 characters long"),
+                WorkspacePipelineConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
+                    "Pipeline slug must be lowercase alphanumeric with single internal dashes",
+                ),
+                WorkspacePipelineConstraints::SlugUnique => {
+                    ErrorKind::Conflict.with_message("A pipeline with this slug already exists")
+                }
                 WorkspacePipelineConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A pipeline with this identifier already exists"),
                 WorkspacePipelineConstraints::UpdatedAfterCreated
@@ -116,6 +124,14 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
                 }
                 WorkspaceConnectionConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Connection metadata size exceeds maximum limit"),
+                WorkspaceConnectionConstraints::SlugLength => ErrorKind::BadRequest
+                    .with_message("Connection slug must be between 3 and 32 characters long"),
+                WorkspaceConnectionConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
+                    "Connection slug must be lowercase alphanumeric with single internal dashes",
+                ),
+                WorkspaceConnectionConstraints::SlugUnique => {
+                    ErrorKind::Conflict.with_message("A connection with this slug already exists")
+                }
                 WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A connection with this identifier already exists"),
                 WorkspaceConnectionConstraints::UpdatedAfterCreated
@@ -166,6 +182,14 @@ impl From<WorkspaceContextConstraints> for Error<'static> {
                     .with_message("Context version must be between 1 and 64 characters"),
                 WorkspaceContextConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Context metadata size exceeds maximum limit"),
+                WorkspaceContextConstraints::SlugLength => ErrorKind::BadRequest
+                    .with_message("Context slug must be between 3 and 32 characters long"),
+                WorkspaceContextConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
+                    "Context slug must be lowercase alphanumeric with single internal dashes",
+                ),
+                WorkspaceContextConstraints::SlugUnique => {
+                    ErrorKind::Conflict.with_message("A context with this slug already exists")
+                }
                 WorkspaceContextConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A context with this identifier already exists"),
                 WorkspaceContextConstraints::UpdatedAfterCreated
@@ -192,6 +216,14 @@ impl From<WorkspacePolicyConstraints> for Error<'static> {
             }
             WorkspacePolicyConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Policy metadata size exceeds maximum limit")
+            }
+            WorkspacePolicyConstraints::SlugLength => ErrorKind::BadRequest
+                .with_message("Policy slug must be between 3 and 32 characters long"),
+            WorkspacePolicyConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
+                "Policy slug must be lowercase alphanumeric with single internal dashes",
+            ),
+            WorkspacePolicyConstraints::SlugUnique => {
+                ErrorKind::Conflict.with_message("A policy with this slug already exists")
             }
             WorkspacePolicyConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A policy with this identifier already exists")

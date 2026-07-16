@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{WebhookEvent, WebhookStatus, WorkspaceSlug};
+use nvisy_postgres::types::{Slug, WebhookEvent, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ pub struct Webhook {
     /// Unique webhook identifier.
     pub webhook_id: Uuid,
     /// Slug of the workspace this webhook belongs to.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Detailed description of the webhook's purpose.
@@ -44,7 +44,7 @@ pub struct Webhook {
 }
 
 impl Webhook {
-    pub fn from_model(webhook: model::WorkspaceWebhook, workspace_slug: WorkspaceSlug) -> Self {
+    pub fn from_model(webhook: model::WorkspaceWebhook, workspace_slug: Slug) -> Self {
         let events = webhook.subscribed_events();
         let headers = webhook.parsed_headers();
 
@@ -87,7 +87,7 @@ pub struct WebhookCreated {
 impl WebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
-        workspace_slug: WorkspaceSlug,
+        workspace_slug: Slug,
         secret: String,
     ) -> Self {
         Self {

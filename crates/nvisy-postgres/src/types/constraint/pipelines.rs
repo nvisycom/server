@@ -10,6 +10,12 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspacePipelineConstraints {
+    // Pipeline slug validation constraints
+    #[strum(serialize = "workspace_pipelines_slug_length")]
+    SlugLength,
+    #[strum(serialize = "workspace_pipelines_slug_format")]
+    SlugFormat,
+
     // Pipeline name validation constraints
     #[strum(serialize = "workspace_pipelines_name_length")]
     NameLength,
@@ -37,6 +43,8 @@ pub enum WorkspacePipelineConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_pipelines_workspace_id_id_key")]
     WorkspaceIdIdUnique,
+    #[strum(serialize = "workspace_pipelines_workspace_id_slug_key")]
+    SlugUnique,
 
     // Pipeline chronological constraints
     #[strum(serialize = "workspace_pipelines_updated_after_created")]
@@ -54,7 +62,9 @@ impl WorkspacePipelineConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspacePipelineConstraints::NameLength
+            WorkspacePipelineConstraints::SlugLength
+            | WorkspacePipelineConstraints::SlugFormat
+            | WorkspacePipelineConstraints::NameLength
             | WorkspacePipelineConstraints::DescriptionLength
             | WorkspacePipelineConstraints::DefinitionSize
             | WorkspacePipelineConstraints::MetadataSize
@@ -62,7 +72,8 @@ impl WorkspacePipelineConstraints {
             | WorkspacePipelineConstraints::ScheduleRequiresCron
             | WorkspacePipelineConstraints::ScheduleTzLength => ConstraintCategory::Validation,
 
-            WorkspacePipelineConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+            WorkspacePipelineConstraints::WorkspaceIdIdUnique
+            | WorkspacePipelineConstraints::SlugUnique => ConstraintCategory::Uniqueness,
 
             WorkspacePipelineConstraints::UpdatedAfterCreated
             | WorkspacePipelineConstraints::DeletedAfterCreated => {

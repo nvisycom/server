@@ -10,6 +10,10 @@ use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceC
 use crate::types::{CursorPage, CursorPagination, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
+/// Maximum number of slug candidates tried before giving up when generating a
+/// unique connection slug (the preferred slug plus numeric suffixes).
+const MAX_SLUG_ATTEMPTS: u32 = 100;
+
 /// Repository for workspace connection database operations.
 ///
 /// Handles connection lifecycle management including creation, updates,
@@ -17,6 +21,17 @@ use crate::{PgConnection, PgError, PgResult, schema};
 pub trait WorkspaceConnectionRepository {
     /// Creates a new workspace connection record.
     fn create_workspace_connection(
+        &mut self,
+        new_connection: NewWorkspaceConnection,
+    ) -> impl Future<Output = PgResult<WorkspaceConnection>> + Send;
+
+    /// Creates a connection, resolving slug collisions with a numeric suffix.
+    ///
+    /// The `new_connection.slug` is treated as the preferred slug. If it is
+    /// already taken within the workspace, the insert is retried with `-2`,
+    /// `-3`, … suffixes until one succeeds. The retry is driven by the
+    /// database's unique constraint, so it is race-safe.
+    fn create_connection_with_unique_slug(
         &mut self,
         new_connection: NewWorkspaceConnection,
     ) -> impl Future<Output = PgResult<WorkspaceConnection>> + Send;
@@ -34,6 +49,15 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
+
+    /// Finds a connection by slug within a specific workspace.
+    ///
+    /// Excludes soft-deleted connections.
+    fn find_connection_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
 
     /// Finds connections by provider type within a workspace.
@@ -102,6 +126,42 @@ impl WorkspaceConnectionRepository for PgConnection {
         Ok(connection)
     }
 
+    async fn create_connection_with_unique_slug(
+        &mut self,
+        new_connection: NewWorkspaceConnection,
+    ) -> PgResult<WorkspaceConnection> {
+        let preferred = new_connection.slug.clone();
+
+        // Attempt the preferred slug first, then `-2`, `-3`, … on collision.
+        // Each attempt uses a fresh candidate cloned from the base record, so a
+        // failed insert never consumes the data needed for the next try. The
+        // loop is bounded; in practice the first suffix or two resolves any
+        // realistic collision.
+        for attempt in 0..MAX_SLUG_ATTEMPTS {
+            let candidate = if attempt == 0 {
+                new_connection.clone()
+            } else {
+                let slug = preferred.with_numeric_suffix(attempt + 1).ok_or_else(|| {
+                    PgError::unexpected("connection slug cannot be disambiguated")
+                })?;
+                NewWorkspaceConnection {
+                    slug,
+                    ..new_connection.clone()
+                }
+            };
+
+            match self.create_workspace_connection(candidate).await {
+                Ok(created) => return Ok(created),
+                Err(error) if error.is_slug_conflict() => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(PgError::unexpected(
+            "exhausted connection slug generation attempts",
+        ))
+    }
+
     async fn find_workspace_connection_by_id(
         &mut self,
         connection_id: Uuid,
@@ -130,6 +190,26 @@ impl WorkspaceConnectionRepository for PgConnection {
         let connection = workspace_connections::table
             .filter(dsl::id.eq(connection_id))
             .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceConnection::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(connection)
+    }
+
+    async fn find_connection_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> PgResult<Option<WorkspaceConnection>> {
+        use schema::workspace_connections::{self, dsl};
+
+        let connection = workspace_connections::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::slug.eq(slug))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceConnection::as_select())
             .first(self)

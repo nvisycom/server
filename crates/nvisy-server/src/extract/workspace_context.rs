@@ -60,7 +60,7 @@ impl WorkspaceContext {
 /// the route definition.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-struct WorkspaceSlugParam {
+struct SlugParam {
     /// URL-safe workspace identifier.
     workspace_slug: String,
 }
@@ -73,8 +73,7 @@ where
     type Rejection = Error<'static>;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Path(WorkspaceSlugParam { workspace_slug }) =
-            parts.extract::<Path<WorkspaceSlugParam>>().await?;
+        let Path(SlugParam { workspace_slug }) = parts.extract::<Path<SlugParam>>().await?;
 
         let pg_client = PgClient::from_ref(state);
         let mut conn = pg_client.get_connection().await.map_err(|error| {
@@ -99,13 +98,13 @@ where
 
 impl OperationInput for WorkspaceContext {
     fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
-        Path::<WorkspaceSlugParam>::operation_input(ctx, operation);
+        Path::<SlugParam>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
-        Path::<WorkspaceSlugParam>::inferred_early_responses(ctx, operation)
+        Path::<SlugParam>::inferred_early_responses(ctx, operation)
     }
 }

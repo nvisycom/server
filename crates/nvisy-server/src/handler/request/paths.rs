@@ -108,8 +108,8 @@ pub struct AccountPathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelinePathParams {
-    /// Unique identifier of the pipeline.
-    pub pipeline_id: Uuid,
+    /// URL slug of the pipeline, unique within its workspace.
+    pub pipeline_slug: String,
 }
 
 /// Path parameters for pipeline run operations.
@@ -117,6 +117,8 @@ pub struct PipelinePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunPathParams {
-    /// Unique identifier of the pipeline run.
-    pub run_id: Uuid,
+    /// URL slug of the pipeline the run belongs to.
+    pub pipeline_slug: String,
+    /// Per-pipeline sequential run number.
+    pub run_number: i32,
 }

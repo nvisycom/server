@@ -66,6 +66,7 @@ async fn create_context(
     let new_context = NewWorkspaceContext {
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
+        slug: request.slug,
         name,
         description,
         version,
@@ -75,7 +76,7 @@ async fn create_context(
 
     let context = conn.create_workspace_context(new_context).await?;
 
-    tracing::info!(target: TRACING_TARGET, context_id = %context.id, "Context created");
+    tracing::info!(target: TRACING_TARGET, context_slug = %context.slug, "Context created");
 
     Ok((
         StatusCode::CREATED,
@@ -146,7 +147,7 @@ fn list_contexts_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        context_id = %path_params.context_id,
+        context_slug = %path_params.context_slug,
     )
 )]
 async fn read_context(
@@ -164,7 +165,7 @@ async fn read_context(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewContexts)
         .await?;
 
-    let context = find_context(&mut conn, workspace.id, path_params.context_id).await?;
+    let context = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace context read");
 
@@ -192,7 +193,7 @@ fn read_context_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        context_id = %path_params.context_id,
+        context_slug = %path_params.context_slug,
     )
 )]
 async fn update_context(
@@ -211,8 +212,7 @@ async fn update_context(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
-    // Confirm the context exists in this workspace before mutating.
-    find_context(&mut conn, workspace.id, path_params.context_id).await?;
+    let existing = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
@@ -230,9 +230,7 @@ async fn update_context(
         ..Default::default()
     };
 
-    let context = conn
-        .update_workspace_context(path_params.context_id, updates)
-        .await?;
+    let context = conn.update_workspace_context(existing.id, updates).await?;
 
     tracing::info!(target: TRACING_TARGET, "Context updated");
 
@@ -258,7 +256,7 @@ fn update_context_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        context_id = %path_params.context_id,
+        context_slug = %path_params.context_slug,
     )
 )]
 async fn delete_context(
@@ -275,11 +273,9 @@ async fn delete_context(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
-    // Confirm the context exists in this workspace before deleting.
-    find_context(&mut conn, workspace.id, path_params.context_id).await?;
+    let existing = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
-    conn.delete_workspace_context(path_params.context_id)
-        .await?;
+    conn.delete_workspace_context(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Context deleted");
 
@@ -295,13 +291,13 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a context within a workspace or returns NotFound error.
+/// Finds a context within a workspace by slug or returns NotFound error.
 async fn find_context(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    context_id: Uuid,
+    context_slug: &str,
 ) -> Result<WorkspaceContextModel> {
-    conn.find_context_in_workspace(workspace_id, context_id)
+    conn.find_context_in_workspace_by_slug(workspace_id, context_slug)
         .await?
         .ok_or_else(|| Error::not_found("context"))
 }
@@ -317,7 +313,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_contexts, list_contexts_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/contexts/{contextId}/",
+            "/workspaces/{workspaceSlug}/contexts/{contextSlug}/",
             get_with(read_context, read_context_docs)
                 .put_with(update_context, update_context_docs)
                 .delete_with(delete_context, delete_context_docs),

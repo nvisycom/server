@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{PipelineStatus, WorkspaceSlug};
+use nvisy_postgres::types::{PipelineStatus, Slug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -15,10 +15,10 @@ use crate::handler::request::PipelineDefinition;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Pipeline {
-    /// Unique pipeline identifier.
-    pub pipeline_id: Uuid,
+    /// URL slug of the pipeline, unique within its workspace.
+    pub slug: Slug,
     /// Slug of the workspace this pipeline belongs to.
-    pub workspace_slug: WorkspaceSlug,
+    pub workspace_slug: Slug,
     /// Account that created this pipeline.
     pub account_id: Uuid,
     /// Pipeline name.
@@ -47,7 +47,7 @@ impl Pipeline {
     /// stored config JSON does not decode to the current schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
-        workspace_slug: WorkspaceSlug,
+        workspace_slug: Slug,
         policy_ids: Vec<Uuid>,
         context_ids: Vec<Uuid>,
     ) -> serde_json::Result<Self> {
@@ -63,7 +63,7 @@ impl Pipeline {
     /// Creates a pipeline response with artifacts and reference ids.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
-        workspace_slug: WorkspaceSlug,
+        workspace_slug: Slug,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
         policy_ids: Vec<Uuid>,
         context_ids: Vec<Uuid>,
@@ -75,7 +75,7 @@ impl Pipeline {
     /// Shared assembly: decodes the stored config and merges the references.
     fn assemble(
         pipeline: model::WorkspacePipeline,
-        workspace_slug: WorkspaceSlug,
+        workspace_slug: Slug,
         artifacts: Vec<Artifact>,
         policy_ids: Vec<Uuid>,
         context_ids: Vec<Uuid>,
@@ -83,7 +83,7 @@ impl Pipeline {
         let definition =
             PipelineDefinition::from_parts(pipeline.definition, policy_ids, context_ids)?;
         Ok(Self {
-            pipeline_id: pipeline.id,
+            slug: pipeline.slug,
             workspace_slug,
             account_id: pipeline.account_id,
             name: pipeline.name,
@@ -105,8 +105,8 @@ pub type PipelinesPage = Page<Pipeline>;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineSummary {
-    /// Unique pipeline identifier.
-    pub pipeline_id: Uuid,
+    /// URL slug of the pipeline, unique within its workspace.
+    pub slug: Slug,
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.
@@ -124,7 +124,7 @@ impl PipelineSummary {
     /// Creates a new instance of [`PipelineSummary`] from the database model.
     pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
         Self {
-            pipeline_id: pipeline.id,
+            slug: pipeline.slug,
             name: pipeline.name,
             description: pipeline.description,
             status: pipeline.status,

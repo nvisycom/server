@@ -66,6 +66,7 @@ async fn create_connection(
     let new_connection = NewWorkspaceConnection {
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
+        slug: request.slug,
         name: request.name,
         provider: request.provider,
         encrypted_data,
@@ -77,7 +78,7 @@ async fn create_connection(
 
     tracing::info!(
         target: TRACING_TARGET,
-        connection_id = %connection.id,
+        connection_slug = %connection.slug,
         provider = %connection.provider,
         "Connection created",
     );
@@ -169,7 +170,7 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        connection_id = %path_params.connection_id,
+        connection_slug = %path_params.connection_slug,
     )
 )]
 async fn read_connection(
@@ -186,7 +187,7 @@ async fn read_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let connection = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
@@ -213,7 +214,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        connection_id = %path_params.connection_id,
+        connection_slug = %path_params.connection_slug,
     )
 )]
 async fn update_connection(
@@ -232,8 +233,7 @@ async fn update_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    // Confirm the connection exists in this workspace before mutating.
-    find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let existing = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     let encrypted_data = request
         .data
@@ -247,7 +247,7 @@ async fn update_connection(
     };
 
     let connection = conn
-        .update_workspace_connection(path_params.connection_id, update_data)
+        .update_workspace_connection(existing.id, update_data)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
@@ -276,7 +276,7 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        connection_id = %path_params.connection_id,
+        connection_slug = %path_params.connection_slug,
     )
 )]
 async fn delete_connection(
@@ -293,11 +293,9 @@ async fn delete_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    // Confirm the connection exists in this workspace before deleting.
-    find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let existing = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
-    conn.delete_workspace_connection(path_params.connection_id)
-        .await?;
+    conn.delete_workspace_connection(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection deleted");
 
@@ -313,13 +311,13 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace or returns NotFound error.
+/// Finds a connection within a workspace by slug or returns NotFound error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    connection_id: Uuid,
+    connection_slug: &str,
 ) -> Result<WorkspaceConnection> {
-    conn.find_connection_in_workspace(workspace_id, connection_id)
+    conn.find_connection_in_workspace_by_slug(workspace_id, connection_slug)
         .await?
         .ok_or_else(|| Error::not_found("connection"))
 }
@@ -335,7 +333,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_connections, list_connections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/",
+            "/workspaces/{workspaceSlug}/connections/{connectionSlug}/",
             get_with(read_connection, read_connection_docs)
                 .put_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),

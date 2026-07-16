@@ -232,7 +232,7 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Tokens".into(),
+            name: "API Tokens".into(),
             description: Some("API token management".into()),
             ..Default::default()
         })
@@ -242,8 +242,38 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
+            name: "Pipelines".into(),
+            description: Some("Redaction pipeline configuration".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Pipeline Runs".into(),
+            description: Some("Pipeline run execution and review".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Policies".into(),
+            description: Some("Redaction policy configuration".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Contexts".into(),
+            description: Some("Detection context configuration".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
             name: "Webhooks".into(),
             description: Some("Webhook configuration".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Notifications".into(),
+            description: Some("Account notification management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Health".into(),
+            description: Some("Service health checks".into()),
             ..Default::default()
         })
 }
