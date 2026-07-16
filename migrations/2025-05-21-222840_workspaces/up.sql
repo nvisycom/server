@@ -7,11 +7,18 @@ CREATE TABLE workspaces (
 
     -- Workspace identity and branding
     display_name     TEXT             NOT NULL,
+    slug             TEXT             NOT NULL,
     description      TEXT             DEFAULT NULL,
     avatar_url       TEXT             DEFAULT NULL,
 
     CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 32),
     CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 2000),
+
+    -- Human-readable URL identity. Mirrors the WorkspaceSlug newtype: lowercase
+    -- alphanumeric with single internal dashes, 3-32 characters.
+    CONSTRAINT workspaces_slug_key UNIQUE (slug),
+    CONSTRAINT workspaces_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
+    CONSTRAINT workspaces_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
     -- Workspace settings
     require_approval BOOLEAN            NOT NULL DEFAULT TRUE,

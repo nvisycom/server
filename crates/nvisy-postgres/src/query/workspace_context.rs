@@ -31,6 +31,13 @@ pub trait WorkspaceContextRepository {
         context_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceContext>>> + Send;
 
+    /// Finds a context by slug within a specific workspace.
+    fn find_context_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceContext>>> + Send;
+
     /// Lists all contexts in a workspace with offset pagination.
     fn offset_list_workspace_contexts(
         &mut self,
@@ -110,6 +117,26 @@ impl WorkspaceContextRepository for PgConnection {
         let context = workspace_contexts::table
             .filter(dsl::id.eq(context_id))
             .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceContext::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(context)
+    }
+
+    async fn find_context_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> PgResult<Option<WorkspaceContext>> {
+        use schema::workspace_contexts::{self, dsl};
+
+        let context = workspace_contexts::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::slug.eq(slug))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceContext::as_select())
             .first(self)

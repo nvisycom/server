@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceActivity;
-use nvisy_postgres::types::ActivityType;
+use nvisy_postgres::types::{ActivityType, Slug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -15,8 +15,8 @@ use super::Page;
 pub struct Activity {
     /// Unique activity identifier.
     pub id: Uuid,
-    /// Workspace ID.
-    pub workspace_id: Uuid,
+    /// Slug of the workspace this activity belongs to.
+    pub workspace_slug: Slug,
     /// Account that performed the activity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<Uuid>,
@@ -32,10 +32,10 @@ pub struct Activity {
 pub type ActivitiesPage = Page<Activity>;
 
 impl Activity {
-    pub fn from_model(activity: WorkspaceActivity) -> Self {
+    pub fn from_model(activity: WorkspaceActivity, workspace_slug: Slug) -> Self {
         Self {
             id: activity.id,
-            workspace_id: activity.workspace_id,
+            workspace_slug,
             account_id: activity.account_id,
             activity_type: activity.activity_type,
             description: activity.description,

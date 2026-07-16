@@ -31,6 +31,13 @@ pub trait WorkspacePolicyRepository {
         policy_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePolicy>>> + Send;
 
+    /// Finds a policy by slug within a specific workspace.
+    fn find_policy_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> impl Future<Output = PgResult<Option<WorkspacePolicy>>> + Send;
+
     /// Lists all policies in a workspace with offset pagination.
     fn offset_list_workspace_policies(
         &mut self,
@@ -110,6 +117,26 @@ impl WorkspacePolicyRepository for PgConnection {
         let policy = workspace_policies::table
             .filter(dsl::id.eq(policy_id))
             .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspacePolicy::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(policy)
+    }
+
+    async fn find_policy_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> PgResult<Option<WorkspacePolicy>> {
+        use schema::workspace_policies::{self, dsl};
+
+        let policy = workspace_policies::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::slug.eq(slug))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspacePolicy::as_select())
             .first(self)

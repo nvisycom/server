@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_policies;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, Slug};
 
 /// Workspace policy representing a structured redaction governance policy.
 ///
@@ -22,6 +22,8 @@ pub struct WorkspacePolicy {
     pub workspace_id: Uuid,
     /// Reference to the account that created this policy.
     pub account_id: Uuid,
+    /// URL-safe policy identifier, unique within the workspace.
+    pub slug: Slug,
     /// Human-readable policy name.
     pub name: String,
     /// Policy description.
@@ -49,6 +51,8 @@ pub struct NewWorkspacePolicy {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
+    /// URL-safe policy identifier, unique within the workspace.
+    pub slug: Slug,
     /// Policy name.
     pub name: String,
     /// Policy description.

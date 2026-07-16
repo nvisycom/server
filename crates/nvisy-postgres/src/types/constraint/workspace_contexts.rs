@@ -10,6 +10,12 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceContextConstraints {
+    // Slug validation constraints
+    #[strum(serialize = "workspace_contexts_slug_length")]
+    SlugLength,
+    #[strum(serialize = "workspace_contexts_slug_format")]
+    SlugFormat,
+
     // Name validation constraints
     #[strum(serialize = "workspace_contexts_name_length")]
     NameLength,
@@ -33,6 +39,8 @@ pub enum WorkspaceContextConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_contexts_workspace_id_id_key")]
     WorkspaceIdIdUnique,
+    #[strum(serialize = "workspace_contexts_workspace_id_slug_key")]
+    SlugUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_contexts_updated_after_created")]
@@ -50,13 +58,16 @@ impl WorkspaceContextConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceContextConstraints::NameLength
+            WorkspaceContextConstraints::SlugLength
+            | WorkspaceContextConstraints::SlugFormat
+            | WorkspaceContextConstraints::NameLength
             | WorkspaceContextConstraints::DescriptionLength
             | WorkspaceContextConstraints::DefinitionSize
             | WorkspaceContextConstraints::VersionLength
             | WorkspaceContextConstraints::MetadataSize => ConstraintCategory::Validation,
 
-            WorkspaceContextConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+            WorkspaceContextConstraints::WorkspaceIdIdUnique
+            | WorkspaceContextConstraints::SlugUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceContextConstraints::UpdatedAfterCreated
             | WorkspaceContextConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,

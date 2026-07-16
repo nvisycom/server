@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnectionRun as ConnectionRunModel;
-use nvisy_postgres::types::{SyncStatus, SyncTriggerType};
+use nvisy_postgres::types::{Slug, SyncStatus, SyncTriggerType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,13 +10,18 @@ use uuid::Uuid;
 use super::Page;
 
 /// Response type for a connection sync run.
+///
+/// A run is addressed as `(connection slug, run number)`, so it carries no
+/// surrogate id of its own.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionRun {
-    /// Unique run identifier.
-    pub id: Uuid,
-    /// Connection this run synchronizes.
-    pub connection_id: Uuid,
+    /// Sequential run number within the connection (the run's identity).
+    pub run_number: i32,
+    /// Slug of the connection this run belongs to.
+    pub connection_slug: Slug,
+    /// Slug of the workspace this run belongs to.
+    pub workspace_slug: Slug,
     /// Account that triggered the run (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<Uuid>,
@@ -24,8 +29,6 @@ pub struct ConnectionRun {
     pub trigger_type: SyncTriggerType,
     /// Current run status.
     pub status: SyncStatus,
-    /// Sequence number within the connection (display only).
-    pub run_number: i32,
     /// Number of records processed by the run.
     pub records_synced: i64,
     /// Failure detail when the run failed.
@@ -44,15 +47,20 @@ pub struct ConnectionRun {
 pub type ConnectionRunsPage = Page<ConnectionRun>;
 
 impl ConnectionRun {
-    /// Creates a connection run response from the database model.
-    pub fn from_model(run: ConnectionRunModel) -> Self {
+    /// Creates a connection run response from the database model and the slugs
+    /// of its owning connection and workspace.
+    pub fn from_model(
+        run: ConnectionRunModel,
+        connection_slug: Slug,
+        workspace_slug: Slug,
+    ) -> Self {
         Self {
-            id: run.id,
-            connection_id: run.connection_id,
+            run_number: run.run_number,
+            connection_slug,
+            workspace_slug,
             account_id: run.account_id,
             trigger_type: run.trigger_type,
             status: run.status,
-            run_number: run.run_number,
             records_synced: run.records_synced,
             error_message: run.error_message,
             metadata: run.metadata,

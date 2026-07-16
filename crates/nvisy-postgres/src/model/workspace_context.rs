@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_contexts;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, Slug};
 
 /// Workspace context representing structured reference-data for redaction.
 ///
@@ -22,6 +22,8 @@ pub struct WorkspaceContext {
     pub workspace_id: Uuid,
     /// Reference to the account that created this context.
     pub account_id: Uuid,
+    /// URL-safe context identifier, unique within the workspace.
+    pub slug: Slug,
     /// Human-readable context name.
     pub name: String,
     /// Context description.
@@ -49,6 +51,8 @@ pub struct NewWorkspaceContext {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
+    /// URL-safe context identifier, unique within the workspace.
+    pub slug: Slug,
     /// Context name.
     pub name: String,
     /// Context description.

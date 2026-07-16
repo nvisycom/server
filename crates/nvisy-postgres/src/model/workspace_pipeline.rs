@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_pipelines;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, PipelineStatus};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, PipelineStatus, Slug};
 
 /// Workspace pipeline model representing a workflow definition in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,6 +18,8 @@ pub struct WorkspacePipeline {
     pub workspace_id: Uuid,
     /// Reference to the account that created this pipeline.
     pub account_id: Uuid,
+    /// URL-safe pipeline identifier, unique within the workspace.
+    pub slug: Slug,
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.
@@ -43,7 +45,10 @@ pub struct WorkspacePipeline {
 }
 
 /// Data for creating a new workspace pipeline.
-#[derive(Debug, Default, Clone, Insertable)]
+///
+/// Not `Default`: a pipeline cannot exist without a [`Slug`], so the slug
+/// must always be supplied explicitly.
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_pipelines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspacePipeline {
@@ -51,6 +56,8 @@ pub struct NewWorkspacePipeline {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
+    /// URL-safe pipeline identifier, unique within the workspace.
+    pub slug: Slug,
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.

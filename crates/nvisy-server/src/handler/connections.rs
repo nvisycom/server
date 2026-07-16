@@ -22,10 +22,11 @@ use nvisy_postgres::query::WorkspaceConnectionRepository;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+};
 use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, UpdateConnection,
-    WorkspacePathParams,
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
 use crate::handler::{Error, Result};
@@ -42,14 +43,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn create_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<CreateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace connection");
@@ -57,18 +58,15 @@ async fn create_connection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let encrypted_data = crypto.encrypt_json(path_params.workspace_id, &request.data)?;
+    let encrypted_data = crypto.encrypt_json(workspace.id, &request.data)?;
 
     let new_connection = NewWorkspaceConnection {
-        workspace_id: path_params.workspace_id,
+        workspace_id: workspace.id,
         account_id: auth_state.account_id,
+        slug: request.slug,
         name: request.name,
         provider: request.provider,
         encrypted_data,
@@ -80,14 +78,14 @@ async fn create_connection(
 
     tracing::info!(
         target: TRACING_TARGET,
-        connection_id = %connection.id,
+        connection_slug = %connection.slug,
         provider = %connection.provider,
         "Connection created",
     );
 
     Ok((
         StatusCode::CREATED,
-        Json(Connection::from_model(connection)),
+        Json(Connection::from_model(connection, workspace.slug)),
     ))
 }
 
@@ -112,13 +110,13 @@ fn create_connection_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn list_connections(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<ConnectionsQuery>,
 ) -> Result<(StatusCode, Json<ConnectionsPage>)> {
@@ -127,16 +125,12 @@ async fn list_connections(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
     let page = conn
         .cursor_list_workspace_connections(
-            path_params.workspace_id,
+            workspace.id,
             pagination.into(),
             query.provider.as_deref(),
         )
@@ -150,10 +144,9 @@ async fn list_connections(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionsPage::from_cursor_page(
-            page,
-            Connection::from_model,
-        )),
+        Json(ConnectionsPage::from_cursor_page(page, |connection| {
+            Connection::from_model(connection, workspace.slug.clone())
+        })),
     ))
 }
 
@@ -176,13 +169,14 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        connection_id = %path_params.connection_id,
+        workspace_id = %workspace.id,
+        connection_slug = %path_params.connection_slug,
     )
 )]
 async fn read_connection(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace connection");
@@ -190,23 +184,17 @@ async fn read_connection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let connection = find_connection(
-        &mut conn,
-        path_params.workspace_id,
-        path_params.connection_id,
-    )
-    .await?;
+    let connection = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
-    Ok((StatusCode::OK, Json(Connection::from_model(connection))))
+    Ok((
+        StatusCode::OK,
+        Json(Connection::from_model(connection, workspace.slug)),
+    ))
 }
 
 fn read_connection_docs(op: TransformOperation) -> TransformOperation {
@@ -225,14 +213,15 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        connection_id = %path_params.connection_id,
+        workspace_id = %workspace.id,
+        connection_slug = %path_params.connection_slug,
     )
 )]
 async fn update_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<UpdateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
@@ -241,24 +230,14 @@ async fn update_connection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    // Confirm the connection exists in this workspace before mutating.
-    find_connection(
-        &mut conn,
-        path_params.workspace_id,
-        path_params.connection_id,
-    )
-    .await?;
+    let existing = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     let encrypted_data = request
         .data
-        .map(|data| crypto.encrypt_json(path_params.workspace_id, &data))
+        .map(|data| crypto.encrypt_json(workspace.id, &data))
         .transpose()?;
 
     let update_data = UpdateWorkspaceConnection {
@@ -268,12 +247,15 @@ async fn update_connection(
     };
 
     let connection = conn
-        .update_workspace_connection(path_params.connection_id, update_data)
+        .update_workspace_connection(existing.id, update_data)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
 
-    Ok((StatusCode::OK, Json(Connection::from_model(connection))))
+    Ok((
+        StatusCode::OK,
+        Json(Connection::from_model(connection, workspace.slug)),
+    ))
 }
 
 fn update_connection_docs(op: TransformOperation) -> TransformOperation {
@@ -293,13 +275,14 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        connection_id = %path_params.connection_id,
+        workspace_id = %workspace.id,
+        connection_slug = %path_params.connection_slug,
     )
 )]
 async fn delete_connection(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace connection");
@@ -307,23 +290,12 @@ async fn delete_connection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    // Confirm the connection exists in this workspace before deleting.
-    find_connection(
-        &mut conn,
-        path_params.workspace_id,
-        path_params.connection_id,
-    )
-    .await?;
+    let existing = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
-    conn.delete_workspace_connection(path_params.connection_id)
-        .await?;
+    conn.delete_workspace_connection(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection deleted");
 
@@ -339,13 +311,13 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace or returns NotFound error.
+/// Finds a connection within a workspace by slug or returns NotFound error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    connection_id: Uuid,
+    connection_slug: &str,
 ) -> Result<WorkspaceConnection> {
-    conn.find_connection_in_workspace(workspace_id, connection_id)
+    conn.find_connection_in_workspace_by_slug(workspace_id, connection_slug)
         .await?
         .ok_or_else(|| Error::not_found("connection"))
 }
@@ -356,12 +328,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/connections/",
+            "/workspaces/{workspaceSlug}/connections/",
             post_with(create_connection, create_connection_docs)
                 .get_with(list_connections, list_connections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/connections/{connectionId}/",
+            "/workspaces/{workspaceSlug}/connections/{connectionSlug}/",
             get_with(read_connection, read_connection_docs)
                 .put_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),

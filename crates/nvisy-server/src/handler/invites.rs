@@ -9,20 +9,24 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceMember, WorkspaceInvite};
+use nvisy_postgres::model::{Account, NewAccountNotification, NewWorkspaceMember, WorkspaceInvite};
 use nvisy_postgres::query::{
-    WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
+    AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
+    WorkspaceMemberRepository, WorkspaceRepository,
 };
+use nvisy_postgres::types::NotificationEvent;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+};
 use crate::handler::request::{
     CreateInvite, CursorPagination, GenerateInviteCode, InviteCodePathParams, InvitePathParams,
-    ListInvites, ReplyInvite, WorkspacePathParams,
+    ListInvites, ReplyInvite,
 };
 use crate::handler::response::{
-    ErrorResponse, Invite, InviteCode, InvitePreview, InvitesPage, Member,
+    ErrorResponse, Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -30,40 +34,55 @@ use crate::service::ServiceState;
 /// Tracing target for workspace invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::invites";
 
-/// Creates a new workspace invitation.
+/// Outcome of [`create_invite`].
 ///
-/// Sends an invitation to join a workspace to the specified email address.
-/// The invitee will receive an email with instructions to accept or decline.
-/// Requires `InviteMembers` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        invited_role = ?request.invited_role,
-    )
-)]
-async fn send_invite(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
-    ValidateJson(request): ValidateJson<CreateInvite>,
-) -> Result<(StatusCode, Json<Invite>)> {
-    tracing::debug!(target: TRACING_TARGET, "Creating workspace invitation");
+/// The invitee must already be a platform account, since the only delivery
+/// this server performs is an in-app notification. An email that maps to no
+/// account produces [`InviteOutcome::UnknownEmail`] and no invite row is
+/// created — the caller reports success either way so the response cannot be
+/// used to probe whether an account exists.
+#[must_use]
+pub enum InviteOutcome {
+    /// The invite (and its notification) were created for an existing account.
+    ///
+    /// Boxed so this variant does not dominate the enum's size over the empty
+    /// [`InviteOutcome::UnknownEmail`].
+    Created(Box<CreatedInvite>),
+    /// No account matches the email; nothing was created.
+    UnknownEmail,
+}
 
-    let mut conn = pg_client.get_connection().await?;
+/// The invitation created by [`create_invite`] together with its recipient.
+pub struct CreatedInvite {
+    /// The persisted invitation.
+    pub invite: WorkspaceInvite,
+    /// The account the invitation was addressed to. Unused by this crate;
+    /// exposed for callers that deliver email out-of-band (e.g. the hosted
+    /// edition) and need the recipient's account details.
+    #[allow(dead_code)]
+    pub account: Account,
+}
 
-    auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::InviteMembers,
-        )
-        .await?;
-
-    // Check if invitee is already a member (by email)
+/// Creates a workspace invitation for an existing platform account.
+///
+/// Assumes the caller has already authorized `InviteMembers` on the workspace.
+/// Rejects an email that already belongs to a member or has a pending invite.
+/// If the email resolves to an account, the invite and an in-app notification
+/// are created together in one transaction and returned as
+/// [`InviteOutcome::Created`]; otherwise [`InviteOutcome::UnknownEmail`] is
+/// returned without creating anything.
+///
+/// A deployment that can deliver email out-of-band (e.g. the hosted edition)
+/// can call this, then send its own message on `Created` and handle
+/// `UnknownEmail` however it chooses.
+pub async fn create_invite(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    actor_id: Uuid,
+    request: &CreateInvite,
+) -> Result<InviteOutcome> {
     if conn
-        .find_workspace_member_by_email(path_params.workspace_id, &request.invitee_email)
+        .find_workspace_member_by_email(workspace_id, &request.invitee_email)
         .await?
         .is_some()
     {
@@ -72,9 +91,12 @@ async fn send_invite(
             .with_resource("workspace_member"));
     }
 
-    // Check for existing pending invite for this email
+    let Some(account) = conn.find_account_by_email(&request.invitee_email).await? else {
+        return Ok(InviteOutcome::UnknownEmail);
+    };
+
     if conn
-        .find_pending_workspace_invite_by_email(path_params.workspace_id, &request.invitee_email)
+        .find_pending_workspace_invite_by_email(workspace_id, &request.invitee_email)
         .await?
         .is_some()
     {
@@ -83,26 +105,89 @@ async fn send_invite(
             .with_resource("workspace_invite"));
     }
 
-    let workspace_invite = conn
-        .create_workspace_invite(
-            request.into_model(path_params.workspace_id, auth_state.account_id),
-        )
+    let new_invite = request.to_model(workspace_id, actor_id);
+    let account_id = account.id;
+
+    let invite = conn
+        .transaction(async |conn| {
+            let invite = conn.create_workspace_invite(new_invite).await?;
+
+            conn.create_account_notification(NewAccountNotification {
+                account_id,
+                notify_type: NotificationEvent::MemberInvited,
+                title: "Workspace invitation".to_owned(),
+                message: "You've been invited to join a workspace.".to_owned(),
+                related_id: Some(invite.id),
+                related_type: Some("workspace_invite".to_owned()),
+                metadata: None,
+                expires_at: None,
+            })
+            .await?;
+
+            Ok::<_, PgError>(invite)
+        })
         .await?;
-    let response = Invite::from_model(workspace_invite);
 
-    tracing::info!(
-        target: TRACING_TARGET,
-        invite_id = %response.invite_id,
-        "Workspace invitation created",
-    );
+    Ok(InviteOutcome::Created(Box::new(CreatedInvite {
+        invite,
+        account,
+    })))
+}
 
-    Ok((StatusCode::CREATED, Json(response)))
+/// Creates a new workspace invitation.
+///
+/// Invites an existing platform user to the workspace and delivers an in-app
+/// notification. This server sends no email; if the address does not belong to
+/// a known account, the request still succeeds but nothing is created, so the
+/// response cannot reveal whether an account exists. Requires `InviteMembers`
+/// permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        invited_role = ?request.invited_role,
+    )
+)]
+async fn send_invite(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    ValidateJson(request): ValidateJson<CreateInvite>,
+) -> Result<(StatusCode, Json<InviteSent>)> {
+    tracing::debug!(target: TRACING_TARGET, "Creating workspace invitation");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
+        .await?;
+
+    match create_invite(&mut conn, workspace.id, auth_state.account_id, &request).await? {
+        InviteOutcome::Created(created) => {
+            tracing::info!(
+                target: TRACING_TARGET,
+                invite_id = %created.invite.id,
+                "Workspace invitation created",
+            );
+        }
+        InviteOutcome::UnknownEmail => {
+            tracing::debug!(target: TRACING_TARGET, "Invite email has no account; no-op");
+        }
+    }
+
+    Ok((StatusCode::OK, Json(InviteSent::new())))
 }
 
 fn send_invite_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Send invitation")
-        .description("Sends an invitation to join a workspace to the specified email address.")
-        .response::<201, Json<Invite>>()
+        .description(
+            "Invites an existing platform user to the workspace and delivers an in-app \
+             notification. No email is sent by this server. The response is identical whether \
+             or not the address belongs to a known account, so it cannot be used to determine \
+             whether an account exists.",
+        )
+        .response::<200, Json<InviteSent>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -117,13 +202,13 @@ fn send_invite_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn list_invites(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     Query(query): Query<ListInvites>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<InvitesPage>)> {
@@ -132,12 +217,12 @@ async fn list_invites(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
         .await?;
 
     let page = conn
         .cursor_list_workspace_invites(
-            path_params.workspace_id,
+            workspace.id,
             pagination.into(),
             query.to_sort(),
             query.to_filter(),
@@ -152,7 +237,9 @@ async fn list_invites(
 
     Ok((
         StatusCode::OK,
-        Json(InvitesPage::from_cursor_page(page, Invite::from_model)),
+        Json(InvitesPage::from_cursor_page(page, |invite| {
+            Invite::from_model(invite, workspace.slug.clone())
+        })),
     ))
 }
 
@@ -172,13 +259,14 @@ fn list_invites_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         invite_id = %path_params.invite_id,
     )
 )]
 async fn cancel_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Cancelling workspace invitation");
@@ -186,15 +274,11 @@ async fn cancel_invite(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::InviteMembers,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
         .await?;
 
     // Confirm the invite exists in this workspace before cancelling.
-    find_invite(&mut conn, path_params.workspace_id, path_params.invite_id).await?;
+    find_invite(&mut conn, workspace.id, path_params.invite_id).await?;
 
     conn.cancel_workspace_invite(path_params.invite_id, auth_state.account_id)
         .await?;
@@ -222,7 +306,7 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         invite_id = %path_params.invite_id,
         accept = request.accept_invite,
     )
@@ -230,6 +314,7 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
 async fn reply_to_invite(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInvite>,
 ) -> Result<(StatusCode, Json<Invite>)> {
@@ -237,7 +322,7 @@ async fn reply_to_invite(
 
     let mut conn = pg_client.get_connection().await?;
 
-    let invite = find_invite(&mut conn, path_params.workspace_id, path_params.invite_id).await?;
+    let invite = find_invite(&mut conn, workspace.id, path_params.invite_id).await?;
 
     // Verify invitation is still valid
     if !invite.can_be_used() {
@@ -285,7 +370,10 @@ async fn reply_to_invite(
         declined
     };
 
-    Ok((StatusCode::OK, Json(Invite::from_model(workspace_invite))))
+    Ok((
+        StatusCode::OK,
+        Json(Invite::from_model(workspace_invite, workspace.slug)),
+    ))
 }
 
 fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
@@ -306,14 +394,14 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         invited_role = ?request.invited_role,
     )
 )]
 async fn generate_invite_code(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<GenerateInviteCode>,
 ) -> Result<(StatusCode, Json<InviteCode>)> {
     tracing::info!(target: TRACING_TARGET, "Generating invite code");
@@ -321,17 +409,11 @@ async fn generate_invite_code(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::InviteMembers,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
         .await?;
 
     let workspace_invite = conn
-        .create_workspace_invite(
-            request.into_model(path_params.workspace_id, auth_state.account_id),
-        )
+        .create_workspace_invite(request.into_model(workspace.id, auth_state.account_id))
         .await?;
 
     tracing::info!(
@@ -342,7 +424,7 @@ async fn generate_invite_code(
 
     Ok((
         StatusCode::CREATED,
-        Json(InviteCode::from_invite(&workspace_invite)),
+        Json(InviteCode::from_invite(&workspace_invite, workspace.slug)),
     ))
 }
 
@@ -540,19 +622,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspaceId}/invites/",
+            "/workspaces/{workspaceSlug}/invites/",
             post_with(send_invite, send_invite_docs).get_with(list_invites, list_invites_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/invites/code/",
+            "/workspaces/{workspaceSlug}/invites/code/",
             post_with(generate_invite_code, generate_invite_code_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/invites/{inviteId}/",
+            "/workspaces/{workspaceSlug}/invites/{inviteId}/",
             delete_with(cancel_invite, cancel_invite_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/invites/{inviteId}/",
+            "/workspaces/{workspaceSlug}/invites/{inviteId}/",
             post_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(

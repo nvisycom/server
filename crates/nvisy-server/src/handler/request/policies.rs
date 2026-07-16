@@ -1,20 +1,23 @@
 //! Policy request types.
 
+use nvisy_postgres::types::Slug;
 use nvisy_schema::policy::Policy as SchemaPolicy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use validator::Validate;
 
 /// Path parameters for policy operations.
+///
+/// The workspace is resolved by the [`WorkspaceContext`] extractor from the
+/// `{workspaceSlug}` path segment.
+///
+/// [`WorkspaceContext`]: crate::extract::WorkspaceContext
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// Unique identifier of the policy.
-    pub policy_id: Uuid,
+    /// URL slug of the policy, unique within its workspace.
+    pub policy_slug: String,
 }
 
 /// Request payload for creating a new workspace policy.
@@ -27,6 +30,8 @@ pub struct PolicyPathParams {
 pub struct CreatePolicy {
     /// Optional display name override. Defaults to the policy's own name.
     pub name: Option<String>,
+    /// URL slug, unique within the workspace and immutable after creation.
+    pub slug: Slug,
     /// Optional description override. Defaults to the policy's own description.
     pub description: Option<String>,
     /// The structured policy body consumed by the engine.

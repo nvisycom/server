@@ -10,15 +10,17 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext};
+use nvisy_postgres::model::{
+    NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext as WorkspaceContextModel,
+};
 use nvisy_postgres::query::WorkspaceContextRepository;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
-use crate::handler::request::{
-    ContextPathParams, CreateContext, CursorPagination, UpdateContext, WorkspacePathParams,
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
+use crate::handler::request::{ContextPathParams, CreateContext, CursorPagination, UpdateContext};
 use crate::handler::response::{Context, ContextsPage, ErrorResponse};
 use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
@@ -35,14 +37,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::contexts";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn create_context(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<CreateContext>,
 ) -> Result<(StatusCode, Json<Context>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace context");
@@ -50,11 +52,7 @@ async fn create_context(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageContexts,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
     let definition = &request.definition;
@@ -63,11 +61,12 @@ async fn create_context(
         .description
         .or_else(|| definition.description.clone());
     let version = definition.version.to_string();
-    let encrypted = crypto.encrypt_json(path_params.workspace_id, definition)?;
+    let encrypted = crypto.encrypt_json(workspace.id, definition)?;
 
     let new_context = NewWorkspaceContext {
-        workspace_id: path_params.workspace_id,
+        workspace_id: workspace.id,
         account_id: auth_state.account_id,
+        slug: request.slug,
         name,
         description,
         version,
@@ -77,11 +76,11 @@ async fn create_context(
 
     let context = conn.create_workspace_context(new_context).await?;
 
-    tracing::info!(target: TRACING_TARGET, context_id = %context.id, "Context created");
+    tracing::info!(target: TRACING_TARGET, context_slug = %context.slug, "Context created");
 
     Ok((
         StatusCode::CREATED,
-        Json(Context::from_model(context, &crypto)?),
+        Json(Context::from_model(context, workspace.slug, &crypto)?),
     ))
 }
 
@@ -99,14 +98,14 @@ fn create_context_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn list_contexts(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ContextsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace contexts");
@@ -114,15 +113,11 @@ async fn list_contexts(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewContexts,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewContexts)
         .await?;
 
     let page = conn
-        .cursor_list_workspace_contexts(path_params.workspace_id, pagination.into())
+        .cursor_list_workspace_contexts(workspace.id, pagination.into())
         .await?;
 
     tracing::debug!(
@@ -131,8 +126,9 @@ async fn list_contexts(
         "Workspace contexts listed",
     );
 
-    let page =
-        ContextsPage::try_from_cursor_page(page, |model| Context::from_model(model, &crypto))?;
+    let page = ContextsPage::try_from_cursor_page(page, |model| {
+        Context::from_model(model, workspace.slug.clone(), &crypto)
+    })?;
 
     Ok((StatusCode::OK, Json(page)))
 }
@@ -150,14 +146,15 @@ fn list_contexts_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        context_id = %path_params.context_id,
+        workspace_id = %workspace.id,
+        context_slug = %path_params.context_slug,
     )
 )]
 async fn read_context(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ContextPathParams>,
 ) -> Result<(StatusCode, Json<Context>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace context");
@@ -165,18 +162,17 @@ async fn read_context(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewContexts,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewContexts)
         .await?;
 
-    let context = find_context(&mut conn, path_params.workspace_id, path_params.context_id).await?;
+    let context = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace context read");
 
-    Ok((StatusCode::OK, Json(Context::from_model(context, &crypto)?)))
+    Ok((
+        StatusCode::OK,
+        Json(Context::from_model(context, workspace.slug, &crypto)?),
+    ))
 }
 
 fn read_context_docs(op: TransformOperation) -> TransformOperation {
@@ -196,14 +192,15 @@ fn read_context_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        context_id = %path_params.context_id,
+        workspace_id = %workspace.id,
+        context_slug = %path_params.context_slug,
     )
 )]
 async fn update_context(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ContextPathParams>,
     ValidateJson(request): ValidateJson<UpdateContext>,
 ) -> Result<(StatusCode, Json<Context>)> {
@@ -212,19 +209,14 @@ async fn update_context(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageContexts,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
-    // Confirm the context exists in this workspace before mutating.
-    find_context(&mut conn, path_params.workspace_id, path_params.context_id).await?;
+    let existing = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
-            let encrypted = crypto.encrypt_json(path_params.workspace_id, definition)?;
+            let encrypted = crypto.encrypt_json(workspace.id, definition)?;
             (Some(definition.version.to_string()), Some(encrypted))
         }
         None => (None, None),
@@ -238,13 +230,14 @@ async fn update_context(
         ..Default::default()
     };
 
-    let context = conn
-        .update_workspace_context(path_params.context_id, updates)
-        .await?;
+    let context = conn.update_workspace_context(existing.id, updates).await?;
 
     tracing::info!(target: TRACING_TARGET, "Context updated");
 
-    Ok((StatusCode::OK, Json(Context::from_model(context, &crypto)?)))
+    Ok((
+        StatusCode::OK,
+        Json(Context::from_model(context, workspace.slug, &crypto)?),
+    ))
 }
 
 fn update_context_docs(op: TransformOperation) -> TransformOperation {
@@ -262,13 +255,14 @@ fn update_context_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
-        context_id = %path_params.context_id,
+        workspace_id = %workspace.id,
+        context_slug = %path_params.context_slug,
     )
 )]
 async fn delete_context(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ContextPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace context");
@@ -276,18 +270,12 @@ async fn delete_context(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageContexts,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
-    // Confirm the context exists in this workspace before deleting.
-    find_context(&mut conn, path_params.workspace_id, path_params.context_id).await?;
+    let existing = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
-    conn.delete_workspace_context(path_params.context_id)
-        .await?;
+    conn.delete_workspace_context(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Context deleted");
 
@@ -303,13 +291,13 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a context within a workspace or returns NotFound error.
+/// Finds a context within a workspace by slug or returns NotFound error.
 async fn find_context(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    context_id: Uuid,
-) -> Result<WorkspaceContext> {
-    conn.find_context_in_workspace(workspace_id, context_id)
+    context_slug: &str,
+) -> Result<WorkspaceContextModel> {
+    conn.find_context_in_workspace_by_slug(workspace_id, context_slug)
         .await?
         .ok_or_else(|| Error::not_found("context"))
 }
@@ -320,12 +308,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/contexts/",
+            "/workspaces/{workspaceSlug}/contexts/",
             post_with(create_context, create_context_docs)
                 .get_with(list_contexts, list_contexts_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/contexts/{contextId}/",
+            "/workspaces/{workspaceSlug}/contexts/{contextSlug}/",
             get_with(read_context, read_context_docs)
                 .put_with(update_context, update_context_docs)
                 .delete_with(delete_context, delete_context_docs),

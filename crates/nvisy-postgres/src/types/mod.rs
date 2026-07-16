@@ -5,6 +5,7 @@ mod constraint;
 mod enums;
 mod filtering;
 mod pagination;
+mod slug;
 mod sorting;
 mod utilities;
 
@@ -28,6 +29,7 @@ pub use enums::{
 };
 pub use filtering::{FileFilter, FileFormat, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
+pub use slug::{SLUG_MAX_LENGTH, SLUG_MIN_LENGTH, Slug, SlugError};
 pub use sorting::{
     FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,
     SortBy, SortOrder,

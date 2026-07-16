@@ -11,6 +11,10 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspacePolicyConstraints {
     // Validation constraints
+    #[strum(serialize = "workspace_policies_slug_length")]
+    SlugLength,
+    #[strum(serialize = "workspace_policies_slug_format")]
+    SlugFormat,
     #[strum(serialize = "workspace_policies_name_length")]
     NameLength,
     #[strum(serialize = "workspace_policies_description_length")]
@@ -25,6 +29,8 @@ pub enum WorkspacePolicyConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_policies_workspace_id_id_key")]
     WorkspaceIdIdUnique,
+    #[strum(serialize = "workspace_policies_workspace_id_slug_key")]
+    SlugUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_policies_updated_after_created")]
@@ -42,13 +48,16 @@ impl WorkspacePolicyConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspacePolicyConstraints::NameLength
+            WorkspacePolicyConstraints::SlugLength
+            | WorkspacePolicyConstraints::SlugFormat
+            | WorkspacePolicyConstraints::NameLength
             | WorkspacePolicyConstraints::DescriptionLength
             | WorkspacePolicyConstraints::VersionLength
             | WorkspacePolicyConstraints::DefinitionSize
             | WorkspacePolicyConstraints::MetadataSize => ConstraintCategory::Validation,
 
-            WorkspacePolicyConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+            WorkspacePolicyConstraints::WorkspaceIdIdUnique
+            | WorkspacePolicyConstraints::SlugUnique => ConstraintCategory::Uniqueness,
 
             WorkspacePolicyConstraints::UpdatedAfterCreated
             | WorkspacePolicyConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,

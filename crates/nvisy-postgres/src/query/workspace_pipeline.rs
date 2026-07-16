@@ -37,6 +37,15 @@ pub trait WorkspacePipelineRepository {
         pipeline_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipeline>>> + Send;
 
+    /// Finds a pipeline by slug within a specific workspace.
+    ///
+    /// Excludes soft-deleted pipelines.
+    fn find_pipeline_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> impl Future<Output = PgResult<Option<WorkspacePipeline>>> + Send;
+
     /// Lists all pipelines in a workspace with offset pagination.
     fn offset_list_workspace_pipelines(
         &mut self,
@@ -140,6 +149,26 @@ impl WorkspacePipelineRepository for PgConnection {
         let pipeline = workspace_pipelines::table
             .filter(dsl::id.eq(pipeline_id))
             .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspacePipeline::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(pipeline)
+    }
+
+    async fn find_pipeline_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> PgResult<Option<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
+
+        let pipeline = workspace_pipelines::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::slug.eq(slug))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspacePipeline::as_select())
             .first(self)

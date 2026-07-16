@@ -59,10 +59,13 @@ schemars = { workspace = true, features = [], optional = true }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
-derive_more = { workspace = true, features = ["deref", "deref_mut"] }
+derive_more = { workspace = true, features = ["deref", "deref_mut", "display", "as_ref", "into"] }
 
 # Encoding
 base64 = { workspace = true, features = [] }
+
+# Text processing
+slug = { workspace = true, features = [] }
 
 # Primitive datatypes
 jiff = { workspace = true, features = ["serde"] }
