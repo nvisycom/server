@@ -68,7 +68,7 @@ async fn create_webhook(
 
     tracing::info!(
         target: TRACING_TARGET,
-        webhook_id = %webhook.id,
+        webhook_slug = %webhook.slug,
         "Webhook created",
     );
 
@@ -150,7 +150,7 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        webhook_id = %path_params.webhook_id,
+        webhook_slug = %path_params.webhook_slug,
     )
 )]
 async fn read_webhook(
@@ -167,7 +167,7 @@ async fn read_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWebhooks)
         .await?;
 
-    let webhook = find_webhook(&mut conn, workspace.id, path_params.webhook_id).await?;
+    let webhook = find_webhook(&mut conn, workspace.id, &path_params.webhook_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace webhook read");
 
@@ -194,7 +194,7 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        webhook_id = %path_params.webhook_id,
+        webhook_slug = %path_params.webhook_slug,
     )
 )]
 async fn update_webhook(
@@ -212,11 +212,11 @@ async fn update_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWebhooks)
         .await?;
 
-    let existing = find_webhook(&mut conn, workspace.id, path_params.webhook_id).await?;
+    let existing = find_webhook(&mut conn, workspace.id, &path_params.webhook_slug).await?;
 
     let update_data = request.into_model(existing.status);
     let webhook = conn
-        .update_workspace_webhook(path_params.webhook_id, update_data)
+        .update_workspace_webhook(existing.id, update_data)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Webhook updated");
@@ -245,7 +245,7 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        webhook_id = %path_params.webhook_id,
+        webhook_slug = %path_params.webhook_slug,
     )
 )]
 async fn delete_webhook(
@@ -262,11 +262,9 @@ async fn delete_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::DeleteWebhooks)
         .await?;
 
-    // Confirm the webhook exists in this workspace before deleting.
-    find_webhook(&mut conn, workspace.id, path_params.webhook_id).await?;
+    let existing = find_webhook(&mut conn, workspace.id, &path_params.webhook_slug).await?;
 
-    conn.delete_workspace_webhook(path_params.webhook_id)
-        .await?;
+    conn.delete_workspace_webhook(existing.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Webhook deleted");
 
@@ -291,7 +289,7 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        webhook_id = %path_params.webhook_id,
+        webhook_slug = %path_params.webhook_slug,
     )
 )]
 async fn test_webhook(
@@ -310,7 +308,7 @@ async fn test_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::TestWebhooks)
         .await?;
 
-    let webhook = find_webhook(&mut conn, workspace.id, path_params.webhook_id).await?;
+    let webhook = find_webhook(&mut conn, workspace.id, &path_params.webhook_slug).await?;
 
     // Parse the webhook URL
     let url: Url = webhook.url.parse().map_err(|_| {
@@ -349,13 +347,13 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a webhook within a workspace or returns NotFound error.
+/// Finds a webhook within a workspace by slug or returns NotFound error.
 async fn find_webhook(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    webhook_id: Uuid,
+    webhook_slug: &str,
 ) -> Result<WorkspaceWebhook> {
-    conn.find_webhook_in_workspace(workspace_id, webhook_id)
+    conn.find_webhook_in_workspace_by_slug(workspace_id, webhook_slug)
         .await?
         .ok_or_else(|| Error::not_found("webhook"))
 }
@@ -365,20 +363,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        // Workspace-scoped routes (require workspace context)
         .api_route(
             "/workspaces/{workspaceSlug}/webhooks/",
             post_with(create_webhook, create_webhook_docs)
                 .get_with(list_webhooks, list_webhooks_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/webhooks/{webhookId}/",
+            "/workspaces/{workspaceSlug}/webhooks/{webhookSlug}/",
             get_with(read_webhook, read_webhook_docs)
                 .put_with(update_webhook, update_webhook_docs)
                 .delete_with(delete_webhook, delete_webhook_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/webhooks/{webhookId}/test/",
+            "/workspaces/{workspaceSlug}/webhooks/{webhookSlug}/test/",
             post_with(test_webhook, test_webhook_docs),
         )
         .with_path_items(|item| item.tag("Webhooks"))

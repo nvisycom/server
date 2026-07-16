@@ -4,15 +4,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Path parameters for workspace-level operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-}
-
 /// Path parameters for workspace member operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -49,34 +40,13 @@ pub struct WorkspaceFilePathParams {
     pub file_id: Uuid,
 }
 
-/// Path parameters for file operations (file ID only).
-///
-/// Since file IDs are globally unique UUIDs, workspace context can be
-/// derived from the file record itself for authorization purposes.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FilePathParams {
-    /// Unique identifier of the file.
-    pub file_id: Uuid,
-}
-
-/// Path parameters for version operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VersionPathParams {
-    /// Unique identifier of the version.
-    pub version_id: Uuid,
-}
-
 /// Path parameters for webhook operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebhookPathParams {
-    /// Unique identifier of the webhook.
-    pub webhook_id: Uuid,
+    /// URL slug of the webhook, unique within its workspace.
+    pub webhook_slug: String,
 }
 
 /// Path parameters for API token operations.

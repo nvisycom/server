@@ -41,9 +41,6 @@ pub struct Workspace {
 }
 
 /// Data for creating a new workspace.
-///
-/// Not `Default`: a workspace cannot exist without a [`Slug`], so the
-/// slug must always be supplied explicitly.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspaces)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

@@ -59,21 +59,24 @@ async fn create_pipeline(
         .into_parts(workspace.id, auth_state.account_id)
         .map_err(serialize_error)?;
 
+    let (policy_ids, context_ids) =
+        resolve_references(&mut conn, workspace.id, &references).await?;
+
     let pipeline = conn
         .transaction(async |conn| {
             let pipeline = conn.create_workspace_pipeline(new_pipeline).await?;
-            replace_references(conn, &pipeline, &references).await?;
+            replace_references(conn, &pipeline, &policy_ids, &context_ids).await?;
             Ok::<WorkspacePipeline, PgError>(pipeline)
         })
         .await?;
 
     // The references were just written from the request, so build the response
-    // from them directly instead of reading the join tables back.
+    // from its slugs directly instead of reading the join tables back.
     let response = Pipeline::from_model(
         pipeline,
         workspace.slug,
-        references.policy_ids,
-        references.context_ids,
+        references.policy_slugs,
+        references.context_slugs,
     )
     .map_err(serialize_error)?;
 
@@ -176,17 +179,16 @@ async fn get_pipeline(
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
-    // Fetch artifacts for all runs of this pipeline
     let artifacts = conn.list_workspace_pipeline_artifacts(pipeline.id).await?;
-    let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
-    let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
+    let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
+    let context_slugs = conn.list_pipeline_context_slugs(pipeline.id).await?;
 
     let response = Pipeline::from_model_with_artifacts(
         pipeline,
         workspace.slug,
         artifacts,
-        policy_ids,
-        context_ids,
+        policy_slugs,
+        context_slugs,
     )
     .map_err(serialize_error)?;
 
@@ -236,7 +238,13 @@ async fn update_pipeline(
 
     let (update_data, references) = request.into_parts().map_err(serialize_error)?;
     let pipeline_id = existing.id;
-    let references_for_response = references.clone();
+
+    // When a definition is supplied, resolve its slugs to ids up front so an
+    // unknown reference rejects with 404 before any write.
+    let resolved = match &references {
+        Some(references) => Some(resolve_references(&mut conn, workspace.id, references).await?),
+        None => None,
+    };
 
     let pipeline = conn
         .transaction(async |conn| {
@@ -244,20 +252,20 @@ async fn update_pipeline(
                 .update_workspace_pipeline(pipeline_id, update_data)
                 .await?;
             // Only touch the join tables when the request supplied a definition.
-            if let Some(references) = references {
-                replace_references(conn, &pipeline, &references).await?;
+            if let Some((policy_ids, context_ids)) = &resolved {
+                replace_references(conn, &pipeline, policy_ids, context_ids).await?;
             }
             Ok::<WorkspacePipeline, PgError>(pipeline)
         })
         .await?;
 
-    let response = match references_for_response {
+    let response = match references {
         // A definition was supplied: the references we just wrote are current.
         Some(references) => Pipeline::from_model(
             pipeline,
             workspace.slug,
-            references.policy_ids,
-            references.context_ids,
+            references.policy_slugs,
+            references.context_slugs,
         )
         .map_err(serialize_error)?,
         // Partial update left the references untouched: read them back.
@@ -342,21 +350,32 @@ async fn find_pipeline(
 async fn replace_references(
     conn: &mut PgConnection,
     pipeline: &WorkspacePipeline,
-    references: &PipelineReferences,
+    policy_ids: &[Uuid],
+    context_ids: &[Uuid],
 ) -> PgResult<()> {
-    conn.replace_workspace_pipeline_policies(
-        pipeline.workspace_id,
-        pipeline.id,
-        &references.policy_ids,
-    )
-    .await?;
-    conn.replace_workspace_pipeline_contexts(
-        pipeline.workspace_id,
-        pipeline.id,
-        &references.context_ids,
-    )
-    .await?;
+    conn.replace_workspace_pipeline_policies(pipeline.workspace_id, pipeline.id, policy_ids)
+        .await?;
+    conn.replace_workspace_pipeline_contexts(pipeline.workspace_id, pipeline.id, context_ids)
+        .await?;
     Ok(())
+}
+
+/// Resolves a set of policy and context slugs to their ids within a workspace,
+/// rejecting the whole request with a 404 if any slug is unknown.
+async fn resolve_references(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    references: &PipelineReferences,
+) -> Result<(Vec<Uuid>, Vec<Uuid>)> {
+    let policy_ids = conn
+        .resolve_policy_slugs(workspace_id, &references.policy_slugs)
+        .await?
+        .ok_or_else(|| Error::not_found("policy"))?;
+    let context_ids = conn
+        .resolve_context_slugs(workspace_id, &references.context_slugs)
+        .await?
+        .ok_or_else(|| Error::not_found("context"))?;
+    Ok((policy_ids, context_ids))
 }
 
 /// Builds a [`Pipeline`] response, reading the pipeline's (live) references back
@@ -366,9 +385,10 @@ async fn build_response(
     pipeline: WorkspacePipeline,
     workspace_slug: Slug,
 ) -> Result<Pipeline> {
-    let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
-    let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
-    Pipeline::from_model(pipeline, workspace_slug, policy_ids, context_ids).map_err(serialize_error)
+    let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
+    let context_slugs = conn.list_pipeline_context_slugs(pipeline.id).await?;
+    Pipeline::from_model(pipeline, workspace_slug, policy_slugs, context_slugs)
+        .map_err(serialize_error)
 }
 
 /// Maps a definition (de)serialization failure to an internal error.

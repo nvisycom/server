@@ -40,36 +40,42 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Creates a response from the database model and its reference ids.
+    /// Creates a response from the database model and its reference slugs.
     ///
-    /// The `policy_ids` / `context_ids` come from the join tables and are merged
-    /// with the stored engine config to rebuild the full definition. Fails if the
-    /// stored config JSON does not decode to the current schema.
+    /// The `policy_slugs` / `context_slugs` come from the join tables and are
+    /// merged with the stored engine config to rebuild the full definition.
+    /// Fails if the stored config JSON does not decode to the current schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
-        policy_ids: Vec<Uuid>,
-        context_ids: Vec<Uuid>,
+        policy_slugs: Vec<Slug>,
+        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         Self::assemble(
             pipeline,
             workspace_slug,
             Vec::new(),
-            policy_ids,
-            context_ids,
+            policy_slugs,
+            context_slugs,
         )
     }
 
-    /// Creates a pipeline response with artifacts and reference ids.
+    /// Creates a pipeline response with artifacts and reference slugs.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
-        policy_ids: Vec<Uuid>,
-        context_ids: Vec<Uuid>,
+        policy_slugs: Vec<Slug>,
+        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
-        Self::assemble(pipeline, workspace_slug, artifacts, policy_ids, context_ids)
+        Self::assemble(
+            pipeline,
+            workspace_slug,
+            artifacts,
+            policy_slugs,
+            context_slugs,
+        )
     }
 
     /// Shared assembly: decodes the stored config and merges the references.
@@ -77,11 +83,11 @@ impl Pipeline {
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
         artifacts: Vec<Artifact>,
-        policy_ids: Vec<Uuid>,
-        context_ids: Vec<Uuid>,
+        policy_slugs: Vec<Slug>,
+        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         let definition =
-            PipelineDefinition::from_parts(pipeline.definition, policy_ids, context_ids)?;
+            PipelineDefinition::from_parts(pipeline.definition, policy_slugs, context_slugs)?;
         Ok(Self {
             slug: pipeline.slug,
             workspace_slug,

@@ -26,8 +26,8 @@ use validator::Validate;
 /// - `recognizers` / `enrichers` / `deduplication` / `label_catalog` — the
 ///   detection machinery, assembled into an engine `AnalyzerParams` per request.
 /// - `default_scope` — optional pipeline-wide scope a document may override.
-/// - `policy_ids` / `context_ids` — references resolved live at run time against
-///   the workspace's policies and contexts.
+/// - `policy_slugs` / `context_slugs` — references to the workspace's policies
+///   and contexts, resolved at run time.
 #[must_use]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,37 +54,37 @@ pub struct PipelineDefinition {
     /// the document must assert its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_scope: Option<ScopeParams>,
-    /// Workspace policies applied at redaction, resolved live by id.
+    /// Slugs of workspace policies applied at redaction.
     ///
     /// Stored relationally in the `workspace_pipeline_policies` join table, not the JSON
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
-    pub policy_ids: Vec<Uuid>,
-    /// Workspace contexts supplied to detection, resolved live by id.
+    pub policy_slugs: Vec<Slug>,
+    /// Slugs of workspace contexts supplied to detection.
     ///
     /// Stored relationally in the `workspace_pipeline_contexts` join table, not the JSON
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
-    pub context_ids: Vec<Uuid>,
+    pub context_slugs: Vec<Slug>,
 }
 
 impl PipelineDefinition {
     /// Splits the definition into its stored parts: the engine config JSON (with
-    /// the relational references removed) and the policy / context reference ids.
+    /// the relational references removed) and the policy / context reference slugs.
     ///
     /// The references live in join tables, so they are stripped from the JSON to
     /// keep a single source of truth. Serialization failure is surfaced rather
     /// than swallowed so a bad config never gets silently persisted as empty.
-    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Uuid>, Vec<Uuid>)> {
-        let policy_ids = std::mem::take(&mut self.policy_ids);
-        let context_ids = std::mem::take(&mut self.context_ids);
+    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Slug>, Vec<Slug>)> {
+        let policy_slugs = std::mem::take(&mut self.policy_slugs);
+        let context_slugs = std::mem::take(&mut self.context_slugs);
         let config = serde_json::to_value(&self)?;
-        Ok((config, policy_ids, context_ids))
+        Ok((config, policy_slugs, context_slugs))
     }
 
-    /// Rebuilds a definition from stored config JSON and the reference ids read
+    /// Rebuilds a definition from stored config JSON and the reference slugs read
     /// back from the join tables.
     ///
     /// Decoding failure is surfaced rather than swallowed: a stored config that
@@ -92,12 +92,12 @@ impl PipelineDefinition {
     /// config to return silently.
     pub fn from_parts(
         config: serde_json::Value,
-        policy_ids: Vec<Uuid>,
-        context_ids: Vec<Uuid>,
+        policy_slugs: Vec<Slug>,
+        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         let mut definition: Self = serde_json::from_value(config)?;
-        definition.policy_ids = policy_ids;
-        definition.context_ids = context_ids;
+        definition.policy_slugs = policy_slugs;
+        definition.context_slugs = context_slugs;
         Ok(definition)
     }
 }
@@ -124,14 +124,14 @@ pub struct CreatePipeline {
     pub definition: Option<PipelineDefinition>,
 }
 
-/// A pipeline's reference ids, split out to be written to the join tables after
-/// the pipeline row exists.
+/// A pipeline's reference slugs, split out to be resolved to ids and written to
+/// the join tables after the pipeline row exists.
 #[derive(Debug, Default, Clone)]
 pub struct PipelineReferences {
-    /// Policy ids the pipeline references.
-    pub policy_ids: Vec<Uuid>,
-    /// Context ids the pipeline references.
-    pub context_ids: Vec<Uuid>,
+    /// Slugs of the policies the pipeline references.
+    pub policy_slugs: Vec<Slug>,
+    /// Slugs of the contexts the pipeline references.
+    pub context_slugs: Vec<Slug>,
 }
 
 impl CreatePipeline {
@@ -175,10 +175,10 @@ impl CreatePipeline {
 fn split_definition(
     definition: Option<PipelineDefinition>,
 ) -> serde_json::Result<(serde_json::Value, PipelineReferences)> {
-    let (config, policy_ids, context_ids) = definition.unwrap_or_default().into_parts()?;
+    let (config, policy_slugs, context_slugs) = definition.unwrap_or_default().into_parts()?;
     let references = PipelineReferences {
-        policy_ids,
-        context_ids,
+        policy_slugs,
+        context_slugs,
     };
     Ok((config, references))
 }
@@ -215,12 +215,12 @@ impl UpdatePipeline {
     ) -> serde_json::Result<(UpdatePipelineModel, Option<PipelineReferences>)> {
         let (definition, references) = match self.definition {
             Some(definition) => {
-                let (config, policy_ids, context_ids) = definition.into_parts()?;
+                let (config, policy_slugs, context_slugs) = definition.into_parts()?;
                 (
                     Some(config),
                     Some(PipelineReferences {
-                        policy_ids,
-                        context_ids,
+                        policy_slugs,
+                        context_slugs,
                     }),
                 )
             }
