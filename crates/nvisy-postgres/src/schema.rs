@@ -383,6 +383,7 @@ diesel::table! {
     workspaces (id) {
         id -> Uuid,
         display_name -> Text,
+        slug -> Text,
         description -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
         require_approval -> Bool,

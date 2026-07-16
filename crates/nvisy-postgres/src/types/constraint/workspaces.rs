@@ -13,6 +13,10 @@ pub enum WorkspaceConstraints {
     // Workspace validation constraints
     #[strum(serialize = "workspaces_display_name_length")]
     DisplayNameLength,
+    #[strum(serialize = "workspaces_slug_length")]
+    SlugLength,
+    #[strum(serialize = "workspaces_slug_format")]
+    SlugFormat,
     #[strum(serialize = "workspaces_description_length_max")]
     DescriptionLengthMax,
     #[strum(serialize = "workspaces_tags_count_max")]
@@ -21,6 +25,10 @@ pub enum WorkspaceConstraints {
     MetadataSize,
     #[strum(serialize = "workspaces_settings_size")]
     SettingsSize,
+
+    // Workspace uniqueness constraints
+    #[strum(serialize = "workspaces_slug_key")]
+    SlugUnique,
 
     // Workspace chronological constraints
     #[strum(serialize = "workspaces_updated_after_created")]
@@ -41,10 +49,14 @@ impl WorkspaceConstraints {
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
             WorkspaceConstraints::DisplayNameLength
+            | WorkspaceConstraints::SlugLength
+            | WorkspaceConstraints::SlugFormat
             | WorkspaceConstraints::DescriptionLengthMax
             | WorkspaceConstraints::TagsCountMax
             | WorkspaceConstraints::MetadataSize
             | WorkspaceConstraints::SettingsSize => ConstraintCategory::Validation,
+
+            WorkspaceConstraints::SlugUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceConstraints::UpdatedAfterCreated
             | WorkspaceConstraints::DeletedAfterCreated

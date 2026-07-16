@@ -15,10 +15,12 @@ use nvisy_postgres::query::{
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+};
 use crate::handler::request::{
     CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
-    UpdatePipeline, WorkspacePathParams,
+    UpdatePipeline,
 };
 use crate::handler::response::{ErrorResponse, Page, Pipeline, PipelineSummary};
 use crate::handler::{Error, ErrorKind, Result};
@@ -35,13 +37,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn create_pipeline(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<CreatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating pipeline");
@@ -49,15 +51,11 @@ async fn create_pipeline(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::CreatePipelines,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::CreatePipelines)
         .await?;
 
     let (new_pipeline, references) = request
-        .into_parts(path_params.workspace_id, auth_state.account_id)
+        .into_parts(workspace.id, auth_state.account_id)
         .map_err(serialize_error)?;
 
     let pipeline = conn
@@ -99,13 +97,13 @@ fn create_pipeline_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn list_pipelines(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     Query(pagination): Query<CursorPagination>,
     Query(filter): Query<PipelineFilter>,
 ) -> Result<(StatusCode, Json<Page<PipelineSummary>>)> {
@@ -114,16 +112,12 @@ async fn list_pipelines(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewPipelines,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
     let page = conn
         .cursor_list_workspace_pipelines(
-            path_params.workspace_id,
+            workspace.id,
             pagination.into(),
             filter.status,
             filter.search.as_deref(),
@@ -156,13 +150,14 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn get_pipeline(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting pipeline");
@@ -170,15 +165,10 @@ async fn get_pipeline(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewPipelines,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let pipeline =
-        find_pipeline(&mut conn, path_params.workspace_id, path_params.pipeline_id).await?;
+    let pipeline = find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
 
     // Fetch artifacts for all runs of this pipeline
     let artifacts = conn
@@ -213,13 +203,14 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn update_pipeline(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
     ValidateJson(request): ValidateJson<UpdatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
@@ -228,15 +219,11 @@ async fn update_pipeline(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::UpdatePipelines,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::UpdatePipelines)
         .await?;
 
     // Confirm the pipeline exists in this workspace before mutating.
-    find_pipeline(&mut conn, path_params.workspace_id, path_params.pipeline_id).await?;
+    find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
 
     let (update_data, references) = request.into_parts().map_err(serialize_error)?;
     let pipeline_id = path_params.pipeline_id;
@@ -288,13 +275,14 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn delete_pipeline(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting pipeline");
@@ -302,15 +290,11 @@ async fn delete_pipeline(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::DeletePipelines,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::DeletePipelines)
         .await?;
 
     // Confirm the pipeline exists in this workspace before deleting.
-    find_pipeline(&mut conn, path_params.workspace_id, path_params.pipeline_id).await?;
+    find_pipeline(&mut conn, workspace.id, path_params.pipeline_id).await?;
 
     conn.delete_workspace_pipeline(path_params.pipeline_id)
         .await?;
@@ -391,13 +375,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes for listing and creating
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/",
+            "/workspaces/{workspaceSlug}/pipelines/",
             post_with(create_pipeline, create_pipeline_docs)
                 .get_with(list_pipelines, list_pipelines_docs),
         )
         // Pipeline operations by ID
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/{pipelineId}/",
+            "/workspaces/{workspaceSlug}/pipelines/{pipelineId}/",
             get_with(get_pipeline, get_pipeline_docs)
                 .patch_with(update_pipeline, update_pipeline_docs)
                 .delete_with(delete_pipeline, delete_pipeline_docs),

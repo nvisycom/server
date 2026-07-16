@@ -7,14 +7,14 @@ use uuid::Uuid;
 
 /// Path parameters for connection sync run operations.
 ///
-/// Since run IDs are globally unique UUIDs, the connection context can be
-/// derived from the run record itself for authorization purposes.
+/// The workspace is resolved separately from the `{workspaceSlug}` segment by
+/// the [`WorkspaceContext`] extractor.
+///
+/// [`WorkspaceContext`]: crate::extract::WorkspaceContext
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionRunPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the connection sync run.
     pub run_id: Uuid,
 }

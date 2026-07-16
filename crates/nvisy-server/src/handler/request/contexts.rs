@@ -7,12 +7,15 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// Path parameters for context operations.
+///
+/// The workspace is resolved by the [`WorkspaceContext`] extractor from the
+/// `{workspaceSlug}` path segment.
+///
+/// [`WorkspaceContext`]: crate::extract::WorkspaceContext
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the context.
     pub context_id: Uuid,
 }

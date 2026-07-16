@@ -252,7 +252,7 @@ mod test {
         // this alongside the built-in invites module would panic on the route
         // collision; excluding the module first must make it succeed.
         let custom = ApiRouter::new().api_route(
-            "/workspaces/{workspaceId}/invites/",
+            "/workspaces/{workspaceSlug}/invites/",
             get_with(
                 || async { Json(InviteSent::new()) },
                 |op| op.summary("custom invites"),

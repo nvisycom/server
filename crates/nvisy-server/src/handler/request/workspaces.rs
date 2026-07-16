@@ -7,11 +7,13 @@
 use nvisy_postgres::model::{
     NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel, UpdateWorkspaceMember,
 };
-use nvisy_postgres::types::NotificationEvent;
+use nvisy_postgres::types::{NotificationEvent, WorkspaceSlug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
+
+use crate::handler::{ErrorKind, Result};
 
 /// Request payload for creating a new workspace.
 ///
@@ -21,9 +23,11 @@ use validator::Validate;
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWorkspace {
-    /// Display name of the workspace (3-100 characters).
-    #[validate(length(min = 3, max = 100))]
+    /// Display name of the workspace (3-32 characters).
+    #[validate(length(min = 3, max = 32))]
     pub display_name: String,
+    /// Optional URL slug. Derived from the display name when omitted.
+    pub slug: Option<WorkspaceSlug>,
     /// Optional description of the workspace (max 200 characters).
     #[validate(length(max = 200))]
     pub description: Option<String>,
@@ -34,18 +38,39 @@ pub struct CreateWorkspace {
 impl CreateWorkspace {
     /// Converts this request into a [`NewWorkspace`] model for database insertion.
     ///
+    /// The slug is the caller-provided one, or derived from the display name.
+    /// The returned slug is only the *preferred* value; the repository resolves
+    /// collisions with a numeric suffix on insert.
+    ///
     /// # Arguments
     ///
     /// * `account_id` - The ID of the account creating the workspace (becomes the owner).
-    #[inline]
-    pub fn into_model(self, account_id: Uuid) -> NewWorkspace {
-        NewWorkspace {
+    ///
+    /// # Errors
+    ///
+    /// Returns `BadRequest` if no slug was given and the display name has no
+    /// slug-able characters.
+    pub fn into_model(self, account_id: Uuid) -> Result<NewWorkspace> {
+        let slug = match self.slug {
+            Some(slug) => slug,
+            None => WorkspaceSlug::derive(&self.display_name).ok_or_else(|| {
+                ErrorKind::BadRequest
+                    .with_message("Could not derive a slug from the display name; provide one")
+                    .with_resource("workspace")
+            })?,
+        };
+
+        Ok(NewWorkspace {
             display_name: self.display_name,
+            slug,
             description: self.description,
+            avatar_url: None,
             require_approval: self.require_approval,
+            tags: None,
+            metadata: None,
+            settings: None,
             created_by: account_id,
-            ..Default::default()
-        }
+        })
     }
 }
 
@@ -56,9 +81,11 @@ impl CreateWorkspace {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWorkspace {
-    /// New display name for the workspace (3-100 characters).
-    #[validate(length(min = 3, max = 100))]
+    /// New display name for the workspace (3-32 characters).
+    #[validate(length(min = 3, max = 32))]
     pub display_name: Option<String>,
+    /// New URL slug for the workspace.
+    pub slug: Option<WorkspaceSlug>,
     /// New description for the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
@@ -70,6 +97,7 @@ impl UpdateWorkspace {
     pub fn into_model(self) -> UpdateWorkspaceModel {
         UpdateWorkspaceModel {
             display_name: self.display_name,
+            slug: self.slug,
             description: self.description.map(Some),
             require_approval: self.require_approval,
             ..Default::default()

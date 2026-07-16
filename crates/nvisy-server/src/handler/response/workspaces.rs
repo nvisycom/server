@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{NotificationEvent, WorkspaceRole};
+use nvisy_postgres::types::{NotificationEvent, WorkspaceRole, WorkspaceSlug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -16,6 +16,8 @@ use super::Page;
 pub struct Workspace {
     /// ID of the workspace.
     pub workspace_id: Uuid,
+    /// URL-safe workspace identifier.
+    pub slug: WorkspaceSlug,
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.
@@ -41,6 +43,7 @@ impl Workspace {
         let tags = workspace.get_tags();
         Self {
             workspace_id: workspace.id,
+            slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             tags,
@@ -60,6 +63,7 @@ impl Workspace {
         let tags = workspace.get_tags();
         Self {
             workspace_id: workspace.id,
+            slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             tags,

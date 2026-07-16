@@ -14,7 +14,7 @@ use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRu
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query};
+use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
 use crate::handler::request::{
     ConnectionPathParams, ConnectionRunPathParams, ConnectionRunsQuery, CursorPagination,
 };
@@ -33,13 +33,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_runs";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn create_connection_run(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Triggering connection sync run");
@@ -47,19 +48,10 @@ async fn create_connection_run(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ManageConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let connection = find_connection(
-        &mut conn,
-        path_params.workspace_id,
-        path_params.connection_id,
-    )
-    .await?;
+    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     let run = conn
         .create_workspace_connection_run(NewWorkspaceConnectionRun {
@@ -91,13 +83,14 @@ fn create_connection_run_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn list_connection_runs(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<ConnectionRunsQuery>,
@@ -107,19 +100,10 @@ async fn list_connection_runs(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let connection = find_connection(
-        &mut conn,
-        path_params.workspace_id,
-        path_params.connection_id,
-    )
-    .await?;
+    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     let page = conn
         .cursor_list_workspace_connection_runs(connection.id, pagination.into(), query.status)
@@ -157,13 +141,14 @@ fn list_connection_runs_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         run_id = %path_params.run_id,
     )
 )]
 async fn read_connection_run(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionRunPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting connection sync run");
@@ -171,15 +156,11 @@ async fn read_connection_run(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewConnections,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
     let run = conn
-        .find_connection_run_in_workspace(path_params.workspace_id, path_params.run_id)
+        .find_connection_run_in_workspace(workspace.id, path_params.run_id)
         .await?
         .ok_or_else(|| Error::not_found("connection_run"))?;
 
@@ -214,12 +195,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/connections/{connectionId}/runs/",
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/runs/",
             post_with(create_connection_run, create_connection_run_docs)
                 .get_with(list_connection_runs, list_connection_runs_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/connection-runs/{runId}/",
+            "/workspaces/{workspaceSlug}/connection-runs/{runId}/",
             get_with(read_connection_run, read_connection_run_docs),
         )
         .with_path_items(|item| item.tag("Connections"))

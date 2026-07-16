@@ -18,8 +18,6 @@ pub struct WorkspacePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the member account.
     pub account_id: Uuid,
 }
@@ -29,8 +27,6 @@ pub struct MemberPathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InvitePathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the invite.
     pub invite_id: Uuid,
 }
@@ -49,8 +45,6 @@ pub struct InviteCodePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFilePathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the file.
     pub file_id: Uuid,
 }
@@ -81,8 +75,6 @@ pub struct VersionPathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebhookPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the webhook.
     pub webhook_id: Uuid,
 }
@@ -116,8 +108,6 @@ pub struct AccountPathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelinePathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the pipeline.
     pub pipeline_id: Uuid,
 }
@@ -127,8 +117,6 @@ pub struct PipelinePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the pipeline run.
     pub run_id: Uuid,
 }

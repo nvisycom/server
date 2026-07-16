@@ -122,6 +122,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 validator = { version = "0.20", features = ["derive"] }
 
+# Text processing
+slug = { version = "0.1", features = [] }
+
 # Derive macros & utilities
 thiserror = { version = "2.0", features = [] }
 strum = { version = "0.28", features = ["derive"] }

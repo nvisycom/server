@@ -11,6 +11,7 @@ mod pg_connection;
 mod reject;
 mod typed_header;
 mod version;
+mod workspace_context;
 
 pub use crate::extract::auth::{
     AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
@@ -20,3 +21,4 @@ pub use crate::extract::pg_connection::PgPool;
 pub use crate::extract::reject::{Form, Json, Multipart, Path, Query, ValidateJson};
 pub use crate::extract::typed_header::TypedHeader;
 pub use crate::extract::version::Version;
+pub use crate::extract::workspace_context::WorkspaceContext;

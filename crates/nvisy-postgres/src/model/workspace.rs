@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspaces;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Tags};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Tags, WorkspaceSlug};
 
 /// Main workspace model representing a workspace workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -14,8 +14,10 @@ use crate::types::{HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Tags}
 pub struct Workspace {
     /// Unique workspace identifier.
     pub id: Uuid,
-    /// Human-readable workspace name (2-100 characters).
+    /// Human-readable workspace name (3-32 characters).
     pub display_name: String,
+    /// URL-safe workspace identifier, unique across the platform.
+    pub slug: WorkspaceSlug,
     /// Detailed description of the workspace purpose and goals.
     pub description: Option<String>,
     /// URL to workspace avatar/logo image.
@@ -39,12 +41,17 @@ pub struct Workspace {
 }
 
 /// Data for creating a new workspace.
-#[derive(Debug, Default, Clone, Insertable)]
+///
+/// Not `Default`: a workspace cannot exist without a [`WorkspaceSlug`], so the
+/// slug must always be supplied explicitly.
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspaces)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspace {
     /// Workspace display name.
     pub display_name: String,
+    /// URL-safe workspace identifier, unique across the platform.
+    pub slug: WorkspaceSlug,
     /// Workspace description.
     pub description: Option<String>,
     /// Optional avatar URL.
@@ -68,6 +75,8 @@ pub struct NewWorkspace {
 pub struct UpdateWorkspace {
     /// Display name.
     pub display_name: Option<String>,
+    /// URL-safe workspace identifier.
+    pub slug: Option<WorkspaceSlug>,
     /// Description.
     pub description: Option<Option<String>>,
     /// Avatar URL.

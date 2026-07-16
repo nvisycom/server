@@ -6,12 +6,15 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// Path parameters for connection operations.
+///
+/// The workspace is resolved separately from the `{workspaceSlug}` segment by
+/// the [`WorkspaceContext`] extractor.
+///
+/// [`WorkspaceContext`]: crate::extract::WorkspaceContext
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionPathParams {
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
     /// Unique identifier of the connection.
     pub connection_id: Uuid,
 }

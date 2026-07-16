@@ -14,10 +14,11 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::{AsyncConnection, PgClient};
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
+use crate::extract::{
+    AuthProvider, AuthState, Json, Permission, Query, ValidateJson, WorkspaceContext,
+};
 use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
-    WorkspacePathParams,
 };
 use crate::handler::response::{
     ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
@@ -40,13 +41,15 @@ async fn create_workspace(
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace");
 
-    let new_workspace = request.into_model(auth_state.account_id);
+    let new_workspace = request.into_model(auth_state.account_id)?;
     let mut conn = pg_client.get_connection().await?;
     let creator_id = auth_state.account_id;
 
     let (workspace, membership) = conn
         .transaction(async |conn| {
-            let workspace = conn.create_workspace(new_workspace).await?;
+            let workspace = conn
+                .create_workspace_with_unique_slug(new_workspace)
+                .await?;
             let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
             let member = conn.add_workspace_member(new_member).await?;
             Ok::<(WorkspaceModel, WorkspaceMember), nvisy_postgres::PgError>((workspace, member))
@@ -114,36 +117,26 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn read_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     let mut conn = pg_client.get_connection().await?;
     let member = auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewWorkspace,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
-
-    let Some(workspace) = conn.find_workspace_by_id(path_params.workspace_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_message("Workspace not found")
-            .with_resource("workspace"));
-    };
 
     tracing::info!(target: TRACING_TARGET, "Workspace read");
 
-    let workspace = match member {
+    let response = match member {
         Some(member) => Workspace::from_model_with_membership(workspace, member),
         None => Workspace::from_model(workspace),
     };
-    Ok((StatusCode::OK, Json(workspace)))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
@@ -162,38 +155,32 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn update_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace");
 
     let mut conn = pg_client.get_connection().await?;
     let member = auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::UpdateWorkspace,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
         .await?;
 
     let update_data = request.into_model();
-    let workspace = conn
-        .update_workspace(path_params.workspace_id, update_data)
-        .await?;
+    let updated = conn.update_workspace(workspace.id, update_data).await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace updated");
 
-    let workspace = match member {
-        Some(member) => Workspace::from_model_with_membership(workspace, member),
-        None => Workspace::from_model(workspace),
+    let response = match member {
+        Some(member) => Workspace::from_model_with_membership(updated, member),
+        None => Workspace::from_model(updated),
     };
-    Ok((StatusCode::OK, Json(workspace)))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
@@ -215,26 +202,22 @@ fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn delete_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace");
 
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::DeleteWorkspace,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteWorkspace)
         .await?;
 
-    conn.delete_workspace(path_params.workspace_id).await?;
+    conn.delete_workspace(workspace.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace deleted");
 
@@ -255,17 +238,17 @@ fn delete_workspace_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn get_notification_settings(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<(StatusCode, Json<NotificationSettings>)> {
     let mut conn = pg_client.get_connection().await?;
     let Some(member) = conn
-        .find_workspace_member(path_params.workspace_id, auth_state.account_id)
+        .find_workspace_member(workspace.id, auth_state.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -294,20 +277,20 @@ fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation 
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn update_notification_settings(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<UpdateNotificationSettings>,
 ) -> Result<(StatusCode, Json<NotificationSettings>)> {
     let mut conn = pg_client.get_connection().await?;
 
     // Verify membership exists
     if conn
-        .find_workspace_member(path_params.workspace_id, auth_state.account_id)
+        .find_workspace_member(workspace.id, auth_state.account_id)
         .await?
         .is_none()
     {
@@ -318,7 +301,7 @@ async fn update_notification_settings(
 
     let update_data = request.into_model();
     let member = conn
-        .update_workspace_member(path_params.workspace_id, auth_state.account_id, update_data)
+        .update_workspace_member(workspace.id, auth_state.account_id, update_data)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Notification settings updated");
@@ -343,13 +326,13 @@ fn update_notification_settings_docs(op: TransformOperation) -> TransformOperati
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn list_activities(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
@@ -357,15 +340,11 @@ async fn list_activities(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::ViewWorkspace,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
     let page = conn
-        .cursor_list_workspace_activity(path_params.workspace_id, pagination.into())
+        .cursor_list_workspace_activity(workspace.id, pagination.into())
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, Activity::from_model);
@@ -400,20 +379,20 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_workspaces, list_workspaces_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/",
+            "/workspaces/{workspaceSlug}/",
             get_with(read_workspace, read_workspace_docs)
                 .patch_with(update_workspace, update_workspace_docs)
                 .delete_with(delete_workspace, delete_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/notifications/",
+            "/workspaces/{workspaceSlug}/notifications/",
             get_with(get_notification_settings, get_notification_settings_docs).patch_with(
                 update_notification_settings,
                 update_notification_settings_docs,
             ),
         )
         .api_route(
-            "/workspaces/{workspaceId}/activities/",
+            "/workspaces/{workspaceSlug}/activities/",
             get_with(list_activities, list_activities_docs),
         )
         .with_path_items(|item| item.tag("Workspaces"))

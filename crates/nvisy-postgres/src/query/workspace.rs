@@ -12,6 +12,10 @@ use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
 use crate::types::OffsetPagination;
 use crate::{PgConnection, PgError, PgResult, schema};
 
+/// Maximum number of slug candidates tried before giving up when generating a
+/// unique workspace slug (the preferred slug plus numeric suffixes).
+const MAX_SLUG_ATTEMPTS: u32 = 100;
+
 /// Repository for workspace database operations.
 ///
 /// Handles workspace lifecycle management including creation, updates,
@@ -25,10 +29,28 @@ pub trait WorkspaceRepository {
         workspace: NewWorkspace,
     ) -> impl Future<Output = PgResult<Workspace>> + Send;
 
+    /// Creates a workspace, resolving slug collisions with a numeric suffix.
+    ///
+    /// The `workspace.slug` is treated as the preferred slug. If it is already
+    /// taken, the insert is retried with `-2`, `-3`, … suffixes until one
+    /// succeeds. The retry is driven by the database's unique constraint, so it
+    /// is race-safe: a concurrent insert of the same slug loses the race and is
+    /// retried rather than silently colliding.
+    fn create_workspace_with_unique_slug(
+        &mut self,
+        workspace: NewWorkspace,
+    ) -> impl Future<Output = PgResult<Workspace>> + Send;
+
     /// Finds a workspace by ID, excluding soft-deleted workspaces.
     fn find_workspace_by_id(
         &mut self,
         workspace_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
+
+    /// Finds a workspace by slug, excluding soft-deleted workspaces.
+    fn find_workspace_by_slug(
+        &mut self,
+        slug: &str,
     ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
 
     /// Updates a workspace with partial changes.
@@ -81,11 +103,62 @@ impl WorkspaceRepository for PgConnection {
         Ok(workspace)
     }
 
+    async fn create_workspace_with_unique_slug(
+        &mut self,
+        workspace: NewWorkspace,
+    ) -> PgResult<Workspace> {
+        let preferred = workspace.slug.clone();
+
+        // Attempt the preferred slug first, then `-2`, `-3`, … on collision.
+        // Each attempt uses a fresh candidate cloned from the base record, so a
+        // failed insert never consumes the data needed for the next try. The
+        // loop is bounded; in practice the first suffix or two resolves any
+        // realistic collision.
+        for attempt in 0..MAX_SLUG_ATTEMPTS {
+            let candidate = if attempt == 0 {
+                workspace.clone()
+            } else {
+                let slug = preferred
+                    .with_numeric_suffix(attempt + 1)
+                    .ok_or_else(|| PgError::unexpected("workspace slug cannot be disambiguated"))?;
+                NewWorkspace {
+                    slug,
+                    ..workspace.clone()
+                }
+            };
+
+            match self.create_workspace(candidate).await {
+                Ok(created) => return Ok(created),
+                Err(error) if error.is_slug_conflict() => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(PgError::unexpected(
+            "exhausted workspace slug generation attempts",
+        ))
+    }
+
     async fn find_workspace_by_id(&mut self, workspace_id: Uuid) -> PgResult<Option<Workspace>> {
         use schema::workspaces::dsl::*;
 
         let workspace = workspaces
             .filter(id.eq(workspace_id))
+            .filter(deleted_at.is_null())
+            .select(Workspace::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(workspace)
+    }
+
+    async fn find_workspace_by_slug(&mut self, slug_value: &str) -> PgResult<Option<Workspace>> {
+        use schema::workspaces::dsl::*;
+
+        let workspace = workspaces
+            .filter(slug.eq(slug_value))
             .filter(deleted_at.is_null())
             .select(Workspace::as_select())
             .first(self)

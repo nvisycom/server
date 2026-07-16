@@ -13,10 +13,10 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceMemberRepository;
 use nvisy_postgres::types::WorkspaceRole;
 
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson};
-use crate::handler::request::{
-    CursorPagination, ListMembers, MemberPathParams, UpdateMember, WorkspacePathParams,
+use crate::extract::{
+    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
+use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
 use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ServiceState, WebhookEmitter};
@@ -32,13 +32,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn list_members(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
     Query(query): Query<ListMembers>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<MembersPage>)> {
@@ -47,12 +47,12 @@ async fn list_members(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
         .await?;
 
     let page = conn
         .cursor_list_workspace_members_with_accounts(
-            path_params.workspace_id,
+            workspace.id,
             pagination.into(),
             query.to_filter(),
         )
@@ -88,13 +88,14 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         member_id = %path_params.account_id,
     )
 )]
 async fn get_member(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
@@ -102,11 +103,11 @@ async fn get_member(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ViewMembers)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
         .await?;
 
     let Some((workspace_member, account)) = conn
-        .find_workspace_member_with_account(path_params.workspace_id, path_params.account_id)
+        .find_workspace_member_with_account(workspace.id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -144,7 +145,7 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         member_id = %path_params.account_id,
     )
 )]
@@ -152,6 +153,7 @@ async fn delete_member(
     State(pg_client): State<PgClient>,
     State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Removing workspace member");
@@ -159,11 +161,7 @@ async fn delete_member(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(
-            &mut conn,
-            path_params.workspace_id,
-            Permission::RemoveMembers,
-        )
+        .authorize_workspace(&mut conn, workspace.id, Permission::RemoveMembers)
         .await?;
 
     // Prevent self-removal (use leave endpoint instead)
@@ -173,7 +171,7 @@ async fn delete_member(
     }
 
     let Some(member_to_remove) = conn
-        .find_workspace_member(path_params.workspace_id, path_params.account_id)
+        .find_workspace_member(workspace.id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
@@ -186,7 +184,7 @@ async fn delete_member(
             .with_context("Owners can only leave the workspace themselves"));
     }
 
-    conn.remove_workspace_member(path_params.workspace_id, path_params.account_id)
+    conn.remove_workspace_member(workspace.id, path_params.account_id)
         .await?;
 
     // Emit webhook event (fire-and-forget)
@@ -196,7 +194,7 @@ async fn delete_member(
     });
     if let Err(err) = webhook_emitter
         .emit_member_deleted(
-            path_params.workspace_id,
+            workspace.id,
             path_params.account_id, // Use account_id as resource_id
             Some(auth_state.account_id),
             Some(data),
@@ -236,7 +234,7 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
         member_id = %path_params.account_id,
         new_role = ?request.role,
     )
@@ -245,6 +243,7 @@ async fn update_member(
     State(pg_client): State<PgClient>,
     State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<MemberPathParams>,
     ValidateJson(request): ValidateJson<UpdateMember>,
 ) -> Result<(StatusCode, Json<Member>)> {
@@ -253,7 +252,7 @@ async fn update_member(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, path_params.workspace_id, Permission::ManageRoles)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageRoles)
         .await?;
 
     // Prevent self-role-update
@@ -264,7 +263,7 @@ async fn update_member(
     }
 
     let Some(current_member) = conn
-        .find_workspace_member(path_params.workspace_id, path_params.account_id)
+        .find_workspace_member(workspace.id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
@@ -278,15 +277,11 @@ async fn update_member(
     }
 
     let new_role = request.role;
-    conn.update_workspace_member(
-        path_params.workspace_id,
-        path_params.account_id,
-        request.into_model(),
-    )
-    .await?;
+    conn.update_workspace_member(workspace.id, path_params.account_id, request.into_model())
+        .await?;
 
     let Some((updated_member, account)) = conn
-        .find_workspace_member_with_account(path_params.workspace_id, path_params.account_id)
+        .find_workspace_member_with_account(workspace.id, path_params.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
@@ -300,7 +295,7 @@ async fn update_member(
     });
     if let Err(err) = webhook_emitter
         .emit_member_updated(
-            path_params.workspace_id,
+            workspace.id,
             path_params.account_id, // Use account_id as resource_id
             Some(auth_state.account_id),
             Some(data),
@@ -347,20 +342,20 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         account_id = %auth_state.account_id,
-        workspace_id = %path_params.workspace_id,
+        workspace_id = %workspace.id,
     )
 )]
 async fn leave_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
-    Path(path_params): Path<WorkspacePathParams>,
+    WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<StatusCode> {
     tracing::warn!(target: TRACING_TARGET, "Member leaving workspace");
 
     let mut conn = pg_client.get_connection().await?;
 
     let Some(_member) = conn
-        .find_workspace_member(path_params.workspace_id, auth_state.account_id)
+        .find_workspace_member(workspace.id, auth_state.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -368,7 +363,7 @@ async fn leave_workspace(
             .with_message("You are not a member of this workspace"));
     };
 
-    conn.remove_workspace_member(path_params.workspace_id, auth_state.account_id)
+    conn.remove_workspace_member(workspace.id, auth_state.account_id)
         .await?;
 
     tracing::warn!(target: TRACING_TARGET, "Member left workspace");
@@ -393,15 +388,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/members/",
+            "/workspaces/{workspaceSlug}/members/",
             get_with(list_members, list_members_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/members/leave/",
+            "/workspaces/{workspaceSlug}/members/leave/",
             post_with(leave_workspace, leave_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/members/{accountId}/",
+            "/workspaces/{workspaceSlug}/members/{accountId}/",
             get_with(get_member, get_member_docs)
                 .patch_with(update_member, update_member_docs)
                 .delete_with(delete_member, delete_member_docs),
