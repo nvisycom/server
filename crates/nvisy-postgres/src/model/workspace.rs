@@ -75,8 +75,6 @@ pub struct NewWorkspace {
 pub struct UpdateWorkspace {
     /// Display name.
     pub display_name: Option<String>,
-    /// URL-safe workspace identifier.
-    pub slug: Option<WorkspaceSlug>,
     /// Description.
     pub description: Option<Option<String>>,
     /// Avatar URL.

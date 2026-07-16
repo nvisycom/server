@@ -77,7 +77,7 @@ async fn create_policy(
 
     Ok((
         StatusCode::CREATED,
-        Json(Policy::from_model(policy, &crypto)?),
+        Json(Policy::from_model(policy, workspace.slug, &crypto)?),
     ))
 }
 
@@ -123,8 +123,9 @@ async fn list_policies(
         "Workspace policies listed",
     );
 
-    let page =
-        PoliciesPage::try_from_cursor_page(page, |model| Policy::from_model(model, &crypto))?;
+    let page = PoliciesPage::try_from_cursor_page(page, |model| {
+        Policy::from_model(model, workspace.slug.clone(), &crypto)
+    })?;
 
     Ok((StatusCode::OK, Json(page)))
 }
@@ -165,7 +166,10 @@ async fn read_policy(
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
 
-    Ok((StatusCode::OK, Json(Policy::from_model(policy, &crypto)?)))
+    Ok((
+        StatusCode::OK,
+        Json(Policy::from_model(policy, workspace.slug, &crypto)?),
+    ))
 }
 
 fn read_policy_docs(op: TransformOperation) -> TransformOperation {
@@ -230,7 +234,10 @@ async fn update_policy(
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
-    Ok((StatusCode::OK, Json(Policy::from_model(policy, &crypto)?)))
+    Ok((
+        StatusCode::OK,
+        Json(Policy::from_model(policy, workspace.slug, &crypto)?),
+    ))
 }
 
 fn update_policy_docs(op: TransformOperation) -> TransformOperation {

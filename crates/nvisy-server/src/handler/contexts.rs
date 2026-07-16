@@ -79,7 +79,7 @@ async fn create_context(
 
     Ok((
         StatusCode::CREATED,
-        Json(Context::from_model(context, &crypto)?),
+        Json(Context::from_model(context, workspace.slug, &crypto)?),
     ))
 }
 
@@ -125,8 +125,9 @@ async fn list_contexts(
         "Workspace contexts listed",
     );
 
-    let page =
-        ContextsPage::try_from_cursor_page(page, |model| Context::from_model(model, &crypto))?;
+    let page = ContextsPage::try_from_cursor_page(page, |model| {
+        Context::from_model(model, workspace.slug.clone(), &crypto)
+    })?;
 
     Ok((StatusCode::OK, Json(page)))
 }
@@ -167,7 +168,10 @@ async fn read_context(
 
     tracing::debug!(target: TRACING_TARGET, "Workspace context read");
 
-    Ok((StatusCode::OK, Json(Context::from_model(context, &crypto)?)))
+    Ok((
+        StatusCode::OK,
+        Json(Context::from_model(context, workspace.slug, &crypto)?),
+    ))
 }
 
 fn read_context_docs(op: TransformOperation) -> TransformOperation {
@@ -232,7 +236,10 @@ async fn update_context(
 
     tracing::info!(target: TRACING_TARGET, "Context updated");
 
-    Ok((StatusCode::OK, Json(Context::from_model(context, &crypto)?)))
+    Ok((
+        StatusCode::OK,
+        Json(Context::from_model(context, workspace.slug, &crypto)?),
+    ))
 }
 
 fn update_context_docs(op: TransformOperation) -> TransformOperation {

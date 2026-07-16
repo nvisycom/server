@@ -2,6 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceContext;
+use nvisy_postgres::types::WorkspaceSlug;
 use nvisy_schema::context::Context as SchemaContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,8 +17,8 @@ use crate::service::CryptoService;
 pub struct Context {
     /// Unique context identifier.
     pub id: Uuid,
-    /// Workspace this context belongs to.
-    pub workspace_id: Uuid,
+    /// Slug of the workspace this context belongs to.
+    pub workspace_slug: WorkspaceSlug,
     /// Account that created this context.
     pub account_id: Uuid,
     /// Human-readable context name.
@@ -42,6 +43,7 @@ impl Context {
     /// Creates a response from a database model, decrypting the definition.
     pub fn from_model(
         context: WorkspaceContext,
+        workspace_slug: WorkspaceSlug,
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =
@@ -49,7 +51,7 @@ impl Context {
 
         Ok(Self {
             id: context.id,
-            workspace_id: context.workspace_id,
+            workspace_slug,
             account_id: context.account_id,
             name: context.name,
             description: context.description,

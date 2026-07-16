@@ -75,7 +75,7 @@ async fn create_webhook(
     // Return WebhookCreated which includes the secret (visible only once)
     Ok((
         StatusCode::CREATED,
-        Json(WebhookCreated::from_model(webhook, secret)),
+        Json(WebhookCreated::from_model(webhook, workspace.slug, secret)),
     ))
 }
 
@@ -128,7 +128,9 @@ async fn list_webhooks(
 
     Ok((
         StatusCode::OK,
-        Json(WebhooksPage::from_cursor_page(page, Webhook::from_model)),
+        Json(WebhooksPage::from_cursor_page(page, |webhook| {
+            Webhook::from_model(webhook, workspace.slug.clone())
+        })),
     ))
 }
 
@@ -169,7 +171,10 @@ async fn read_webhook(
 
     tracing::debug!(target: TRACING_TARGET, "Workspace webhook read");
 
-    Ok((StatusCode::OK, Json(Webhook::from_model(webhook))))
+    Ok((
+        StatusCode::OK,
+        Json(Webhook::from_model(webhook, workspace.slug)),
+    ))
 }
 
 fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
@@ -216,7 +221,10 @@ async fn update_webhook(
 
     tracing::info!(target: TRACING_TARGET, "Webhook updated");
 
-    Ok((StatusCode::OK, Json(Webhook::from_model(webhook))))
+    Ok((
+        StatusCode::OK,
+        Json(Webhook::from_model(webhook, workspace.slug)),
+    ))
 }
 
 fn update_webhook_docs(op: TransformOperation) -> TransformOperation {

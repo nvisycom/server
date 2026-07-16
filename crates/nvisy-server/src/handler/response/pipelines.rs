@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::PipelineStatus;
+use nvisy_postgres::types::{PipelineStatus, WorkspaceSlug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -17,8 +17,8 @@ use crate::handler::request::PipelineDefinition;
 pub struct Pipeline {
     /// Unique pipeline identifier.
     pub pipeline_id: Uuid,
-    /// Workspace this pipeline belongs to.
-    pub workspace_id: Uuid,
+    /// Slug of the workspace this pipeline belongs to.
+    pub workspace_slug: WorkspaceSlug,
     /// Account that created this pipeline.
     pub account_id: Uuid,
     /// Pipeline name.
@@ -47,26 +47,35 @@ impl Pipeline {
     /// stored config JSON does not decode to the current schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
+        workspace_slug: WorkspaceSlug,
         policy_ids: Vec<Uuid>,
         context_ids: Vec<Uuid>,
     ) -> serde_json::Result<Self> {
-        Self::assemble(pipeline, Vec::new(), policy_ids, context_ids)
+        Self::assemble(
+            pipeline,
+            workspace_slug,
+            Vec::new(),
+            policy_ids,
+            context_ids,
+        )
     }
 
     /// Creates a pipeline response with artifacts and reference ids.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
+        workspace_slug: WorkspaceSlug,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
         policy_ids: Vec<Uuid>,
         context_ids: Vec<Uuid>,
     ) -> serde_json::Result<Self> {
         let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
-        Self::assemble(pipeline, artifacts, policy_ids, context_ids)
+        Self::assemble(pipeline, workspace_slug, artifacts, policy_ids, context_ids)
     }
 
     /// Shared assembly: decodes the stored config and merges the references.
     fn assemble(
         pipeline: model::WorkspacePipeline,
+        workspace_slug: WorkspaceSlug,
         artifacts: Vec<Artifact>,
         policy_ids: Vec<Uuid>,
         context_ids: Vec<Uuid>,
@@ -75,7 +84,7 @@ impl Pipeline {
             PipelineDefinition::from_parts(pipeline.definition, policy_ids, context_ids)?;
         Ok(Self {
             pipeline_id: pipeline.id,
-            workspace_id: pipeline.workspace_id,
+            workspace_slug,
             account_id: pipeline.account_id,
             name: pipeline.name,
             description: pipeline.description,

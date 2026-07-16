@@ -84,7 +84,7 @@ async fn create_connection(
 
     Ok((
         StatusCode::CREATED,
-        Json(Connection::from_model(connection)),
+        Json(Connection::from_model(connection, workspace.slug)),
     ))
 }
 
@@ -143,10 +143,9 @@ async fn list_connections(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionsPage::from_cursor_page(
-            page,
-            Connection::from_model,
-        )),
+        Json(ConnectionsPage::from_cursor_page(page, |connection| {
+            Connection::from_model(connection, workspace.slug.clone())
+        })),
     ))
 }
 
@@ -191,7 +190,10 @@ async fn read_connection(
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
-    Ok((StatusCode::OK, Json(Connection::from_model(connection))))
+    Ok((
+        StatusCode::OK,
+        Json(Connection::from_model(connection, workspace.slug)),
+    ))
 }
 
 fn read_connection_docs(op: TransformOperation) -> TransformOperation {
@@ -250,7 +252,10 @@ async fn update_connection(
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
 
-    Ok((StatusCode::OK, Json(Connection::from_model(connection))))
+    Ok((
+        StatusCode::OK,
+        Json(Connection::from_model(connection, workspace.slug)),
+    ))
 }
 
 fn update_connection_docs(op: TransformOperation) -> TransformOperation {

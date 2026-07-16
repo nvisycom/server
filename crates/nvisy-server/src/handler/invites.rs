@@ -237,7 +237,9 @@ async fn list_invites(
 
     Ok((
         StatusCode::OK,
-        Json(InvitesPage::from_cursor_page(page, Invite::from_model)),
+        Json(InvitesPage::from_cursor_page(page, |invite| {
+            Invite::from_model(invite, workspace.slug.clone())
+        })),
     ))
 }
 
@@ -368,7 +370,10 @@ async fn reply_to_invite(
         declined
     };
 
-    Ok((StatusCode::OK, Json(Invite::from_model(workspace_invite))))
+    Ok((
+        StatusCode::OK,
+        Json(Invite::from_model(workspace_invite, workspace.slug)),
+    ))
 }
 
 fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
@@ -419,7 +424,7 @@ async fn generate_invite_code(
 
     Ok((
         StatusCode::CREATED,
-        Json(InviteCode::from_invite(&workspace_invite)),
+        Json(InviteCode::from_invite(&workspace_invite, workspace.slug)),
     ))
 }
 

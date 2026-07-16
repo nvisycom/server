@@ -73,7 +73,8 @@ async fn list_files(
         )
         .await?;
 
-    let response = FilesPage::from_cursor_page(page, File::from_model);
+    let response =
+        FilesPage::from_cursor_page(page, |file| File::from_model(file, workspace.slug.clone()));
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -215,7 +216,10 @@ async fn upload_file(
         }
 
         let created_file = process_single_file(&mut conn, &ctx, field).await?;
-        uploaded_files.push(response::File::from_model(created_file));
+        uploaded_files.push(response::File::from_model(
+            created_file,
+            workspace.slug.clone(),
+        ));
     }
 
     if uploaded_files.is_empty() {
@@ -291,7 +295,7 @@ async fn read_file(
 
     tracing::debug!(target: TRACING_TARGET, "File metadata retrieved");
 
-    Ok((StatusCode::OK, Json(File::from_model(file))))
+    Ok((StatusCode::OK, Json(File::from_model(file, workspace.slug))))
 }
 
 fn read_file_docs(op: TransformOperation) -> TransformOperation {
@@ -366,7 +370,7 @@ async fn update_file(
 
     Ok((
         StatusCode::OK,
-        Json(response::File::from_model(updated_file)),
+        Json(response::File::from_model(updated_file, workspace.slug)),
     ))
 }
 

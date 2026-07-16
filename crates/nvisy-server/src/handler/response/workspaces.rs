@@ -14,8 +14,6 @@ use super::Page;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
-    /// ID of the workspace.
-    pub workspace_id: Uuid,
     /// URL-safe workspace identifier.
     pub slug: WorkspaceSlug,
     /// Display name of the workspace.
@@ -42,7 +40,6 @@ impl Workspace {
     pub fn from_model(workspace: model::Workspace) -> Self {
         let tags = workspace.get_tags();
         Self {
-            workspace_id: workspace.id,
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
@@ -62,7 +59,6 @@ impl Workspace {
     ) -> Self {
         let tags = workspace.get_tags();
         Self {
-            workspace_id: workspace.id,
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,

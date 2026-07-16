@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
+use nvisy_postgres::types::{WebhookEvent, WebhookStatus, WorkspaceSlug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,8 +18,8 @@ use super::Page;
 pub struct Webhook {
     /// Unique webhook identifier.
     pub webhook_id: Uuid,
-    /// Reference to the workspace this webhook belongs to.
-    pub workspace_id: Uuid,
+    /// Slug of the workspace this webhook belongs to.
+    pub workspace_slug: WorkspaceSlug,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Detailed description of the webhook's purpose.
@@ -44,13 +44,13 @@ pub struct Webhook {
 }
 
 impl Webhook {
-    pub fn from_model(webhook: model::WorkspaceWebhook) -> Self {
+    pub fn from_model(webhook: model::WorkspaceWebhook, workspace_slug: WorkspaceSlug) -> Self {
         let events = webhook.subscribed_events();
         let headers = webhook.parsed_headers();
 
         Self {
             webhook_id: webhook.id,
-            workspace_id: webhook.workspace_id,
+            workspace_slug,
             display_name: webhook.display_name,
             description: webhook.description,
             url: webhook.url,
@@ -85,9 +85,13 @@ pub struct WebhookCreated {
 }
 
 impl WebhookCreated {
-    pub fn from_model(webhook: model::WorkspaceWebhook, secret: String) -> Self {
+    pub fn from_model(
+        webhook: model::WorkspaceWebhook,
+        workspace_slug: WorkspaceSlug,
+        secret: String,
+    ) -> Self {
         Self {
-            webhook: Webhook::from_model(webhook),
+            webhook: Webhook::from_model(webhook, workspace_slug),
             secret,
         }
     }

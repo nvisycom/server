@@ -76,7 +76,8 @@ impl CreateWorkspace {
 
 /// Request payload to update an existing workspace.
 ///
-/// All fields are optional; only provided fields will be updated.
+/// All fields are optional; only provided fields will be updated. The slug is
+/// immutable and set at creation, so it cannot be changed here.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -84,8 +85,6 @@ pub struct UpdateWorkspace {
     /// New display name for the workspace (3-32 characters).
     #[validate(length(min = 3, max = 32))]
     pub display_name: Option<String>,
-    /// New URL slug for the workspace.
-    pub slug: Option<WorkspaceSlug>,
     /// New description for the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
@@ -97,7 +96,6 @@ impl UpdateWorkspace {
     pub fn into_model(self) -> UpdateWorkspaceModel {
         UpdateWorkspaceModel {
             display_name: self.display_name,
-            slug: self.slug,
             description: self.description.map(Some),
             require_approval: self.require_approval,
             ..Default::default()

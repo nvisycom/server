@@ -12,6 +12,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
 };
+use nvisy_postgres::types::WorkspaceSlug;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -68,8 +69,13 @@ async fn create_pipeline(
 
     // The references were just written from the request, so build the response
     // from them directly instead of reading the join tables back.
-    let response = Pipeline::from_model(pipeline, references.policy_ids, references.context_ids)
-        .map_err(serialize_error)?;
+    let response = Pipeline::from_model(
+        pipeline,
+        workspace.slug,
+        references.policy_ids,
+        references.context_ids,
+    )
+    .map_err(serialize_error)?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -177,9 +183,14 @@ async fn get_pipeline(
     let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
     let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
 
-    let response =
-        Pipeline::from_model_with_artifacts(pipeline, artifacts, policy_ids, context_ids)
-            .map_err(serialize_error)?;
+    let response = Pipeline::from_model_with_artifacts(
+        pipeline,
+        workspace.slug,
+        artifacts,
+        policy_ids,
+        context_ids,
+    )
+    .map_err(serialize_error)?;
 
     tracing::info!(target: TRACING_TARGET, "Pipeline retrieved");
 
@@ -244,12 +255,15 @@ async fn update_pipeline(
 
     let response = match references_for_response {
         // A definition was supplied: the references we just wrote are current.
-        Some(references) => {
-            Pipeline::from_model(pipeline, references.policy_ids, references.context_ids)
-                .map_err(serialize_error)?
-        }
+        Some(references) => Pipeline::from_model(
+            pipeline,
+            workspace.slug,
+            references.policy_ids,
+            references.context_ids,
+        )
+        .map_err(serialize_error)?,
         // Partial update left the references untouched: read them back.
-        None => build_response(&mut conn, pipeline).await?,
+        None => build_response(&mut conn, pipeline, workspace.slug).await?,
     };
 
     tracing::info!(target: TRACING_TARGET, "Pipeline updated");
@@ -350,10 +364,14 @@ async fn replace_references(
 
 /// Builds a [`Pipeline`] response, reading the pipeline's (live) references back
 /// from the join tables. Used when the caller did not just write them.
-async fn build_response(conn: &mut PgConnection, pipeline: WorkspacePipeline) -> Result<Pipeline> {
+async fn build_response(
+    conn: &mut PgConnection,
+    pipeline: WorkspacePipeline,
+    workspace_slug: WorkspaceSlug,
+) -> Result<Pipeline> {
     let policy_ids = conn.list_pipeline_policy_ids(pipeline.id).await?;
     let context_ids = conn.list_pipeline_context_ids(pipeline.id).await?;
-    Pipeline::from_model(pipeline, policy_ids, context_ids).map_err(serialize_error)
+    Pipeline::from_model(pipeline, workspace_slug, policy_ids, context_ids).map_err(serialize_error)
 }
 
 /// Maps a definition (de)serialization failure to an internal error.

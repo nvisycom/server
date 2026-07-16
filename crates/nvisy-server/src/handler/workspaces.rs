@@ -60,7 +60,7 @@ async fn create_workspace(
 
     tracing::info!(
         target: TRACING_TARGET,
-        workspace_id = %response.workspace_id,
+        workspace_slug = %response.slug,
         "Workspace created",
     );
 
@@ -347,7 +347,9 @@ async fn list_activities(
         .cursor_list_workspace_activity(workspace.id, pagination.into())
         .await?;
 
-    let response = ActivitiesPage::from_cursor_page(page, Activity::from_model);
+    let response = ActivitiesPage::from_cursor_page(page, |activity| {
+        Activity::from_model(activity, workspace.slug.clone())
+    });
 
     tracing::debug!(
         target: TRACING_TARGET,
