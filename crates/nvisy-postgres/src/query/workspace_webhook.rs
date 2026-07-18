@@ -7,9 +7,8 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
-use crate::types::Username;
 use crate::types::{
-    Cursor, CursorPage, CursorPagination, OffsetPagination, WebhookEvent, WebhookStatus,
+    Cursor, CursorPage, CursorPagination, OffsetPagination, Username, WebhookEvent, WebhookStatus,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 

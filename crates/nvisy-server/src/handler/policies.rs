@@ -77,7 +77,8 @@ async fn create_policy(
 
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
-    let (policy, creator_username) = find_policy(&mut conn, workspace.id, policy.slug.as_str()).await?;
+    let (policy, creator_username) =
+        find_policy(&mut conn, workspace.id, policy.slug.as_str()).await?;
 
     Ok((
         StatusCode::CREATED,

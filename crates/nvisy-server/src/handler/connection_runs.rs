@@ -66,9 +66,13 @@ async fn create_connection_run(
 
     tracing::debug!(target: TRACING_TARGET, run_number = run.run_number, "Connection sync run triggered");
 
-    let (_, run, trigger_username) =
-        find_connection_run(&mut conn, workspace.id, connection.slug.as_str(), run.run_number)
-            .await?;
+    let (_, run, trigger_username) = find_connection_run(
+        &mut conn,
+        workspace.id,
+        connection.slug.as_str(),
+        run.run_number,
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -299,7 +303,11 @@ async fn find_connection_run(
     workspace_id: Uuid,
     connection_slug: &str,
     run_number: i32,
-) -> Result<(WorkspaceConnection, WorkspaceConnectionRun, Option<Username>)> {
+) -> Result<(
+    WorkspaceConnection,
+    WorkspaceConnectionRun,
+    Option<Username>,
+)> {
     let connection = find_connection(conn, workspace_id, connection_slug).await?;
     let (run, trigger_username) = conn
         .find_connection_run_by_number(connection.id, run_number)

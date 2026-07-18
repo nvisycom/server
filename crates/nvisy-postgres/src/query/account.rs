@@ -184,10 +184,7 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_account_by_username(
-        &mut self,
-        username: &Username,
-    ) -> PgResult<Option<Account>> {
+    async fn find_account_by_username(&mut self, username: &Username) -> PgResult<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         accounts::table

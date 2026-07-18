@@ -156,8 +156,8 @@ impl WorkspaceConnectionRepository for PgConnection {
         workspace_id: Uuid,
         slug: &str,
     ) -> PgResult<Option<(WorkspaceConnection, Username)>> {
-        use schema::{accounts, workspace_connections};
         use schema::workspace_connections::dsl;
+        use schema::{accounts, workspace_connections};
 
         let connection = workspace_connections::table
             .inner_join(accounts::table)

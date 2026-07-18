@@ -186,7 +186,11 @@ async fn read_webhook(
 
     Ok((
         StatusCode::OK,
-        Json(Webhook::from_model(webhook, workspace.slug, creator_username)),
+        Json(Webhook::from_model(
+            webhook,
+            workspace.slug,
+            creator_username,
+        )),
     ))
 }
 
@@ -238,7 +242,11 @@ async fn update_webhook(
 
     Ok((
         StatusCode::OK,
-        Json(Webhook::from_model(webhook, workspace.slug, creator_username)),
+        Json(Webhook::from_model(
+            webhook,
+            workspace.slug,
+            creator_username,
+        )),
     ))
 }
 

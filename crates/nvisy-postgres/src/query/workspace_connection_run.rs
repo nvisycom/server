@@ -72,7 +72,8 @@ pub trait WorkspaceConnectionRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>>>
+    + Send;
 
     /// Gets the most recent run for a connection (its current sync state).
     fn find_latest_workspace_connection_run(
@@ -226,38 +227,37 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let limit = pagination.limit + 1;
 
-        let items: Vec<(WorkspaceConnectionRun, Option<Username>)> = if let Some(cursor) =
-            &pagination.after
-        {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let items: Vec<(WorkspaceConnectionRun, Option<Username>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::started_at
-                        .lt(&cursor_time)
-                        .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select((
-                    WorkspaceConnectionRun::as_select(),
-                    accounts::username.nullable(),
-                ))
-                .order((dsl::started_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select((
-                    WorkspaceConnectionRun::as_select(),
-                    accounts::username.nullable(),
-                ))
-                .order((dsl::started_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::started_at
+                            .lt(&cursor_time)
+                            .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspaceConnectionRun::as_select(),
+                        accounts::username.nullable(),
+                    ))
+                    .order((dsl::started_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspaceConnectionRun::as_select(),
+                        accounts::username.nullable(),
+                    ))
+                    .order((dsl::started_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
         Ok(CursorPage::new(
             items,

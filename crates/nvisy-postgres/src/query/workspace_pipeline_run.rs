@@ -299,38 +299,37 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let limit = pagination.limit + 1;
 
-        let items: Vec<(WorkspacePipelineRun, Option<Username>)> = if let Some(cursor) =
-            &pagination.after
-        {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let items: Vec<(WorkspacePipelineRun, Option<Username>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::started_at
-                        .lt(&cursor_time)
-                        .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select((
-                    WorkspacePipelineRun::as_select(),
-                    accounts::username.nullable(),
-                ))
-                .order((dsl::started_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select((
-                    WorkspacePipelineRun::as_select(),
-                    accounts::username.nullable(),
-                ))
-                .order((dsl::started_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::started_at
+                            .lt(&cursor_time)
+                            .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspacePipelineRun::as_select(),
+                        accounts::username.nullable(),
+                    ))
+                    .order((dsl::started_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspacePipelineRun::as_select(),
+                        accounts::username.nullable(),
+                    ))
+                    .order((dsl::started_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
         Ok(CursorPage::new(
             items,
