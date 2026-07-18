@@ -9,7 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::types::OffsetPagination;
+use crate::types::{OffsetPagination, Username};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Maximum number of slug candidates tried before giving up when generating a
@@ -47,11 +47,12 @@ pub trait WorkspaceRepository {
         workspace_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
 
-    /// Finds a workspace by slug, excluding soft-deleted workspaces.
+    /// Finds a workspace by slug, with the handle of the account that created
+    /// it, excluding soft-deleted workspaces.
     fn find_workspace_by_slug(
         &mut self,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(Workspace, Username)>>> + Send;
 
     /// Updates a workspace with partial changes.
     fn update_workspace(
@@ -154,13 +155,18 @@ impl WorkspaceRepository for PgConnection {
         Ok(workspace)
     }
 
-    async fn find_workspace_by_slug(&mut self, slug_value: &str) -> PgResult<Option<Workspace>> {
-        use schema::workspaces::dsl::*;
+    async fn find_workspace_by_slug(
+        &mut self,
+        slug_value: &str,
+    ) -> PgResult<Option<(Workspace, Username)>> {
+        use schema::workspaces::dsl;
+        use schema::{accounts, workspaces};
 
-        let workspace = workspaces
-            .filter(slug.eq(slug_value))
-            .filter(deleted_at.is_null())
-            .select(Workspace::as_select())
+        let workspace = workspaces::table
+            .inner_join(accounts::table)
+            .filter(dsl::slug.eq(slug_value))
+            .filter(dsl::deleted_at.is_null())
+            .select((Workspace::as_select(), accounts::username))
             .first(self)
             .await
             .optional()

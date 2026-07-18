@@ -14,6 +14,7 @@ use nvisy_postgres::model::{
     NewWorkspaceContext, UpdateWorkspaceContext, WorkspaceContext as WorkspaceContextModel,
 };
 use nvisy_postgres::query::WorkspaceContextRepository;
+use nvisy_postgres::types::Username;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -78,9 +79,17 @@ async fn create_context(
 
     tracing::info!(target: TRACING_TARGET, context_slug = %context.slug, "Context created");
 
+    let (context, creator_username) =
+        find_context(&mut conn, workspace.id, context.slug.as_str()).await?;
+
     Ok((
         StatusCode::CREATED,
-        Json(Context::from_model(context, workspace.slug, &crypto)?),
+        Json(Context::from_model(
+            context,
+            workspace.slug,
+            creator_username,
+            &crypto,
+        )?),
     ))
 }
 
@@ -126,8 +135,8 @@ async fn list_contexts(
         "Workspace contexts listed",
     );
 
-    let page = ContextsPage::try_from_cursor_page(page, |model| {
-        Context::from_model(model, workspace.slug.clone(), &crypto)
+    let page = ContextsPage::try_from_cursor_page(page, |(model, creator_username)| {
+        Context::from_model(model, workspace.slug.clone(), creator_username, &crypto)
     })?;
 
     Ok((StatusCode::OK, Json(page)))
@@ -165,13 +174,19 @@ async fn read_context(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewContexts)
         .await?;
 
-    let context = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
+    let (context, creator_username) =
+        find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace context read");
 
     Ok((
         StatusCode::OK,
-        Json(Context::from_model(context, workspace.slug, &crypto)?),
+        Json(Context::from_model(
+            context,
+            workspace.slug,
+            creator_username,
+            &crypto,
+        )?),
     ))
 }
 
@@ -212,7 +227,7 @@ async fn update_context(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
-    let existing = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
+    let (existing, _) = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
@@ -230,13 +245,21 @@ async fn update_context(
         ..Default::default()
     };
 
-    let context = conn.update_workspace_context(existing.id, updates).await?;
+    conn.update_workspace_context(existing.id, updates).await?;
+
+    let (context, creator_username) =
+        find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     tracing::info!(target: TRACING_TARGET, "Context updated");
 
     Ok((
         StatusCode::OK,
-        Json(Context::from_model(context, workspace.slug, &crypto)?),
+        Json(Context::from_model(
+            context,
+            workspace.slug,
+            creator_username,
+            &crypto,
+        )?),
     ))
 }
 
@@ -273,7 +296,7 @@ async fn delete_context(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageContexts)
         .await?;
 
-    let existing = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
+    let (existing, _) = find_context(&mut conn, workspace.id, &path_params.context_slug).await?;
 
     conn.delete_workspace_context(existing.id).await?;
 
@@ -291,12 +314,13 @@ fn delete_context_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a context within a workspace by slug or returns NotFound error.
+/// Finds a context within a workspace by slug, with its creator's handle, or
+/// returns a NotFound error.
 async fn find_context(
     conn: &mut PgConn,
     workspace_id: Uuid,
     context_slug: &str,
-) -> Result<WorkspaceContextModel> {
+) -> Result<(WorkspaceContextModel, Username)> {
     conn.find_context_in_workspace_by_slug(workspace_id, context_slug)
         .await?
         .ok_or_else(|| Error::not_found("context"))

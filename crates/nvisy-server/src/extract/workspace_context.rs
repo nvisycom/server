@@ -86,6 +86,7 @@ where
         let workspace = conn
             .find_workspace_by_slug(&workspace_slug)
             .await?
+            .map(|(workspace, _)| workspace)
             .ok_or_else(|| {
                 ErrorKind::NotFound
                     .with_message("Workspace not found")

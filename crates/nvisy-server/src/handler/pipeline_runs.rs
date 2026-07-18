@@ -548,6 +548,7 @@ async fn find_pipeline(
 ) -> Result<WorkspacePipeline> {
     conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
+        .map(|(pipeline, _)| pipeline)
         .ok_or_else(|| Error::not_found("pipeline"))
 }
 

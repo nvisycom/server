@@ -2,11 +2,10 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceContext;
-use nvisy_postgres::types::Slug;
+use nvisy_postgres::types::{Slug, Username};
 use nvisy_schema::context::Context as SchemaContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 use crate::service::CryptoService;
@@ -19,8 +18,8 @@ pub struct Context {
     pub slug: Slug,
     /// Slug of the workspace this context belongs to.
     pub workspace_slug: Slug,
-    /// Account that created this context.
-    pub account_id: Uuid,
+    /// Handle of the account that created this context.
+    pub creator_username: Username,
     /// Human-readable context name.
     pub name: String,
     /// Context description.
@@ -44,6 +43,7 @@ impl Context {
     pub fn from_model(
         context: WorkspaceContext,
         workspace_slug: Slug,
+        creator_username: Username,
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =
@@ -52,7 +52,7 @@ impl Context {
         Ok(Self {
             slug: context.slug,
             workspace_slug,
-            account_id: context.account_id,
+            creator_username,
             name: context.name,
             description: context.description,
             version: context.version,

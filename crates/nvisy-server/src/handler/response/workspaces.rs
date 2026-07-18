@@ -2,10 +2,9 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{NotificationEvent, Slug, WorkspaceRole};
+use nvisy_postgres::types::{NotificationEvent, Slug, Username, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 
@@ -25,8 +24,8 @@ pub struct Workspace {
     pub tags: Vec<String>,
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
-    /// ID of the account that created the workspace.
-    pub created_by: Uuid,
+    /// Handle of the account that created this workspace.
+    pub creator_username: Username,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
     /// Timestamp when the workspace was created.
@@ -37,7 +36,7 @@ pub struct Workspace {
 
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
-    pub fn from_model(workspace: model::Workspace) -> Self {
+    pub fn from_model(workspace: model::Workspace, creator_username: Username) -> Self {
         let tags = workspace.get_tags();
         Self {
             slug: workspace.slug,
@@ -45,7 +44,7 @@ impl Workspace {
             description: workspace.description,
             tags,
             require_approval: workspace.require_approval,
-            created_by: workspace.created_by,
+            creator_username,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
@@ -56,6 +55,7 @@ impl Workspace {
     pub fn from_model_with_membership(
         workspace: model::Workspace,
         member: model::WorkspaceMember,
+        creator_username: Username,
     ) -> Self {
         let tags = workspace.get_tags();
         Self {
@@ -64,7 +64,7 @@ impl Workspace {
             description: workspace.description,
             tags,
             require_approval: workspace.require_approval,
-            created_by: workspace.created_by,
+            creator_username,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),

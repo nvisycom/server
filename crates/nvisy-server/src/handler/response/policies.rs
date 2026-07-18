@@ -2,11 +2,10 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspacePolicy;
-use nvisy_postgres::types::Slug;
+use nvisy_postgres::types::{Slug, Username};
 use nvisy_schema::policy::Policy as SchemaPolicy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 use crate::service::CryptoService;
@@ -19,8 +18,8 @@ pub struct Policy {
     pub slug: Slug,
     /// Slug of the workspace this policy belongs to.
     pub workspace_slug: Slug,
-    /// Account that created this policy.
-    pub account_id: Uuid,
+    /// Handle of the account that created this policy.
+    pub creator_username: Username,
     /// Human-readable policy name.
     pub name: String,
     /// Policy description.
@@ -40,10 +39,12 @@ pub struct Policy {
 pub type PoliciesPage = Page<Policy>;
 
 impl Policy {
-    /// Creates a response from a database model, decrypting the definition.
+    /// Creates a response from a database model and its creator's handle,
+    /// decrypting the definition.
     pub fn from_model(
         policy: WorkspacePolicy,
         workspace_slug: Slug,
+        creator_username: Username,
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =
@@ -52,7 +53,7 @@ impl Policy {
         Ok(Self {
             slug: policy.slug,
             workspace_slug,
-            account_id: policy.account_id,
+            creator_username,
             name: policy.name,
             description: policy.description,
             version: policy.version,

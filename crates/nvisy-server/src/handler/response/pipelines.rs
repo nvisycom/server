@@ -2,10 +2,9 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{PipelineStatus, Slug};
+use nvisy_postgres::types::{PipelineStatus, Slug, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::{Artifact, Page};
 use crate::handler::request::PipelineDefinition;
@@ -19,8 +18,8 @@ pub struct Pipeline {
     pub slug: Slug,
     /// Slug of the workspace this pipeline belongs to.
     pub workspace_slug: Slug,
-    /// Account that created this pipeline.
-    pub account_id: Uuid,
+    /// Handle of the account that created this pipeline.
+    pub creator_username: Username,
     /// Pipeline name.
     pub name: String,
     /// Pipeline description.
@@ -48,12 +47,14 @@ impl Pipeline {
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
+        creator_username: Username,
         policy_slugs: Vec<Slug>,
         context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         Self::assemble(
             pipeline,
             workspace_slug,
+            creator_username,
             Vec::new(),
             policy_slugs,
             context_slugs,
@@ -64,6 +65,7 @@ impl Pipeline {
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
+        creator_username: Username,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
         policy_slugs: Vec<Slug>,
         context_slugs: Vec<Slug>,
@@ -72,6 +74,7 @@ impl Pipeline {
         Self::assemble(
             pipeline,
             workspace_slug,
+            creator_username,
             artifacts,
             policy_slugs,
             context_slugs,
@@ -82,6 +85,7 @@ impl Pipeline {
     fn assemble(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
+        creator_username: Username,
         artifacts: Vec<Artifact>,
         policy_slugs: Vec<Slug>,
         context_slugs: Vec<Slug>,
@@ -91,7 +95,7 @@ impl Pipeline {
         Ok(Self {
             slug: pipeline.slug,
             workspace_slug,
-            account_id: pipeline.account_id,
+            creator_username,
             name: pipeline.name,
             description: pipeline.description,
             status: pipeline.status,
