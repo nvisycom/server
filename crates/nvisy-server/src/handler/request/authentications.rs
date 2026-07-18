@@ -1,5 +1,6 @@
 //! Authentication request types.
 
+use nvisy_postgres::types::Username;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -9,10 +10,9 @@ use validator::Validate;
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Login {
-    /// Email address of the account.
-    #[validate(email)]
-    #[validate(length(min = 5, max = 254))]
-    pub email_address: String,
+    /// Email address or username of the account.
+    #[validate(length(min = 3, max = 254))]
+    pub identifier: String,
     /// Password of the account.
     #[validate(length(min = 1, max = 1000))]
     pub password: String,
@@ -26,9 +26,12 @@ pub struct Login {
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Signup {
-    /// Display name of the account.
+    /// Public account handle, unique across all accounts.
+    pub username: Username,
+
+    /// Optional display name of the account.
     #[validate(length(min = 2, max = 32))]
-    pub display_name: String,
+    pub display_name: Option<String>,
 
     /// Email address of the account.
     #[validate(email)]

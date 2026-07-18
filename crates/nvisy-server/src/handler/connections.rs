@@ -19,6 +19,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 use nvisy_postgres::query::WorkspaceConnectionRepository;
+use nvisy_postgres::types::Username;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -83,9 +84,16 @@ async fn create_connection(
         "Connection created",
     );
 
+    let (connection, creator_username) =
+        find_connection(&mut conn, workspace.id, connection.slug.as_str()).await?;
+
     Ok((
         StatusCode::CREATED,
-        Json(Connection::from_model(connection, workspace.slug)),
+        Json(Connection::from_model(
+            connection,
+            workspace.slug,
+            creator_username,
+        )),
     ))
 }
 
@@ -144,9 +152,12 @@ async fn list_connections(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionsPage::from_cursor_page(page, |connection| {
-            Connection::from_model(connection, workspace.slug.clone())
-        })),
+        Json(ConnectionsPage::from_cursor_page(
+            page,
+            |(connection, creator_username)| {
+                Connection::from_model(connection, workspace.slug.clone(), creator_username)
+            },
+        )),
     ))
 }
 
@@ -187,13 +198,18 @@ async fn read_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let connection = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+    let (connection, creator_username) =
+        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
     Ok((
         StatusCode::OK,
-        Json(Connection::from_model(connection, workspace.slug)),
+        Json(Connection::from_model(
+            connection,
+            workspace.slug,
+            creator_username,
+        )),
     ))
 }
 
@@ -233,7 +249,8 @@ async fn update_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let existing = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+    let (existing, _) =
+        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     let encrypted_data = request
         .data
@@ -246,15 +263,21 @@ async fn update_connection(
         ..Default::default()
     };
 
-    let connection = conn
-        .update_workspace_connection(existing.id, update_data)
+    conn.update_workspace_connection(existing.id, update_data)
         .await?;
+
+    let (connection, creator_username) =
+        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
 
     Ok((
         StatusCode::OK,
-        Json(Connection::from_model(connection, workspace.slug)),
+        Json(Connection::from_model(
+            connection,
+            workspace.slug,
+            creator_username,
+        )),
     ))
 }
 
@@ -293,7 +316,8 @@ async fn delete_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let existing = find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+    let (existing, _) =
+        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
 
     conn.delete_workspace_connection(existing.id).await?;
 
@@ -311,12 +335,13 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace by slug or returns NotFound error.
+/// Finds a connection within a workspace by slug, with its creator's handle, or
+/// returns a NotFound error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
     connection_slug: &str,
-) -> Result<WorkspaceConnection> {
+) -> Result<(WorkspaceConnection, Username)> {
     conn.find_connection_in_workspace_by_slug(workspace_id, connection_slug)
         .await?
         .ok_or_else(|| Error::not_found("connection"))

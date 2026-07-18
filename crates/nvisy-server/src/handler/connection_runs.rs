@@ -265,6 +265,7 @@ async fn find_connection(
 ) -> Result<WorkspaceConnection> {
     conn.find_connection_in_workspace_by_slug(workspace_id, connection_slug)
         .await?
+        .map(|(connection, _)| connection)
         .ok_or_else(|| Error::not_found("connection"))
 }
 

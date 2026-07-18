@@ -1,9 +1,9 @@
 //! Authentication response types.
 
 use jiff::Timestamp;
+use nvisy_postgres::types::Username;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Response returned after successful authentication (login/signup).
 #[must_use]
@@ -12,10 +12,8 @@ use uuid::Uuid;
 pub struct AuthToken {
     /// The JWT API token for authentication.
     pub api_token: String,
-    /// ID of the authenticated account.
-    pub account_id: Uuid,
-    /// ID of the token.
-    pub token_id: Uuid,
+    /// Handle of the authenticated account.
+    pub username: Username,
     /// Timestamp when the token was issued.
     pub issued_at: Timestamp,
     /// Timestamp when the token expires.

@@ -7,6 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{Account, NewAccount, UpdateAccount};
+use crate::types::Username;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account database operations.
@@ -39,6 +40,25 @@ pub trait AccountRepository {
     fn find_account_by_email(
         &mut self,
         email: &str,
+    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+
+    /// Finds an account by its public handle.
+    ///
+    /// Retrieves an account using its username, excluding soft-deleted
+    /// accounts. Comparison is case-insensitive.
+    fn find_account_by_username(
+        &mut self,
+        username: &Username,
+    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+
+    /// Finds an account by either email address or username.
+    ///
+    /// The identifier is treated as an email when it contains `@` (usernames
+    /// never do), and as a username otherwise. Used to authenticate with
+    /// either credential. Comparison is case-insensitive.
+    fn find_account_by_identifier(
+        &mut self,
+        identifier: &str,
     ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
 
     /// Updates an account with new information.
@@ -98,6 +118,23 @@ pub trait AccountRepository {
         email: &str,
         exclude_account_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
+
+    /// Checks if a username is already registered in the system.
+    ///
+    /// Used during registration to prevent duplicate handles.
+    fn username_exists(
+        &mut self,
+        username: &Username,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+
+    /// Checks if a username is used by another account.
+    ///
+    /// Used during account updates to prevent duplicate handles.
+    fn username_exists_for_other(
+        &mut self,
+        username: &Username,
+        exclude_account_id: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
 }
 
 impl AccountRepository for PgConnection {
@@ -105,7 +142,9 @@ impl AccountRepository for PgConnection {
         use schema::accounts;
 
         // Normalize fields: trim whitespace
-        new_account.display_name = new_account.display_name.trim().to_owned();
+        if let Some(ref mut name) = new_account.display_name {
+            *name = name.trim().to_owned();
+        }
         new_account.email_address = new_account.email_address.trim().to_lowercase();
         if let Some(ref mut company) = new_account.company_name {
             *company = company.trim().to_owned();
@@ -145,6 +184,33 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
+    async fn find_account_by_username(
+        &mut self,
+        username: &Username,
+    ) -> PgResult<Option<Account>> {
+        use schema::accounts::{self, dsl};
+
+        accounts::table
+            .filter(dsl::username.eq(username.as_str()))
+            .filter(dsl::deleted_at.is_null())
+            .select(Account::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)
+    }
+
+    async fn find_account_by_identifier(&mut self, identifier: &str) -> PgResult<Option<Account>> {
+        if identifier.contains('@') {
+            return self.find_account_by_email(identifier).await;
+        }
+
+        match Username::parse(identifier.trim()) {
+            Ok(username) => self.find_account_by_username(&username).await,
+            Err(_) => Ok(None),
+        }
+    }
+
     async fn update_account(
         &mut self,
         account_id: Uuid,
@@ -153,7 +219,8 @@ impl AccountRepository for PgConnection {
         use schema::accounts::{self, dsl};
 
         // Normalize fields: trim whitespace
-        if let Some(name) = updates.display_name.as_mut() {
+        // Some(None) clears, Some(Some(value)) sets, None skips
+        if let Some(Some(name)) = updates.display_name.as_mut() {
             *name = name.trim().to_owned();
         }
         if let Some(email) = updates.email_address.as_mut() {
@@ -241,6 +308,39 @@ impl AccountRepository for PgConnection {
 
         let count: i64 = accounts::table
             .filter(dsl::email_address.eq(email.trim().to_lowercase()))
+            .filter(dsl::id.ne(exclude_account_id))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(count > 0)
+    }
+
+    async fn username_exists(&mut self, username: &Username) -> PgResult<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::username.eq(username.as_str()))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(count > 0)
+    }
+
+    async fn username_exists_for_other(
+        &mut self,
+        username: &Username,
+        exclude_account_id: Uuid,
+    ) -> PgResult<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::username.eq(username.as_str()))
             .filter(dsl::id.ne(exclude_account_id))
             .filter(dsl::deleted_at.is_null())
             .count()

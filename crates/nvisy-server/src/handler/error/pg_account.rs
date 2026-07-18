@@ -9,6 +9,14 @@ use crate::handler::{Error, ErrorKind};
 impl From<AccountConstraints> for Error<'static> {
     fn from(c: AccountConstraints) -> Self {
         let error = match c {
+            AccountConstraints::UsernameLength => ErrorKind::BadRequest
+                .with_message("Username must be between 3 and 32 characters long"),
+            AccountConstraints::UsernameFormat => ErrorKind::BadRequest.with_message(
+                "Username must be lowercase alphanumeric with single internal dashes",
+            ),
+            AccountConstraints::UsernameUnique => {
+                ErrorKind::Conflict.with_message("Username is already taken")
+            }
             AccountConstraints::DisplayNameLength => ErrorKind::BadRequest
                 .with_message("Display name must be between 2 and 100 characters long"),
             AccountConstraints::DisplayNameNotEmpty => {

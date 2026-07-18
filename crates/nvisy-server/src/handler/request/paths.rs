@@ -1,5 +1,6 @@
 //! Path parameter types for HTTP handlers.
 
+use nvisy_postgres::types::Username;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -9,8 +10,8 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberPathParams {
-    /// Unique identifier of the member account.
-    pub account_id: Uuid,
+    /// Public handle of the member's account.
+    pub username: Username,
 }
 
 /// Path parameters for invite operations.
@@ -63,14 +64,14 @@ pub struct TokenPathParams {
 
 /// Path parameters for account operations.
 ///
-/// Used when retrieving account information by ID. Access is granted
+/// Used when retrieving account information by handle. Access is granted
 /// if the requester shares at least one workspace with the target account.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountPathParams {
-    /// Unique identifier of the account.
-    pub account_id: Uuid,
+    /// Public handle of the account.
+    pub username: Username,
 }
 
 /// Path parameters for pipeline operations.

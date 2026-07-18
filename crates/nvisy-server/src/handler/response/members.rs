@@ -2,10 +2,9 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{Account, WorkspaceMember};
-use nvisy_postgres::types::WorkspaceRole;
+use nvisy_postgres::types::{Username, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 
@@ -14,12 +13,13 @@ use super::Page;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
-    /// Account ID of the member.
-    pub account_id: Uuid,
+    /// Handle of the member's account.
+    pub username: Username,
     /// Email address of the member.
     pub email_address: String,
-    /// Display name of the member.
-    pub display_name: String,
+    /// Display name of the member, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
     /// Whether the member has two-factor authentication enabled.
@@ -33,7 +33,7 @@ impl Member {
     // TODO: Fetch actual 2FA status from account settings
     pub fn from_model(member: WorkspaceMember, account: Account) -> Self {
         Self {
-            account_id: member.account_id,
+            username: account.username,
             email_address: account.email_address,
             display_name: account.display_name,
             member_role: member.member_role,

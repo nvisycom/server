@@ -11,6 +11,10 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum AccountConstraints {
     // Account validation constraints
+    #[strum(serialize = "accounts_username_length")]
+    UsernameLength,
+    #[strum(serialize = "accounts_username_format")]
+    UsernameFormat,
     #[strum(serialize = "accounts_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "accounts_display_name_not_empty")]
@@ -32,6 +36,10 @@ pub enum AccountConstraints {
     #[strum(serialize = "accounts_suspended_not_admin")]
     SuspendedNotAdmin,
 
+    // Account uniqueness constraints
+    #[strum(serialize = "accounts_username_unique_idx")]
+    UsernameUnique,
+
     // Account chronological constraints
     #[strum(serialize = "accounts_updated_after_created")]
     UpdatedAfterCreated,
@@ -52,7 +60,9 @@ impl AccountConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            AccountConstraints::DisplayNameLength
+            AccountConstraints::UsernameLength
+            | AccountConstraints::UsernameFormat
+            | AccountConstraints::DisplayNameLength
             | AccountConstraints::DisplayNameNotEmpty
             | AccountConstraints::EmailFormat
             | AccountConstraints::EmailLengthMax
@@ -62,6 +72,8 @@ impl AccountConstraints {
             | AccountConstraints::TimezoneFormat
             | AccountConstraints::LocaleFormat
             | AccountConstraints::SuspendedNotAdmin => ConstraintCategory::Validation,
+
+            AccountConstraints::UsernameUnique => ConstraintCategory::Uniqueness,
 
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
