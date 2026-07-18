@@ -353,8 +353,8 @@ async fn list_activities(
         .cursor_list_workspace_activity(workspace.id, pagination.into())
         .await?;
 
-    let response = ActivitiesPage::from_cursor_page(page, |activity| {
-        Activity::from_model(activity, workspace.slug.clone())
+    let response = ActivitiesPage::from_cursor_page(page, |(activity, actor_username)| {
+        Activity::from_model(activity, workspace.slug.clone(), actor_username)
     });
 
     tracing::debug!(

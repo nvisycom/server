@@ -9,7 +9,7 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
-use crate::types::{ActivityType, CursorPage, CursorPagination, OffsetPagination};
+use crate::types::{ActivityType, CursorPage, CursorPagination, OffsetPagination, Username};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Parameters for logging entity-specific activities.
@@ -46,12 +46,13 @@ pub trait WorkspaceActivityRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
-    /// Lists activities for a specific workspace with cursor pagination.
+    /// Lists activities for a specific workspace with cursor pagination, each
+    /// paired with the handle of the account that performed it, if any.
     fn cursor_list_workspace_activity(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceActivity>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceActivity, Option<Username>)>>> + Send;
 
     /// Gets recent activities across all workspaces for a specific user.
     fn get_account_recent_activity(
@@ -174,9 +175,10 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WorkspaceActivity>> {
+    ) -> PgResult<CursorPage<(WorkspaceActivity, Option<Username>)>> {
         use diesel::dsl::count_star;
-        use schema::workspace_activities::{self, dsl};
+        use schema::workspace_activities::dsl;
+        use schema::{accounts, workspace_activities};
 
         // Get total count only if requested
         let total = if pagination.include_count {
@@ -194,6 +196,7 @@ impl WorkspaceActivityRepository for PgConnection {
 
         // Build query with cursor
         let mut query = workspace_activities::table
+            .left_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .into_boxed();
 
@@ -206,15 +209,18 @@ impl WorkspaceActivityRepository for PgConnection {
             );
         }
 
-        let items: Vec<WorkspaceActivity> = query
-            .select(WorkspaceActivity::as_select())
+        let items: Vec<(WorkspaceActivity, Option<Username>)> = query
+            .select((
+                WorkspaceActivity::as_select(),
+                accounts::username.nullable(),
+            ))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(pagination.fetch_limit())
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(CursorPage::new(items, total, pagination.limit, |a| {
+        Ok(CursorPage::new(items, total, pagination.limit, |(a, _)| {
             (a.created_at.into(), a.id)
         }))
     }

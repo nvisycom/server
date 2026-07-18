@@ -2,10 +2,9 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnectionRun as ConnectionRunModel;
-use nvisy_postgres::types::{Slug, SyncStatus, SyncTriggerType};
+use nvisy_postgres::types::{Slug, SyncStatus, SyncTriggerType, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 
@@ -22,9 +21,9 @@ pub struct ConnectionRun {
     pub connection_slug: Slug,
     /// Slug of the workspace this run belongs to.
     pub workspace_slug: Slug,
-    /// Account that triggered the run (optional).
+    /// Handle of the account that triggered the run, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub account_id: Option<Uuid>,
+    pub trigger_username: Option<Username>,
     /// How the run was triggered.
     pub trigger_type: SyncTriggerType,
     /// Current run status.
@@ -47,18 +46,19 @@ pub struct ConnectionRun {
 pub type ConnectionRunsPage = Page<ConnectionRun>;
 
 impl ConnectionRun {
-    /// Creates a connection run response from the database model and the slugs
-    /// of its owning connection and workspace.
+    /// Creates a connection run response from the database model, the slugs of
+    /// its owning connection and workspace, and the triggering account's handle.
     pub fn from_model(
         run: ConnectionRunModel,
         connection_slug: Slug,
         workspace_slug: Slug,
+        trigger_username: Option<Username>,
     ) -> Self {
         Self {
             run_number: run.run_number,
             connection_slug,
             workspace_slug,
-            account_id: run.account_id,
+            trigger_username,
             trigger_type: run.trigger_type,
             status: run.status,
             records_synced: run.records_synced,
