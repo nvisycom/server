@@ -17,7 +17,8 @@ use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
-use nvisy_postgres::query::WorkspaceFileRepository;
+use nvisy_postgres::query::{AccountRepository, WorkspaceFileRepository};
+use nvisy_postgres::types::Username;
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
@@ -38,6 +39,18 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
 /// Finds a file within a workspace or returns NotFound error.
 async fn find_file(conn: &mut PgConn, workspace_id: Uuid, file_id: Uuid) -> Result<FileModel> {
     conn.find_file_in_workspace(workspace_id, file_id)
+        .await?
+        .ok_or_else(|| Error::not_found("file"))
+}
+
+/// Finds a file within a workspace, with its uploader's handle, or returns a
+/// NotFound error.
+async fn find_file_with_creator(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    file_id: Uuid,
+) -> Result<(FileModel, Username)> {
+    conn.find_file_in_workspace_with_creator(workspace_id, file_id)
         .await?
         .ok_or_else(|| Error::not_found("file"))
 }
@@ -73,8 +86,9 @@ async fn list_files(
         )
         .await?;
 
-    let response =
-        FilesPage::from_cursor_page(page, |file| File::from_model(file, workspace.slug.clone()));
+    let response = FilesPage::from_cursor_page(page, |(file, uploaded_by)| {
+        File::from_model(file, workspace.slug.clone(), uploaded_by)
+    });
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -192,6 +206,13 @@ async fn upload_file(
 
     let file_store = nats_client.object_store::<FilesBucket, FileKey>().await?;
 
+    // The uploader is the caller; resolve the handle once for every file below.
+    let uploaded_by: Username = conn
+        .find_account_by_id(auth_claims.account_id)
+        .await?
+        .ok_or_else(|| Error::not_found("account"))?
+        .username;
+
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
         account_id: auth_claims.account_id,
@@ -219,6 +240,7 @@ async fn upload_file(
         uploaded_files.push(response::File::from_model(
             created_file,
             workspace.slug.clone(),
+            uploaded_by.clone(),
         ));
     }
 
@@ -291,11 +313,15 @@ async fn read_file(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
         .await?;
 
-    let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
+    let (file, uploaded_by) =
+        find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "File metadata retrieved");
 
-    Ok((StatusCode::OK, Json(File::from_model(file, workspace.slug))))
+    Ok((
+        StatusCode::OK,
+        Json(File::from_model(file, workspace.slug, uploaded_by)),
+    ))
 }
 
 fn read_file_docs(op: TransformOperation) -> TransformOperation {
@@ -337,13 +363,15 @@ async fn update_file(
 
     let updates = request.into_model();
 
-    let updated_file = conn
-        .update_workspace_file(path_params.file_id, updates)
+    conn.update_workspace_file(path_params.file_id, updates)
         .await
         .map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
             ErrorKind::InternalServerError.with_message("Failed to update file")
         })?;
+
+    let (updated_file, uploaded_by) =
+        find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({
@@ -370,7 +398,11 @@ async fn update_file(
 
     Ok((
         StatusCode::OK,
-        Json(response::File::from_model(updated_file, workspace.slug)),
+        Json(response::File::from_model(
+            updated_file,
+            workspace.slug,
+            uploaded_by,
+        )),
     ))
 }
 

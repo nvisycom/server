@@ -7,6 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
+use crate::types::Username;
 use crate::types::{
     Cursor, CursorPage, CursorPagination, OffsetPagination, WebhookEvent, WebhookStatus,
 };
@@ -35,12 +36,13 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
 
-    /// Finds a webhook by slug within a workspace, excluding soft-deleted rows.
+    /// Finds a webhook by slug within a workspace, with the handle of the
+    /// account that created it, excluding soft-deleted rows.
     fn find_webhook_in_workspace_by_slug(
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceWebhook, Username)>>> + Send;
 
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
@@ -49,12 +51,13 @@ pub trait WorkspaceWebhookRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
 
-    /// Lists all webhooks for a workspace with cursor pagination.
+    /// Lists all webhooks for a workspace with cursor pagination, each paired
+    /// with the handle of the account that created it.
     fn cursor_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceWebhook>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceWebhook, Username)>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
@@ -172,14 +175,16 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug_value: &str,
-    ) -> PgResult<Option<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::{self, dsl};
+    ) -> PgResult<Option<(WorkspaceWebhook, Username)>> {
+        use schema::workspace_webhooks::dsl;
+        use schema::{accounts, workspace_webhooks};
 
         let webhook = workspace_webhooks::table
+            .inner_join(accounts::table)
             .filter(dsl::slug.eq(slug_value))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceWebhook::as_select())
+            .select((WorkspaceWebhook::as_select(), accounts::username))
             .first(self)
             .await
             .optional()
@@ -213,8 +218,9 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::{self, dsl};
+    ) -> PgResult<CursorPage<(WorkspaceWebhook, Username)>> {
+        use schema::workspace_webhooks::dsl;
+        use schema::{accounts, workspace_webhooks};
 
         // Get total count only if requested
         let total = if pagination.include_count {
@@ -233,6 +239,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         // Build query with cursor
         let mut query = workspace_webhooks::table
+            .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
@@ -247,8 +254,8 @@ impl WorkspaceWebhookRepository for PgConnection {
         }
 
         let fetch_limit = pagination.fetch_limit();
-        let mut items: Vec<WorkspaceWebhook> = query
-            .select(WorkspaceWebhook::as_select())
+        let mut items: Vec<(WorkspaceWebhook, Username)> = query
+            .select((WorkspaceWebhook::as_select(), accounts::username))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(fetch_limit)
             .load(self)
@@ -261,7 +268,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         }
 
         let next_cursor = if has_more {
-            items.last().map(|w| {
+            items.last().map(|(w, _)| {
                 Cursor {
                     timestamp: w.created_at.into(),
                     id: w.id,

@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::model::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 use crate::types::{
     CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, OffsetPagination,
-    SortOrder,
+    SortOrder, Username,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -40,6 +40,16 @@ pub trait WorkspaceFileRepository {
         workspace_id: Uuid,
         file_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceFile>>> + Send;
+
+    /// Finds a file by id within a workspace, with the handle of the account
+    /// that uploaded it.
+    ///
+    /// Provides workspace-scoped access control at the database level.
+    fn find_file_in_workspace_with_creator(
+        &mut self,
+        workspace_id: Uuid,
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceFile, Username)>>> + Send;
 
     /// Lists all files uploaded by a specific account with offset pagination.
     fn offset_list_account_files(
@@ -79,13 +89,14 @@ pub trait WorkspaceFileRepository {
         filter: FileFilter,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
 
-    /// Lists all files in a workspace with cursor pagination and optional filtering.
+    /// Lists all files in a workspace with cursor pagination and optional
+    /// filtering, each paired with the handle of the account that uploaded it.
     fn cursor_list_workspace_files(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceFile, Username)>>> + Send;
 
     /// Finds workspace files with a matching SHA-256 hash.
     fn find_workspace_files_by_hash(
@@ -176,6 +187,28 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceFile::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(file)
+    }
+
+    async fn find_file_in_workspace_with_creator(
+        &mut self,
+        workspace_id: Uuid,
+        file_id: Uuid,
+    ) -> PgResult<Option<(WorkspaceFile, Username)>> {
+        use schema::workspace_files::dsl;
+        use schema::{accounts, workspace_files};
+
+        let file = workspace_files::table
+            .inner_join(accounts::table)
+            .filter(dsl::id.eq(file_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select((WorkspaceFile::as_select(), accounts::username))
             .first(self)
             .await
             .optional()
@@ -305,8 +338,9 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> PgResult<CursorPage<WorkspaceFile>> {
-        use schema::workspace_files::{self, dsl};
+    ) -> PgResult<CursorPage<(WorkspaceFile, Username)>> {
+        use schema::workspace_files::dsl;
+        use schema::{accounts, workspace_files};
 
         // Precompute filter values
         let search_term = filter.search_term().map(|s| s.to_string());
@@ -342,6 +376,7 @@ impl WorkspaceFileRepository for PgConnection {
 
         // Rebuild query for fetching items (can't reuse boxed query after count)
         let mut query = workspace_files::table
+            .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
@@ -359,7 +394,7 @@ impl WorkspaceFileRepository for PgConnection {
         let limit = pagination.limit + 1;
 
         // Apply cursor filter if present
-        let items: Vec<WorkspaceFile> = if let Some(cursor) = &pagination.after {
+        let items: Vec<(WorkspaceFile, Username)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
             query
@@ -368,7 +403,7 @@ impl WorkspaceFileRepository for PgConnection {
                         .lt(&cursor_time)
                         .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
                 )
-                .select(WorkspaceFile::as_select())
+                .select((WorkspaceFile::as_select(), accounts::username))
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(limit)
                 .load(self)
@@ -376,7 +411,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .map_err(PgError::from)?
         } else {
             query
-                .select(WorkspaceFile::as_select())
+                .select((WorkspaceFile::as_select(), accounts::username))
                 .order((dsl::created_at.desc(), dsl::id.desc()))
                 .limit(limit)
                 .load(self)
@@ -388,7 +423,7 @@ impl WorkspaceFileRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |f: &WorkspaceFile| (f.created_at.into(), f.id),
+            |(f, _): &(WorkspaceFile, Username)| (f.created_at.into(), f.id),
         ))
     }
 

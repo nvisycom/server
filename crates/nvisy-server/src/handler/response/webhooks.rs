@@ -4,10 +4,9 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Slug, WebhookEvent, WebhookStatus};
+use nvisy_postgres::types::{Slug, Username, WebhookEvent, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 
@@ -35,8 +34,8 @@ pub struct Webhook {
     /// Timestamp of the most recent webhook trigger.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_triggered_at: Option<Timestamp>,
-    /// Account that originally created this webhook.
-    pub created_by: Uuid,
+    /// Handle of the account that created this webhook.
+    pub creator_username: Username,
     /// Timestamp when this webhook was first created.
     pub created_at: Timestamp,
     /// Timestamp when this webhook was last modified.
@@ -44,7 +43,11 @@ pub struct Webhook {
 }
 
 impl Webhook {
-    pub fn from_model(webhook: model::WorkspaceWebhook, workspace_slug: Slug) -> Self {
+    pub fn from_model(
+        webhook: model::WorkspaceWebhook,
+        workspace_slug: Slug,
+        creator_username: Username,
+    ) -> Self {
         let events = webhook.subscribed_events();
         let headers = webhook.parsed_headers();
 
@@ -58,7 +61,7 @@ impl Webhook {
             headers,
             status: webhook.status,
             last_triggered_at: webhook.last_triggered_at.map(Into::into),
-            created_by: webhook.created_by,
+            creator_username,
             created_at: webhook.created_at.into(),
             updated_at: webhook.updated_at.into(),
         }
@@ -88,10 +91,11 @@ impl WebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_slug: Slug,
+        creator_username: Username,
         secret: String,
     ) -> Self {
         Self {
-            webhook: Webhook::from_model(webhook, workspace_slug),
+            webhook: Webhook::from_model(webhook, workspace_slug, creator_username),
             secret,
         }
     }
