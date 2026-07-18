@@ -366,6 +366,7 @@ diesel::table! {
     workspace_webhooks (id) {
         id -> Uuid,
         workspace_id -> Uuid,
+        slug -> Text,
         display_name -> Text,
         description -> Text,
         url -> Text,

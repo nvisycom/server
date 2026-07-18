@@ -16,8 +16,8 @@ use super::Page;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Webhook {
-    /// Unique webhook identifier.
-    pub webhook_id: Uuid,
+    /// URL slug of the webhook, unique within its workspace.
+    pub slug: Slug,
     /// Slug of the workspace this webhook belongs to.
     pub workspace_slug: Slug,
     /// Human-readable name for the webhook.
@@ -49,7 +49,7 @@ impl Webhook {
         let headers = webhook.parsed_headers();
 
         Self {
-            webhook_id: webhook.id,
+            slug: webhook.slug,
             workspace_slug,
             display_name: webhook.display_name,
             description: webhook.description,

@@ -14,8 +14,8 @@ CREATE TABLE workspace_policies (
     -- Composite key target for workspace-scoped foreign keys (join tables).
     CONSTRAINT workspace_policies_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- Immutable URL identity, unique within the workspace. Mirrors the Slug
-    -- newtype: lowercase alphanumeric with single internal dashes, 3-32 chars.
+    -- URL identity, unique within the workspace: lowercase alphanumeric with
+    -- single internal dashes, 3-32 characters.
     slug            TEXT            NOT NULL,
     CONSTRAINT workspace_policies_workspace_id_slug_key UNIQUE (workspace_id, slug),
     CONSTRAINT workspace_policies_slug_length CHECK (length(slug) BETWEEN 3 AND 32),

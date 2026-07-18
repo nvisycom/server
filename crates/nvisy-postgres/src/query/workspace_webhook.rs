@@ -35,6 +35,13 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
 
+    /// Finds a webhook by slug within a workspace, excluding soft-deleted rows.
+    fn find_webhook_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug: &str,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
+
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
         &mut self,
@@ -150,6 +157,26 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhook = workspace_webhooks::table
             .filter(dsl::id.eq(webhook_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceWebhook::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)?;
+
+        Ok(webhook)
+    }
+
+    async fn find_webhook_in_workspace_by_slug(
+        &mut self,
+        workspace_id: Uuid,
+        slug_value: &str,
+    ) -> PgResult<Option<WorkspaceWebhook>> {
+        use schema::workspace_webhooks::{self, dsl};
+
+        let webhook = workspace_webhooks::table
+            .filter(dsl::slug.eq(slug_value))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceWebhook::as_select())

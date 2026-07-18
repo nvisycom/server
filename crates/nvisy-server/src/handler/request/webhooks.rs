@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use nvisy_postgres::model::{
     NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel,
 };
-use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
+use nvisy_postgres::types::{Slug, WebhookEvent, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -16,9 +16,11 @@ use validator::Validate;
 
 /// Request payload for creating a new workspace webhook.
 #[must_use]
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWebhook {
+    /// URL slug, unique within the workspace and immutable after creation.
+    pub slug: Slug,
     /// Human-readable name for the webhook (1-100 characters).
     #[validate(length(min = 1, max = 100))]
     pub display_name: String,
@@ -60,6 +62,7 @@ impl CreateWebhook {
 
         NewWorkspaceWebhook {
             workspace_id,
+            slug: self.slug,
             display_name: self.display_name,
             description: self.description,
             url: self.url,
