@@ -9,16 +9,17 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::query::WorkspaceMemberRepository;
-use nvisy_postgres::types::WorkspaceRole;
+use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
+use nvisy_postgres::types::{Username, WorkspaceRole};
+use nvisy_postgres::{PgClient, PgConn};
+use uuid::Uuid;
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
 use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace member operations.
@@ -89,7 +90,8 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        member_id = %path_params.account_id,
+        member = %path_params.username,
+        member_id = tracing::field::Empty,
     )
 )]
 async fn get_member(
@@ -106,8 +108,10 @@ async fn get_member(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
         .await?;
 
+    let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
+
     let Some((workspace_member, account)) = conn
-        .find_workspace_member_with_account(workspace.id, path_params.account_id)
+        .find_workspace_member_with_account(workspace.id, member_account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -146,7 +150,8 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        member_id = %path_params.account_id,
+        member = %path_params.username,
+        member_id = tracing::field::Empty,
     )
 )]
 async fn delete_member(
@@ -164,14 +169,16 @@ async fn delete_member(
         .authorize_workspace(&mut conn, workspace.id, Permission::RemoveMembers)
         .await?;
 
+    let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
+
     // Prevent self-removal (use leave endpoint instead)
-    if auth_state.account_id == path_params.account_id {
+    if auth_state.account_id == member_account_id {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot remove yourself. Use the leave workspace endpoint instead."));
     }
 
     let Some(member_to_remove) = conn
-        .find_workspace_member(workspace.id, path_params.account_id)
+        .find_workspace_member(workspace.id, member_account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
@@ -184,18 +191,17 @@ async fn delete_member(
             .with_context("Owners can only leave the workspace themselves"));
     }
 
-    conn.remove_workspace_member(workspace.id, path_params.account_id)
+    conn.remove_workspace_member(workspace.id, member_account_id)
         .await?;
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({
-        "removedAccountId": path_params.account_id,
-        "removedBy": auth_state.account_id,
+        "removedUsername": path_params.username,
     });
     if let Err(err) = webhook_emitter
         .emit_member_deleted(
             workspace.id,
-            path_params.account_id, // Use account_id as resource_id
+            member_account_id,
             Some(auth_state.account_id),
             Some(data),
         )
@@ -235,7 +241,8 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        member_id = %path_params.account_id,
+        member = %path_params.username,
+        member_id = tracing::field::Empty,
         new_role = ?request.role,
     )
 )]
@@ -255,15 +262,17 @@ async fn update_member(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageRoles)
         .await?;
 
+    let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
+
     // Prevent self-role-update
-    if auth_state.account_id == path_params.account_id {
+    if auth_state.account_id == member_account_id {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot update your own role")
             .with_context("Ask another owner to update your role"));
     }
 
     let Some(current_member) = conn
-        .find_workspace_member(workspace.id, path_params.account_id)
+        .find_workspace_member(workspace.id, member_account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
@@ -277,11 +286,11 @@ async fn update_member(
     }
 
     let new_role = request.role;
-    conn.update_workspace_member(workspace.id, path_params.account_id, request.into_model())
+    conn.update_workspace_member(workspace.id, member_account_id, request.into_model())
         .await?;
 
     let Some((updated_member, account)) = conn
-        .find_workspace_member_with_account(workspace.id, path_params.account_id)
+        .find_workspace_member_with_account(workspace.id, member_account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
@@ -289,14 +298,14 @@ async fn update_member(
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({
-        "accountId": path_params.account_id,
+        "username": path_params.username,
         "previousRole": current_member.member_role.to_string(),
         "newRole": new_role.to_string(),
     });
     if let Err(err) = webhook_emitter
         .emit_member_updated(
             workspace.id,
-            path_params.account_id, // Use account_id as resource_id
+            member_account_id,
             Some(auth_state.account_id),
             Some(data),
         )
@@ -380,6 +389,17 @@ fn leave_workspace_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Resolves a member's public handle to its account id, recording the id on the
+/// current tracing span. Returns `NotFound` when no such account exists.
+async fn resolve_member_account_id(conn: &mut PgConn, username: &Username) -> Result<Uuid> {
+    let account = conn
+        .find_account_by_username(username)
+        .await?
+        .ok_or_else(|| Error::not_found("workspace_member"))?;
+    tracing::Span::current().record("member_id", tracing::field::display(account.id));
+    Ok(account.id)
+}
+
 /// Returns a [`Router`] with all workspace member related routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -396,7 +416,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(leave_workspace, leave_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/members/{accountId}/",
+            "/workspaces/{workspaceSlug}/members/{username}/",
             get_with(get_member, get_member_docs)
                 .patch_with(update_member, update_member_docs)
                 .delete_with(delete_member, delete_member_docs),

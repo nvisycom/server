@@ -11,7 +11,7 @@ use crate::model::{
 };
 use crate::types::{
     Cursor, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
-    OffsetPagination, SortOrder, WorkspaceRole,
+    OffsetPagination, SortOrder, Username, WorkspaceRole,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -83,12 +83,14 @@ pub trait WorkspaceMemberRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<(Workspace, WorkspaceMember)>>> + Send;
 
-    /// Lists user workspaces with full workspace details using cursor pagination.
+    /// Lists user workspaces with full workspace details using cursor
+    /// pagination, each paired with the handle of the account that created the
+    /// workspace.
     fn cursor_list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(Workspace, WorkspaceMember)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(Workspace, WorkspaceMember, Username)>>> + Send;
 
     /// Gets a user's role in a workspace for permission checking.
     ///
@@ -406,9 +408,9 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(Workspace, WorkspaceMember)>> {
+    ) -> PgResult<CursorPage<(Workspace, WorkspaceMember, Username)>> {
         use diesel::dsl::count_star;
-        use schema::{workspace_members, workspaces};
+        use schema::{accounts, workspace_members, workspaces};
 
         // Build base filter
         let base_filter = workspace_members::account_id
@@ -435,6 +437,7 @@ impl WorkspaceMemberRepository for PgConnection {
         // Build query
         let mut query = workspace_members::table
             .inner_join(workspaces::table.on(workspaces::id.eq(workspace_members::workspace_id)))
+            .inner_join(accounts::table.on(accounts::id.eq(workspaces::created_by)))
             .filter(base_filter)
             .into_boxed();
 
@@ -456,14 +459,23 @@ impl WorkspaceMemberRepository for PgConnection {
                 workspace_members::workspace_id.desc(),
             ))
             .limit(pagination.fetch_limit())
-            .select((Workspace::as_select(), WorkspaceMember::as_select()))
+            .select((
+                Workspace::as_select(),
+                WorkspaceMember::as_select(),
+                accounts::username,
+            ))
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(CursorPage::new(items, total, pagination.limit, |(_, m)| {
-            (m.created_at.into(), m.workspace_id)
-        }))
+        Ok(CursorPage::new(
+            items,
+            total,
+            pagination.limit,
+            |(_, m, _): &(Workspace, WorkspaceMember, Username)| {
+                (m.created_at.into(), m.workspace_id)
+            },
+        ))
     }
 
     async fn check_account_role(

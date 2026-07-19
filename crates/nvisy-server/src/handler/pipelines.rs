@@ -12,7 +12,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::Slug;
+use nvisy_postgres::types::{Slug, Username};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -70,11 +70,16 @@ async fn create_pipeline(
         })
         .await?;
 
+    // Re-read by slug to pick up the creator's handle via the join.
+    let (pipeline, creator_username) =
+        find_pipeline(&mut conn, workspace.id, pipeline.slug.as_str()).await?;
+
     // The references were just written from the request, so build the response
     // from its slugs directly instead of reading the join tables back.
     let response = Pipeline::from_model(
         pipeline,
         workspace.slug,
+        creator_username,
         references.policy_slugs,
         references.context_slugs,
     )
@@ -133,7 +138,9 @@ async fn list_pipelines(
         )
         .await?;
 
-    let response = Page::from_cursor_page(page, PipelineSummary::from_model);
+    let response = Page::from_cursor_page(page, |(pipeline, _creator_username)| {
+        PipelineSummary::from_model(pipeline)
+    });
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -177,7 +184,8 @@ async fn get_pipeline(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let (pipeline, creator_username) =
+        find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let artifacts = conn.list_workspace_pipeline_artifacts(pipeline.id).await?;
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
@@ -186,6 +194,7 @@ async fn get_pipeline(
     let response = Pipeline::from_model_with_artifacts(
         pipeline,
         workspace.slug,
+        creator_username,
         artifacts,
         policy_slugs,
         context_slugs,
@@ -234,7 +243,8 @@ async fn update_pipeline(
         .await?;
 
     // Confirm the pipeline exists in this workspace before mutating.
-    let existing = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let (existing, creator_username) =
+        find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let (update_data, references) = request.into_parts().map_err(serialize_error)?;
     let pipeline_id = existing.id;
@@ -264,12 +274,13 @@ async fn update_pipeline(
         Some(references) => Pipeline::from_model(
             pipeline,
             workspace.slug,
+            creator_username,
             references.policy_slugs,
             references.context_slugs,
         )
         .map_err(serialize_error)?,
         // Partial update left the references untouched: read them back.
-        None => build_response(&mut conn, pipeline, workspace.slug).await?,
+        None => build_response(&mut conn, pipeline, workspace.slug, creator_username).await?,
     };
 
     tracing::info!(target: TRACING_TARGET, "Pipeline updated");
@@ -314,7 +325,7 @@ async fn delete_pipeline(
         .await?;
 
     // Confirm the pipeline exists in this workspace before deleting.
-    let existing = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let (existing, _) = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     conn.delete_workspace_pipeline(existing.id).await?;
 
@@ -332,12 +343,13 @@ fn delete_pipeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a pipeline within a workspace by slug or returns NotFound error.
+/// Finds a pipeline within a workspace by slug, with its creator's handle, or
+/// returns a NotFound error.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
     pipeline_slug: &str,
-) -> Result<WorkspacePipeline> {
+) -> Result<(WorkspacePipeline, Username)> {
     conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
@@ -384,11 +396,18 @@ async fn build_response(
     conn: &mut PgConnection,
     pipeline: WorkspacePipeline,
     workspace_slug: Slug,
+    creator_username: Username,
 ) -> Result<Pipeline> {
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
     let context_slugs = conn.list_pipeline_context_slugs(pipeline.id).await?;
-    Pipeline::from_model(pipeline, workspace_slug, policy_slugs, context_slugs)
-        .map_err(serialize_error)
+    Pipeline::from_model(
+        pipeline,
+        workspace_slug,
+        creator_username,
+        policy_slugs,
+        context_slugs,
+    )
+    .map_err(serialize_error)
 }
 
 /// Maps a definition (de)serialization failure to an internal error.

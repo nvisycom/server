@@ -13,6 +13,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnectionRun, WorkspaceConnection, WorkspaceConnectionRun,
 };
 use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
+use nvisy_postgres::types::Username;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -65,12 +66,21 @@ async fn create_connection_run(
 
     tracing::debug!(target: TRACING_TARGET, run_number = run.run_number, "Connection sync run triggered");
 
+    let (_, run, trigger_username) = find_connection_run(
+        &mut conn,
+        workspace.id,
+        connection.slug.as_str(),
+        run.run_number,
+    )
+    .await?;
+
     Ok((
         StatusCode::CREATED,
         Json(ConnectionRun::from_model(
             run,
             connection.slug,
             workspace.slug,
+            trigger_username,
         )),
     ))
 }
@@ -126,9 +136,17 @@ async fn list_connection_runs(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionRunsPage::from_cursor_page(page, |run| {
-            ConnectionRun::from_model(run, connection.slug.clone(), workspace.slug.clone())
-        })),
+        Json(ConnectionRunsPage::from_cursor_page(
+            page,
+            |(run, trigger_username)| {
+                ConnectionRun::from_model(
+                    run,
+                    connection.slug.clone(),
+                    workspace.slug.clone(),
+                    trigger_username,
+                )
+            },
+        )),
     ))
 }
 
@@ -181,8 +199,13 @@ async fn list_workspace_connection_runs(
         StatusCode::OK,
         Json(ConnectionRunsPage::from_cursor_page(
             page,
-            |(run, connection_slug)| {
-                ConnectionRun::from_model(run, connection_slug, workspace.slug.clone())
+            |(run, connection_slug, trigger_username)| {
+                ConnectionRun::from_model(
+                    run,
+                    connection_slug,
+                    workspace.slug.clone(),
+                    trigger_username,
+                )
             },
         )),
     ))
@@ -227,7 +250,7 @@ async fn read_connection_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let (connection, run) = find_connection_run(
+    let (connection, run, trigger_username) = find_connection_run(
         &mut conn,
         workspace.id,
         &path_params.connection_slug,
@@ -243,6 +266,7 @@ async fn read_connection_run(
             run,
             connection.slug,
             workspace.slug,
+            trigger_username,
         )),
     ))
 }
@@ -265,6 +289,7 @@ async fn find_connection(
 ) -> Result<WorkspaceConnection> {
     conn.find_connection_in_workspace_by_slug(workspace_id, connection_slug)
         .await?
+        .map(|(connection, _)| connection)
         .ok_or_else(|| Error::not_found("connection"))
 }
 
@@ -278,13 +303,17 @@ async fn find_connection_run(
     workspace_id: Uuid,
     connection_slug: &str,
     run_number: i32,
-) -> Result<(WorkspaceConnection, WorkspaceConnectionRun)> {
+) -> Result<(
+    WorkspaceConnection,
+    WorkspaceConnectionRun,
+    Option<Username>,
+)> {
     let connection = find_connection(conn, workspace_id, connection_slug).await?;
-    let run = conn
+    let (run, trigger_username) = conn
         .find_connection_run_by_number(connection.id, run_number)
         .await?
         .ok_or_else(|| Error::not_found("connection_run"))?;
-    Ok((connection, run))
+    Ok((connection, run, trigger_username))
 }
 
 /// Returns routes for workspace connection sync run management.

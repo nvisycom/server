@@ -12,7 +12,8 @@ use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, Wor
 use nvisy_postgres::query::{
     WorkspaceActivityRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::{AsyncConnection, PgClient};
+use nvisy_postgres::types::Username;
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Permission, Query, ValidateJson, WorkspaceContext,
@@ -23,7 +24,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
 };
-use crate::handler::{ErrorKind, Result};
+use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
 /// Tracing target for workspace operations.
@@ -56,7 +57,8 @@ async fn create_workspace(
         })
         .await?;
 
-    let response = Workspace::from_model_with_membership(workspace, membership);
+    let creator_username = find_workspace_creator(&mut conn, workspace.slug.as_str()).await?;
+    let response = Workspace::from_model_with_membership(workspace, membership, creator_username);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -90,8 +92,8 @@ async fn list_workspaces(
         .cursor_list_account_workspaces_with_details(auth_state.account_id, pagination.into())
         .await?;
 
-    let response = Page::from_cursor_page(page, |(workspace, member)| {
-        Workspace::from_model_with_membership(workspace, member)
+    let response = Page::from_cursor_page(page, |(workspace, member, creator_username)| {
+        Workspace::from_model_with_membership(workspace, member, creator_username)
     });
 
     tracing::info!(
@@ -130,11 +132,13 @@ async fn read_workspace(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
+    let creator_username = find_workspace_creator(&mut conn, workspace.slug.as_str()).await?;
+
     tracing::info!(target: TRACING_TARGET, "Workspace read");
 
     let response = match member {
-        Some(member) => Workspace::from_model_with_membership(workspace, member),
-        None => Workspace::from_model(workspace),
+        Some(member) => Workspace::from_model_with_membership(workspace, member, creator_username),
+        None => Workspace::from_model(workspace, creator_username),
     };
     Ok((StatusCode::OK, Json(response)))
 }
@@ -174,11 +178,13 @@ async fn update_workspace(
     let update_data = request.into_model();
     let updated = conn.update_workspace(workspace.id, update_data).await?;
 
+    let creator_username = find_workspace_creator(&mut conn, updated.slug.as_str()).await?;
+
     tracing::info!(target: TRACING_TARGET, "Workspace updated");
 
     let response = match member {
-        Some(member) => Workspace::from_model_with_membership(updated, member),
-        None => Workspace::from_model(updated),
+        Some(member) => Workspace::from_model_with_membership(updated, member, creator_username),
+        None => Workspace::from_model(updated, creator_username),
     };
     Ok((StatusCode::OK, Json(response)))
 }
@@ -347,8 +353,8 @@ async fn list_activities(
         .cursor_list_workspace_activity(workspace.id, pagination.into())
         .await?;
 
-    let response = ActivitiesPage::from_cursor_page(page, |activity| {
-        Activity::from_model(activity, workspace.slug.clone())
+    let response = ActivitiesPage::from_cursor_page(page, |(activity, actor_username)| {
+        Activity::from_model(activity, workspace.slug.clone(), actor_username)
     });
 
     tracing::debug!(
@@ -366,6 +372,15 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
         .response::<200, Json<ActivitiesPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
+}
+
+/// Returns the handle of the account that created the workspace addressed by
+/// `slug`, or a NotFound error if no such workspace exists.
+async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Username> {
+    conn.find_workspace_by_slug(slug)
+        .await?
+        .map(|(_, creator_username)| creator_username)
+        .ok_or_else(|| Error::not_found("workspace"))
 }
 
 /// Returns a [`Router`] with all workspace-related routes.

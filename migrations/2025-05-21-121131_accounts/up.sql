@@ -20,13 +20,21 @@ CREATE TABLE accounts (
     is_verified           BOOLEAN     NOT NULL DEFAULT FALSE,
     is_suspended          BOOLEAN     NOT NULL DEFAULT FALSE,
 
+    -- Public account handle, unique across all accounts: lowercase alphanumeric
+    -- with single internal dashes, 3-32 characters. Addresses the profile at
+    -- /u/{username} and stands in for the account id at the API boundary.
+    username              TEXT        NOT NULL,
+
+    CONSTRAINT accounts_username_length CHECK (length(username) BETWEEN 3 AND 32),
+    CONSTRAINT accounts_username_format CHECK (username ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+
     -- Core account information
-    display_name          TEXT        NOT NULL,
+    display_name          TEXT        DEFAULT NULL,
     email_address         TEXT        NOT NULL,
     password_hash         TEXT        NOT NULL,
 
-    CONSTRAINT accounts_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 100),
-    CONSTRAINT accounts_display_name_not_empty CHECK (trim(display_name) <> ''),
+    CONSTRAINT accounts_display_name_length CHECK (display_name IS NULL OR length(trim(display_name)) BETWEEN 2 AND 32),
+    CONSTRAINT accounts_display_name_not_empty CHECK (display_name IS NULL OR trim(display_name) <> ''),
     CONSTRAINT accounts_email_format CHECK (is_valid_email(email_address)),
     CONSTRAINT accounts_email_length_max CHECK (length(email_address) <= 254),
     CONSTRAINT accounts_password_hash_not_empty CHECK (password_hash <> ''),
@@ -70,6 +78,10 @@ CREATE UNIQUE INDEX accounts_email_address_unique_idx
     ON accounts (lower(email_address))
     WHERE deleted_at IS NULL;
 
+CREATE UNIQUE INDEX accounts_username_unique_idx
+    ON accounts (lower(username))
+    WHERE deleted_at IS NULL;
+
 CREATE INDEX accounts_admin_users_idx
     ON accounts (id, display_name)
     WHERE is_admin = TRUE AND deleted_at IS NULL;
@@ -87,10 +99,11 @@ COMMENT ON TABLE accounts IS
     'User accounts with enhanced security features, preferences, and audit trails.';
 
 COMMENT ON COLUMN accounts.id IS 'Unique account identifier (UUID)';
+COMMENT ON COLUMN accounts.username IS 'Public account handle, unique across accounts (3-32 chars, lowercase alphanumeric with single internal dashes)';
 COMMENT ON COLUMN accounts.is_admin IS 'Administrative privileges across the entire system';
 COMMENT ON COLUMN accounts.is_verified IS 'Account identity verification status (email confirmation, etc.)';
 COMMENT ON COLUMN accounts.is_suspended IS 'Temporarily disables account access while preserving data';
-COMMENT ON COLUMN accounts.display_name IS 'Human-readable name for UI and communications (2-100 characters)';
+COMMENT ON COLUMN accounts.display_name IS 'Optional human-readable name for UI and communications (2-32 characters)';
 COMMENT ON COLUMN accounts.email_address IS 'Primary email for authentication and communications (validated format)';
 COMMENT ON COLUMN accounts.password_hash IS 'Securely hashed password (bcrypt recommended, minimum 60 characters)';
 COMMENT ON COLUMN accounts.company_name IS 'Optional company affiliation for business accounts';

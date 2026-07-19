@@ -12,6 +12,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use nvisy_postgres::query::WorkspacePolicyRepository;
+use nvisy_postgres::types::Username;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -76,9 +77,17 @@ async fn create_policy(
 
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
+    let (policy, creator_username) =
+        find_policy(&mut conn, workspace.id, policy.slug.as_str()).await?;
+
     Ok((
         StatusCode::CREATED,
-        Json(Policy::from_model(policy, workspace.slug, &crypto)?),
+        Json(Policy::from_model(
+            policy,
+            workspace.slug,
+            creator_username,
+            &crypto,
+        )?),
     ))
 }
 
@@ -124,8 +133,8 @@ async fn list_policies(
         "Workspace policies listed",
     );
 
-    let page = PoliciesPage::try_from_cursor_page(page, |model| {
-        Policy::from_model(model, workspace.slug.clone(), &crypto)
+    let page = PoliciesPage::try_from_cursor_page(page, |(model, creator_username)| {
+        Policy::from_model(model, workspace.slug.clone(), creator_username, &crypto)
     })?;
 
     Ok((StatusCode::OK, Json(page)))
@@ -163,13 +172,19 @@ async fn read_policy(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPolicies)
         .await?;
 
-    let policy = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let (policy, creator_username) =
+        find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
 
     Ok((
         StatusCode::OK,
-        Json(Policy::from_model(policy, workspace.slug, &crypto)?),
+        Json(Policy::from_model(
+            policy,
+            workspace.slug,
+            creator_username,
+            &crypto,
+        )?),
     ))
 }
 
@@ -211,7 +226,7 @@ async fn update_policy(
         .await?;
 
     // Confirm the policy exists in this workspace before mutating.
-    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let (existing, _) = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     let (version, definition) = match &request.definition {
         Some(definition) => {
@@ -229,13 +244,21 @@ async fn update_policy(
         ..Default::default()
     };
 
-    let policy = conn.update_workspace_policy(existing.id, updates).await?;
+    conn.update_workspace_policy(existing.id, updates).await?;
+
+    let (policy, creator_username) =
+        find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
     Ok((
         StatusCode::OK,
-        Json(Policy::from_model(policy, workspace.slug, &crypto)?),
+        Json(Policy::from_model(
+            policy,
+            workspace.slug,
+            creator_username,
+            &crypto,
+        )?),
     ))
 }
 
@@ -273,7 +296,7 @@ async fn delete_policy(
         .await?;
 
     // Confirm the policy exists in this workspace before deleting.
-    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let (existing, _) = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     conn.delete_workspace_policy(existing.id).await?;
 
@@ -291,12 +314,13 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a policy within a workspace by slug or returns NotFound error.
+/// Finds a policy within a workspace by slug, with its creator's handle, or
+/// returns a NotFound error.
 async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
     policy_slug: &str,
-) -> Result<WorkspacePolicy> {
+) -> Result<(WorkspacePolicy, Username)> {
     conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))

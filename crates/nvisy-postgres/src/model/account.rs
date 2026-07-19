@@ -16,7 +16,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::accounts;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt, Username};
 
 /// Main account model representing a user account in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -31,8 +31,10 @@ pub struct Account {
     pub is_verified: bool,
     /// Temporarily disables account access while preserving data.
     pub is_suspended: bool,
-    /// Human-readable name for UI and communications (2-100 characters).
-    pub display_name: String,
+    /// Public account handle, unique across all accounts.
+    pub username: Username,
+    /// Optional human-readable name for UI and communications (2-100 chars).
+    pub display_name: Option<String>,
     /// Primary email for authentication and communications (validated format).
     pub email_address: String,
     /// Securely hashed password (bcrypt recommended, minimum 60 characters).
@@ -56,12 +58,14 @@ pub struct Account {
 }
 
 /// Data for creating a new account.
-#[derive(Debug, Default, Clone, Insertable)]
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = accounts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount {
-    /// Human-readable name for UI and communications (2-100 characters).
-    pub display_name: String,
+    /// Public account handle, unique across all accounts.
+    pub username: Username,
+    /// Optional human-readable name for UI and communications (2-100 chars).
+    pub display_name: Option<String>,
     /// Primary email for authentication and communications (validated format).
     pub email_address: String,
     /// Securely hashed password (bcrypt recommended, minimum 60 characters).
@@ -81,8 +85,10 @@ pub struct NewAccount {
 #[diesel(table_name = accounts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccount {
-    /// Human-readable name for UI and communications.
-    pub display_name: Option<String>,
+    /// Public account handle, unique across all accounts.
+    pub username: Option<Username>,
+    /// Human-readable name for UI and communications (`Some(None)` clears it).
+    pub display_name: Option<Option<String>>,
     /// Primary email for authentication and communications.
     pub email_address: Option<String>,
     /// Securely hashed password.

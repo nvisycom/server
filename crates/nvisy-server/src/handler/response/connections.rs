@@ -2,10 +2,9 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnection;
-use nvisy_postgres::types::Slug;
+use nvisy_postgres::types::{Slug, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Page;
 
@@ -20,8 +19,8 @@ pub struct Connection {
     pub slug: Slug,
     /// Slug of the workspace this connection belongs to.
     pub workspace_slug: Slug,
-    /// Account that created this connection.
-    pub account_id: Uuid,
+    /// Handle of the account that created this connection.
+    pub creator_username: Username,
     /// Human-readable connection name.
     pub name: String,
     /// Provider type (e.g., "openai", "postgres", "s3").
@@ -36,12 +35,16 @@ pub struct Connection {
 pub type ConnectionsPage = Page<Connection>;
 
 impl Connection {
-    /// Creates a response from a database model.
-    pub fn from_model(connection: WorkspaceConnection, workspace_slug: Slug) -> Self {
+    /// Creates a response from a database model and its creator's handle.
+    pub fn from_model(
+        connection: WorkspaceConnection,
+        workspace_slug: Slug,
+        creator_username: Username,
+    ) -> Self {
         Self {
             slug: connection.slug,
             workspace_slug,
-            account_id: connection.account_id,
+            creator_username,
             name: connection.name,
             provider: connection.provider,
             created_at: connection.created_at.into(),

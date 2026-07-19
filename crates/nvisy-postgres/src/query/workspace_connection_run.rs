@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
 };
-use crate::types::{CursorPage, CursorPagination, Slug, SyncStatus};
+use crate::types::{CursorPage, CursorPagination, Slug, SyncStatus, Username};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection run database operations.
@@ -48,15 +48,16 @@ pub trait WorkspaceConnectionRunRepository {
         &mut self,
         connection_id: Uuid,
         run_number: i32,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>>> + Send;
 
-    /// Lists runs for a specific connection with cursor pagination.
+    /// Lists runs for a specific connection with cursor pagination, each paired
+    /// with the handle of the account that triggered it, if any.
     fn cursor_list_workspace_connection_runs(
         &mut self,
         connection_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceConnectionRun>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Option<Username>)>>> + Send;
 
     /// Lists all runs across a workspace's connections with cursor pagination.
     ///
@@ -71,7 +72,8 @@ pub trait WorkspaceConnectionRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Slug)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>>>
+    + Send;
 
     /// Gets the most recent run for a connection (its current sync state).
     fn find_latest_workspace_connection_run(
@@ -165,13 +167,18 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         &mut self,
         connection_id: Uuid,
         run_number: i32,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
-        use schema::workspace_connection_runs::{self, dsl};
+    ) -> PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>> {
+        use schema::workspace_connection_runs::dsl;
+        use schema::{accounts, workspace_connection_runs};
 
         let run = workspace_connection_runs::table
+            .left_join(accounts::table)
             .filter(dsl::connection_id.eq(connection_id))
             .filter(dsl::run_number.eq(run_number))
-            .select(WorkspaceConnectionRun::as_select())
+            .select((
+                WorkspaceConnectionRun::as_select(),
+                accounts::username.nullable(),
+            ))
             .first(self)
             .await
             .optional()
@@ -185,8 +192,9 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         connection_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> PgResult<CursorPage<WorkspaceConnectionRun>> {
-        use schema::workspace_connection_runs::{self, dsl};
+    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Option<Username>)>> {
+        use schema::workspace_connection_runs::dsl;
+        use schema::{accounts, workspace_connection_runs};
 
         let mut base_query = workspace_connection_runs::table
             .filter(dsl::connection_id.eq(connection_id))
@@ -209,6 +217,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         };
 
         let mut query = workspace_connection_runs::table
+            .left_join(accounts::table)
             .filter(dsl::connection_id.eq(connection_id))
             .into_boxed();
 
@@ -218,36 +227,43 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let limit = pagination.limit + 1;
 
-        let items: Vec<WorkspaceConnectionRun> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let items: Vec<(WorkspaceConnectionRun, Option<Username>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::started_at
-                        .lt(&cursor_time)
-                        .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select(WorkspaceConnectionRun::as_select())
-                .order((dsl::started_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select(WorkspaceConnectionRun::as_select())
-                .order((dsl::started_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::started_at
+                            .lt(&cursor_time)
+                            .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspaceConnectionRun::as_select(),
+                        accounts::username.nullable(),
+                    ))
+                    .order((dsl::started_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspaceConnectionRun::as_select(),
+                        accounts::username.nullable(),
+                    ))
+                    .order((dsl::started_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
         Ok(CursorPage::new(
             items,
             total,
             pagination.limit,
-            |r: &WorkspaceConnectionRun| (r.started_at.into(), r.id),
+            |(r, _): &(WorkspaceConnectionRun, Option<Username>)| (r.started_at.into(), r.id),
         ))
     }
 
@@ -256,17 +272,19 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Slug)>> {
+    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>> {
+        use schema::accounts::dsl as accounts;
         use schema::workspace_connection_runs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
 
         // Runs have no workspace column; scope them through the owning
-        // connection. The owning connection's slug is selected alongside each
-        // run so the cross-connection response can address each run by
-        // `(connection, number)`.
+        // connection. The owning connection's slug and the triggering account's
+        // handle are selected alongside each run so the cross-connection response
+        // can address each run by `(connection, number)` and name its trigger.
         let scoped = || {
             let mut query = runs::workspace_connection_runs
                 .inner_join(connections::workspace_connections)
+                .left_join(accounts::accounts)
                 .filter(connections::workspace_id.eq(workspace_id))
                 .into_boxed();
             if let Some(status) = status_filter {
@@ -288,38 +306,45 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         };
 
         let limit = pagination.limit + 1;
-        let selection = (WorkspaceConnectionRun::as_select(), connections::slug);
+        let selection = (
+            WorkspaceConnectionRun::as_select(),
+            connections::slug,
+            accounts::username.nullable(),
+        );
 
-        let items: Vec<(WorkspaceConnectionRun, Slug)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let items: Vec<(WorkspaceConnectionRun, Slug, Option<Username>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            scoped()
-                .filter(
-                    runs::started_at.lt(&cursor_time).or(runs::started_at
-                        .eq(&cursor_time)
-                        .and(runs::id.lt(cursor.id))),
-                )
-                .select(selection)
-                .order((runs::started_at.desc(), runs::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            scoped()
-                .select(selection)
-                .order((runs::started_at.desc(), runs::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                scoped()
+                    .filter(
+                        runs::started_at.lt(&cursor_time).or(runs::started_at
+                            .eq(&cursor_time)
+                            .and(runs::id.lt(cursor.id))),
+                    )
+                    .select(selection)
+                    .order((runs::started_at.desc(), runs::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                scoped()
+                    .select(selection)
+                    .order((runs::started_at.desc(), runs::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
         Ok(CursorPage::new(
             items,
             total,
             pagination.limit,
-            |(run, _): &(WorkspaceConnectionRun, Slug)| (run.started_at.into(), run.id),
+            |(run, _, _): &(WorkspaceConnectionRun, Slug, Option<Username>)| {
+                (run.started_at.into(), run.id)
+            },
         ))
     }
 

@@ -49,14 +49,14 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
-/// Retrieves an account by ID.
+/// Retrieves an account by its public handle.
 ///
 /// The requester must share at least one workspace with the target account.
 #[tracing::instrument(
     skip_all,
     fields(
         requester_id = %auth_claims.account_id,
-        target_id = %path_params.account_id,
+        target = %path_params.username,
     )
 )]
 async fn get_account(
@@ -64,36 +64,39 @@ async fn get_account(
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<AccountPathParams>,
 ) -> Result<(StatusCode, Json<Account>)> {
-    tracing::debug!(target: TRACING_TARGET, "Reading account by ID");
+    tracing::debug!(target: TRACING_TARGET, "Reading account by username");
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Check if requester shares a workspace with target account
+    let account = conn
+        .find_account_by_username(&path_params.username)
+        .await?
+        .ok_or_else(|| Error::not_found("account"))?;
+
+    // Accessible only to accounts that share a workspace. A non-shared account is
+    // reported as not-found (not forbidden) so this endpoint cannot be used to
+    // distinguish existing from non-existing handles.
     let shares_workspace = conn
-        .accounts_share_workspace(auth_claims.account_id, path_params.account_id)
+        .accounts_share_workspace(auth_claims.account_id, account.id)
         .await?;
 
     if !shares_workspace {
         tracing::warn!(
             target: TRACING_TARGET,
-            "Access denied: accounts do not share a workspace"
+            "Account not accessible: no shared workspace"
         );
-        return Err(ErrorKind::Forbidden
-            .with_message("You do not have access to this account")
-            .with_resource("account"));
+        return Err(Error::not_found("account"));
     }
 
-    let account = find_account(&mut conn, path_params.account_id).await?;
-
-    tracing::info!(target: TRACING_TARGET, "Account read by ID");
+    tracing::info!(target: TRACING_TARGET, "Account read by username");
 
     Ok((StatusCode::OK, Json(Account::from_model(account))))
 }
 
 fn get_account_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get account by ID")
+    op.summary("Get account by username")
         .description(
-            "Returns an account's details by ID. \
+            "Returns an account's details by its public handle. \
              The requester must share at least one workspace with the target account.",
         )
         .response::<200, Json<Account>>()
@@ -121,16 +124,21 @@ async fn update_own_account(
     // Validate and hash password if provided
     let password_hash = match request.password.as_ref() {
         Some(new_password) => {
+            let username = request
+                .username
+                .as_ref()
+                .unwrap_or(&current_account.username)
+                .as_str();
             let display_name = request
                 .display_name
                 .as_deref()
-                .unwrap_or(&current_account.display_name);
+                .or(current_account.display_name.as_deref());
             let email_address = request
                 .email_address
                 .as_deref()
                 .unwrap_or(&current_account.email_address);
 
-            let user_inputs = build_password_user_inputs(display_name, email_address);
+            let user_inputs = build_password_user_inputs(username, display_name, email_address);
             Some(password.validate_and_hash(new_password, &user_inputs)?)
         }
         None => None,
@@ -144,7 +152,19 @@ async fn update_own_account(
     {
         tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
         return Err(ErrorKind::Conflict
-            .with_message("Account with this email already exists")
+            .with_message("Email is already registered")
+            .with_resource("account"));
+    }
+
+    // Check if username is already taken by another account
+    if let Some(ref username) = request.username
+        && conn
+            .username_exists_for_other(username, auth_claims.account_id)
+            .await?
+    {
+        tracing::warn!(target: TRACING_TARGET, "Account update failed: username already taken");
+        return Err(ErrorKind::Conflict
+            .with_message("Username is already taken")
             .with_resource("account"));
     }
 
@@ -196,8 +216,13 @@ fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Builds user inputs for password strength validation.
-fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str) -> Vec<&'a str> {
-    let mut inputs = vec![display_name];
+fn build_password_user_inputs<'a>(
+    username: &'a str,
+    display_name: Option<&'a str>,
+    email_address: &'a str,
+) -> Vec<&'a str> {
+    let mut inputs = vec![username];
+    inputs.extend(display_name);
     inputs.extend(email_address.split('@'));
     inputs
 }
@@ -222,9 +247,6 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
                 .patch_with(update_own_account, update_own_account_docs)
                 .delete_with(delete_own_account, delete_own_account_docs),
         )
-        .api_route(
-            "/accounts/{accountId}/",
-            get_with(get_account, get_account_docs),
-        )
+        .api_route("/u/{username}/", get_with(get_account, get_account_docs))
         .with_path_items(|item| item.tag("Accounts"))
 }

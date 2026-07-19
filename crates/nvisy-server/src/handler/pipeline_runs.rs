@@ -21,11 +21,11 @@ use nvisy_postgres::model::{
     WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceContextRepository, WorkspaceFileRepository,
-    WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
+    AccountRepository, PipelineReferenceRepository, WorkspaceContextRepository,
+    WorkspaceFileRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{ArtifactType, PipelineRunStatus};
+use nvisy_postgres::types::{ArtifactType, PipelineRunStatus, Username};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_schema::context::Context as SchemaContext;
 use nvisy_schema::file::Document;
@@ -88,19 +88,22 @@ async fn create_pipeline_run(
 
     let idempotency_key = idempotency_key(&headers)?;
 
-    // Idempotent replay: a repeated key returns the run created the first time.
+    // Idempotent replay: a repeated key returns the run created the first time,
+    // attributed to whoever originally triggered it (not the current caller).
     if let Some(key) = &idempotency_key
         && let Some(existing) = conn
             .find_pipeline_run_by_idempotency_key(pipeline.id, key)
             .await?
     {
         tracing::debug!(target: TRACING_TARGET, "Replaying run for idempotency key");
+        let trigger_username = resolve_trigger_username(&mut conn, existing.account_id).await?;
         return Ok((
             StatusCode::OK,
             Json(PipelineRun::from_model(
                 existing,
                 pipeline.slug.clone(),
                 workspace.slug.clone(),
+                trigger_username,
             )),
         ));
     }
@@ -154,9 +157,16 @@ async fn create_pipeline_run(
 
     tracing::info!(target: TRACING_TARGET, run_number = run.run_number, "Pipeline run analyzed");
 
+    let trigger_username = resolve_trigger_username(&mut conn, run.account_id).await?;
+
     Ok((
         StatusCode::CREATED,
-        Json(PipelineRun::from_model(run, pipeline.slug, workspace.slug)),
+        Json(PipelineRun::from_model(
+            run,
+            pipeline.slug,
+            workspace.slug,
+            trigger_username,
+        )),
     ))
 }
 
@@ -211,9 +221,17 @@ async fn list_pipeline_runs(
 
     Ok((
         StatusCode::OK,
-        Json(PipelineRunsPage::from_cursor_page(page, |run| {
-            PipelineRun::from_model(run, pipeline.slug.clone(), workspace.slug.clone())
-        })),
+        Json(PipelineRunsPage::from_cursor_page(
+            page,
+            |(run, trigger_username)| {
+                PipelineRun::from_model(
+                    run,
+                    pipeline.slug.clone(),
+                    workspace.slug.clone(),
+                    trigger_username,
+                )
+            },
+        )),
     ))
 }
 
@@ -266,8 +284,13 @@ async fn list_workspace_runs(
         StatusCode::OK,
         Json(PipelineRunsPage::from_cursor_page(
             page,
-            |(run, pipeline_slug)| {
-                PipelineRun::from_model(run, pipeline_slug, workspace.slug.clone())
+            |(run, pipeline_slug, trigger_username)| {
+                PipelineRun::from_model(
+                    run,
+                    pipeline_slug,
+                    workspace.slug.clone(),
+                    trigger_username,
+                )
             },
         )),
     ))
@@ -309,7 +332,7 @@ async fn get_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (pipeline, run) = find_pipeline_run(
+    let (pipeline, run, trigger_username) = find_pipeline_run(
         &mut conn,
         workspace.id,
         &path_params.pipeline_slug,
@@ -321,7 +344,12 @@ async fn get_pipeline_run(
 
     Ok((
         StatusCode::OK,
-        Json(PipelineRun::from_model(run, pipeline.slug, workspace.slug)),
+        Json(PipelineRun::from_model(
+            run,
+            pipeline.slug,
+            workspace.slug,
+            trigger_username,
+        )),
     ))
 }
 
@@ -363,7 +391,7 @@ async fn get_pipeline_run_analysis(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (_pipeline, run) = find_pipeline_run(
+    let (_pipeline, run, _) = find_pipeline_run(
         &mut conn,
         workspace.id,
         &path_params.pipeline_slug,
@@ -419,7 +447,7 @@ async fn redact_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
         .await?;
 
-    let (pipeline, run) = find_pipeline_run(
+    let (pipeline, run, trigger_username) = find_pipeline_run(
         &mut conn,
         workspace.id,
         &path_params.pipeline_slug,
@@ -481,7 +509,12 @@ async fn redact_pipeline_run(
 
     Ok((
         StatusCode::OK,
-        Json(PipelineRun::from_model(run, pipeline.slug, workspace.slug)),
+        Json(PipelineRun::from_model(
+            run,
+            pipeline.slug,
+            workspace.slug,
+            trigger_username,
+        )),
     ))
 }
 
@@ -548,6 +581,7 @@ async fn find_pipeline(
 ) -> Result<WorkspacePipeline> {
     conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
+        .map(|(pipeline, _)| pipeline)
         .ok_or_else(|| Error::not_found("pipeline"))
 }
 
@@ -555,18 +589,33 @@ async fn find_pipeline(
 ///
 /// Returns both the owning pipeline and the run, or NotFound if either the
 /// pipeline slug or the run number does not resolve.
+/// Resolves the handle of the account that triggered a run, if any. Used on the
+/// create/replay paths where the run model is already in hand.
+async fn resolve_trigger_username(
+    conn: &mut PgConn,
+    account_id: Option<Uuid>,
+) -> Result<Option<Username>> {
+    let Some(account_id) = account_id else {
+        return Ok(None);
+    };
+    Ok(conn
+        .find_account_by_id(account_id)
+        .await?
+        .map(|account| account.username))
+}
+
 async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,
     pipeline_slug: &str,
     run_number: i32,
-) -> Result<(WorkspacePipeline, WorkspacePipelineRun)> {
+) -> Result<(WorkspacePipeline, WorkspacePipelineRun, Option<Username>)> {
     let pipeline = find_pipeline(conn, workspace_id, pipeline_slug).await?;
-    let run = conn
+    let (run, trigger_username) = conn
         .find_pipeline_run_by_number(pipeline.id, run_number)
         .await?
         .ok_or_else(|| Error::not_found("pipeline_run"))?;
-    Ok((pipeline, run))
+    Ok((pipeline, run, trigger_username))
 }
 
 /// Returns a [`Router`] with all pipeline run routes.

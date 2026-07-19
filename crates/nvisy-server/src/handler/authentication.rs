@@ -28,8 +28,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
 
 /// Builds user inputs for password strength validation.
-fn build_password_user_inputs<'a>(display_name: &'a str, email_address: &'a str) -> Vec<&'a str> {
-    let mut inputs = vec![display_name];
+fn build_password_user_inputs<'a>(
+    username: &'a str,
+    display_name: Option<&'a str>,
+    email_address: &'a str,
+) -> Vec<&'a str> {
+    let mut inputs = vec![username];
+    inputs.extend(display_name);
     inputs.extend(email_address.split('@'));
     inputs
 }
@@ -58,7 +63,7 @@ async fn login(
     tracing::debug!(target: TRACING_TARGET, "Login attempt");
 
     let mut conn = pg_client.get_connection().await?;
-    let account = conn.find_account_by_email(&request.email_address).await?;
+    let account = conn.find_account_by_identifier(&request.identifier).await?;
 
     // Always perform password hashing to prevent timing attacks
     let password_valid = match &account {
@@ -78,13 +83,13 @@ async fn login(
             tracing::warn!(target: TRACING_TARGET, reason = "account_not_found", "Login failed");
             return Err(ErrorKind::Unauthorized
                 .with_resource("credentials")
-                .with_message("Invalid email or password"));
+                .with_message("Invalid credentials"));
         }
         Some(_) if !password_valid => {
             tracing::warn!(target: TRACING_TARGET, reason = "invalid_password", "Login failed");
             return Err(ErrorKind::Unauthorized
                 .with_resource("credentials")
-                .with_message("Invalid email or password"));
+                .with_message("Invalid credentials"));
         }
         Some(acc) if acc.is_suspended() => {
             tracing::warn!(target: TRACING_TARGET, reason = "account_suspended", "Login failed");
@@ -119,8 +124,7 @@ async fn login(
     let api_token = auth_header.into_string()?;
     let response = AuthToken {
         api_token,
-        account_id: auth_claims.account_id,
-        token_id: auth_claims.token_id,
+        username: account.username.clone(),
         issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
         expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };
@@ -156,22 +160,35 @@ async fn signup(
     tracing::debug!(target: TRACING_TARGET, "Signing up");
 
     // Validate password strength and hash
-    let user_inputs = build_password_user_inputs(&request.display_name, &request.email_address);
+    let user_inputs = build_password_user_inputs(
+        request.username.as_str(),
+        request.display_name.as_deref(),
+        &request.email_address,
+    );
     let password_hash = password.validate_and_hash(&request.password, &user_inputs)?;
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Check if email already exists
+    // Reject duplicate email or username before insert for a clear error;
+    // the unique indexes remain the race-safe backstop.
     if conn.email_exists(&request.email_address).await? {
         tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
-        return Err(ErrorKind::Conflict.into_error());
+        return Err(ErrorKind::Conflict.with_message("Email is already registered"));
+    }
+    if conn.username_exists(&request.username).await? {
+        tracing::warn!(target: TRACING_TARGET, "Signup failed: username already taken");
+        return Err(ErrorKind::Conflict.with_message("Username is already taken"));
     }
 
     let new_account = NewAccount {
+        username: request.username,
         display_name: request.display_name,
         email_address: request.email_address,
         password_hash,
-        ..Default::default()
+        company_name: None,
+        avatar_url: None,
+        timezone: None,
+        locale: None,
     };
 
     let account = conn.create_account(new_account).await?;
@@ -205,8 +222,7 @@ async fn signup(
     let api_token = auth_header.into_string()?;
     let response = AuthToken {
         api_token,
-        account_id: auth_claims.account_id,
-        token_id: auth_claims.token_id,
+        username: account.username.clone(),
         issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
         expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
     };

@@ -7,6 +7,7 @@ mod filtering;
 mod pagination;
 mod slug;
 mod sorting;
+mod username;
 mod utilities;
 
 pub use constants::{
@@ -34,6 +35,7 @@ pub use sorting::{
     FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,
     SortBy, SortOrder,
 };
+pub use username::{USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, Username, UsernameError};
 pub use utilities::{
     HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext, HasLastActivityAt,
     HasOwnership, HasSecurityContext, HasUpdatedAt, Tags,
