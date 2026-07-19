@@ -13,7 +13,7 @@ use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut};
 use nvisy_postgres::model::Account;
-use nvisy_postgres::query::AccountRepository;
+use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::{PgClient, PgConn};
 use serde::Deserialize;
 
@@ -156,6 +156,11 @@ where
         // Step 2: Ensure token claims match current account state
         Self::verify_privilege_consistency(&auth_claims, &account)?;
 
+        // Step 3: Ensure the token itself has not been revoked. The JWT's own
+        // expiry bounds its lifetime, but revocation must take effect
+        // immediately, so the backing token row is checked on every request.
+        Self::verify_token_active(&mut conn, &auth_claims).await?;
+
         tracing::info!(
             target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
@@ -290,6 +295,54 @@ where
             is_admin = account.is_admin,
             "privilege consistency verification successful"
         );
+
+        Ok(())
+    }
+
+    /// Verifies that the token backing this request has not been revoked.
+    ///
+    /// The bearer credential is a self-contained JWT, so a revoked (soft-deleted)
+    /// token would otherwise keep working until its `exp`. Checking the backing
+    /// `account_api_tokens` row by `jti` on every request makes revocation
+    /// immediate. The lookup is scoped to the token's own account, so a token
+    /// only authenticates while its row exists, is not deleted, and still belongs
+    /// to the claimed account.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::Unauthorized`] if the token has been revoked.
+    async fn verify_token_active(conn: &mut PgConn, auth_claims: &AuthClaims<T>) -> Result<()> {
+        let is_active = conn
+            .account_api_token_is_active(auth_claims.token_id, auth_claims.account_id)
+            .await
+            .map_err(|db_error| {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %db_error,
+                    account_id = %auth_claims.account_id,
+                    token_id = %auth_claims.token_id,
+                    "database error occurred during token revocation check"
+                );
+
+                ErrorKind::InternalServerError
+                    .with_message("Authentication verification encountered an error")
+                    .with_context("Unable to validate the session token")
+                    .with_resource("authentication")
+            })?;
+
+        if !is_active {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                account_id = %auth_claims.account_id,
+                token_id = %auth_claims.token_id,
+                "authentication failed: token has been revoked"
+            );
+
+            return Err(ErrorKind::Unauthorized
+                .with_message("Your session has been revoked")
+                .with_context("Please sign in again to continue")
+                .with_resource("authentication"));
+        }
 
         Ok(())
     }
