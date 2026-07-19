@@ -39,8 +39,6 @@ pub struct Account {
     pub email_address: String,
     /// Securely hashed password (bcrypt recommended, minimum 60 characters).
     pub password_hash: String,
-    /// Optional company affiliation for business accounts.
-    pub company_name: Option<String>,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier (e.g., "America/New_York", "UTC").
@@ -70,8 +68,6 @@ pub struct NewAccount {
     pub email_address: String,
     /// Securely hashed password (bcrypt recommended, minimum 60 characters).
     pub password_hash: String,
-    /// Optional company affiliation for business accounts.
-    pub company_name: Option<String>,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -93,8 +89,6 @@ pub struct UpdateAccount {
     pub email_address: Option<String>,
     /// Securely hashed password.
     pub password_hash: Option<String>,
-    /// Company affiliation for business accounts.
-    pub company_name: Option<Option<String>>,
     /// URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -140,13 +134,6 @@ impl Account {
     /// Returns whether the account can perform admin actions.
     pub fn can_admin(&self) -> bool {
         self.is_active() && self.is_admin()
-    }
-
-    /// Returns whether the account has a company name set.
-    pub fn has_company(&self) -> bool {
-        self.company_name
-            .as_deref()
-            .is_some_and(|company_name| !company_name.is_empty())
     }
 
     /// Returns whether the account has an avatar URL configured.

@@ -15,7 +15,7 @@ use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
-use super::response::{Account, ErrorResponse};
+use super::response::{Account, ErrorResponse, PublicAccount};
 use crate::extract::{AuthState, Json, Path, ValidateJson};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{PasswordService, ServiceState};
@@ -49,9 +49,12 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
-/// Retrieves an account by its public handle.
+/// Retrieves the public profile of an account by its handle.
 ///
-/// The requester must share at least one workspace with the target account.
+/// The requester must share at least one workspace with the target account;
+/// otherwise the account is reported as not found. Only public fields are
+/// returned — private details (email) are available solely through the
+/// caller's own `/account/` view.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -63,7 +66,7 @@ async fn get_account(
     State(pg_client): State<PgClient>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<AccountPathParams>,
-) -> Result<(StatusCode, Json<Account>)> {
+) -> Result<(StatusCode, Json<PublicAccount>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading account by username");
 
     let mut conn = pg_client.get_connection().await?;
@@ -90,16 +93,16 @@ async fn get_account(
 
     tracing::info!(target: TRACING_TARGET, "Account read by username");
 
-    Ok((StatusCode::OK, Json(Account::from_model(account))))
+    Ok((StatusCode::OK, Json(PublicAccount::from_model(account))))
 }
 
 fn get_account_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get account by username")
         .description(
-            "Returns an account's details by its public handle. \
+            "Returns an account's public profile by its handle. \
              The requester must share at least one workspace with the target account.",
         )
-        .response::<200, Json<Account>>()
+        .response::<200, Json<PublicAccount>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -247,6 +250,9 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
                 .patch_with(update_own_account, update_own_account_docs)
                 .delete_with(delete_own_account, delete_own_account_docs),
         )
-        .api_route("/u/{username}/", get_with(get_account, get_account_docs))
+        .api_route(
+            "/accounts/{username}/",
+            get_with(get_account, get_account_docs),
+        )
         .with_path_items(|item| item.tag("Accounts"))
 }

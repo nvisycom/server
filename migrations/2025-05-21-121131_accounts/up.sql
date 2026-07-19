@@ -22,7 +22,7 @@ CREATE TABLE accounts (
 
     -- Public account handle, unique across all accounts: lowercase alphanumeric
     -- with single internal dashes, 3-32 characters. Addresses the profile at
-    -- /u/{username} and stands in for the account id at the API boundary.
+    -- /accounts/{username} and stands in for the account id at the API boundary.
     username              TEXT        NOT NULL,
 
     CONSTRAINT accounts_username_length CHECK (length(username) BETWEEN 3 AND 32),
@@ -41,10 +41,7 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_password_hash_length_min CHECK (length(password_hash) >= 60),
 
     -- Optional profile information
-    company_name          TEXT        DEFAULT NULL,
     avatar_url            TEXT        DEFAULT NULL,
-
-    CONSTRAINT accounts_company_name_length_max CHECK (company_name IS NULL OR length(company_name) <= 255),
 
     -- Preferences and settings
     timezone              TEXT        NOT NULL DEFAULT 'UTC',
@@ -106,7 +103,6 @@ COMMENT ON COLUMN accounts.is_suspended IS 'Temporarily disables account access 
 COMMENT ON COLUMN accounts.display_name IS 'Optional human-readable name for UI and communications (2-32 characters)';
 COMMENT ON COLUMN accounts.email_address IS 'Primary email for authentication and communications (validated format)';
 COMMENT ON COLUMN accounts.password_hash IS 'Securely hashed password (bcrypt recommended, minimum 60 characters)';
-COMMENT ON COLUMN accounts.company_name IS 'Optional company affiliation for business accounts';
 COMMENT ON COLUMN accounts.avatar_url IS 'URL to user profile image or avatar';
 COMMENT ON COLUMN accounts.timezone IS 'User timezone for date/time display preferences';
 COMMENT ON COLUMN accounts.locale IS 'User locale for language and regional formatting';

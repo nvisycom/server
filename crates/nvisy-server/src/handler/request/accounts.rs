@@ -24,9 +24,6 @@ pub struct UpdateAccount {
     /// New password (will be hashed before storage).
     #[validate(length(min = 8, max = 256))]
     pub password: Option<String>,
-    /// Company or organization name (empty string clears the value).
-    #[validate(length(max = 100))]
-    pub company_name: Option<String>,
 }
 
 impl UpdateAccount {
@@ -39,7 +36,6 @@ impl UpdateAccount {
             display_name: self.display_name.map(Some),
             email_address: self.email_address,
             password_hash,
-            company_name: self.company_name.map(Some),
             ..Default::default()
         }
     }

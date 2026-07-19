@@ -109,7 +109,6 @@ diesel::table! {
         display_name -> Nullable<Text>,
         email_address -> Text,
         password_hash -> Text,
-        company_name -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
         timezone -> Text,
         locale -> Text,

@@ -185,7 +185,6 @@ async fn signup(
         display_name: request.display_name,
         email_address: request.email_address,
         password_hash,
-        company_name: None,
         avatar_url: None,
         timezone: None,
         locale: None,
