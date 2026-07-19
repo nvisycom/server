@@ -25,9 +25,6 @@ pub struct Account {
     pub display_name: Option<String>,
     /// Email address associated with the account.
     pub email_address: String,
-    /// Company name (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub company_name: Option<String>,
 
     /// Timestamp when the account was created.
     pub created_at: Timestamp,
@@ -45,10 +42,36 @@ impl Account {
 
             display_name: account.display_name,
             email_address: account.email_address,
-            company_name: account.company_name,
 
             created_at: account.created_at.into(),
             updated_at: account.updated_at.into(),
+        }
+    }
+}
+
+/// Public view of an account, returned when looking up someone other than the
+/// authenticated caller. Carries only the fields safe to share with a
+/// workspace peer; private details (email, account flags) are omitted
+/// and remain available solely through the caller's own `/account/` view.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicAccount {
+    /// Public handle of the account.
+    pub username: Username,
+    /// Display name of the account holder, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Timestamp when the account was created.
+    pub created_at: Timestamp,
+}
+
+impl PublicAccount {
+    pub fn from_model(account: model::Account) -> Self {
+        Self {
+            username: account.username,
+            display_name: account.display_name,
+            created_at: account.created_at.into(),
         }
     }
 }

@@ -32,7 +32,7 @@ pub enum UsernameError {
 /// A validated, public account handle.
 ///
 /// The username is the human-facing identity of an account: it addresses the
-/// public profile at `/u/{username}` and appears in place of the account's
+/// public profile at `/accounts/{username}` and appears in place of the account's
 /// database id everywhere the API refers to an account. Unlike a
 /// [`Slug`](crate::types::Slug), a username is globally unique and may be
 /// changed by its owner. The invariants — `[a-z0-9]` with single internal
@@ -145,7 +145,7 @@ impl schemars::JsonSchema for Username {
             "pattern": r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
             "minLength": USERNAME_MIN_LENGTH,
             "maxLength": USERNAME_MAX_LENGTH,
-            "description": "Public account handle used in URLs (e.g. /u/{username}).",
+            "description": "Public account handle used in URLs (e.g. /accounts/{username}).",
         })
     }
 }

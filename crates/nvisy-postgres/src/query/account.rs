@@ -146,9 +146,6 @@ impl AccountRepository for PgConnection {
             *name = name.trim().to_owned();
         }
         new_account.email_address = new_account.email_address.trim().to_lowercase();
-        if let Some(ref mut company) = new_account.company_name {
-            *company = company.trim().to_owned();
-        }
 
         diesel::insert_into(accounts::table)
             .values(&new_account)
@@ -227,10 +224,6 @@ impl AccountRepository for PgConnection {
         if let Some(email) = updates.email_address.as_mut() {
             *email = email.trim().to_lowercase();
         }
-        // Some(None) clears, Some(Some(value)) sets, None skips
-        updates.company_name = updates
-            .company_name
-            .map(|opt| opt.map(|c| c.trim().to_owned()).filter(|c| !c.is_empty()));
 
         diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
             .set(&updates)
