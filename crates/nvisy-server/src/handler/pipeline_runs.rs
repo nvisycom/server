@@ -86,21 +86,17 @@ async fn create_pipeline_run(
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
-    // The run is triggered by the caller; resolve the handle for the response.
-    let trigger_username: Option<Username> = conn
-        .find_account_by_id(auth_state.account_id)
-        .await?
-        .map(|account| account.username);
-
     let idempotency_key = idempotency_key(&headers)?;
 
-    // Idempotent replay: a repeated key returns the run created the first time.
+    // Idempotent replay: a repeated key returns the run created the first time,
+    // attributed to whoever originally triggered it (not the current caller).
     if let Some(key) = &idempotency_key
         && let Some(existing) = conn
             .find_pipeline_run_by_idempotency_key(pipeline.id, key)
             .await?
     {
         tracing::debug!(target: TRACING_TARGET, "Replaying run for idempotency key");
+        let trigger_username = resolve_trigger_username(&mut conn, existing.account_id).await?;
         return Ok((
             StatusCode::OK,
             Json(PipelineRun::from_model(
@@ -160,6 +156,8 @@ async fn create_pipeline_run(
         .await?;
 
     tracing::info!(target: TRACING_TARGET, run_number = run.run_number, "Pipeline run analyzed");
+
+    let trigger_username = resolve_trigger_username(&mut conn, run.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -591,6 +589,21 @@ async fn find_pipeline(
 ///
 /// Returns both the owning pipeline and the run, or NotFound if either the
 /// pipeline slug or the run number does not resolve.
+/// Resolves the handle of the account that triggered a run, if any. Used on the
+/// create/replay paths where the run model is already in hand.
+async fn resolve_trigger_username(
+    conn: &mut PgConn,
+    account_id: Option<Uuid>,
+) -> Result<Option<Username>> {
+    let Some(account_id) = account_id else {
+        return Ok(None);
+    };
+    Ok(conn
+        .find_account_by_id(account_id)
+        .await?
+        .map(|account| account.username))
+}
+
 async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,

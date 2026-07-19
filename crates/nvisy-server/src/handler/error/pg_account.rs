@@ -18,7 +18,7 @@ impl From<AccountConstraints> for Error<'static> {
                 ErrorKind::Conflict.with_message("Username is already taken")
             }
             AccountConstraints::DisplayNameLength => ErrorKind::BadRequest
-                .with_message("Display name must be between 2 and 100 characters long"),
+                .with_message("Display name must be between 2 and 32 characters long"),
             AccountConstraints::DisplayNameNotEmpty => {
                 ErrorKind::BadRequest.with_message("Display name cannot be empty")
             }

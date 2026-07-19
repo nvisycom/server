@@ -202,9 +202,13 @@ impl AccountRepository for PgConnection {
             return self.find_account_by_email(identifier).await;
         }
 
+        // An identifier that is not a well-formed username cannot match any
+        // account. Still issue a lookup (guaranteed to miss) so every branch
+        // performs one query and the login flow's timing stays uniform,
+        // regardless of whether the identifier was syntactically valid.
         match Username::parse(identifier.trim()) {
             Ok(username) => self.find_account_by_username(&username).await,
-            Err(_) => Ok(None),
+            Err(_) => self.find_account_by_email(identifier).await,
         }
     }
 

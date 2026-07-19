@@ -73,7 +73,9 @@ async fn get_account(
         .await?
         .ok_or_else(|| Error::not_found("account"))?;
 
-    // Check if requester shares a workspace with target account
+    // Accessible only to accounts that share a workspace. A non-shared account is
+    // reported as not-found (not forbidden) so this endpoint cannot be used to
+    // distinguish existing from non-existing handles.
     let shares_workspace = conn
         .accounts_share_workspace(auth_claims.account_id, account.id)
         .await?;
@@ -81,11 +83,9 @@ async fn get_account(
     if !shares_workspace {
         tracing::warn!(
             target: TRACING_TARGET,
-            "Access denied: accounts do not share a workspace"
+            "Account not accessible: no shared workspace"
         );
-        return Err(ErrorKind::Forbidden
-            .with_message("You do not have access to this account")
-            .with_resource("account"));
+        return Err(Error::not_found("account"));
     }
 
     tracing::info!(target: TRACING_TARGET, "Account read by username");

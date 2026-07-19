@@ -13,8 +13,8 @@ use validator::{Validate, ValidationError};
 pub struct UpdateAccount {
     /// New account handle.
     pub username: Option<Username>,
-    /// New display name (2-32 characters; empty string clears it).
-    #[validate(length(max = 32))]
+    /// New display name (2-32 characters).
+    #[validate(length(min = 2, max = 32))]
     #[validate(custom(function = "validate_display_name_format"))]
     pub display_name: Option<String>,
     /// New email address (must be valid email format).
@@ -33,13 +33,10 @@ impl UpdateAccount {
     /// Converts this request into a database model.
     ///
     /// Note: Password must be hashed separately before setting `password_hash`.
-    /// A supplied empty `display_name` clears the stored value.
     pub fn into_model(self, password_hash: Option<String>) -> UpdateAccountModel {
         UpdateAccountModel {
             username: self.username,
-            display_name: self
-                .display_name
-                .map(|name| (!name.trim().is_empty()).then_some(name)),
+            display_name: self.display_name.map(Some),
             email_address: self.email_address,
             password_hash,
             company_name: self.company_name.map(Some),
