@@ -40,9 +40,15 @@ pub trait WorkspaceConnectionRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
-    /// Finds a sync run by its opaque id, with the triggering account's handle.
+    /// Finds a sync run by its opaque id, scoped to a workspace via its owning
+    /// connection, with the triggering account's handle.
+    ///
+    /// Runs carry no workspace column, so this joins through the connection and
+    /// filters on its workspace; a run whose connection is in another workspace
+    /// is not found.
     fn find_connection_run_by_id(
         &mut self,
+        workspace_id: Uuid,
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>>> + Send;
 
@@ -161,14 +167,19 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
     async fn find_connection_run_by_id(
         &mut self,
+        workspace_id: Uuid,
         run_id: Uuid,
     ) -> PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>> {
-        use schema::workspace_connection_runs::dsl;
-        use schema::{accounts, workspace_connection_runs};
+        use schema::workspace_connection_runs::dsl as runs;
+        use schema::{accounts, workspace_connection_runs, workspace_connections};
 
+        // Runs carry no workspace column; scope through the owning connection so
+        // the id resolves only within its workspace.
         let run = workspace_connection_runs::table
+            .inner_join(workspace_connections::table)
             .left_join(accounts::table)
-            .filter(dsl::id.eq(run_id))
+            .filter(runs::id.eq(run_id))
+            .filter(workspace_connections::workspace_id.eq(workspace_id))
             .select((
                 WorkspaceConnectionRun::as_select(),
                 accounts::username.nullable(),
@@ -272,9 +283,9 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         use schema::workspace_connections::dsl as connections;
 
         // Runs have no workspace column; scope them through the owning
-        // connection. The owning connection's slug and the triggering account's
+        // connection. The owning connection's id and the triggering account's
         // handle are selected alongside each run so the cross-connection response
-        // can address each run by `(connection, number)` and name its trigger.
+        // can name its connection and trigger (the run is addressed by its own id).
         let scoped = || {
             let mut query = runs::workspace_connection_runs
                 .inner_join(connections::workspace_connections)

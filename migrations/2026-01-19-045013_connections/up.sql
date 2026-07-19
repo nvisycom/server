@@ -79,6 +79,10 @@ CREATE INDEX workspace_connections_provider_idx
     ON workspace_connections (provider, workspace_id)
     WHERE deleted_at IS NULL;
 
+CREATE UNIQUE INDEX workspace_connections_name_unique_idx
+    ON workspace_connections (workspace_id, lower(trim(name)))
+    WHERE deleted_at IS NULL;
+
 CREATE INDEX workspace_connections_active_idx
     ON workspace_connections (workspace_id, is_active)
     WHERE deleted_at IS NULL AND is_active = TRUE;

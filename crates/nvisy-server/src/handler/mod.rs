@@ -13,11 +13,11 @@ mod invites;
 mod members;
 mod monitors;
 mod notifications;
-mod pipeline_runs;
 mod pipelines;
 mod policies;
 pub mod request;
 pub mod response;
+mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -84,7 +84,7 @@ fn private_routes(
         router = router.merge(pipelines::routes());
     }
     if is_included(BuiltinModule::PipelineRuns) {
-        router = router.merge(pipeline_runs::routes());
+        router = router.merge(runs::routes());
     }
     if is_included(BuiltinModule::Policies) {
         router = router.merge(policies::routes());

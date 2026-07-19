@@ -120,6 +120,9 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
                     .with_message("Connection metadata size exceeds maximum limit"),
                 WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A connection with this identifier already exists"),
+                WorkspaceConnectionConstraints::NameUnique => {
+                    ErrorKind::Conflict.with_message("A connection with this name already exists")
+                }
                 WorkspaceConnectionConstraints::UpdatedAfterCreated
                 | WorkspaceConnectionConstraints::DeletedAfterCreated => {
                     ErrorKind::InternalServerError.into_error()

@@ -6,7 +6,9 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::model::{NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipelineRun};
+use crate::model::{
+    NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
+};
 use crate::types::{
     CursorPage, CursorPagination, OffsetPagination, PipelineRunStatus, Slug, Username,
 };
@@ -23,33 +25,19 @@ pub trait WorkspacePipelineRunRepository {
         new_run: NewWorkspacePipelineRun,
     ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
 
-    /// Finds a workspace pipeline run by its unique identifier.
-    fn find_workspace_pipeline_run_by_id(
-        &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
-
-    /// Finds a run by ID, scoped to a workspace via its owning pipeline.
-    ///
-    /// Runs carry no workspace column, so this joins through the pipeline and
-    /// filters on its workspace. A run whose pipeline is in another workspace
-    /// is not found.
-    fn find_pipeline_run_in_workspace(
-        &mut self,
-        workspace_id: Uuid,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
-
-    /// Finds a run by its opaque id, scoped to a workspace, with the triggering
-    /// account's handle.
+    /// Finds a run by its opaque id, scoped to a workspace, returning the run,
+    /// its owning pipeline, and the triggering account's handle.
     ///
     /// The run is addressed by its own id (behind `/runs/{runId}`); scoping
-    /// through the owning pipeline keeps it workspace-bounded.
+    /// through the owning pipeline keeps it workspace-bounded and hides runs of
+    /// soft-deleted pipelines.
     fn find_workspace_run_by_id(
         &mut self,
         workspace_id: Uuid,
         run_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspacePipelineRun, Option<Username>)>>> + Send;
+    ) -> impl Future<
+        Output = PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)>>,
+    > + Send;
 
     /// Finds a run by its `(pipeline, idempotency key)` pair, for detect replay.
     fn find_pipeline_run_by_idempotency_key(
@@ -157,61 +145,27 @@ impl WorkspacePipelineRunRepository for PgConnection {
         Ok(run)
     }
 
-    async fn find_workspace_pipeline_run_by_id(
-        &mut self,
-        run_id: Uuid,
-    ) -> PgResult<Option<WorkspacePipelineRun>> {
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let run = workspace_pipeline_runs::table
-            .filter(dsl::id.eq(run_id))
-            .select(WorkspacePipelineRun::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(PgError::from)?;
-
-        Ok(run)
-    }
-
-    async fn find_pipeline_run_in_workspace(
-        &mut self,
-        workspace_id: Uuid,
-        run_id: Uuid,
-    ) -> PgResult<Option<WorkspacePipelineRun>> {
-        use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::workspace_pipelines::dsl as pipelines;
-
-        let run = runs::workspace_pipeline_runs
-            .inner_join(pipelines::workspace_pipelines)
-            .filter(runs::id.eq(run_id))
-            .filter(pipelines::workspace_id.eq(workspace_id))
-            .select(WorkspacePipelineRun::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(PgError::from)?;
-
-        Ok(run)
-    }
-
     async fn find_workspace_run_by_id(
         &mut self,
         workspace_id: Uuid,
         run_id: Uuid,
-    ) -> PgResult<Option<(WorkspacePipelineRun, Option<Username>)>> {
+    ) -> PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)>> {
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::{accounts, workspace_pipeline_runs, workspace_pipelines};
 
         // Runs carry no workspace column; scope through the owning pipeline so
-        // the id resolves only within its workspace.
+        // the id resolves only within its workspace, and only while that
+        // pipeline is live (a soft-deleted pipeline hides its runs). The
+        // pipeline is returned alongside so callers need no second lookup.
         let run = workspace_pipeline_runs::table
             .inner_join(workspace_pipelines::table)
             .left_join(accounts::table)
             .filter(runs::id.eq(run_id))
             .filter(workspace_pipelines::workspace_id.eq(workspace_id))
+            .filter(workspace_pipelines::deleted_at.is_null())
             .select((
                 WorkspacePipelineRun::as_select(),
+                WorkspacePipeline::as_select(),
                 accounts::username.nullable(),
             ))
             .first(self)
@@ -355,8 +309,8 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         // Runs have no workspace column; scope them through the owning pipeline.
         // The owning pipeline's slug and the triggering account's handle are
-        // selected alongside each run so the cross-pipeline response can address
-        // each run by `(pipeline, number)` and name its trigger.
+        // selected alongside each run so the cross-pipeline response can name
+        // its pipeline and trigger (the run is addressed by its own id).
         let scoped = || {
             let mut query = runs::workspace_pipeline_runs
                 .inner_join(pipelines::workspace_pipelines)

@@ -594,12 +594,8 @@ async fn find_pipeline_run(
     workspace_id: Uuid,
     run_id: Uuid,
 ) -> Result<(WorkspacePipeline, WorkspacePipelineRun, Option<Username>)> {
-    let (run, trigger_username) = conn
+    let (run, pipeline, trigger_username) = conn
         .find_workspace_run_by_id(workspace_id, run_id)
-        .await?
-        .ok_or_else(|| Error::not_found("pipeline_run"))?;
-    let pipeline = conn
-        .find_pipeline_in_workspace(workspace_id, run.pipeline_id)
         .await?
         .ok_or_else(|| Error::not_found("pipeline_run"))?;
     Ok((pipeline, run, trigger_username))
