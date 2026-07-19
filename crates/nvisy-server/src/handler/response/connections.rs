@@ -25,6 +25,9 @@ pub struct Connection {
     pub name: String,
     /// Provider type (e.g., "openai", "postgres", "s3").
     pub provider: String,
+    /// When the connection last synced successfully, if ever.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced: Option<Timestamp>,
     /// When the connection was created.
     pub created_at: Timestamp,
     /// When the connection was last updated.
@@ -40,6 +43,7 @@ impl Connection {
         connection: WorkspaceConnection,
         workspace_slug: Slug,
         creator_username: Username,
+        last_synced: Option<Timestamp>,
     ) -> Self {
         Self {
             id: ConnectionId::from_uuid(connection.id),
@@ -47,6 +51,7 @@ impl Connection {
             creator_username,
             name: connection.name,
             provider: connection.provider,
+            last_synced,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),
         }

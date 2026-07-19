@@ -52,6 +52,18 @@ pub trait WorkspaceConnectionRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>>> + Send;
 
+    /// Returns the most recent successful sync completion time for each of the
+    /// given connections.
+    ///
+    /// A connection's "last synced" instant is the `completed_at` of its latest
+    /// run with status `Completed`; connections that have never synced
+    /// successfully are absent from the result. This is a single grouped query
+    /// so a page of connections costs one round-trip, not one per connection.
+    fn last_successful_sync_at(
+        &mut self,
+        connection_ids: &[Uuid],
+    ) -> impl Future<Output = PgResult<Vec<(Uuid, jiff_diesel::Timestamp)>>> + Send;
+
     /// Lists runs for a specific connection with cursor pagination, each paired
     /// with the handle of the account that triggered it, if any.
     fn cursor_list_workspace_connection_runs(
@@ -190,6 +202,30 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(run)
+    }
+
+    async fn last_successful_sync_at(
+        &mut self,
+        connection_ids: &[Uuid],
+    ) -> PgResult<Vec<(Uuid, jiff_diesel::Timestamp)>> {
+        use diesel::dsl::max;
+        use schema::workspace_connection_runs::{self, dsl};
+
+        if connection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Only successful runs count toward "last synced"; a failed or cancelled
+        // run does not move the timestamp. completed_at is non-null for any run
+        // in a terminal state, so the grouped MAX is present for every group.
+        workspace_connection_runs::table
+            .filter(dsl::connection_id.eq_any(connection_ids))
+            .filter(dsl::status.eq(SyncStatus::Completed))
+            .group_by(dsl::connection_id)
+            .select((dsl::connection_id, max(dsl::completed_at).assume_not_null()))
+            .load(self)
+            .await
+            .map_err(PgError::from)
     }
 
     async fn cursor_list_workspace_connection_runs(
