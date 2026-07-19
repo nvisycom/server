@@ -36,14 +36,14 @@ pub trait WorkspaceConnectionRepository {
         connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
 
-    /// Finds a connection by slug within a specific workspace, with the handle
-    /// of the account that created it.
+    /// Finds a connection by id within a specific workspace, with the handle of
+    /// the account that created it.
     ///
     /// Excludes soft-deleted connections.
-    fn find_connection_in_workspace_by_slug(
+    fn find_connection_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
-        slug: &str,
+        connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceConnection, Username)>>> + Send;
 
     /// Finds connections by provider type within a workspace.
@@ -151,10 +151,10 @@ impl WorkspaceConnectionRepository for PgConnection {
         Ok(connection)
     }
 
-    async fn find_connection_in_workspace_by_slug(
+    async fn find_connection_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
-        slug: &str,
+        connection_id: Uuid,
     ) -> PgResult<Option<(WorkspaceConnection, Username)>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
@@ -162,7 +162,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         let connection = workspace_connections::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::slug.eq(slug))
+            .filter(dsl::id.eq(connection_id))
             .filter(dsl::deleted_at.is_null())
             .select((WorkspaceConnection::as_select(), accounts::username))
             .first(self)

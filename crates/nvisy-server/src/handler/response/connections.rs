@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnection;
-use nvisy_postgres::types::{Slug, Username};
+use nvisy_postgres::types::{ConnectionId, Slug, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,8 +15,8 @@ use super::Page;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {
-    /// URL slug of the connection, unique within its workspace.
-    pub slug: Slug,
+    /// Opaque identifier of the connection.
+    pub id: ConnectionId,
     /// Slug of the workspace this connection belongs to.
     pub workspace_slug: Slug,
     /// Handle of the account that created this connection.
@@ -42,7 +42,7 @@ impl Connection {
         creator_username: Username,
     ) -> Self {
         Self {
-            slug: connection.slug,
+            id: ConnectionId::from_uuid(connection.id),
             workspace_slug,
             creator_username,
             name: connection.name,

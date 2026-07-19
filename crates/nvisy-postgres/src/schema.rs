@@ -163,7 +163,6 @@ diesel::table! {
         id -> Uuid,
         workspace_id -> Uuid,
         account_id -> Uuid,
-        slug -> Text,
         name -> Text,
         provider -> Text,
         encrypted_data -> Bytea,

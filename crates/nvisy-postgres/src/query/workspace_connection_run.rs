@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
 };
-use crate::types::{CursorPage, CursorPagination, Slug, SyncStatus, Username};
+use crate::types::{CursorPage, CursorPagination, SyncStatus, Username};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection run database operations.
@@ -72,7 +72,7 @@ pub trait WorkspaceConnectionRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>>>
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Uuid, Option<Username>)>>>
     + Send;
 
     /// Gets the most recent run for a connection (its current sync state).
@@ -272,7 +272,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>> {
+    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Uuid, Option<Username>)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_connection_runs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
@@ -308,11 +308,11 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         let limit = pagination.limit + 1;
         let selection = (
             WorkspaceConnectionRun::as_select(),
-            connections::slug,
+            connections::id,
             accounts::username.nullable(),
         );
 
-        let items: Vec<(WorkspaceConnectionRun, Slug, Option<Username>)> =
+        let items: Vec<(WorkspaceConnectionRun, Uuid, Option<Username>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -342,7 +342,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(run, _, _): &(WorkspaceConnectionRun, Slug, Option<Username>)| {
+            |(run, _, _): &(WorkspaceConnectionRun, Uuid, Option<Username>)| {
                 (run.started_at.into(), run.id)
             },
         ))
