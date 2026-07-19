@@ -335,13 +335,6 @@ mod tests {
                 WorkspacePolicyConstraints::WorkspaceIdIdUnique
             ))
         );
-        assert_eq!(
-            ConstraintViolation::new("workspace_pipeline_runs_pipeline_id_run_number_key"),
-            Some(ConstraintViolation::WorkspacePipelineRun(
-                WorkspacePipelineRunConstraints::RunNumberUnique
-            ))
-        );
-
         assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
     }
 
@@ -390,8 +383,8 @@ mod tests {
             ConstraintCategory::Chronological
         );
 
-        let violation = ConstraintViolation::WorkspacePipelineRun(
-            WorkspacePipelineRunConstraints::RunNumberUnique,
+        let violation = ConstraintViolation::WorkspaceConnection(
+            WorkspaceConnectionConstraints::WorkspaceIdIdUnique,
         );
         assert_eq!(
             violation.constraint_category(),

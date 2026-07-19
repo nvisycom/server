@@ -2,7 +2,6 @@
 
 mod accounts;
 mod authentications;
-mod connection_runs;
 mod connections;
 mod contexts;
 mod files;
@@ -21,7 +20,6 @@ mod workspaces;
 
 pub use accounts::*;
 pub use authentications::*;
-pub use connection_runs::*;
 pub use connections::*;
 pub use contexts::*;
 pub use files::*;

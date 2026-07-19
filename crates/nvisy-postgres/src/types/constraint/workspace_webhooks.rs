@@ -13,14 +13,8 @@ pub enum WorkspaceWebhookConstraints {
     // Webhook unique constraints
     #[strum(serialize = "workspace_webhooks_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-    #[strum(serialize = "workspace_webhooks_workspace_id_slug_key")]
-    SlugUnique,
 
     // Webhook validation constraints
-    #[strum(serialize = "workspace_webhooks_slug_length")]
-    SlugLength,
-    #[strum(serialize = "workspace_webhooks_slug_format")]
-    SlugFormat,
     #[strum(serialize = "workspace_webhooks_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "workspace_webhooks_description_length")]
@@ -50,12 +44,9 @@ impl WorkspaceWebhookConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceWebhookConstraints::WorkspaceIdIdUnique
-            | WorkspaceWebhookConstraints::SlugUnique => ConstraintCategory::Uniqueness,
+            WorkspaceWebhookConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
 
-            WorkspaceWebhookConstraints::SlugLength
-            | WorkspaceWebhookConstraints::SlugFormat
-            | WorkspaceWebhookConstraints::DisplayNameLength
+            WorkspaceWebhookConstraints::DisplayNameLength
             | WorkspaceWebhookConstraints::DescriptionLength
             | WorkspaceWebhookConstraints::UrlLength
             | WorkspaceWebhookConstraints::UrlFormat

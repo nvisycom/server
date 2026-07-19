@@ -40,14 +40,15 @@ pub trait WorkspacePipelineRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
 
-    /// Finds a run by its per-pipeline sequential `run_number`.
+    /// Finds a run by its opaque id, scoped to a workspace, with the triggering
+    /// account's handle.
     ///
-    /// The run's public identity is `(pipeline, run_number)`; this is the
-    /// lookup behind `/pipelines/{slug}/runs/{run_number}`.
-    fn find_pipeline_run_by_number(
+    /// The run is addressed by its own id (behind `/runs/{runId}`); scoping
+    /// through the owning pipeline keeps it workspace-bounded.
+    fn find_workspace_run_by_id(
         &mut self,
-        pipeline_id: Uuid,
-        run_number: i32,
+        workspace_id: Uuid,
+        run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspacePipelineRun, Option<Username>)>>> + Send;
 
     /// Finds a run by its `(pipeline, idempotency key)` pair, for detect replay.
@@ -194,18 +195,21 @@ impl WorkspacePipelineRunRepository for PgConnection {
         Ok(run)
     }
 
-    async fn find_pipeline_run_by_number(
+    async fn find_workspace_run_by_id(
         &mut self,
-        pipeline_id: Uuid,
-        run_number: i32,
+        workspace_id: Uuid,
+        run_id: Uuid,
     ) -> PgResult<Option<(WorkspacePipelineRun, Option<Username>)>> {
-        use schema::workspace_pipeline_runs::dsl;
-        use schema::{accounts, workspace_pipeline_runs};
+        use schema::workspace_pipeline_runs::dsl as runs;
+        use schema::{accounts, workspace_pipeline_runs, workspace_pipelines};
 
+        // Runs carry no workspace column; scope through the owning pipeline so
+        // the id resolves only within its workspace.
         let run = workspace_pipeline_runs::table
+            .inner_join(workspace_pipelines::table)
             .left_join(accounts::table)
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .filter(dsl::run_number.eq(run_number))
+            .filter(runs::id.eq(run_id))
+            .filter(workspace_pipelines::workspace_id.eq(workspace_id))
             .select((
                 WorkspacePipelineRun::as_select(),
                 accounts::username.nullable(),

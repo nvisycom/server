@@ -40,14 +40,10 @@ pub trait WorkspaceConnectionRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
-    /// Finds a run by its per-connection sequential `run_number`.
-    ///
-    /// The run's public identity is `(connection, run_number)`; this is the
-    /// lookup behind `/connections/{slug}/runs/{run_number}`.
-    fn find_connection_run_by_number(
+    /// Finds a sync run by its opaque id, with the triggering account's handle.
+    fn find_connection_run_by_id(
         &mut self,
-        connection_id: Uuid,
-        run_number: i32,
+        run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>>> + Send;
 
     /// Lists runs for a specific connection with cursor pagination, each paired
@@ -163,18 +159,16 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         Ok(run)
     }
 
-    async fn find_connection_run_by_number(
+    async fn find_connection_run_by_id(
         &mut self,
-        connection_id: Uuid,
-        run_number: i32,
+        run_id: Uuid,
     ) -> PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>> {
         use schema::workspace_connection_runs::dsl;
         use schema::{accounts, workspace_connection_runs};
 
         let run = workspace_connection_runs::table
             .left_join(accounts::table)
-            .filter(dsl::connection_id.eq(connection_id))
-            .filter(dsl::run_number.eq(run_number))
+            .filter(dsl::id.eq(run_id))
             .select((
                 WorkspaceConnectionRun::as_select(),
                 accounts::username.nullable(),

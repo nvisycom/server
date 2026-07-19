@@ -31,7 +31,7 @@ pub use enums::{
 };
 pub use filtering::{FileFilter, FileFormat, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
-pub use prefixed_id::{ConnectionId, PipelineId, PrefixedIdError, WebhookId};
+pub use prefixed_id::{ConnectionId, PrefixedIdError, RunId, WebhookId};
 pub use slug::{SLUG_MAX_LENGTH, SLUG_MIN_LENGTH, Slug, SlugError};
 pub use sorting::{
     FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,

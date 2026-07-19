@@ -59,12 +59,6 @@ impl From<WorkspacePipelineRunConstraints> for Error<'static> {
             WorkspacePipelineRunConstraints::IdempotencyKeyLength => {
                 ErrorKind::BadRequest.with_message("Idempotency key must be 1 to 255 characters")
             }
-            WorkspacePipelineRunConstraints::RunNumberPositive => {
-                ErrorKind::BadRequest.with_message("Run number must be greater than zero")
-            }
-            WorkspacePipelineRunConstraints::RunNumberUnique => {
-                ErrorKind::Conflict.with_message("A run with this number already exists")
-            }
             WorkspacePipelineRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }
@@ -124,14 +118,6 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
                 }
                 WorkspaceConnectionConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Connection metadata size exceeds maximum limit"),
-                WorkspaceConnectionConstraints::SlugLength => ErrorKind::BadRequest
-                    .with_message("Connection slug must be between 3 and 32 characters long"),
-                WorkspaceConnectionConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
-                    "Connection slug must be lowercase alphanumeric with single internal dashes",
-                ),
-                WorkspaceConnectionConstraints::SlugUnique => {
-                    ErrorKind::Conflict.with_message("A connection with this slug already exists")
-                }
                 WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A connection with this identifier already exists"),
                 WorkspaceConnectionConstraints::UpdatedAfterCreated
@@ -151,12 +137,6 @@ impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
                 .with_message("Sync error message must be between 1 and 4096 characters"),
             WorkspaceConnectionRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Sync run metadata size exceeds maximum limit")
-            }
-            WorkspaceConnectionRunConstraints::RunNumberPositive => {
-                ErrorKind::BadRequest.with_message("Run number must be greater than zero")
-            }
-            WorkspaceConnectionRunConstraints::RunNumberUnique => {
-                ErrorKind::Conflict.with_message("A run with this number already exists")
             }
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
             | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {

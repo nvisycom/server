@@ -132,13 +132,13 @@ prefixed_id! {
 }
 
 prefixed_id! {
-    /// Opaque identifier for a workspace pipeline (`pipe_<uuid>`).
-    PipelineId, "pipe"
+    /// Opaque identifier for a workspace webhook (`whk_<uuid>`).
+    WebhookId, "whk"
 }
 
 prefixed_id! {
-    /// Opaque identifier for a workspace webhook (`whk_<uuid>`).
-    WebhookId, "whk"
+    /// Opaque identifier for a pipeline run (`run_<uuid>`).
+    RunId, "run"
 }
 
 #[cfg(test)]

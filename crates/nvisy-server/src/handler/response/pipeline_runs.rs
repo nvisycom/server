@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspacePipelineRun as PipelineRunModel;
-use nvisy_postgres::types::{PipelineRunStatus, PipelineTriggerType, Slug, Username};
+use nvisy_postgres::types::{PipelineRunStatus, PipelineTriggerType, RunId, Slug, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,13 +11,13 @@ use super::Page;
 
 /// Response type for a pipeline run.
 ///
-/// A run is addressed as `(pipeline slug, run number)`, so it carries no
-/// surrogate id of its own.
+/// A run is addressed by its own opaque id; the owning pipeline and workspace
+/// slugs are carried for context.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRun {
-    /// Sequential run number within the pipeline (the run's identity).
-    pub run_number: i32,
+    /// Opaque identifier of the run.
+    pub id: RunId,
     /// Slug of the pipeline this run belongs to.
     pub pipeline_slug: Slug,
     /// Slug of the workspace this run belongs to.
@@ -56,7 +56,7 @@ impl PipelineRun {
         trigger_username: Option<Username>,
     ) -> Self {
         Self {
-            run_number: run.run_number,
+            id: RunId::from_uuid(run.id),
             pipeline_slug,
             workspace_slug,
             file_id: run.file_id,

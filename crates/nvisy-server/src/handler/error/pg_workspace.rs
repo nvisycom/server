@@ -96,14 +96,6 @@ impl From<WorkspaceActivitiesConstraints> for Error<'static> {
 impl From<WorkspaceWebhookConstraints> for Error<'static> {
     fn from(c: WorkspaceWebhookConstraints) -> Self {
         let error = match c {
-            WorkspaceWebhookConstraints::SlugLength => ErrorKind::BadRequest
-                .with_message("Webhook slug must be between 3 and 32 characters long"),
-            WorkspaceWebhookConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
-                "Webhook slug must be lowercase alphanumeric with single internal dashes",
-            ),
-            WorkspaceWebhookConstraints::SlugUnique => {
-                ErrorKind::Conflict.with_message("A webhook with this slug already exists")
-            }
             WorkspaceWebhookConstraints::DisplayNameLength => ErrorKind::BadRequest
                 .with_message("Webhook name must be between 3 and 64 characters long"),
             WorkspaceWebhookConstraints::DescriptionLength => {

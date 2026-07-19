@@ -19,7 +19,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 use nvisy_postgres::query::WorkspaceConnectionRepository;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::{ConnectionId, Username};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -67,7 +67,6 @@ async fn create_connection(
     let new_connection = NewWorkspaceConnection {
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
-        slug: request.slug,
         name: request.name,
         provider: request.provider,
         encrypted_data,
@@ -79,13 +78,17 @@ async fn create_connection(
 
     tracing::info!(
         target: TRACING_TARGET,
-        connection_slug = %connection.slug,
+        connection_id = %ConnectionId::from_uuid(connection.id),
         provider = %connection.provider,
         "Connection created",
     );
 
-    let (connection, creator_username) =
-        find_connection(&mut conn, workspace.id, connection.slug.as_str()).await?;
+    let (connection, creator_username) = find_connection(
+        &mut conn,
+        workspace.id,
+        ConnectionId::from_uuid(connection.id),
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -181,7 +184,7 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        connection_slug = %path_params.connection_slug,
+        connection_id = %path_params.connection_id,
     )
 )]
 async fn read_connection(
@@ -199,7 +202,7 @@ async fn read_connection(
         .await?;
 
     let (connection, creator_username) =
-        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
@@ -230,7 +233,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        connection_slug = %path_params.connection_slug,
+        connection_id = %path_params.connection_id,
     )
 )]
 async fn update_connection(
@@ -249,8 +252,7 @@ async fn update_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let (existing, _) =
-        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+    let (existing, _) = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     let encrypted_data = request
         .data
@@ -267,7 +269,7 @@ async fn update_connection(
         .await?;
 
     let (connection, creator_username) =
-        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
 
@@ -299,7 +301,7 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        connection_slug = %path_params.connection_slug,
+        connection_id = %path_params.connection_id,
     )
 )]
 async fn delete_connection(
@@ -316,8 +318,7 @@ async fn delete_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let (existing, _) =
-        find_connection(&mut conn, workspace.id, &path_params.connection_slug).await?;
+    let (existing, _) = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     conn.delete_workspace_connection(existing.id).await?;
 
@@ -335,14 +336,14 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace by slug, with its creator's handle, or
+/// Finds a connection within a workspace by id, with its creator's handle, or
 /// returns a NotFound error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    connection_slug: &str,
+    connection_id: ConnectionId,
 ) -> Result<(WorkspaceConnection, Username)> {
-    conn.find_connection_in_workspace_by_slug(workspace_id, connection_slug)
+    conn.find_connection_in_workspace_with_creator(workspace_id, connection_id.as_uuid())
         .await?
         .ok_or_else(|| Error::not_found("connection"))
 }
@@ -358,7 +359,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_connections, list_connections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionSlug}/",
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/",
             get_with(read_connection, read_connection_docs)
                 .put_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),

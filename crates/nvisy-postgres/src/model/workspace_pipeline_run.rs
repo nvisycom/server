@@ -28,8 +28,6 @@ pub struct WorkspacePipelineRun {
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
     pub status: PipelineRunStatus,
-    /// Human-facing sequence number within the pipeline (assigned at insert).
-    pub run_number: i32,
     /// Object-store key for the encrypted `AnalyzedDocument` held between detect
     /// and redact. `None` until analysis writes it.
     pub analyzed_document_key: Option<String>,

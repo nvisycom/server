@@ -147,7 +147,6 @@ diesel::table! {
         account_id -> Nullable<Uuid>,
         trigger_type -> SyncTriggerType,
         status -> SyncStatus,
-        run_number -> Int4,
         records_synced -> Int8,
         error_message -> Nullable<Text>,
         metadata -> Jsonb,
@@ -306,7 +305,6 @@ diesel::table! {
         account_id -> Nullable<Uuid>,
         trigger_type -> PipelineTriggerType,
         status -> PipelineRunStatus,
-        run_number -> Int4,
         analyzed_document_key -> Nullable<Text>,
         idempotency_key -> Nullable<Text>,
         metadata -> Jsonb,
@@ -365,7 +363,6 @@ diesel::table! {
     workspace_webhooks (id) {
         id -> Uuid,
         workspace_id -> Uuid,
-        slug -> Text,
         display_name -> Text,
         description -> Text,
         url -> Text,

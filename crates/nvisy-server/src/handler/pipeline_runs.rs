@@ -155,7 +155,7 @@ async fn create_pipeline_run(
         )
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, run_number = run.run_number, "Pipeline run analyzed");
+    tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Pipeline run analyzed");
 
     let trigger_username = resolve_trigger_username(&mut conn, run.account_id).await?;
 
@@ -314,8 +314,7 @@ fn list_workspace_runs_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
-        run_number = path_params.run_number,
+        run_id = %path_params.run_id,
     )
 )]
 async fn get_pipeline_run(
@@ -332,13 +331,8 @@ async fn get_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (pipeline, run, trigger_username) = find_pipeline_run(
-        &mut conn,
-        workspace.id,
-        &path_params.pipeline_slug,
-        path_params.run_number,
-    )
-    .await?;
+    let (pipeline, run, trigger_username) =
+        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");
 
@@ -371,8 +365,7 @@ fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
-        run_number = path_params.run_number,
+        run_id = %path_params.run_id,
     )
 )]
 async fn get_pipeline_run_analysis(
@@ -391,13 +384,8 @@ async fn get_pipeline_run_analysis(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (_pipeline, run, _) = find_pipeline_run(
-        &mut conn,
-        workspace.id,
-        &path_params.pipeline_slug,
-        path_params.run_number,
-    )
-    .await?;
+    let (_pipeline, run, _) =
+        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
 
@@ -426,8 +414,7 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
-        run_number = path_params.run_number,
+        run_id = %path_params.run_id,
     )
 )]
 async fn redact_pipeline_run(
@@ -447,13 +434,8 @@ async fn redact_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
         .await?;
 
-    let (pipeline, run, trigger_username) = find_pipeline_run(
-        &mut conn,
-        workspace.id,
-        &path_params.pipeline_slug,
-        path_params.run_number,
-    )
-    .await?;
+    let (pipeline, run, trigger_username) =
+        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     // A run can only be redacted once, after detection.
     if !run.is_analyzed() {
@@ -502,7 +484,7 @@ async fn redact_pipeline_run(
 
     tracing::info!(
         target: TRACING_TARGET,
-        run_number = run.run_number,
+        run_id = %run.id,
         artifact_file_id = %artifact_file.id,
         "Pipeline run redacted"
     );
@@ -604,15 +586,20 @@ async fn resolve_trigger_username(
         .map(|account| account.username))
 }
 
+/// Resolves a run by its opaque id within a workspace, returning the run, its
+/// owning pipeline (for the response's pipeline slug), and the triggering
+/// account's handle. The lookup is workspace-scoped through the owning pipeline.
 async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    pipeline_slug: &str,
-    run_number: i32,
+    run_id: Uuid,
 ) -> Result<(WorkspacePipeline, WorkspacePipelineRun, Option<Username>)> {
-    let pipeline = find_pipeline(conn, workspace_id, pipeline_slug).await?;
     let (run, trigger_username) = conn
-        .find_pipeline_run_by_number(pipeline.id, run_number)
+        .find_workspace_run_by_id(workspace_id, run_id)
+        .await?
+        .ok_or_else(|| Error::not_found("pipeline_run"))?;
+    let pipeline = conn
+        .find_pipeline_in_workspace(workspace_id, run.pipeline_id)
         .await?
         .ok_or_else(|| Error::not_found("pipeline_run"))?;
     Ok((pipeline, run, trigger_username))
@@ -635,15 +622,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_pipeline_runs, list_pipeline_runs_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/{runNumber}/",
+            "/workspaces/{workspaceSlug}/runs/{runId}/",
             get_with(get_pipeline_run, get_pipeline_run_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/{runNumber}/detections/",
+            "/workspaces/{workspaceSlug}/runs/{runId}/detections/",
             get_with(get_pipeline_run_analysis, get_pipeline_run_analysis_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/runs/{runNumber}/redactions/",
+            "/workspaces/{workspaceSlug}/runs/{runId}/redactions/",
             post_with(redact_pipeline_run, redact_pipeline_run_docs),
         )
         .with_path_items(|item| item.tag("Pipeline Runs"))

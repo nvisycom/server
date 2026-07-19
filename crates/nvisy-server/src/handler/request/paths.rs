@@ -1,6 +1,6 @@
 //! Path parameter types for HTTP handlers.
 
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::{RunId, Username, WebhookId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -46,8 +46,8 @@ pub struct WorkspaceFilePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebhookPathParams {
-    /// URL slug of the webhook, unique within its workspace.
-    pub webhook_slug: String,
+    /// Opaque identifier of the webhook.
+    pub webhook_id: WebhookId,
 }
 
 /// Path parameters for API token operations.
@@ -88,8 +88,6 @@ pub struct PipelinePathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunPathParams {
-    /// URL slug of the pipeline the run belongs to.
-    pub pipeline_slug: String,
-    /// Per-pipeline sequential run number.
-    pub run_number: i32,
+    /// Opaque identifier of the run.
+    pub run_id: RunId,
 }
