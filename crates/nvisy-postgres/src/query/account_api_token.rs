@@ -28,6 +28,16 @@ pub trait AccountApiTokenRepository {
         token_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<AccountApiToken>>> + Send;
 
+    /// Returns whether the token is still active: it exists, belongs to the
+    /// given account, and has not been revoked (soft-deleted). Used on the
+    /// authentication path so revoking a token takes effect immediately rather
+    /// than only when its JWT expires.
+    fn account_api_token_is_active(
+        &mut self,
+        token_id: Uuid,
+        account_id: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+
     /// Updates an account API token.
     fn update_account_api_token(
         &mut self,
@@ -115,6 +125,25 @@ impl AccountApiTokenRepository for PgConnection {
             .await
             .optional()
             .map_err(PgError::from)
+    }
+
+    async fn account_api_token_is_active(
+        &mut self,
+        token_id: Uuid,
+        account_id: Uuid,
+    ) -> PgResult<bool> {
+        use diesel::dsl::{exists, select};
+        use schema::account_api_tokens::{self, dsl};
+
+        select(exists(
+            account_api_tokens::table
+                .filter(dsl::id.eq(token_id))
+                .filter(dsl::account_id.eq(account_id))
+                .filter(dsl::deleted_at.is_null()),
+        ))
+        .get_result(self)
+        .await
+        .map_err(PgError::from)
     }
 
     async fn update_account_api_token(
