@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_connections;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, Slug};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Workspace connection model representing encrypted provider connections.
 ///
@@ -22,8 +22,6 @@ pub struct WorkspaceConnection {
     pub workspace_id: Uuid,
     /// Reference to the account that created this connection.
     pub account_id: Uuid,
-    /// URL-safe connection identifier, unique within the workspace.
-    pub slug: Slug,
     /// Human-readable connection name.
     pub name: String,
     /// Provider type for indexing (e.g., "openai", "postgres", "s3").
@@ -52,8 +50,6 @@ pub struct NewWorkspaceConnection {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
-    /// URL-safe connection identifier, unique within the workspace.
-    pub slug: Slug,
     /// Connection name.
     pub name: String,
     /// Provider type for indexing.

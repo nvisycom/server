@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
 };
-use crate::types::{CursorPage, CursorPagination, Slug, SyncStatus, Username};
+use crate::types::{CursorPage, CursorPagination, SyncStatus, Username};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection run database operations.
@@ -40,15 +40,29 @@ pub trait WorkspaceConnectionRunRepository {
         run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
-    /// Finds a run by its per-connection sequential `run_number`.
+    /// Finds a sync run by its opaque id, scoped to a workspace via its owning
+    /// connection, with the triggering account's handle.
     ///
-    /// The run's public identity is `(connection, run_number)`; this is the
-    /// lookup behind `/connections/{slug}/runs/{run_number}`.
-    fn find_connection_run_by_number(
+    /// Runs carry no workspace column, so this joins through the connection and
+    /// filters on its workspace; a run whose connection is in another workspace
+    /// is not found.
+    fn find_connection_run_by_id(
         &mut self,
-        connection_id: Uuid,
-        run_number: i32,
+        workspace_id: Uuid,
+        run_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>>> + Send;
+
+    /// Returns the most recent successful sync completion time for each of the
+    /// given connections.
+    ///
+    /// A connection's "last synced" instant is the `completed_at` of its latest
+    /// run with status `Completed`; connections that have never synced
+    /// successfully are absent from the result. This is a single grouped query
+    /// so a page of connections costs one round-trip, not one per connection.
+    fn last_successful_sync_at(
+        &mut self,
+        connection_ids: &[Uuid],
+    ) -> impl Future<Output = PgResult<Vec<(Uuid, jiff_diesel::Timestamp)>>> + Send;
 
     /// Lists runs for a specific connection with cursor pagination, each paired
     /// with the handle of the account that triggered it, if any.
@@ -72,7 +86,7 @@ pub trait WorkspaceConnectionRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>>>
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Uuid, Option<Username>)>>>
     + Send;
 
     /// Gets the most recent run for a connection (its current sync state).
@@ -163,18 +177,21 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         Ok(run)
     }
 
-    async fn find_connection_run_by_number(
+    async fn find_connection_run_by_id(
         &mut self,
-        connection_id: Uuid,
-        run_number: i32,
+        workspace_id: Uuid,
+        run_id: Uuid,
     ) -> PgResult<Option<(WorkspaceConnectionRun, Option<Username>)>> {
-        use schema::workspace_connection_runs::dsl;
-        use schema::{accounts, workspace_connection_runs};
+        use schema::workspace_connection_runs::dsl as runs;
+        use schema::{accounts, workspace_connection_runs, workspace_connections};
 
+        // Runs carry no workspace column; scope through the owning connection so
+        // the id resolves only within its workspace.
         let run = workspace_connection_runs::table
+            .inner_join(workspace_connections::table)
             .left_join(accounts::table)
-            .filter(dsl::connection_id.eq(connection_id))
-            .filter(dsl::run_number.eq(run_number))
+            .filter(runs::id.eq(run_id))
+            .filter(workspace_connections::workspace_id.eq(workspace_id))
             .select((
                 WorkspaceConnectionRun::as_select(),
                 accounts::username.nullable(),
@@ -185,6 +202,30 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(run)
+    }
+
+    async fn last_successful_sync_at(
+        &mut self,
+        connection_ids: &[Uuid],
+    ) -> PgResult<Vec<(Uuid, jiff_diesel::Timestamp)>> {
+        use diesel::dsl::max;
+        use schema::workspace_connection_runs::{self, dsl};
+
+        if connection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Only successful runs count toward "last synced"; a failed or cancelled
+        // run does not move the timestamp. completed_at is non-null for any run
+        // in a terminal state, so the grouped MAX is present for every group.
+        workspace_connection_runs::table
+            .filter(dsl::connection_id.eq_any(connection_ids))
+            .filter(dsl::status.eq(SyncStatus::Completed))
+            .group_by(dsl::connection_id)
+            .select((dsl::connection_id, max(dsl::completed_at).assume_not_null()))
+            .load(self)
+            .await
+            .map_err(PgError::from)
     }
 
     async fn cursor_list_workspace_connection_runs(
@@ -272,15 +313,15 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Slug, Option<Username>)>> {
+    ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Uuid, Option<Username>)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_connection_runs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
 
         // Runs have no workspace column; scope them through the owning
-        // connection. The owning connection's slug and the triggering account's
+        // connection. The owning connection's id and the triggering account's
         // handle are selected alongside each run so the cross-connection response
-        // can address each run by `(connection, number)` and name its trigger.
+        // can name its connection and trigger (the run is addressed by its own id).
         let scoped = || {
             let mut query = runs::workspace_connection_runs
                 .inner_join(connections::workspace_connections)
@@ -308,11 +349,11 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         let limit = pagination.limit + 1;
         let selection = (
             WorkspaceConnectionRun::as_select(),
-            connections::slug,
+            connections::id,
             accounts::username.nullable(),
         );
 
-        let items: Vec<(WorkspaceConnectionRun, Slug, Option<Username>)> =
+        let items: Vec<(WorkspaceConnectionRun, Uuid, Option<Username>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -342,7 +383,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(run, _, _): &(WorkspaceConnectionRun, Slug, Option<Username>)| {
+            |(run, _, _): &(WorkspaceConnectionRun, Uuid, Option<Username>)| {
                 (run.started_at.into(), run.id)
             },
         ))

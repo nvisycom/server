@@ -17,12 +17,6 @@ pub enum WorkspacePipelineRunConstraints {
     MetadataSize,
     #[strum(serialize = "workspace_pipeline_runs_idempotency_key_length")]
     IdempotencyKeyLength,
-    #[strum(serialize = "workspace_pipeline_runs_run_number_positive")]
-    RunNumberPositive,
-
-    // Uniqueness constraints
-    #[strum(serialize = "workspace_pipeline_runs_pipeline_id_run_number_key")]
-    RunNumberUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_pipeline_runs_completed_after_started")]
@@ -40,10 +34,9 @@ impl WorkspacePipelineRunConstraints {
         match self {
             WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength
             | WorkspacePipelineRunConstraints::MetadataSize
-            | WorkspacePipelineRunConstraints::IdempotencyKeyLength
-            | WorkspacePipelineRunConstraints::RunNumberPositive => ConstraintCategory::Validation,
-
-            WorkspacePipelineRunConstraints::RunNumberUnique => ConstraintCategory::Uniqueness,
+            | WorkspacePipelineRunConstraints::IdempotencyKeyLength => {
+                ConstraintCategory::Validation
+            }
 
             WorkspacePipelineRunConstraints::CompletedAfterStarted => {
                 ConstraintCategory::Chronological

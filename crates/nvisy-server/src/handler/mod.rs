@@ -5,7 +5,6 @@
 
 mod accounts;
 mod authentication;
-mod connection_runs;
 mod connections;
 mod contexts;
 mod error;
@@ -14,11 +13,11 @@ mod invites;
 mod members;
 mod monitors;
 mod notifications;
-mod pipeline_runs;
 mod pipelines;
 mod policies;
 pub mod request;
 pub mod response;
+mod runs;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -66,9 +65,6 @@ fn private_routes(
     if is_included(BuiltinModule::Connections) {
         router = router.merge(connections::routes());
     }
-    if is_included(BuiltinModule::ConnectionRuns) {
-        router = router.merge(connection_runs::routes());
-    }
     if is_included(BuiltinModule::Contexts) {
         router = router.merge(contexts::routes());
     }
@@ -88,7 +84,7 @@ fn private_routes(
         router = router.merge(pipelines::routes());
     }
     if is_included(BuiltinModule::PipelineRuns) {
-        router = router.merge(pipeline_runs::routes());
+        router = router.merge(runs::routes());
     }
     if is_included(BuiltinModule::Policies) {
         router = router.merge(policies::routes());

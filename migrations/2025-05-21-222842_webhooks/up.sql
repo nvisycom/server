@@ -45,13 +45,6 @@ CREATE TABLE workspace_webhooks (
     -- Composite key target for workspace-scoped access and foreign keys.
     CONSTRAINT workspace_webhooks_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- URL identity, unique within the workspace: lowercase alphanumeric with
-    -- single internal dashes, 3-32 characters.
-    slug             TEXT             NOT NULL,
-    CONSTRAINT workspace_webhooks_workspace_id_slug_key UNIQUE (workspace_id, slug),
-    CONSTRAINT workspace_webhooks_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
-    CONSTRAINT workspace_webhooks_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
-
     -- Webhook details
     display_name     TEXT             NOT NULL,
     description      TEXT             NOT NULL DEFAULT '',

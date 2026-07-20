@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::schema::workspace_webhooks;
 use crate::types::{
-    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Slug, WebhookEvent, WebhookStatus,
+    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, WebhookEvent, WebhookStatus,
 };
 
 /// Workspace webhook model representing a webhook configuration for a workspace.
@@ -27,8 +27,6 @@ pub struct WorkspaceWebhook {
     pub id: Uuid,
     /// Reference to the workspace this webhook belongs to.
     pub workspace_id: Uuid,
-    /// URL-safe webhook identifier, unique within the workspace.
-    pub slug: Slug,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Description of the webhook's purpose.
@@ -62,8 +60,6 @@ pub struct WorkspaceWebhook {
 pub struct NewWorkspaceWebhook {
     /// Reference to the workspace this webhook will belong to.
     pub workspace_id: Uuid,
-    /// URL-safe webhook identifier, unique within the workspace.
-    pub slug: Slug,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Description of the webhook's purpose.

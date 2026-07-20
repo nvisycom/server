@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Slug, Username, WebhookEvent, WebhookStatus};
+use nvisy_postgres::types::{Slug, Username, WebhookEvent, WebhookId, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,8 +15,8 @@ use super::Page;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Webhook {
-    /// URL slug of the webhook, unique within its workspace.
-    pub slug: Slug,
+    /// Opaque identifier of the webhook.
+    pub id: WebhookId,
     /// Slug of the workspace this webhook belongs to.
     pub workspace_slug: Slug,
     /// Human-readable name for the webhook.
@@ -52,7 +52,7 @@ impl Webhook {
         let headers = webhook.parsed_headers();
 
         Self {
-            slug: webhook.slug,
+            id: WebhookId::from_uuid(webhook.id),
             workspace_slug,
             display_name: webhook.display_name,
             description: webhook.description,

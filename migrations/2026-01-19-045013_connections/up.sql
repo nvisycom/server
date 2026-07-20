@@ -34,13 +34,6 @@ CREATE TABLE workspace_connections (
     -- Composite key target for workspace-scoped access and foreign keys.
     CONSTRAINT workspace_connections_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- URL identity, unique within the workspace: lowercase alphanumeric with
-    -- single internal dashes, 3-32 characters.
-    slug            TEXT            NOT NULL,
-    CONSTRAINT workspace_connections_workspace_id_slug_key UNIQUE (workspace_id, slug),
-    CONSTRAINT workspace_connections_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
-    CONSTRAINT workspace_connections_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
-
     -- Core attributes
     name            TEXT            NOT NULL,
     provider        TEXT            NOT NULL,
@@ -123,13 +116,6 @@ CREATE TABLE workspace_connection_runs (
     trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
     status          SYNC_STATUS         NOT NULL DEFAULT 'running',
 
-    -- Human-facing sequence number within the connection ("run #47"). Assigned
-    -- at insert; display only, never used to address the run (the UUID is).
-    run_number      INTEGER             NOT NULL,
-
-    CONSTRAINT workspace_connection_runs_run_number_positive CHECK (run_number >= 1),
-    CONSTRAINT workspace_connection_runs_connection_id_run_number_key UNIQUE (connection_id, run_number),
-
     -- Number of records processed by this run. Resumption state (cursor,
     -- offset) is not stored here; it lives in the connection's encrypted
     -- context, which each run reads and advances.
@@ -153,29 +139,6 @@ CREATE TABLE workspace_connection_runs (
 
     CONSTRAINT workspace_connection_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
-
--- Assign a gap-free, per-connection run_number on insert. Locking the parent
--- connection row serializes concurrent inserts for the same connection
--- (different connections proceed in parallel), so the sequence is contiguous
--- and race-free.
-CREATE OR REPLACE FUNCTION set_workspace_connection_run_number()
-RETURNS TRIGGER AS $$
-BEGIN
-    PERFORM 1 FROM workspace_connections WHERE id = NEW.connection_id FOR UPDATE;
-    SELECT COALESCE(MAX(run_number), 0) + 1 INTO NEW.run_number
-    FROM workspace_connection_runs
-    WHERE connection_id = NEW.connection_id;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER workspace_connection_runs_set_run_number_trigger
-    BEFORE INSERT ON workspace_connection_runs
-    FOR EACH ROW
-    EXECUTE FUNCTION set_workspace_connection_run_number();
-
-COMMENT ON FUNCTION set_workspace_connection_run_number() IS
-    'Assigns a gap-free per-connection run_number, serialized by locking the connection row.';
 
 -- Indexes
 CREATE INDEX workspace_connection_runs_connection_idx

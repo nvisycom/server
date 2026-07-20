@@ -1,6 +1,6 @@
 //! Connection request types.
 
-use nvisy_postgres::types::Slug;
+use nvisy_postgres::types::ConnectionId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -15,8 +15,8 @@ use validator::Validate;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionPathParams {
-    /// URL slug of the connection, unique within its workspace.
-    pub connection_slug: String,
+    /// Opaque identifier of the connection.
+    pub connection_id: ConnectionId,
 }
 
 /// Request payload for creating a new workspace connection.
@@ -26,8 +26,6 @@ pub struct CreateConnection {
     /// Human-readable connection name.
     #[validate(length(min = 1, max = 255))]
     pub name: String,
-    /// URL slug, unique within the workspace and immutable after creation.
-    pub slug: Slug,
     /// Provider type (e.g., "openai", "postgres", "s3").
     #[validate(length(min = 1, max = 64))]
     pub provider: String,

@@ -184,13 +184,6 @@ CREATE TABLE workspace_pipeline_runs (
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
     status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'running',
 
-    -- Human-facing sequence number within the pipeline ("run #47"). Assigned at
-    -- insert; display only, never used to address the run (the UUID is).
-    run_number      INTEGER                 NOT NULL,
-
-    CONSTRAINT workspace_pipeline_runs_run_number_positive CHECK (run_number >= 1),
-    CONSTRAINT workspace_pipeline_runs_pipeline_id_run_number_key UNIQUE (pipeline_id, run_number),
-
     -- Object-store key for the engine's AnalyzedDocument, encrypted and held in
     -- the intermediates bucket between the detect and redact calls. Null until
     -- analysis writes it; redact reads it back as the source of truth.
@@ -215,28 +208,6 @@ CREATE TABLE workspace_pipeline_runs (
 
     CONSTRAINT workspace_pipeline_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
-
--- Assign a gap-free, per-pipeline run_number on insert. Locking the parent
--- pipeline row serializes concurrent inserts for the same pipeline (different
--- pipelines proceed in parallel), so the sequence is contiguous and race-free.
-CREATE OR REPLACE FUNCTION set_workspace_pipeline_run_number()
-RETURNS TRIGGER AS $$
-BEGIN
-    PERFORM 1 FROM workspace_pipelines WHERE id = NEW.pipeline_id FOR UPDATE;
-    SELECT COALESCE(MAX(run_number), 0) + 1 INTO NEW.run_number
-    FROM workspace_pipeline_runs
-    WHERE pipeline_id = NEW.pipeline_id;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER workspace_pipeline_runs_set_run_number_trigger
-    BEFORE INSERT ON workspace_pipeline_runs
-    FOR EACH ROW
-    EXECUTE FUNCTION set_workspace_pipeline_run_number();
-
-COMMENT ON FUNCTION set_workspace_pipeline_run_number() IS
-    'Assigns a gap-free per-pipeline run_number, serialized by locking the pipeline row.';
 
 -- Indexes
 CREATE INDEX workspace_pipeline_runs_pipeline_idx

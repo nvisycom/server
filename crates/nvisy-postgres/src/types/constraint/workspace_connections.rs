@@ -10,12 +10,6 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceConnectionConstraints {
-    // Slug validation constraints
-    #[strum(serialize = "workspace_connections_slug_length")]
-    SlugLength,
-    #[strum(serialize = "workspace_connections_slug_format")]
-    SlugFormat,
-
     // Name validation constraints
     #[strum(serialize = "workspace_connections_name_length")]
     NameLength,
@@ -35,8 +29,8 @@ pub enum WorkspaceConnectionConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_connections_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-    #[strum(serialize = "workspace_connections_workspace_id_slug_key")]
-    SlugUnique,
+    #[strum(serialize = "workspace_connections_name_unique_idx")]
+    NameUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_connections_updated_after_created")]
@@ -54,15 +48,13 @@ impl WorkspaceConnectionConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceConnectionConstraints::SlugLength
-            | WorkspaceConnectionConstraints::SlugFormat
-            | WorkspaceConnectionConstraints::NameLength
+            WorkspaceConnectionConstraints::NameLength
             | WorkspaceConnectionConstraints::ProviderLength
             | WorkspaceConnectionConstraints::DataSize
             | WorkspaceConnectionConstraints::MetadataSize => ConstraintCategory::Validation,
 
             WorkspaceConnectionConstraints::WorkspaceIdIdUnique
-            | WorkspaceConnectionConstraints::SlugUnique => ConstraintCategory::Uniqueness,
+            | WorkspaceConnectionConstraints::NameUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceConnectionConstraints::UpdatedAfterCreated
             | WorkspaceConnectionConstraints::DeletedAfterCreated => {
