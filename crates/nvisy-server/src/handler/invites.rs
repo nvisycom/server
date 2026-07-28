@@ -419,7 +419,7 @@ async fn generate_invite_code(
     tracing::info!(
         target: TRACING_TARGET,
         invite_id = %workspace_invite.id,
-        "Invite code generated ",
+        "Invite code generated",
     );
 
     Ok((
@@ -631,19 +631,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         .api_route(
             "/workspaces/{workspaceSlug}/invites/{inviteId}/",
-            delete_with(cancel_invite, cancel_invite_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceSlug}/invites/{inviteId}/",
-            post_with(reply_to_invite, reply_to_invite_docs),
+            delete_with(cancel_invite, cancel_invite_docs)
+                .post_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(
             "/invites/code/{inviteCode}/",
-            get_with(preview_invite_code, preview_invite_code_docs),
-        )
-        .api_route(
-            "/invites/code/{inviteCode}/",
-            post_with(reply_to_invite_code, reply_to_invite_code_docs),
+            get_with(preview_invite_code, preview_invite_code_docs)
+                .post_with(reply_to_invite_code, reply_to_invite_code_docs),
         )
         .with_path_items(|item| item.tag("Invites"))
 }

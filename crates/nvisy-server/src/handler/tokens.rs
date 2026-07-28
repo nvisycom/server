@@ -192,7 +192,7 @@ async fn revoke_api_token(
     AuthState(auth_state): AuthState,
     Path(path): Path<TokenPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Revoking API token");
+    tracing::debug!(target: TRACING_TARGET, "Revoking API token");
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -207,7 +207,7 @@ async fn revoke_api_token(
             .with_message("API token is already revoked"));
     }
 
-    tracing::warn!(target: TRACING_TARGET, "API token revoked");
+    tracing::info!(target: TRACING_TARGET, "API token revoked");
 
     Ok(StatusCode::NO_CONTENT)
 }

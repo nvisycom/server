@@ -59,7 +59,7 @@ async fn list_members(
         )
         .await?;
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         member_count = page.items.len(),
         "Workspace members listed",
@@ -161,7 +161,7 @@ async fn delete_member(
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Removing workspace member");
+    tracing::debug!(target: TRACING_TARGET, "Removing workspace member");
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -214,7 +214,7 @@ async fn delete_member(
         );
     }
 
-    tracing::warn!(target: TRACING_TARGET, "Workspace member removed");
+    tracing::info!(target: TRACING_TARGET, "Workspace member removed");
 
     Ok(StatusCode::OK)
 }
@@ -359,7 +359,7 @@ async fn leave_workspace(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "Member leaving workspace");
+    tracing::debug!(target: TRACING_TARGET, "Member leaving workspace");
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -375,7 +375,7 @@ async fn leave_workspace(
     conn.remove_workspace_member(workspace.id, auth_state.account_id)
         .await?;
 
-    tracing::warn!(target: TRACING_TARGET, "Member left workspace");
+    tracing::info!(target: TRACING_TARGET, "Member left workspace");
 
     Ok(StatusCode::OK)
 }

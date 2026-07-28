@@ -2,8 +2,7 @@
 //!
 //! This module provides comprehensive account management functionality including
 //! profile viewing, updating, deletion, and notifications. All operations follow
-//! security best practices with proper authorization, input validation, and audit
-//! logging.
+//! security best practices with proper authorization and input validation.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -17,6 +16,7 @@ use uuid::Uuid;
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse, PublicAccount};
 use crate::extract::{AuthState, Json, Path, ValidateJson};
+use crate::handler::utility::build_password_user_inputs;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{PasswordService, ServiceState};
 
@@ -216,18 +216,6 @@ fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
         .response_with::<200, (), _>(|res| res.description("Account deleted."))
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
-}
-
-/// Builds user inputs for password strength validation.
-fn build_password_user_inputs<'a>(
-    username: &'a str,
-    display_name: Option<&'a str>,
-    email_address: &'a str,
-) -> Vec<&'a str> {
-    let mut inputs = vec![username];
-    inputs.extend(display_name);
-    inputs.extend(email_address.split('@'));
-    inputs
 }
 
 /// Finds an account by ID or returns NotFound error.

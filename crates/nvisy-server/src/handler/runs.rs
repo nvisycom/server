@@ -24,9 +24,8 @@ use nvisy_postgres::model::{
     WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
-    AccountRepository, PipelineReferenceRepository, WorkspaceFileRepository,
-    WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
-    WorkspacePipelineRunRepository, WorkspacePolicyRepository,
+    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineArtifactRepository,
+    WorkspacePipelineRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
 use nvisy_postgres::types::{ArtifactType, PipelineRunStatus, Username};
 use nvisy_postgres::{PgClient, PgConn};
@@ -43,6 +42,7 @@ use crate::handler::request::{
     PipelineRunPathParams, WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
+use crate::handler::utility::resolve_trigger_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, EngineService, ServiceState};
 
@@ -546,21 +546,6 @@ async fn find_pipeline(
         .await?
         .map(|(pipeline, _)| pipeline)
         .ok_or_else(|| Error::not_found("pipeline"))
-}
-
-/// Resolves the handle of the account that triggered a run, if any. Used on the
-/// create/replay paths where the run model is already in hand.
-async fn resolve_trigger_username(
-    conn: &mut PgConn,
-    account_id: Option<Uuid>,
-) -> Result<Option<Username>> {
-    let Some(account_id) = account_id else {
-        return Ok(None);
-    };
-    Ok(conn
-        .find_account_by_id(account_id)
-        .await?
-        .map(|account| account.username))
 }
 
 /// Resolves a run by its opaque id within a workspace, returning the run, its

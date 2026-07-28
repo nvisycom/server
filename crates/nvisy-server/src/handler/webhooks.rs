@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::{Username, WebhookId};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::provider::WebhookRequest;
@@ -28,6 +28,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
 };
+use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -69,13 +70,14 @@ async fn create_webhook(
 
     tracing::info!(
         target: TRACING_TARGET,
-        webhook_id = %webhook.id,
+        webhook_id = %WebhookId::from_uuid(webhook.id),
         "Webhook created",
     );
 
-    let (webhook, creator_username) = find_webhook(&mut conn, workspace.id, webhook.id).await?;
+    // The creator is the authenticated caller; resolve their handle directly.
+    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
 
-    // Return WebhookCreated which includes the secret (visible only once)
+    // WebhookCreated includes the secret, which is visible only once.
     Ok((
         StatusCode::CREATED,
         Json(WebhookCreated::from_model(

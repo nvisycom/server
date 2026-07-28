@@ -20,9 +20,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
-use nvisy_postgres::query::{
-    AccountRepository, WorkspaceConnectionRepository, WorkspaceConnectionRunRepository,
-};
+use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
 use nvisy_postgres::types::{ConnectionId, Username};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
@@ -34,7 +32,8 @@ use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, UpdateConnection,
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
-use crate::handler::{Error, ErrorKind, Result};
+use crate::handler::utility::resolve_creator_username;
+use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
 
 /// Tracing target for workspace connection operations.
@@ -350,17 +349,6 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
-}
-
-/// Resolves the handle of the account that created a connection.
-///
-/// The account is the authenticated caller, so a missing row is a server-side
-/// inconsistency rather than a client error.
-async fn resolve_creator_username(conn: &mut PgConn, account_id: Uuid) -> Result<Username> {
-    conn.find_account_by_id(account_id)
-        .await?
-        .map(|account| account.username)
-        .ok_or_else(|| ErrorKind::InternalServerError.with_message("Creator account not found"))
 }
 
 /// Finds a connection within a workspace by id, with its creator's handle, or
