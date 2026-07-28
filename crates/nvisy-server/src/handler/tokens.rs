@@ -100,10 +100,15 @@ async fn list_api_tokens(
         "API tokens listed",
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(ApiTokensPage::from_cursor_page(page, ApiToken::from_model)),
-    ))
+    // Flag the token this request authenticated with so the client can single
+    // out the current session.
+    let current_token_id = auth_state.token_id;
+    let response = ApiTokensPage::from_cursor_page(page, |token| {
+        let is_current = token.id == current_token_id;
+        ApiToken::from_model(token).with_current(is_current)
+    });
+
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
@@ -129,7 +134,11 @@ async fn read_api_token(
 
     tracing::debug!(target: TRACING_TARGET, "API token read");
 
-    Ok((StatusCode::OK, Json(ApiToken::from_model(token))))
+    let is_current = token.id == auth_state.token_id;
+    Ok((
+        StatusCode::OK,
+        Json(ApiToken::from_model(token).with_current(is_current)),
+    ))
 }
 
 fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
@@ -173,7 +182,11 @@ async fn update_api_token(
 
     tracing::info!(target: TRACING_TARGET, "API token updated");
 
-    Ok((StatusCode::OK, Json(ApiToken::from_model(updated_token))))
+    let is_current = updated_token.id == auth_state.token_id;
+    Ok((
+        StatusCode::OK,
+        Json(ApiToken::from_model(updated_token).with_current(is_current)),
+    ))
 }
 
 fn update_api_token_docs(op: TransformOperation) -> TransformOperation {

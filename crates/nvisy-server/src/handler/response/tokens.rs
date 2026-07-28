@@ -27,6 +27,11 @@ pub struct ApiToken {
     /// Timestamp of most recent token activity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<Timestamp>,
+    /// Whether this token is the one the current request authenticated with.
+    ///
+    /// Lets a client single out the active session in the list. Defaults to
+    /// `false`; the listing handler sets it for the matching token.
+    pub current: bool,
 }
 
 impl ApiToken {
@@ -38,7 +43,15 @@ impl ApiToken {
             issued_at: token.issued_at.into(),
             expired_at: token.expired_at.map(Into::into),
             last_used_at: token.last_used_at.map(Into::into),
+            current: false,
         }
+    }
+
+    /// Marks whether this token is the current request's session token.
+    #[must_use]
+    pub fn with_current(mut self, current: bool) -> Self {
+        self.current = current;
+        self
     }
 }
 
