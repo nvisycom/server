@@ -19,9 +19,9 @@ const MAX_KEY_LENGTH: usize = 255;
 
 /// The validated `Idempotency-Key` header, absent when the client omits it.
 ///
-/// A present header must be a non-empty ASCII string of at most
-/// [`MAX_KEY_LENGTH`] characters; anything else rejects with `400 Bad Request`
-/// before the handler runs.
+/// A present header must be a non-empty ASCII string of at most 255
+/// characters; anything else rejects with `400 Bad Request` before the handler
+/// runs.
 #[must_use]
 #[derive(Debug, Clone, Default)]
 pub struct IdempotencyKey(pub Option<String>);
