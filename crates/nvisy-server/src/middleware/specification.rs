@@ -257,11 +257,6 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Contexts".into(),
-            description: Some("Detection context configuration".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
             name: "Webhooks".into(),
             description: Some("Webhook configuration".into()),
             ..Default::default()

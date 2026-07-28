@@ -1,5 +1,5 @@
--- Pipelines: redaction pipeline definitions, their policy/context
--- references (join tables), runs, and artifacts.
+-- Pipelines: redaction pipeline definitions, their runs, and artifacts.
+-- Policy references live in a join table declared alongside policies.
 
 -- Pipeline status enum
 CREATE TYPE PIPELINE_STATUS AS ENUM (
@@ -62,8 +62,8 @@ CREATE TABLE workspace_pipelines (
 
     -- Engine detection + redaction config (nvisy_schema plan as JSON):
     -- recognizers, enrichers, deduplication, label catalog, default scope.
-    -- Policy/context references are relational (see the join tables below),
-    -- not embedded here.
+    -- Policy references are relational (workspace_pipeline_policies, declared
+    -- alongside policies), not embedded here.
     definition      JSONB            NOT NULL,
 
     CONSTRAINT workspace_pipelines_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
@@ -129,46 +129,6 @@ COMMENT ON COLUMN workspace_pipelines.next_run_at IS 'Next scheduled run time (c
 COMMENT ON COLUMN workspace_pipelines.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_pipelines.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft deletion timestamp';
-
--- Pipeline → policy references (redaction rules applied by the pipeline).
--- The shared workspace_id in both composite foreign keys enforces that a
--- pipeline can only reference policies from its own workspace.
-CREATE TABLE workspace_pipeline_policies (
-    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    pipeline_id     UUID            NOT NULL,
-    policy_id       UUID            NOT NULL,
-
-    PRIMARY KEY (pipeline_id, policy_id),
-
-    CONSTRAINT workspace_pipeline_policies_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
-        REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT workspace_pipeline_policies_policy_fkey FOREIGN KEY (workspace_id, policy_id)
-        REFERENCES workspace_policies (workspace_id, id) ON DELETE CASCADE
-);
-
-CREATE INDEX workspace_pipeline_policies_policy_idx ON workspace_pipeline_policies (policy_id);
-
-COMMENT ON TABLE workspace_pipeline_policies IS
-    'Policies a pipeline applies at redaction. CASCADE cleans up on hard delete.';
-
--- Pipeline → context references (reference data supplied to detection).
-CREATE TABLE workspace_pipeline_contexts (
-    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    pipeline_id     UUID            NOT NULL,
-    context_id      UUID            NOT NULL,
-
-    PRIMARY KEY (pipeline_id, context_id),
-
-    CONSTRAINT workspace_pipeline_contexts_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
-        REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
-    CONSTRAINT workspace_pipeline_contexts_context_fkey FOREIGN KEY (workspace_id, context_id)
-        REFERENCES workspace_contexts (workspace_id, id) ON DELETE CASCADE
-);
-
-CREATE INDEX workspace_pipeline_contexts_context_idx ON workspace_pipeline_contexts (context_id);
-
-COMMENT ON TABLE workspace_pipeline_contexts IS
-    'Contexts a pipeline supplies to detection. CASCADE cleans up on hard delete.';
 
 -- Pipeline runs table (execution instances)
 CREATE TABLE workspace_pipeline_runs (

@@ -4,11 +4,11 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
-use nvisy_postgres::types::{PipelineStatus, Slug};
-use nvisy_schema::plan::{
+use nvisy_engine::plan::{
     DeduplicationParams, EnricherParams, LabelCatalogParams, RecognizerParams, ScopeParams,
 };
+use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
+use nvisy_postgres::types::{PipelineStatus, Slug};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,8 +26,8 @@ use validator::Validate;
 /// - `recognizers` / `enrichers` / `deduplication` / `label_catalog` — the
 ///   detection machinery, assembled into an engine `AnalyzerParams` per request.
 /// - `default_scope` — optional pipeline-wide scope a document may override.
-/// - `policy_slugs` / `context_slugs` — references to the workspace's policies
-///   and contexts, resolved at run time.
+/// - `policy_slugs` — references to the workspace's policies, resolved at run
+///   time.
 #[must_use]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -61,31 +61,23 @@ pub struct PipelineDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
     pub policy_slugs: Vec<Slug>,
-    /// Slugs of workspace contexts supplied to detection.
-    ///
-    /// Stored relationally in the `workspace_pipeline_contexts` join table, not the JSON
-    /// definition; surfaced here so the API exposes one coherent object.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[validate(length(max = 64))]
-    pub context_slugs: Vec<Slug>,
 }
 
 impl PipelineDefinition {
     /// Splits the definition into its stored parts: the engine config JSON (with
-    /// the relational references removed) and the policy / context reference slugs.
+    /// the relational references removed) and the policy reference slugs.
     ///
-    /// The references live in join tables, so they are stripped from the JSON to
+    /// The references live in a join table, so they are stripped from the JSON to
     /// keep a single source of truth. Serialization failure is surfaced rather
     /// than swallowed so a bad config never gets silently persisted as empty.
-    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Slug>, Vec<Slug>)> {
+    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Slug>)> {
         let policy_slugs = std::mem::take(&mut self.policy_slugs);
-        let context_slugs = std::mem::take(&mut self.context_slugs);
         let config = serde_json::to_value(&self)?;
-        Ok((config, policy_slugs, context_slugs))
+        Ok((config, policy_slugs))
     }
 
     /// Rebuilds a definition from stored config JSON and the reference slugs read
-    /// back from the join tables.
+    /// back from the join table.
     ///
     /// Decoding failure is surfaced rather than swallowed: a stored config that
     /// does not match the schema is a server-side data error, not an empty
@@ -93,11 +85,9 @@ impl PipelineDefinition {
     pub fn from_parts(
         config: serde_json::Value,
         policy_slugs: Vec<Slug>,
-        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         let mut definition: Self = serde_json::from_value(config)?;
         definition.policy_slugs = policy_slugs;
-        definition.context_slugs = context_slugs;
         Ok(definition)
     }
 }
@@ -125,21 +115,19 @@ pub struct CreatePipeline {
 }
 
 /// A pipeline's reference slugs, split out to be resolved to ids and written to
-/// the join tables after the pipeline row exists.
+/// the join table after the pipeline row exists.
 #[derive(Debug, Default, Clone)]
 pub struct PipelineReferences {
     /// Slugs of the policies the pipeline references.
     pub policy_slugs: Vec<Slug>,
-    /// Slugs of the contexts the pipeline references.
-    pub context_slugs: Vec<Slug>,
 }
 
 impl CreatePipeline {
     /// Splits this request into the pipeline model and its reference ids.
     ///
-    /// The stored model carries only the engine config JSON; the policy and
-    /// context references are returned separately for the caller to persist into
-    /// the join tables (`None` when no definition was supplied).
+    /// The stored model carries only the engine config JSON; the policy
+    /// references are returned separately for the caller to persist into the
+    /// join table (`None` when no definition was supplied).
     ///
     /// # Arguments
     ///
@@ -175,11 +163,8 @@ impl CreatePipeline {
 fn split_definition(
     definition: Option<PipelineDefinition>,
 ) -> serde_json::Result<(serde_json::Value, PipelineReferences)> {
-    let (config, policy_slugs, context_slugs) = definition.unwrap_or_default().into_parts()?;
-    let references = PipelineReferences {
-        policy_slugs,
-        context_slugs,
-    };
+    let (config, policy_slugs) = definition.unwrap_or_default().into_parts()?;
+    let references = PipelineReferences { policy_slugs };
     Ok((config, references))
 }
 
@@ -208,21 +193,15 @@ impl UpdatePipeline {
     /// Splits this request into the update model and its reference ids.
     ///
     /// A missing `definition` leaves both the config column and the reference
-    /// join tables untouched (partial update); a present one replaces both, so
+    /// join table untouched (partial update); a present one replaces both, so
     /// the references are returned only in that case.
     pub fn into_parts(
         self,
     ) -> serde_json::Result<(UpdatePipelineModel, Option<PipelineReferences>)> {
         let (definition, references) = match self.definition {
             Some(definition) => {
-                let (config, policy_slugs, context_slugs) = definition.into_parts()?;
-                (
-                    Some(config),
-                    Some(PipelineReferences {
-                        policy_slugs,
-                        context_slugs,
-                    }),
-                )
+                let (config, policy_slugs) = definition.into_parts()?;
+                (Some(config), Some(PipelineReferences { policy_slugs }))
             }
             None => (None, None),
         };

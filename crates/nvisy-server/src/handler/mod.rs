@@ -6,7 +6,6 @@
 mod accounts;
 mod authentication;
 mod connections;
-mod contexts;
 mod error;
 mod files;
 mod invites;
@@ -64,9 +63,6 @@ fn private_routes(
     }
     if is_included(BuiltinModule::Connections) {
         router = router.merge(connections::routes());
-    }
-    if is_included(BuiltinModule::Contexts) {
-        router = router.merge(contexts::routes());
     }
     if is_included(BuiltinModule::Invites) {
         router = router.merge(invites::routes());

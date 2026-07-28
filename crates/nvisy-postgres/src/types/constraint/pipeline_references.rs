@@ -5,10 +5,10 @@ use strum::{Display, EnumIter, EnumString};
 
 use super::ConstraintCategory;
 
-/// Foreign-key violations on the pipeline → policy / context join tables.
+/// Foreign-key violations on the pipeline → policy join table.
 ///
-/// These fire when a pipeline references a policy or context id that does not
-/// exist in its workspace, so they map to a client error rather than a 500.
+/// These fire when a pipeline references a policy id that does not exist in its
+/// workspace, so they map to a client error rather than a 500.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
@@ -16,12 +16,8 @@ pub enum WorkspacePipelineReferenceConstraints {
     // Foreign-key constraints (referenced row must exist in the workspace)
     #[strum(serialize = "workspace_pipeline_policies_policy_fkey")]
     PolicyReference,
-    #[strum(serialize = "workspace_pipeline_contexts_context_fkey")]
-    ContextReference,
     #[strum(serialize = "workspace_pipeline_policies_pipeline_fkey")]
     PolicyPipelineReference,
-    #[strum(serialize = "workspace_pipeline_contexts_pipeline_fkey")]
-    ContextPipelineReference,
 }
 
 impl WorkspacePipelineReferenceConstraints {

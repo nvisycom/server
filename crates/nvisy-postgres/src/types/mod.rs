@@ -19,8 +19,8 @@ pub use constraint::{
     AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
     ConstraintCategory, ConstraintViolation, WorkspaceActivitiesConstraints,
     WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints, WorkspaceConstraints,
-    WorkspaceContextConstraints, WorkspaceFileConstraints, WorkspaceInviteConstraints,
-    WorkspaceMemberConstraints, WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
+    WorkspaceFileConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
+    WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
     WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
     WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
 };

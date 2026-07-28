@@ -1,7 +1,7 @@
 //! Core authorization types and utilities.
 //!
 //! This module provides the fundamental types used for authorization throughout
-//! the nvisy system, including permissions, contexts, and results.
+//! the nvisy system, including permissions and results.
 
 use std::borrow::Cow;
 
@@ -63,12 +63,6 @@ pub enum Permission {
     /// Can create, modify, and manage workspace connections.
     ManageConnections,
 
-    // Context permissions
-    /// Can view workspace contexts.
-    ViewContexts,
-    /// Can create, modify, and manage workspace contexts.
-    ManageContexts,
-
     // Policy permissions
     /// Can view workspace policies.
     ViewPolicies,
@@ -108,7 +102,6 @@ impl Permission {
             | Self::ViewPipelines
             | Self::ViewMembers
             | Self::ViewConnections
-            | Self::ViewContexts
             | Self::ViewPolicies
             | Self::ViewWebhooks => WorkspaceRole::Guest,
 
@@ -127,7 +120,6 @@ impl Permission {
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageConnections
-            | Self::ManageContexts
             | Self::ManagePolicies
             | Self::CreateWebhooks
             | Self::UpdateWebhooks

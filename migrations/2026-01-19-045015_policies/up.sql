@@ -83,3 +83,25 @@ COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_policies.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_policies.deleted_at IS 'Soft deletion timestamp';
 
+-- Pipeline → policy references (redaction rules applied by the pipeline).
+-- Lives here (after both workspace_pipelines and workspace_policies exist); the
+-- shared workspace_id in both composite foreign keys enforces that a pipeline
+-- can only reference policies from its own workspace.
+CREATE TABLE workspace_pipeline_policies (
+    workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    pipeline_id     UUID            NOT NULL,
+    policy_id       UUID            NOT NULL,
+
+    PRIMARY KEY (pipeline_id, policy_id),
+
+    CONSTRAINT workspace_pipeline_policies_pipeline_fkey FOREIGN KEY (workspace_id, pipeline_id)
+        REFERENCES workspace_pipelines (workspace_id, id) ON DELETE CASCADE,
+    CONSTRAINT workspace_pipeline_policies_policy_fkey FOREIGN KEY (workspace_id, policy_id)
+        REFERENCES workspace_policies (workspace_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX workspace_pipeline_policies_policy_idx ON workspace_pipeline_policies (policy_id);
+
+COMMENT ON TABLE workspace_pipeline_policies IS
+    'Policies a pipeline applies at redaction. CASCADE cleans up on hard delete.';
+
