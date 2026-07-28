@@ -115,7 +115,7 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
 struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
-    file_store: ObjectStore<FilesBucket, FileKey>,
+    file_store: ObjectStore<FilesBucket>,
     crypto: CryptoService,
 }
 
@@ -204,7 +204,7 @@ async fn upload_file(
         .authorize_workspace(&mut conn, workspace.id, Permission::UploadFiles)
         .await?;
 
-    let file_store = nats_client.object_store::<FilesBucket, FileKey>().await?;
+    let file_store = nats_client.object_store::<FilesBucket>().await?;
 
     // The uploader is the caller; resolve the handle once for every file below.
     let uploaded_by: Username = conn
@@ -444,7 +444,7 @@ async fn download_file(
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
 
     let file_store = nats_client
-        .object_store::<FilesBucket, FileKey>()
+        .object_store::<FilesBucket>()
         .await
         .map_err(|err| {
             tracing::error!(

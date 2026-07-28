@@ -7,11 +7,12 @@
 //! # Architecture
 //!
 //! ## Store
-//! - [`ObjectStore<B, K>`] - Type-safe object store with bucket and key configuration
+//! - [`ObjectStore<B>`] - Type-safe object store keyed by its bucket's key type
 //!
 //! ## Key Types
 //! - [`FileKey`] - Unique key for files (workspace + object ID)
 //! - [`AccountKey`] - Key for account-scoped objects (account ID)
+//! - [`IntermediateKey`] - Key for intermediate pipeline artifacts
 //!
 //! ## Bucket Types
 //! - [`FilesBucket`] - Primary file storage (no expiration)
@@ -29,9 +30,8 @@ mod object_key;
 mod object_store;
 
 pub use object_bucket::{
-    AvatarsBucket, ContextFilesBucket, FilesBucket, IntermediatesBucket, ObjectBucket,
-    ThumbnailsBucket,
+    AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ThumbnailsBucket,
 };
 pub use object_data::{GetResult, PutResult};
-pub use object_key::{AccountKey, ContextKey, FileKey, IntermediateKey, ObjectKey};
+pub use object_key::{AccountKey, FileKey, IntermediateKey, ObjectKey};
 pub use object_store::ObjectStore;

@@ -615,7 +615,7 @@ async fn build_document(
     file: &WorkspaceFile,
     correlation_id: Uuid,
 ) -> Result<Document> {
-    let store = nats.object_store::<FilesBucket, FileKey>().await?;
+    let store = nats.object_store::<FilesBucket>().await?;
     let key = FileKey::from_str(&file.storage_path).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Invalid file storage path")
@@ -706,7 +706,7 @@ async fn store_redacted_file(
             .with_context(err.to_string())
     })?;
 
-    let store = nats.object_store::<FilesBucket, FileKey>().await?;
+    let store = nats.object_store::<FilesBucket>().await?;
     let key = FileKey::generate(source.workspace_id);
     store.put(&key, Cursor::new(ciphertext)).await?;
 
@@ -747,9 +747,7 @@ async fn store_analyzed_document(
             .with_context(err.to_string())
     })?;
 
-    let store = nats
-        .object_store::<IntermediatesBucket, IntermediateKey>()
-        .await?;
+    let store = nats.object_store::<IntermediatesBucket>().await?;
     let key = IntermediateKey::generate(workspace_id);
     store.put(&key, Cursor::new(ciphertext)).await?;
 
@@ -776,9 +774,7 @@ async fn load_analyzed_document(
             .with_context(err.to_string())
     })?;
 
-    let store = nats
-        .object_store::<IntermediatesBucket, IntermediateKey>()
-        .await?;
+    let store = nats.object_store::<IntermediatesBucket>().await?;
     let data = store.get(&key).await?.ok_or_else(|| {
         ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
     })?;
