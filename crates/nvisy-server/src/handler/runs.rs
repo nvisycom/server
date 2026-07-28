@@ -321,7 +321,7 @@ async fn get_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (pipeline, run, trigger_username) =
+    let (run, pipeline, trigger_username) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");
@@ -374,7 +374,7 @@ async fn get_pipeline_run_analysis(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (_pipeline, run, _) =
+    let (run, _pipeline, _) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
@@ -424,7 +424,7 @@ async fn redact_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
         .await?;
 
-    let (pipeline, run, trigger_username) =
+    let (run, pipeline, trigger_username) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     // A run can only be redacted once, after detection.
@@ -522,6 +522,13 @@ fn serialize_error(error: serde_json::Error) -> Error<'static> {
         .with_context(error.to_string())
 }
 
+/// Maps an analyzed-document (de)serialization failure to an internal error.
+fn analysis_serde_error(error: serde_json::Error) -> Error<'static> {
+    ErrorKind::InternalServerError
+        .with_message("Failed to process analysis")
+        .with_context(error.to_string())
+}
+
 /// Maps an engine analyze/anonymize failure to an internal error.
 fn analysis_error(error: nvisy_engine::Error) -> Error<'static> {
     ErrorKind::InternalServerError
@@ -541,10 +548,6 @@ async fn find_pipeline(
         .ok_or_else(|| Error::not_found("pipeline"))
 }
 
-/// Resolves a run addressed as `(pipeline slug, run number)` within a workspace.
-///
-/// Returns both the owning pipeline and the run, or NotFound if either the
-/// pipeline slug or the run number does not resolve.
 /// Resolves the handle of the account that triggered a run, if any. Used on the
 /// create/replay paths where the run model is already in hand.
 async fn resolve_trigger_username(
@@ -567,12 +570,10 @@ async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,
     run_id: Uuid,
-) -> Result<(WorkspacePipeline, WorkspacePipelineRun, Option<Username>)> {
-    let (run, pipeline, trigger_username) = conn
-        .find_workspace_run_by_id(workspace_id, run_id)
+) -> Result<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)> {
+    conn.find_workspace_run_by_id(workspace_id, run_id)
         .await?
-        .ok_or_else(|| Error::not_found("pipeline_run"))?;
-    Ok((pipeline, run, trigger_username))
+        .ok_or_else(|| Error::not_found("pipeline_run"))
 }
 
 /// Returns a [`Router`] with all pipeline run routes.
@@ -739,7 +740,7 @@ async fn store_analyzed_document(
     workspace_id: Uuid,
     analyzed: &AnalyzedDocument,
 ) -> Result<String> {
-    let plaintext = serde_json::to_vec(analyzed).map_err(serialize_error)?;
+    let plaintext = serde_json::to_vec(analyzed).map_err(analysis_serde_error)?;
     let ciphertext = crypto.encrypt(workspace_id, &plaintext).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Failed to encrypt analysis")
@@ -794,7 +795,7 @@ async fn load_analyzed_document(
             .with_message("Failed to decrypt analysis")
             .with_context(err.to_string())
     })?;
-    serde_json::from_slice(&plaintext).map_err(serialize_error)
+    serde_json::from_slice(&plaintext).map_err(analysis_serde_error)
 }
 
 /// Records that a run produced an output file (the redaction artifact).
