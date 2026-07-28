@@ -13,6 +13,9 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use bytes::Bytes;
 use nvisy_engine::AnalyzedDocument;
+use nvisy_engine::file::Document;
+use nvisy_engine::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
+use nvisy_engine::policy::Policy as SchemaPolicy;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, IntermediateKey, IntermediatesBucket};
 use nvisy_postgres::model::{
@@ -21,16 +24,12 @@ use nvisy_postgres::model::{
     WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
-    AccountRepository, PipelineReferenceRepository, WorkspaceContextRepository,
-    WorkspaceFileRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
+    AccountRepository, PipelineReferenceRepository, WorkspaceFileRepository,
+    WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
 use nvisy_postgres::types::{ArtifactType, PipelineRunStatus, Username};
 use nvisy_postgres::{PgClient, PgConn};
-use nvisy_schema::context::Context as SchemaContext;
-use nvisy_schema::file::Document;
-use nvisy_schema::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
-use nvisy_schema::policy::Policy as SchemaPolicy;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
@@ -113,8 +112,8 @@ async fn create_pipeline_run(
         .await?
         .ok_or_else(|| Error::not_found("file"))?;
 
-    let definition = PipelineDefinition::from_parts(pipeline.definition, Vec::new(), Vec::new())
-        .map_err(serialize_error)?;
+    let definition =
+        PipelineDefinition::from_parts(pipeline.definition, Vec::new()).map_err(serialize_error)?;
 
     // Create the run first so its id is the engine correlation id.
     let new_run = NewWorkspacePipelineRun {
@@ -130,9 +129,8 @@ async fn create_pipeline_run(
     // Assemble the engine inputs and analyze.
     let document = build_document(&nats, &crypto, &file, run.id).await?;
     let params = build_analyzer_params(&definition, request.scope);
-    let contexts = resolve_contexts(&mut conn, &crypto, pipeline.workspace_id, pipeline.id).await?;
 
-    let analyzed = match engine.analyze_document(document, &params, &contexts).await {
+    let analyzed = match engine.analyze_document(document, &params).await {
         Ok(analyzed) => analyzed,
         Err(err) => {
             fail_run(&mut conn, run.id).await;
@@ -690,25 +688,6 @@ fn build_analyzer_params(
         scope,
         annotations: AnyAnnotations::default(),
     }
-}
-
-/// Resolves a pipeline's live context references into decrypted engine contexts.
-///
-/// Soft-deleted contexts are already filtered out by the repository.
-async fn resolve_contexts(
-    conn: &mut PgConn,
-    crypto: &CryptoService,
-    workspace_id: Uuid,
-    pipeline_id: Uuid,
-) -> Result<Vec<SchemaContext>> {
-    let ids = conn.list_pipeline_context_ids(pipeline_id).await?;
-    let mut contexts = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(model) = conn.find_context_in_workspace(workspace_id, id).await? {
-            contexts.push(crypto.decrypt_json::<SchemaContext>(workspace_id, &model.definition)?);
-        }
-    }
-    Ok(contexts)
 }
 
 /// Resolves a pipeline's live policy references into decrypted engine policies.

@@ -26,7 +26,6 @@ mod pipelines;
 
 mod workspace_connection_runs;
 mod workspace_connections;
-mod workspace_contexts;
 mod workspace_policies;
 
 use std::fmt;
@@ -44,7 +43,6 @@ pub use self::pipelines::WorkspacePipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_connection_runs::WorkspaceConnectionRunConstraints;
 pub use self::workspace_connections::WorkspaceConnectionConstraints;
-pub use self::workspace_contexts::WorkspaceContextConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_policies::WorkspacePolicyConstraints;
@@ -81,7 +79,6 @@ pub enum ConstraintViolation {
     WorkspacePipelineReference(WorkspacePipelineReferenceConstraints),
     WorkspaceConnection(WorkspaceConnectionConstraints),
     WorkspaceConnectionRun(WorkspaceConnectionRunConstraints),
-    WorkspaceContext(WorkspaceContextConstraints),
     WorkspacePolicy(WorkspacePolicyConstraints),
 }
 
@@ -152,7 +149,6 @@ impl ConstraintViolation {
                 WorkspaceWebhookConstraints::new => WorkspaceWebhook,
                 WorkspaceConnectionRunConstraints::new => WorkspaceConnectionRun,
                 WorkspaceConnectionConstraints::new => WorkspaceConnection,
-                WorkspaceContextConstraints::new => WorkspaceContext,
                 WorkspacePolicyConstraints::new => WorkspacePolicy,
                 WorkspaceFileConstraints::new => WorkspaceFile,
                 WorkspacePipelineRunConstraints::new => WorkspacePipelineRun,
@@ -191,7 +187,6 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspacePipelineReference(_) => "pipeline_references",
             ConstraintViolation::WorkspaceConnection(_) => "workspace_connections",
             ConstraintViolation::WorkspaceConnectionRun(_) => "workspace_connection_runs",
-            ConstraintViolation::WorkspaceContext(_) => "workspace_contexts",
             ConstraintViolation::WorkspacePolicy(_) => "workspace_policies",
         }
     }
@@ -220,7 +215,6 @@ impl ConstraintViolation {
 
             ConstraintViolation::WorkspaceConnection(_)
             | ConstraintViolation::WorkspaceConnectionRun(_) => "connections",
-            ConstraintViolation::WorkspaceContext(_) => "contexts",
             ConstraintViolation::WorkspacePolicy(_) => "policies",
         }
     }
@@ -248,7 +242,6 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspacePipelineReference(c) => c.categorize(),
             ConstraintViolation::WorkspaceConnection(c) => c.categorize(),
             ConstraintViolation::WorkspaceConnectionRun(c) => c.categorize(),
-            ConstraintViolation::WorkspaceContext(c) => c.categorize(),
             ConstraintViolation::WorkspacePolicy(c) => c.categorize(),
         }
     }
@@ -281,7 +274,6 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::WorkspacePipelineReference(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceConnection(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceConnectionRun(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceContext(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspacePolicy(c) => write!(f, "{}", c),
         }
     }

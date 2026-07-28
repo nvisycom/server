@@ -1,7 +1,7 @@
 //! Pipeline-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints, WorkspaceContextConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints,
     WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
     WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
     WorkspacePolicyConstraints,
@@ -88,15 +88,9 @@ impl From<WorkspacePipelineReferenceConstraints> for Error<'static> {
                 ErrorKind::BadRequest
                     .with_message("Referenced policy does not exist in this workspace"),
             ),
-            WorkspacePipelineReferenceConstraints::ContextReference => (
-                "context",
-                ErrorKind::BadRequest
-                    .with_message("Referenced context does not exist in this workspace"),
-            ),
             // The pipeline side of the FK only fails if the pipeline row vanished
             // mid-transaction, which is a server-side fault rather than bad input.
-            WorkspacePipelineReferenceConstraints::PolicyPipelineReference
-            | WorkspacePipelineReferenceConstraints::ContextPipelineReference => {
+            WorkspacePipelineReferenceConstraints::PolicyPipelineReference => {
                 ("pipeline", ErrorKind::InternalServerError.into_error())
             }
         };
@@ -148,40 +142,6 @@ impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
         };
 
         error.with_resource("workspace_connection_run")
-    }
-}
-
-impl From<WorkspaceContextConstraints> for Error<'static> {
-    fn from(c: WorkspaceContextConstraints) -> Self {
-        let error =
-            match c {
-                WorkspaceContextConstraints::NameLength => ErrorKind::BadRequest
-                    .with_message("Context name must be between 1 and 255 characters"),
-                WorkspaceContextConstraints::DescriptionLength => ErrorKind::BadRequest
-                    .with_message("Context description must be at most 4096 characters"),
-                WorkspaceContextConstraints::DefinitionSize => ErrorKind::BadRequest
-                    .with_message("Context definition size exceeds maximum limit"),
-                WorkspaceContextConstraints::VersionLength => ErrorKind::BadRequest
-                    .with_message("Context version must be between 1 and 64 characters"),
-                WorkspaceContextConstraints::MetadataSize => ErrorKind::BadRequest
-                    .with_message("Context metadata size exceeds maximum limit"),
-                WorkspaceContextConstraints::SlugLength => ErrorKind::BadRequest
-                    .with_message("Context slug must be between 3 and 32 characters long"),
-                WorkspaceContextConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
-                    "Context slug must be lowercase alphanumeric with single internal dashes",
-                ),
-                WorkspaceContextConstraints::SlugUnique => {
-                    ErrorKind::Conflict.with_message("A context with this slug already exists")
-                }
-                WorkspaceContextConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
-                    .with_message("A context with this identifier already exists"),
-                WorkspaceContextConstraints::UpdatedAfterCreated
-                | WorkspaceContextConstraints::DeletedAfterCreated => {
-                    ErrorKind::InternalServerError.into_error()
-                }
-            };
-
-        error.with_resource("workspace_context")
     }
 }
 

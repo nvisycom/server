@@ -1,7 +1,7 @@
 //! Pipeline run request types (detect).
 
+use nvisy_engine::plan::ScopeParams;
 use nvisy_postgres::types::PipelineRunStatus;
-use nvisy_schema::plan::ScopeParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

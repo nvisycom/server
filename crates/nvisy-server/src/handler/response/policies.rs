@@ -1,9 +1,9 @@
 //! Policy response types.
 
 use jiff::Timestamp;
+use nvisy_engine::policy::Policy as SchemaPolicy;
 use nvisy_postgres::model::WorkspacePolicy;
 use nvisy_postgres::types::{Slug, Username};
-use nvisy_schema::policy::Policy as SchemaPolicy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

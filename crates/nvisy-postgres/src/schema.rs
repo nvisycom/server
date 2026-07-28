@@ -175,25 +175,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-
-    workspace_contexts (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        account_id -> Uuid,
-        slug -> Text,
-        name -> Text,
-        description -> Nullable<Text>,
-        version -> Text,
-        definition -> Bytea,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
     use super::sql_types::FileSource;
 
     workspace_files (id) {
@@ -270,16 +251,6 @@ diesel::table! {
         artifact_type -> ArtifactType,
         metadata -> Jsonb,
         created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-
-    workspace_pipeline_contexts (pipeline_id, context_id) {
-        workspace_id -> Uuid,
-        pipeline_id -> Uuid,
-        context_id -> Uuid,
     }
 }
 
@@ -406,15 +377,12 @@ diesel::joinable!(workspace_connection_runs -> accounts (account_id));
 diesel::joinable!(workspace_connection_runs -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
-diesel::joinable!(workspace_contexts -> accounts (account_id));
-diesel::joinable!(workspace_contexts -> workspaces (workspace_id));
 diesel::joinable!(workspace_files -> accounts (account_id));
 diesel::joinable!(workspace_files -> workspaces (workspace_id));
 diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_artifacts -> workspace_files (file_id));
 diesel::joinable!(workspace_pipeline_artifacts -> workspace_pipeline_runs (run_id));
-diesel::joinable!(workspace_pipeline_contexts -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_policies -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_runs -> accounts (account_id));
 diesel::joinable!(workspace_pipeline_runs -> workspace_files (file_id));
@@ -434,12 +402,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_activities,
     workspace_connection_runs,
     workspace_connections,
-    workspace_contexts,
     workspace_files,
     workspace_invites,
     workspace_members,
     workspace_pipeline_artifacts,
-    workspace_pipeline_contexts,
     workspace_pipeline_policies,
     workspace_pipeline_runs,
     workspace_pipelines,

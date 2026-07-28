@@ -41,15 +41,14 @@ pub struct Pipeline {
 impl Pipeline {
     /// Creates a response from the database model and its reference slugs.
     ///
-    /// The `policy_slugs` / `context_slugs` come from the join tables and are
-    /// merged with the stored engine config to rebuild the full definition.
-    /// Fails if the stored config JSON does not decode to the current schema.
+    /// The `policy_slugs` come from the join table and are merged with the stored
+    /// engine config to rebuild the full definition. Fails if the stored config
+    /// JSON does not decode to the current schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Slug,
         creator_username: Username,
         policy_slugs: Vec<Slug>,
-        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         Self::assemble(
             pipeline,
@@ -57,7 +56,6 @@ impl Pipeline {
             creator_username,
             Vec::new(),
             policy_slugs,
-            context_slugs,
         )
     }
 
@@ -68,7 +66,6 @@ impl Pipeline {
         creator_username: Username,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
         policy_slugs: Vec<Slug>,
-        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
         let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
         Self::assemble(
@@ -77,7 +74,6 @@ impl Pipeline {
             creator_username,
             artifacts,
             policy_slugs,
-            context_slugs,
         )
     }
 
@@ -88,10 +84,8 @@ impl Pipeline {
         creator_username: Username,
         artifacts: Vec<Artifact>,
         policy_slugs: Vec<Slug>,
-        context_slugs: Vec<Slug>,
     ) -> serde_json::Result<Self> {
-        let definition =
-            PipelineDefinition::from_parts(pipeline.definition, policy_slugs, context_slugs)?;
+        let definition = PipelineDefinition::from_parts(pipeline.definition, policy_slugs)?;
         Ok(Self {
             slug: pipeline.slug,
             workspace_slug,
