@@ -10,7 +10,7 @@ use std::str::FromStr;
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use bytes::Bytes;
 use nvisy_engine::AnalyzedDocument;
 use nvisy_engine::file::Document;
@@ -35,7 +35,8 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, IdempotencyKey, Json, Path, Permission, Query, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
@@ -47,9 +48,6 @@ use crate::service::{CryptoService, EngineService, ServiceState};
 
 /// Tracing target for pipeline run operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::runs";
-
-/// Header carrying the detect idempotency key.
-const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 
 /// Starts a run: analyzes a file with the pipeline's configuration (detect).
 ///
@@ -72,7 +70,7 @@ async fn create_pipeline_run(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
-    headers: HeaderMap,
+    IdempotencyKey(idempotency_key): IdempotencyKey,
     ValidateJson(request): ValidateJson<CreatePipelineRun>,
 ) -> Result<(StatusCode, Json<PipelineRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting pipeline run (detect)");
@@ -84,8 +82,6 @@ async fn create_pipeline_run(
         .await?;
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
-
-    let idempotency_key = idempotency_key(&headers)?;
 
     // Idempotent replay: a repeated key returns the run created the first time,
     // attributed to whoever originally triggered it (not the current caller).
@@ -217,20 +213,16 @@ async fn list_pipeline_runs(
         "Pipeline runs listed"
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(PipelineRunsPage::from_cursor_page(
-            page,
-            |(run, trigger_username)| {
-                PipelineRun::from_model(
-                    run,
-                    pipeline.slug.clone(),
-                    workspace.slug.clone(),
-                    trigger_username,
-                )
-            },
-        )),
-    ))
+    let response = PipelineRunsPage::from_cursor_page(page, |(run, trigger_username)| {
+        PipelineRun::from_model(
+            run,
+            pipeline.slug.clone(),
+            workspace.slug.clone(),
+            trigger_username,
+        )
+    });
+
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_pipeline_runs_docs(op: TransformOperation) -> TransformOperation {
@@ -509,22 +501,6 @@ fn redact_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
-}
-
-/// Extracts and validates the optional idempotency key header.
-fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>> {
-    let Some(value) = headers.get(IDEMPOTENCY_HEADER) else {
-        return Ok(None);
-    };
-    let key = value.to_str().map_err(|_| {
-        ErrorKind::BadRequest.with_message("Idempotency-Key must be a valid ASCII string")
-    })?;
-    if key.is_empty() || key.len() > 255 {
-        return Err(
-            ErrorKind::BadRequest.with_message("Idempotency-Key must be 1 to 255 characters")
-        );
-    }
-    Ok(Some(key.to_owned()))
 }
 
 /// Marks a run failed (best effort) after an engine error.

@@ -7,6 +7,7 @@
 
 mod auth;
 mod connection_info;
+mod idempotency_key;
 mod pg_connection;
 mod reject;
 mod typed_header;
@@ -17,6 +18,7 @@ pub use crate::extract::auth::{
     AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
 };
 pub use crate::extract::connection_info::{AppConnectInfo, ClientIp};
+pub use crate::extract::idempotency_key::IdempotencyKey;
 pub use crate::extract::pg_connection::PgPool;
 pub use crate::extract::reject::{Form, Json, Multipart, Path, Query, ValidateJson};
 pub use crate::extract::typed_header::TypedHeader;
