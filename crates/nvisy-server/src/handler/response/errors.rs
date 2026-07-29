@@ -59,78 +59,74 @@ pub struct ErrorResponse<'a> {
 impl<'a> ErrorResponse<'a> {
     pub const BAD_REQUEST: Self = Self::new(
         "bad_request",
-        "Invalid request data.",
+        "Invalid request data",
         StatusCode::BAD_REQUEST,
     );
     pub const CONFLICT: Self =
-        Self::new("conflict", "Resource state conflict.", StatusCode::CONFLICT);
-    pub const FORBIDDEN: Self = Self::new(
-        "forbidden",
-        "Resource access denied.",
-        StatusCode::FORBIDDEN,
-    );
+        Self::new("conflict", "Resource state conflict", StatusCode::CONFLICT);
+    pub const FORBIDDEN: Self =
+        Self::new("forbidden", "Resource access denied", StatusCode::FORBIDDEN);
     pub const GATEWAY_TIMEOUT: Self = Self::new(
         "gateway_timeout",
-        "Request timed out.",
+        "Request timed out",
         StatusCode::GATEWAY_TIMEOUT,
     );
     pub const INTERNAL_SERVER_ERROR: Self = Self::new(
         "internal_server_error",
-        "Internal server error.",
+        "Internal server error",
         StatusCode::INTERNAL_SERVER_ERROR,
     );
     pub const MALFORMED_AUTH_TOKEN: Self = Self::new(
         "malformed_auth_token",
-        "Malformed auth token.",
+        "Malformed auth token",
         StatusCode::UNAUTHORIZED,
     );
     pub const MISSING_AUTH_TOKEN: Self = Self::new(
         "missing_auth_token",
-        "Missing auth token.",
+        "Missing auth token",
         StatusCode::UNAUTHORIZED,
     );
     pub const MISSING_PATH_PARAM: Self = Self::new(
         "missing_path_param",
-        "Missing path parameter.",
+        "Missing path parameter",
         StatusCode::BAD_REQUEST,
     );
-    pub const NOT_FOUND: Self =
-        Self::new("not_found", "Resource not found.", StatusCode::NOT_FOUND);
+    pub const NOT_FOUND: Self = Self::new("not_found", "Resource not found", StatusCode::NOT_FOUND);
     pub const NOT_IMPLEMENTED: Self = Self::new(
         "not_implemented",
-        "Not implemented.",
+        "Not implemented",
         StatusCode::NOT_IMPLEMENTED,
     );
     pub const PAYLOAD_TOO_LARGE: Self = Self::new(
         "payload_too_large",
-        "Payload too large.",
+        "Payload too large",
         StatusCode::PAYLOAD_TOO_LARGE,
     );
     pub const SERVICE_UNAVAILABLE: Self = Self::new(
         "service_unavailable",
-        "Service unavailable.",
+        "Service unavailable",
         StatusCode::SERVICE_UNAVAILABLE,
     );
     pub const TOKEN_EXPIRED: Self =
-        Self::new("token_expired", "Token expired.", StatusCode::UNAUTHORIZED);
+        Self::new("token_expired", "Token expired", StatusCode::UNAUTHORIZED);
     pub const TOO_MANY_REQUESTS: Self = Self::new(
         "too_many_requests",
-        "Rate limit exceeded.",
+        "Rate limit exceeded",
         StatusCode::TOO_MANY_REQUESTS,
     );
     pub const UNAUTHORIZED: Self = Self::new(
         "unauthorized",
-        "Invalid credentials.",
+        "Invalid credentials",
         StatusCode::UNAUTHORIZED,
     );
     pub const UNSUPPORTED_MEDIA_TYPE: Self = Self::new(
         "unsupported_media_type",
-        "Unsupported media type.",
+        "Unsupported media type",
         StatusCode::UNSUPPORTED_MEDIA_TYPE,
     );
     pub const VALIDATION_ERROR: Self = Self::new(
         "validation_error",
-        "Validation failed.",
+        "Validation failed",
         StatusCode::BAD_REQUEST,
     );
 
@@ -160,12 +156,9 @@ impl<'a> ErrorResponse<'a> {
         self
     }
 
-    /// Creates a new error response with custom message.
-    /// Appends the new message to the existing message.
+    /// Sets the error message, replacing the kind's default.
     pub fn with_message(mut self, message: impl Into<Cow<'a, str>>) -> Self {
-        let new_message = message.into();
-        let base = self.message.trim_end_matches('.');
-        self.message = Cow::Owned(format!("{}. {}", base, new_message));
+        self.message = message.into();
         self
     }
 
@@ -276,15 +269,9 @@ mod tests {
     }
 
     #[test]
-    fn error_response_merging_message() {
-        let response = ErrorResponse::BAD_REQUEST
-            .with_message("Invalid format")
-            .with_message("Missing required field");
-
-        assert_eq!(
-            &response.message,
-            "Invalid request data. Invalid format. Missing required field"
-        );
+    fn with_message_replaces_default() {
+        let response = ErrorResponse::UNAUTHORIZED.with_message("Invalid credentials");
+        assert_eq!(&response.message, "Invalid credentials");
     }
 
     #[test]

@@ -174,7 +174,7 @@ async fn delete_member(
     // Prevent self-removal (use leave endpoint instead)
     if auth_state.account_id == member_account_id {
         return Err(ErrorKind::BadRequest
-            .with_message("Cannot remove yourself. Use the leave workspace endpoint instead."));
+            .with_message("Cannot remove yourself. Use the leave workspace endpoint instead"));
     }
 
     let Some(member_to_remove) = conn
