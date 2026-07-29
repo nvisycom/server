@@ -10,7 +10,7 @@ use std::str::FromStr;
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use bytes::Bytes;
 use nvisy_engine::AnalyzedDocument;
 use nvisy_engine::file::Document;
@@ -24,9 +24,8 @@ use nvisy_postgres::model::{
     WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
-    AccountRepository, PipelineReferenceRepository, WorkspaceFileRepository,
-    WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
-    WorkspacePipelineRunRepository, WorkspacePolicyRepository,
+    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineArtifactRepository,
+    WorkspacePipelineRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
 use nvisy_postgres::types::{ArtifactType, PipelineRunStatus, Username};
 use nvisy_postgres::{PgClient, PgConn};
@@ -35,21 +34,20 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, IdempotencyKey, Json, Path, Permission, Query, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
     PipelineRunPathParams, WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
+use crate::handler::utility::resolve_trigger_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, EngineService, ServiceState};
 
 /// Tracing target for pipeline run operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::runs";
-
-/// Header carrying the detect idempotency key.
-const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 
 /// Starts a run: analyzes a file with the pipeline's configuration (detect).
 ///
@@ -72,7 +70,7 @@ async fn create_pipeline_run(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
-    headers: HeaderMap,
+    IdempotencyKey(idempotency_key): IdempotencyKey,
     ValidateJson(request): ValidateJson<CreatePipelineRun>,
 ) -> Result<(StatusCode, Json<PipelineRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting pipeline run (detect)");
@@ -84,8 +82,6 @@ async fn create_pipeline_run(
         .await?;
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
-
-    let idempotency_key = idempotency_key(&headers)?;
 
     // Idempotent replay: a repeated key returns the run created the first time,
     // attributed to whoever originally triggered it (not the current caller).
@@ -217,20 +213,16 @@ async fn list_pipeline_runs(
         "Pipeline runs listed"
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(PipelineRunsPage::from_cursor_page(
-            page,
-            |(run, trigger_username)| {
-                PipelineRun::from_model(
-                    run,
-                    pipeline.slug.clone(),
-                    workspace.slug.clone(),
-                    trigger_username,
-                )
-            },
-        )),
-    ))
+    let response = PipelineRunsPage::from_cursor_page(page, |(run, trigger_username)| {
+        PipelineRun::from_model(
+            run,
+            pipeline.slug.clone(),
+            workspace.slug.clone(),
+            trigger_username,
+        )
+    });
+
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_pipeline_runs_docs(op: TransformOperation) -> TransformOperation {
@@ -329,7 +321,7 @@ async fn get_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (pipeline, run, trigger_username) =
+    let (run, pipeline, trigger_username) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");
@@ -382,7 +374,7 @@ async fn get_pipeline_run_analysis(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (_pipeline, run, _) =
+    let (run, _pipeline, _) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
@@ -432,7 +424,7 @@ async fn redact_pipeline_run(
         .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
         .await?;
 
-    let (pipeline, run, trigger_username) =
+    let (run, pipeline, trigger_username) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     // A run can only be redacted once, after detection.
@@ -511,22 +503,6 @@ fn redact_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Extracts and validates the optional idempotency key header.
-fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>> {
-    let Some(value) = headers.get(IDEMPOTENCY_HEADER) else {
-        return Ok(None);
-    };
-    let key = value.to_str().map_err(|_| {
-        ErrorKind::BadRequest.with_message("Idempotency-Key must be a valid ASCII string")
-    })?;
-    if key.is_empty() || key.len() > 255 {
-        return Err(
-            ErrorKind::BadRequest.with_message("Idempotency-Key must be 1 to 255 characters")
-        );
-    }
-    Ok(Some(key.to_owned()))
-}
-
 /// Marks a run failed (best effort) after an engine error.
 async fn fail_run(conn: &mut PgConn, run_id: uuid::Uuid) {
     let update = UpdateWorkspacePipelineRun {
@@ -543,6 +519,13 @@ async fn fail_run(conn: &mut PgConn, run_id: uuid::Uuid) {
 fn serialize_error(error: serde_json::Error) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Failed to process pipeline definition")
+        .with_context(error.to_string())
+}
+
+/// Maps an analyzed-document (de)serialization failure to an internal error.
+fn analysis_serde_error(error: serde_json::Error) -> Error<'static> {
+    ErrorKind::InternalServerError
+        .with_message("Failed to process analysis")
         .with_context(error.to_string())
 }
 
@@ -565,25 +548,6 @@ async fn find_pipeline(
         .ok_or_else(|| Error::not_found("pipeline"))
 }
 
-/// Resolves a run addressed as `(pipeline slug, run number)` within a workspace.
-///
-/// Returns both the owning pipeline and the run, or NotFound if either the
-/// pipeline slug or the run number does not resolve.
-/// Resolves the handle of the account that triggered a run, if any. Used on the
-/// create/replay paths where the run model is already in hand.
-async fn resolve_trigger_username(
-    conn: &mut PgConn,
-    account_id: Option<Uuid>,
-) -> Result<Option<Username>> {
-    let Some(account_id) = account_id else {
-        return Ok(None);
-    };
-    Ok(conn
-        .find_account_by_id(account_id)
-        .await?
-        .map(|account| account.username))
-}
-
 /// Resolves a run by its opaque id within a workspace, returning the run, its
 /// owning pipeline (for the response's pipeline slug), and the triggering
 /// account's handle. The lookup is workspace-scoped through the owning pipeline.
@@ -591,12 +555,10 @@ async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,
     run_id: Uuid,
-) -> Result<(WorkspacePipeline, WorkspacePipelineRun, Option<Username>)> {
-    let (run, pipeline, trigger_username) = conn
-        .find_workspace_run_by_id(workspace_id, run_id)
+) -> Result<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)> {
+    conn.find_workspace_run_by_id(workspace_id, run_id)
         .await?
-        .ok_or_else(|| Error::not_found("pipeline_run"))?;
-    Ok((pipeline, run, trigger_username))
+        .ok_or_else(|| Error::not_found("pipeline_run"))
 }
 
 /// Returns a [`Router`] with all pipeline run routes.
@@ -638,7 +600,7 @@ async fn build_document(
     file: &WorkspaceFile,
     correlation_id: Uuid,
 ) -> Result<Document> {
-    let store = nats.object_store::<FilesBucket, FileKey>().await?;
+    let store = nats.object_store::<FilesBucket>().await?;
     let key = FileKey::from_str(&file.storage_path).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Invalid file storage path")
@@ -729,7 +691,7 @@ async fn store_redacted_file(
             .with_context(err.to_string())
     })?;
 
-    let store = nats.object_store::<FilesBucket, FileKey>().await?;
+    let store = nats.object_store::<FilesBucket>().await?;
     let key = FileKey::generate(source.workspace_id);
     store.put(&key, Cursor::new(ciphertext)).await?;
 
@@ -763,16 +725,14 @@ async fn store_analyzed_document(
     workspace_id: Uuid,
     analyzed: &AnalyzedDocument,
 ) -> Result<String> {
-    let plaintext = serde_json::to_vec(analyzed).map_err(serialize_error)?;
+    let plaintext = serde_json::to_vec(analyzed).map_err(analysis_serde_error)?;
     let ciphertext = crypto.encrypt(workspace_id, &plaintext).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Failed to encrypt analysis")
             .with_context(err.to_string())
     })?;
 
-    let store = nats
-        .object_store::<IntermediatesBucket, IntermediateKey>()
-        .await?;
+    let store = nats.object_store::<IntermediatesBucket>().await?;
     let key = IntermediateKey::generate(workspace_id);
     store.put(&key, Cursor::new(ciphertext)).await?;
 
@@ -799,9 +759,7 @@ async fn load_analyzed_document(
             .with_context(err.to_string())
     })?;
 
-    let store = nats
-        .object_store::<IntermediatesBucket, IntermediateKey>()
-        .await?;
+    let store = nats.object_store::<IntermediatesBucket>().await?;
     let data = store.get(&key).await?.ok_or_else(|| {
         ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
     })?;
@@ -818,7 +776,7 @@ async fn load_analyzed_document(
             .with_message("Failed to decrypt analysis")
             .with_context(err.to_string())
     })?;
-    serde_json::from_slice(&plaintext).map_err(serialize_error)
+    serde_json::from_slice(&plaintext).map_err(analysis_serde_error)
 }
 
 /// Records that a run produced an output file (the redaction artifact).

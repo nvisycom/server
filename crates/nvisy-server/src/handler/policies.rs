@@ -21,6 +21,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
 use crate::handler::response::{ErrorResponse, PoliciesPage, Policy};
+use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -77,8 +78,8 @@ async fn create_policy(
 
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
-    let (policy, creator_username) =
-        find_policy(&mut conn, workspace.id, policy.slug.as_str()).await?;
+    // The creator is the authenticated caller; resolve their handle directly.
+    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
 
     Ok((
         StatusCode::CREATED,

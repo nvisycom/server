@@ -18,6 +18,7 @@ use nvisy_postgres::{JiffTimestamp, PgClient};
 use super::request::{Login, Signup};
 use super::response::{AuthToken, ErrorResponse};
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, TypedHeader, ValidateJson};
+use crate::handler::utility::build_password_user_inputs;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordService, ServiceState, SessionKeys, UserAgentParser};
 
@@ -26,18 +27,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 
 /// Tracing target for authentication cleanup operations.
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
-
-/// Builds user inputs for password strength validation.
-fn build_password_user_inputs<'a>(
-    username: &'a str,
-    display_name: Option<&'a str>,
-    email_address: &'a str,
-) -> Vec<&'a str> {
-    let mut inputs = vec![username];
-    inputs.extend(display_name);
-    inputs.extend(email_address.split('@'));
-    inputs
-}
 
 /// Creates a new authentication header.
 fn create_auth_header(

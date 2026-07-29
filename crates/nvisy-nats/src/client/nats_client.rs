@@ -43,8 +43,7 @@ use crate::kv::{
     ApiToken, ApiTokensBucket, ChatHistoryBucket, KvBucket, KvKey, KvStore, SessionKey, TokenKey,
 };
 use crate::object::{
-    AccountKey, AvatarsBucket, ContextFilesBucket, ContextKey, FileKey, FilesBucket,
-    IntermediatesBucket, ObjectBucket, ObjectKey, ObjectStore, ThumbnailsBucket,
+    AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
 };
 use crate::stream::{EventPublisher, EventStream, EventSubscriber, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
@@ -222,43 +221,36 @@ impl NatsClient {
 
 // Object store getters
 impl NatsClient {
-    /// Get or create an object store for the specified bucket and key types.
+    /// Get or create an object store for the specified bucket type.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn object_store<B, K>(&self) -> Result<ObjectStore<B, K>>
+    pub async fn object_store<B>(&self) -> Result<ObjectStore<B>>
     where
         B: ObjectBucket,
-        K: ObjectKey,
     {
         ObjectStore::new(&self.inner.jetstream).await
     }
 
     /// Get or create a file store for primary file storage.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn file_store(&self) -> Result<ObjectStore<FilesBucket, FileKey>> {
+    pub async fn file_store(&self) -> Result<ObjectStore<FilesBucket>> {
         self.object_store().await
     }
 
     /// Get or create an intermediates store for temporary processing artifacts.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn intermediates_store(&self) -> Result<ObjectStore<IntermediatesBucket, FileKey>> {
+    pub async fn intermediates_store(&self) -> Result<ObjectStore<IntermediatesBucket>> {
         self.object_store().await
     }
 
     /// Get or create a thumbnail store for document thumbnails.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn thumbnail_store(&self) -> Result<ObjectStore<ThumbnailsBucket, FileKey>> {
+    pub async fn thumbnail_store(&self) -> Result<ObjectStore<ThumbnailsBucket>> {
         self.object_store().await
     }
 
     /// Get or create an avatar store for account avatars.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn avatar_store(&self) -> Result<ObjectStore<AvatarsBucket, AccountKey>> {
-        self.object_store().await
-    }
-
-    /// Get or create a context file store for encrypted workspace contexts.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn context_file_store(&self) -> Result<ObjectStore<ContextFilesBucket, ContextKey>> {
+    pub async fn avatar_store(&self) -> Result<ObjectStore<AvatarsBucket>> {
         self.object_store().await
     }
 }

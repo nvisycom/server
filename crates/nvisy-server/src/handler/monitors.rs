@@ -92,7 +92,7 @@ async fn health_status(
         HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
     };
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         status = ?health.status,
         used_cache = use_cached,

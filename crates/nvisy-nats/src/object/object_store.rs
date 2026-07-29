@@ -10,7 +10,6 @@ use tokio::io::AsyncRead;
 
 use super::object_bucket::ObjectBucket;
 use super::object_data::{GetResult, PutResult};
-use super::object_key::ObjectKey;
 use crate::{Error, Result};
 
 /// Tracing target for object store operations.
@@ -20,23 +19,21 @@ const TRACING_TARGET: &str = "nvisy_nats::object_store";
 ///
 /// Uploads and downloads stream without buffering the whole object.
 ///
-/// The store is generic over:
-/// - `B`: The bucket type (determines storage location and TTL)
-/// - `K`: The key type (determines how objects are addressed)
+/// The store is generic over the bucket type `B`, which determines the storage
+/// location, TTL, and — through [`ObjectBucket::Key`] — the key type used to
+/// address its objects.
 #[derive(Clone)]
-pub struct ObjectStore<B, K>
+pub struct ObjectStore<B>
 where
     B: ObjectBucket,
-    K: ObjectKey,
 {
     inner: Arc<object_store::ObjectStore>,
-    _marker: PhantomData<(B, K)>,
+    _marker: PhantomData<B>,
 }
 
-impl<B, K> ObjectStore<B, K>
+impl<B> ObjectStore<B>
 where
     B: ObjectBucket,
-    K: ObjectKey,
 {
     /// Creates a new object store for the specified bucket type.
     pub(crate) async fn new(jetstream: &jetstream::Context) -> Result<Self> {
@@ -102,7 +99,7 @@ where
     }
 
     /// Streams data to the store without buffering it, suitable for large files.
-    pub async fn put<R>(&self, key: &K, mut reader: R) -> Result<PutResult>
+    pub async fn put<R>(&self, key: &B::Key, mut reader: R) -> Result<PutResult>
     where
         R: AsyncRead + Unpin,
     {
@@ -145,7 +142,7 @@ where
     ///
     /// Returns `None` if the object doesn't exist.
     /// The returned reader implements `AsyncRead` for streaming the content.
-    pub async fn get(&self, key: &K) -> Result<Option<GetResult>> {
+    pub async fn get(&self, key: &B::Key) -> Result<Option<GetResult>> {
         let key_str = key.to_string();
 
         tracing::debug!(
@@ -195,7 +192,7 @@ where
     }
 
     /// Gets object info without downloading the content.
-    pub async fn info(&self, key: &K) -> Result<Option<ObjectInfo>> {
+    pub async fn info(&self, key: &B::Key) -> Result<Option<ObjectInfo>> {
         let key_str = key.to_string();
 
         match self.inner.info(&key_str).await {
@@ -212,7 +209,7 @@ where
     }
 
     /// Deletes an object from the store.
-    pub async fn delete(&self, key: &K) -> Result<()> {
+    pub async fn delete(&self, key: &B::Key) -> Result<()> {
         let key_str = key.to_string();
 
         tracing::debug!(
@@ -242,7 +239,7 @@ where
     }
 
     /// Checks if an object exists.
-    pub async fn exists(&self, key: &K) -> Result<bool> {
+    pub async fn exists(&self, key: &B::Key) -> Result<bool> {
         Ok(self.info(key).await?.is_some())
     }
 }

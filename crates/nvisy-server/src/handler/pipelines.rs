@@ -24,6 +24,7 @@ use crate::handler::request::{
     UpdatePipeline,
 };
 use crate::handler::response::{ErrorResponse, Page, Pipeline, PipelineSummary};
+use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -32,8 +33,8 @@ const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
 
 /// Creates a new pipeline within a workspace.
 ///
-/// The creator is automatically set as the owner of the pipeline.
-/// Requires `UploadFiles` permission for the workspace.
+/// The creator is recorded as the pipeline's owner. Requires the
+/// `CreatePipelines` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -69,9 +70,8 @@ async fn create_pipeline(
         })
         .await?;
 
-    // Re-read by slug to pick up the creator's handle via the join.
-    let (pipeline, creator_username) =
-        find_pipeline(&mut conn, workspace.id, pipeline.slug.as_str()).await?;
+    // The creator is the authenticated caller; resolve their handle directly.
+    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
 
     // The references were just written from the request, so build the response
     // from its slugs directly instead of reading the join table back.
@@ -103,8 +103,8 @@ fn create_pipeline_docs(op: TransformOperation) -> TransformOperation {
 
 /// Lists all pipelines in a workspace with optional filtering.
 ///
-/// Supports filtering by status and searching by name.
-/// Requires `ViewFiles` permission for the workspace.
+/// Supports filtering by status and searching by name. Requires the
+/// `ViewPipelines` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -157,7 +157,7 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Retrieves a pipeline by ID.
+/// Retrieves a pipeline by slug.
 ///
 /// Returns the pipeline with all artifacts from its runs.
 #[tracing::instrument(
@@ -204,7 +204,7 @@ async fn get_pipeline(
 
 fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get pipeline")
-        .description("Returns a pipeline by its unique identifier.")
+        .description("Returns a pipeline by its slug.")
         .response::<200, Json<Pipeline>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -213,8 +213,7 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
 
 /// Updates an existing pipeline.
 ///
-/// Only the pipeline owner or users with `UpdateFiles` permission can update.
-/// Only provided fields are updated.
+/// Only provided fields are updated. Requires the `UpdatePipelines` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -295,7 +294,7 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
 
 /// Soft-deletes a pipeline.
 ///
-/// Requires `DeleteFiles` permission. The pipeline is marked as deleted
+/// Requires the `DeletePipelines` permission. The pipeline is marked as deleted
 /// but data is retained for potential recovery.
 #[tracing::instrument(
     skip_all,

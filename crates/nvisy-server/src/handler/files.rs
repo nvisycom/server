@@ -2,8 +2,7 @@
 //!
 //! This module provides comprehensive file management functionality for workspaces,
 //! including upload, download, metadata management, and file operations. All
-//! operations are secured with workspace-level authorization and include virus
-//! scanning and content validation.
+//! operations are secured with workspace-level authorization.
 
 use std::str::FromStr;
 
@@ -17,7 +16,7 @@ use futures::StreamExt;
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
-use nvisy_postgres::query::{AccountRepository, WorkspaceFileRepository};
+use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::Username;
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -29,6 +28,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
+use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{CryptoService, HashingReader, ServiceState, WebhookEmitter};
@@ -115,7 +115,7 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
 struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
-    file_store: ObjectStore<FilesBucket, FileKey>,
+    file_store: ObjectStore<FilesBucket>,
     crypto: CryptoService,
 }
 
@@ -204,14 +204,10 @@ async fn upload_file(
         .authorize_workspace(&mut conn, workspace.id, Permission::UploadFiles)
         .await?;
 
-    let file_store = nats_client.object_store::<FilesBucket, FileKey>().await?;
+    let file_store = nats_client.object_store::<FilesBucket>().await?;
 
     // The uploader is the caller; resolve the handle once for every file below.
-    let uploaded_by: Username = conn
-        .find_account_by_id(auth_claims.account_id)
-        .await?
-        .ok_or_else(|| Error::not_found("account"))?
-        .username;
+    let uploaded_by = resolve_creator_username(&mut conn, auth_claims.account_id).await?;
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
@@ -283,7 +279,7 @@ async fn upload_file(
 
 fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Upload files")
-        .description("Uploads one or more files to a document for processing. Files are validated, stored, and queued for processing.")
+        .description("Uploads one or more files to a workspace. Each file is encrypted, streamed to storage, and recorded.")
         .response::<201, Json<Files>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -444,7 +440,7 @@ async fn download_file(
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
 
     let file_store = nats_client
-        .object_store::<FilesBucket, FileKey>()
+        .object_store::<FilesBucket>()
         .await
         .map_err(|err| {
             tracing::error!(
@@ -555,7 +551,7 @@ async fn delete_file(
     Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
 ) -> Result<StatusCode> {
-    tracing::warn!(target: TRACING_TARGET, "File Deleting");
+    tracing::debug!(target: TRACING_TARGET, "Deleting file");
 
     let mut conn = pg_client.get_connection().await?;
 

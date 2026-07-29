@@ -2,11 +2,17 @@
 
 use std::time::Duration;
 
+use super::object_key::{AccountKey, FileKey, IntermediateKey, ObjectKey};
+
 /// Marker trait for object storage buckets.
 ///
 /// This trait defines the configuration for a NATS object storage bucket,
-/// including its name and optional TTL for objects.
+/// including its name, optional TTL, and the key type that addresses its
+/// objects.
 pub trait ObjectBucket: Clone + Send + Sync + 'static {
+    /// Key type that addresses objects in this bucket.
+    type Key: ObjectKey;
+
     /// Bucket name used in NATS object storage.
     const NAME: &'static str;
 
@@ -22,6 +28,8 @@ pub trait ObjectBucket: Clone + Send + Sync + 'static {
 pub struct FilesBucket;
 
 impl ObjectBucket for FilesBucket {
+    type Key = FileKey;
+
     const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "DOCUMENT_FILES";
 }
@@ -33,6 +41,8 @@ impl ObjectBucket for FilesBucket {
 pub struct IntermediatesBucket;
 
 impl ObjectBucket for IntermediatesBucket {
+    type Key = IntermediateKey;
+
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(7 * 24 * 60 * 60));
     const NAME: &'static str = "DOCUMENT_INTERMEDIATES";
 }
@@ -44,6 +54,8 @@ impl ObjectBucket for IntermediatesBucket {
 pub struct ThumbnailsBucket;
 
 impl ObjectBucket for ThumbnailsBucket {
+    type Key = FileKey;
+
     const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "DOCUMENT_THUMBNAILS";
 }
@@ -55,19 +67,10 @@ impl ObjectBucket for ThumbnailsBucket {
 pub struct AvatarsBucket;
 
 impl ObjectBucket for AvatarsBucket {
+    type Key = AccountKey;
+
     const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "ACCOUNT_AVATARS";
-}
-
-/// Storage for encrypted workspace context files.
-///
-/// No expiration, context files are retained indefinitely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct ContextFilesBucket;
-
-impl ObjectBucket for ContextFilesBucket {
-    const MAX_AGE: Option<Duration> = None;
-    const NAME: &'static str = "CONTEXT_FILES";
 }
 
 #[cfg(test)]
@@ -80,7 +83,6 @@ mod tests {
         assert_eq!(IntermediatesBucket::NAME, "DOCUMENT_INTERMEDIATES");
         assert_eq!(ThumbnailsBucket::NAME, "DOCUMENT_THUMBNAILS");
         assert_eq!(AvatarsBucket::NAME, "ACCOUNT_AVATARS");
-        assert_eq!(ContextFilesBucket::NAME, "CONTEXT_FILES");
     }
 
     #[test]
@@ -92,6 +94,5 @@ mod tests {
         );
         assert_eq!(ThumbnailsBucket::MAX_AGE, None);
         assert_eq!(AvatarsBucket::MAX_AGE, None);
-        assert_eq!(ContextFilesBucket::MAX_AGE, None);
     }
 }

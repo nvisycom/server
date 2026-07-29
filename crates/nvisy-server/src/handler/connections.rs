@@ -7,9 +7,9 @@
 //!
 //! # Encryption
 //!
-//! Connection data (credentials + context) is encrypted using workspace-derived
-//! keys (HKDF-SHA256 with XChaCha20-Poly1305). The encrypted data is stored in
-//! the database and never exposed through the API.
+//! Connection data (credentials plus sync state) is encrypted using
+//! workspace-derived keys (HKDF-SHA256 with XChaCha20-Poly1305). The encrypted
+//! data is stored in the database and never exposed through the API.
 
 use std::collections::HashMap;
 
@@ -32,6 +32,7 @@ use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, UpdateConnection,
 };
 use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
+use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -85,12 +86,9 @@ async fn create_connection(
         "Connection created",
     );
 
-    let (connection, creator_username, last_synced) = find_connection(
-        &mut conn,
-        workspace.id,
-        ConnectionId::from_uuid(connection.id),
-    )
-    .await?;
+    // The creator is the authenticated caller, and a fresh connection has no
+    // sync runs yet, so last-synced is `None`.
+    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -98,7 +96,7 @@ async fn create_connection(
             connection,
             workspace.slug,
             creator_username,
-            last_synced,
+            None,
         )),
     ))
 }

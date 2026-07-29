@@ -24,6 +24,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
 };
+use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -57,7 +58,8 @@ async fn create_workspace(
         })
         .await?;
 
-    let creator_username = find_workspace_creator(&mut conn, workspace.slug.as_str()).await?;
+    // The creator is the authenticated caller; resolve their handle directly.
+    let creator_username = resolve_creator_username(&mut conn, creator_id).await?;
     let response = Workspace::from_model_with_membership(workspace, membership, creator_username);
 
     tracing::info!(
@@ -96,7 +98,7 @@ async fn list_workspaces(
         Workspace::from_model_with_membership(workspace, member, creator_username)
     });
 
-    tracing::info!(
+    tracing::debug!(
         target: TRACING_TARGET,
         workspace_count = response.items.len(),
         "Workspaces listed",
