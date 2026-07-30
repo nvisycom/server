@@ -100,8 +100,8 @@ impl PipelineDefinition {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePipeline {
-    /// Pipeline name (3-100 characters).
-    #[validate(length(min = 3, max = 100))]
+    /// Pipeline name (2-128 characters).
+    #[validate(length(min = 2, max = 128))]
     pub name: String,
     /// URL slug, unique within the workspace and immutable after creation.
     pub slug: Slug,
@@ -176,8 +176,8 @@ fn split_definition(
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePipeline {
-    /// New name for the pipeline (3-100 characters).
-    #[validate(length(min = 3, max = 100))]
+    /// New name for the pipeline (2-128 characters).
+    #[validate(length(min = 2, max = 128))]
     pub name: Option<String>,
     /// New description for the pipeline (max 500 characters).
     #[validate(length(max = 500))]
