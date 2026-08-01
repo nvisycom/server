@@ -2,40 +2,41 @@
 //!
 //! Wraps the runtime's [`Engine`] — the stateless detect/redact pipeline — as a
 //! dependency-injectable service. The engine is configured once at startup with
-//! the deployment's NER and LLM recognizer lineups; each request then drives
-//! analyze / anonymize against it.
+//! the deployment's NER/LLM recognizer lineups and the server-wide enrichment
+//! and deduplication-calibration defaults; each request then drives analyze /
+//! anonymize against it, merging those defaults with the pipeline's intent.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use derive_more::Deref;
 use nvisy_engine::Engine;
-use nvisy_engine::llm::LlmConfig;
-use nvisy_engine::ner::NerConfig;
-use serde::{Deserialize, Serialize};
+use nvisy_engine::plan::{
+    AnalyzerParams, AnyAnnotations, DeduplicationParams, ProviderSelection, ScopeParams,
+};
 
-use crate::{Error, Result};
+use crate::Result;
+use crate::handler::request::PipelineDefinition;
+use crate::handler::{ErrorKind, Result as HandlerResult};
+
+mod config;
+mod error;
+
+use config::{EngineDefaults, EngineFile};
+pub use error::UnknownFormatToken;
 
 /// Deployment configuration for the redaction engine.
 #[must_use]
 #[derive(Debug, Clone, Default)]
 pub struct EngineConfig {
-    /// Optional path to a JSON file with the NER/LLM recognizer lineups.
+    /// Optional path to a TOML file with the deployment engine configuration.
     ///
-    /// Absent means no NER/LLM recognizers are configured (pattern recognizers
-    /// still run); the inference-backed lineups arrive with the sidecars.
+    /// Carries the NER/LLM recognizer lineups plus the server-wide enrichment
+    /// and deduplication-calibration defaults. Absent means no NER/LLM
+    /// recognizers, no enrichment, and no calibration (pattern recognizers
+    /// still run).
     pub config_path: Option<PathBuf>,
-}
-
-/// The recognizer lineups the engine is built with, as loaded from config.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RecognizerLineups {
-    /// NER recognizer lineup (runs when a request enables `recognizers.ner`).
-    #[serde(default)]
-    ner: NerConfig,
-    /// LLM recognizer lineup (runs when a request enables `recognizers.llm`).
-    #[serde(default)]
-    llm: LlmConfig,
 }
 
 /// The redaction engine, injectable via [`State`](axum::extract::State).
@@ -46,34 +47,178 @@ struct RecognizerLineups {
 #[derive(Clone, Deref)]
 #[must_use = "the engine does nothing unless you analyze or anonymize with it"]
 pub struct EngineService {
+    #[deref]
     engine: Engine,
+    defaults: Arc<EngineDefaults>,
 }
 
 impl EngineService {
     /// Builds the engine from the deployment configuration.
     ///
-    /// Loads the recognizer lineups from the configured file when present;
-    /// otherwise starts with empty NER/LLM lineups.
+    /// Loads the NER/LLM lineups and the server-wide enrichment / calibration
+    /// defaults from the configured file when present; otherwise starts with
+    /// empty lineups, no enrichment, and no calibration.
     pub async fn from_config(config: EngineConfig) -> Result<Self> {
-        let lineups = match config.config_path {
-            Some(path) => load_lineups(&path).await?,
-            None => RecognizerLineups::default(),
+        let file = match config.config_path {
+            Some(path) => EngineFile::load(&path).await?,
+            None => EngineFile::default(),
         };
-        let engine = Engine::new().with_ner(lineups.ner).with_llm(lineups.llm);
-        Ok(Self { engine })
+
+        let (ner, llm, defaults) = file.into_parts();
+        let engine = Engine::new().with_ner(ner).with_llm(llm);
+        Ok(Self {
+            engine,
+            defaults: Arc::new(defaults),
+        })
     }
 
     /// Borrows the underlying [`Engine`].
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
+
+    /// Builds the [`AnalyzerParams`] for one detect run by merging a pipeline's
+    /// intent with the deployment defaults.
+    ///
+    /// Recognizers, deduplication behavior, and label catalog come from the
+    /// pipeline; enrichment and deduplication calibration come from the
+    /// server-wide defaults. Scope is the request's own (falling back to the
+    /// pipeline default), with the pipeline's label catalog folded in.
+    ///
+    /// Rejects a pipeline that explicitly enables NER or LLM recognizers this
+    /// deployment has no lineup for, rather than silently running without them.
+    pub fn analyzer_params(
+        &self,
+        definition: &PipelineDefinition,
+        request_scope: Option<ScopeParams>,
+    ) -> HandlerResult<AnalyzerParams> {
+        let recognizers = &definition.recognizers;
+        if wants_recognizer(recognizers.ner.as_ref()) && !self.defaults.has_ner {
+            return Err(ErrorKind::BadRequest
+                .with_message("NER recognition is not available in this deployment")
+                .with_resource("pipeline"));
+        }
+        if wants_recognizer(recognizers.llm.as_ref()) && !self.defaults.has_llm {
+            return Err(ErrorKind::BadRequest
+                .with_message("LLM recognition is not available in this deployment")
+                .with_resource("pipeline"));
+        }
+
+        let mut scope = request_scope
+            .or_else(|| definition.default_scope.clone())
+            .unwrap_or_default();
+        scope.label_catalog = definition.label_catalog.clone();
+
+        // Deduplication: a pipeline field wins; otherwise the deployment default;
+        // otherwise the engine baseline. Calibration is operator-only.
+        let dedup = &definition.deduplication;
+        let dedup_defaults = &self.defaults.deduplication;
+        let deduplication = DeduplicationParams {
+            calibration: dedup_defaults.calibration.clone(),
+            merging: dedup.merging.or(dedup_defaults.merging).unwrap_or_default(),
+            tiebreaker: dedup
+                .tiebreaker
+                .or(dedup_defaults.tiebreaker)
+                .unwrap_or_default(),
+            min_confidence: dedup.min_confidence.or(dedup_defaults.min_confidence),
+        };
+
+        Ok(AnalyzerParams {
+            recognizers: recognizers.clone(),
+            enrichers: self.defaults.enrichers.clone(),
+            deduplication,
+            scope,
+            annotations: AnyAnnotations::default(),
+        })
+    }
+
+    /// Resolves file-extension filter tokens to the set of extensions to match.
+    ///
+    /// Each token is a file extension (`pdf`, `jpg`); it expands to its format's
+    /// full extension set so siblings match too (e.g. `jpg` also matches
+    /// `jpeg`). An unknown extension is returned as an error so the request
+    /// rejects rather than silently matching nothing.
+    ///
+    /// Extensions are lowercased and de-duplicated, preserving first-seen order.
+    pub fn resolve_extensions<I, S>(&self, tokens: I) -> Result<Vec<String>, UnknownFormatToken>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let registry = self.engine.formats();
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+
+        for token in tokens {
+            let token = token.as_ref().trim().to_ascii_lowercase();
+            if token.is_empty() {
+                continue;
+            }
+            match registry.by_extension(&token) {
+                Some(format) => {
+                    for ext in format.extensions() {
+                        push_unique(&mut out, &mut seen, ext.as_ref());
+                    }
+                }
+                None => return Err(UnknownFormatToken::Extension(token)),
+            }
+        }
+
+        Ok(out)
+    }
+
+    /// Resolves modality keywords (`text`, `tabular`, `image`, `audio`) to the
+    /// set of file extensions of every format of those modalities.
+    ///
+    /// An unknown modality is returned as an error. Extensions are lowercased
+    /// and de-duplicated, preserving first-seen order.
+    pub fn resolve_modalities<I, S>(&self, tokens: I) -> Result<Vec<String>, UnknownFormatToken>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let registry = self.engine.formats();
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+
+        for token in tokens {
+            let token = token.as_ref().trim().to_ascii_lowercase();
+            if token.is_empty() {
+                continue;
+            }
+            let mut matched = false;
+            for format in registry.iter() {
+                if format.modality() == token {
+                    matched = true;
+                    for ext in format.extensions() {
+                        push_unique(&mut out, &mut seen, ext.as_ref());
+                    }
+                }
+            }
+            if !matched {
+                return Err(UnknownFormatToken::Modality(token));
+            }
+        }
+
+        Ok(out)
+    }
 }
 
-/// Reads and parses the recognizer lineups from a JSON config file.
-async fn load_lineups(path: &PathBuf) -> Result<RecognizerLineups> {
-    let bytes = tokio::fs::read(path).await.map_err(|e| {
-        Error::internal("engine", "Failed to read engine config file").with_source(e)
-    })?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| Error::internal("engine", "Failed to parse engine config file").with_source(e))
+/// Whether a provider selection is an explicit request to run recognizers
+/// (`All(true)` or a non-empty `Only` allowlist), as opposed to off or the
+/// softly-on default.
+fn wants_recognizer(selection: Option<&ProviderSelection>) -> bool {
+    match selection {
+        Some(ProviderSelection::All(enabled)) => *enabled,
+        Some(ProviderSelection::Only(names)) => !names.is_empty(),
+        None => false,
+    }
+}
+
+/// Pushes `ext` (lowercased) into `out` if not already present.
+fn push_unique(out: &mut Vec<String>, seen: &mut HashSet<String>, ext: &str) {
+    let ext = ext.to_ascii_lowercase();
+    if seen.insert(ext.clone()) {
+        out.push(ext);
+    }
 }

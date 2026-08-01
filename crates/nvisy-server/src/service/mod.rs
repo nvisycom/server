@@ -15,7 +15,7 @@ use nvisy_webhook::WebhookService;
 
 pub(crate) use crate::service::crypto::HashingReader;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
-pub use crate::service::engine::{EngineConfig, EngineService};
+pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::security::{
     PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,

@@ -57,8 +57,8 @@ CREATE TABLE workspace_pipelines (
     description     TEXT             DEFAULT NULL,
     status          PIPELINE_STATUS  NOT NULL DEFAULT 'draft',
 
-    CONSTRAINT workspace_pipelines_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_pipelines_description_length CHECK (description IS NULL OR length(description) <= 4096),
+    CONSTRAINT workspace_pipelines_name_length CHECK (length(trim(name)) BETWEEN 2 AND 128),
+    CONSTRAINT workspace_pipelines_description_length CHECK (description IS NULL OR length(description) <= 500),
 
     -- Engine detection + redaction config (nvisy_schema plan as JSON):
     -- recognizers, enrichers, deduplication, label catalog, default scope.
@@ -118,8 +118,8 @@ COMMENT ON TABLE workspace_pipelines IS
 COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
 COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_pipelines.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_pipelines.name IS 'Pipeline name (1-255 chars)';
-COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 4096 chars)';
+COMMENT ON COLUMN workspace_pipelines.name IS 'Pipeline name (2-128 chars)';
+COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 500 chars)';
 COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';
 COMMENT ON COLUMN workspace_pipelines.definition IS 'Pipeline definition JSON (steps, input/output schemas, etc.)';
 COMMENT ON COLUMN workspace_pipelines.metadata IS 'Extended metadata';

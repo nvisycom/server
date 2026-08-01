@@ -14,9 +14,9 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
         let error =
             match c {
                 WorkspacePipelineConstraints::NameLength => ErrorKind::BadRequest
-                    .with_message("Pipeline name must be between 1 and 255 characters long"),
+                    .with_message("Pipeline name must be between 2 and 128 characters long"),
                 WorkspacePipelineConstraints::DescriptionLength => ErrorKind::BadRequest
-                    .with_message("Pipeline description must be at most 4096 characters long"),
+                    .with_message("Pipeline description must be at most 500 characters long"),
                 WorkspacePipelineConstraints::DefinitionSize => ErrorKind::BadRequest
                     .with_message("Pipeline definition size exceeds maximum limit"),
                 WorkspacePipelineConstraints::MetadataSize => ErrorKind::BadRequest

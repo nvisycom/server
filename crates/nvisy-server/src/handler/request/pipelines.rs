@@ -4,8 +4,9 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
+use nvisy_engine::entity::ConfidenceThreshold;
 use nvisy_engine::plan::{
-    DeduplicationParams, EnricherParams, LabelCatalogParams, RecognizerParams, ScopeParams,
+    LabelCatalogParams, MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams,
 };
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{PipelineStatus, Slug};
@@ -14,17 +15,18 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-/// Reusable detection + redaction configuration for a pipeline.
+/// A pipeline's detection + governance intent.
 ///
-/// The pipeline holds the "how to detect and redact" configuration the engine
-/// consumes, minus the per-document assertions (which travel with a document at
-/// detect time). Stored as JSON in the pipeline's `definition` column but
-/// validated against this schema at the API boundary.
+/// Holds what a pipeline author decides — which recognizers to run, the entity
+/// labels, the default scope, and the policies to apply. Infrastructure config
+/// (enrichment backends, deduplication calibration) is server-wide and lives in
+/// the engine config, not here. Stored as JSON in the pipeline's `definition`
+/// column but validated against this schema at the API boundary.
 ///
 /// The split:
 ///
-/// - `recognizers` / `enrichers` / `deduplication` / `label_catalog` — the
-///   detection machinery, assembled into an engine `AnalyzerParams` per request.
+/// - `recognizers` / `deduplication` / `label_catalog` — the detection intent,
+///   merged with the server-wide engine defaults into an `AnalyzerParams`.
 /// - `default_scope` — optional pipeline-wide scope a document may override.
 /// - `policy_slugs` — references to the workspace's policies, resolved at run
 ///   time.
@@ -36,12 +38,9 @@ pub struct PipelineDefinition {
     /// dictionaries), plus the NER and LLM toggles.
     #[serde(default)]
     pub recognizers: RecognizerParams,
-    /// Enrichers run before recognition: language, OCR, STT.
+    /// Post-recognition deduplication behavior.
     #[serde(default)]
-    pub enrichers: EnricherParams,
-    /// Post-recognition deduplication pipeline.
-    #[serde(default)]
-    pub deduplication: DeduplicationParams,
+    pub deduplication: PipelineDeduplication,
     /// Entity-label catalog: which entity types the recognizers emit.
     ///
     /// Reusable across the pipeline's documents, so it lives here rather than in
@@ -61,6 +60,26 @@ pub struct PipelineDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
     pub policy_slugs: Vec<Slug>,
+}
+
+/// A pipeline's deduplication intent.
+///
+/// Each field is optional: when a pipeline omits one, it inherits the
+/// deployment default from the engine config. Per-recognizer calibration is
+/// operator-only and never set here.
+#[must_use]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PipelineDeduplication {
+    /// How same-label overlapping findings are merged into one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merging: Option<MergingStrategyParams>,
+    /// How cross-label overlaps pick a winner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tiebreaker: Option<TiebreakerParams>,
+    /// Minimum confidence the filter layer admits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_confidence: Option<ConfidenceThreshold>,
 }
 
 impl PipelineDefinition {
@@ -100,8 +119,8 @@ impl PipelineDefinition {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePipeline {
-    /// Pipeline name (3-100 characters).
-    #[validate(length(min = 3, max = 100))]
+    /// Pipeline name (2-128 characters).
+    #[validate(length(min = 2, max = 128))]
     pub name: String,
     /// URL slug, unique within the workspace and immutable after creation.
     pub slug: Slug,
@@ -176,8 +195,8 @@ fn split_definition(
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePipeline {
-    /// New name for the pipeline (3-100 characters).
-    #[validate(length(min = 3, max = 100))]
+    /// New name for the pipeline (2-128 characters).
+    #[validate(length(min = 2, max = 128))]
     pub name: Option<String>,
     /// New description for the pipeline (max 500 characters).
     #[validate(length(max = 500))]

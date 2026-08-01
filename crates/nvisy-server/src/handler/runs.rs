@@ -12,10 +12,8 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use bytes::Bytes;
-use nvisy_engine::AnalyzedDocument;
-use nvisy_engine::file::Document;
-use nvisy_engine::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
 use nvisy_engine::policy::Policy as SchemaPolicy;
+use nvisy_engine::{AnalyzedDocument, Document};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, IntermediateKey, IntermediatesBucket};
 use nvisy_postgres::model::{
@@ -122,9 +120,17 @@ async fn create_pipeline_run(
     };
     let run = conn.create_workspace_pipeline_run(new_run).await?;
 
-    // Assemble the engine inputs and analyze.
+    // Merge the pipeline's intent with the deployment defaults; rejects a
+    // pipeline that enables recognizers this deployment lacks.
+    let params = match engine.analyzer_params(&definition, request.scope) {
+        Ok(params) => params,
+        Err(err) => {
+            fail_run(&mut conn, run.id).await;
+            return Err(err);
+        }
+    };
+
     let document = build_document(&nats, &crypto, &file, run.id).await?;
-    let params = build_analyzer_params(&definition, request.scope);
 
     let analyzed = match engine.analyze_document(document, &params).await {
         Ok(analyzed) => analyzed,
@@ -627,29 +633,6 @@ async fn build_document(
         })?;
 
     Ok(Document::new(bytes, file.file_extension.clone()).with_correlation_id(correlation_id))
-}
-
-/// Assembles the engine's [`AnalyzerParams`] for one detect request.
-///
-/// The recognizers, enrichers, and deduplication come from the pipeline's
-/// stored config; the scope is the request's own (falling back to the pipeline
-/// default), with the pipeline's reusable label catalog folded in.
-fn build_analyzer_params(
-    definition: &PipelineDefinition,
-    request_scope: Option<ScopeParams>,
-) -> AnalyzerParams {
-    let mut scope = request_scope
-        .or_else(|| definition.default_scope.clone())
-        .unwrap_or_default();
-    scope.label_catalog = definition.label_catalog.clone();
-
-    AnalyzerParams {
-        recognizers: definition.recognizers.clone(),
-        enrichers: definition.enrichers.clone(),
-        deduplication: definition.deduplication.clone(),
-        scope,
-        annotations: AnyAnnotations::default(),
-    }
 }
 
 /// Resolves a pipeline's live policy references into decrypted engine policies.
