@@ -31,7 +31,7 @@ use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
-use crate::service::{CryptoService, HashingReader, ServiceState, WebhookEmitter};
+use crate::service::{CryptoService, EngineService, HashingReader, ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
@@ -65,6 +65,7 @@ async fn find_file_with_creator(
 )]
 async fn list_files(
     State(pg_client): State<PgClient>,
+    State(engine): State<EngineService>,
     WorkspaceContext(workspace): WorkspaceContext,
     AuthState(auth_claims): AuthState,
     Query(files_query): Query<ListFiles>,
@@ -78,12 +79,14 @@ async fn list_files(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
         .await?;
 
+    let filter = files_query.to_filter(&engine).map_err(|err| {
+        ErrorKind::BadRequest
+            .with_message("Unknown file format filter")
+            .with_context(err.to_string())
+    })?;
+
     let page = conn
-        .cursor_list_workspace_files(
-            workspace.id,
-            cursor_pagination.into(),
-            files_query.to_filter(),
-        )
+        .cursor_list_workspace_files(workspace.id, cursor_pagination.into(), filter)
         .await?;
 
     let response = FilesPage::from_cursor_page(page, |(file, uploaded_by)| {

@@ -305,11 +305,10 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        // Apply format filter using file extensions
-        if !filter.is_empty() {
-            let extensions: Vec<String> =
-                filter.extensions().iter().map(|s| s.to_string()).collect();
-            query = query.filter(dsl::file_extension.eq_any(extensions));
+        // Apply the extension constraint. A present-but-empty set matches
+        // nothing (an active facet with no members), so apply whenever `Some`.
+        if let Some(extensions) = filter.extensions() {
+            query = query.filter(dsl::file_extension.eq_any(extensions.to_vec()));
         }
 
         // Apply sorting
@@ -344,7 +343,7 @@ impl WorkspaceFileRepository for PgConnection {
 
         // Precompute filter values
         let search_term = filter.search_term().map(|s| s.to_string());
-        let extensions: Vec<String> = filter.extensions().iter().map(|s| s.to_string()).collect();
+        let extensions: Option<Vec<String>> = filter.extensions().map(|e| e.to_vec());
 
         // Build base query with filters
         let mut base_query = workspace_files::table
@@ -357,9 +356,10 @@ impl WorkspaceFileRepository for PgConnection {
             base_query = base_query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
-        // Apply format filter using file extensions
-        if !extensions.is_empty() {
-            base_query = base_query.filter(dsl::file_extension.eq_any(&extensions));
+        // Apply the extension constraint. A present-but-empty set matches
+        // nothing (an active facet with no members), so apply whenever `Some`.
+        if let Some(ref extensions) = extensions {
+            base_query = base_query.filter(dsl::file_extension.eq_any(extensions));
         }
 
         let total = if pagination.include_count {
@@ -386,9 +386,10 @@ impl WorkspaceFileRepository for PgConnection {
             query = query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
-        // Apply format filter using file extensions
-        if !extensions.is_empty() {
-            query = query.filter(dsl::file_extension.eq_any(&extensions));
+        // Apply the extension constraint. A present-but-empty set matches
+        // nothing (an active facet with no members), so apply whenever `Some`.
+        if let Some(ref extensions) = extensions {
+            query = query.filter(dsl::file_extension.eq_any(extensions));
         }
 
         let limit = pagination.limit + 1;

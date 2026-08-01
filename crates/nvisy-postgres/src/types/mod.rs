@@ -29,7 +29,7 @@ pub use enums::{
     NotificationEvent, PipelineRunStatus, PipelineStatus, PipelineTriggerType, SyncStatus,
     SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
-pub use filtering::{FileFilter, FileFormat, InviteFilter, MemberFilter};
+pub use filtering::{FileFilter, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
 pub use prefixed_id::{ConnectionId, PrefixedIdError, RunId, WebhookId};
 pub use slug::{SLUG_MAX_LENGTH, SLUG_MIN_LENGTH, Slug, SlugError};

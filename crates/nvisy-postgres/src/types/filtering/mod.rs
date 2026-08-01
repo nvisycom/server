@@ -4,6 +4,6 @@ mod files;
 mod invites;
 mod members;
 
-pub use files::{FileFilter, FileFormat};
+pub use files::FileFilter;
 pub use invites::InviteFilter;
 pub use members::MemberFilter;
