@@ -384,7 +384,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/connections/{connectionId}/",
             get_with(read_connection, read_connection_docs)
-                .put_with(update_connection, update_connection_docs)
+                .patch_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),
         )
         .with_path_items(|item| item.tag("Connections"))
