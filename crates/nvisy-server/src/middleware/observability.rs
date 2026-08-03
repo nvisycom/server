@@ -21,6 +21,22 @@ use super::RouteCategory;
 /// Tracing target for request metrics.
 const TRACING_TARGET_METRICS: &str = "nvisy_server::metrics";
 
+/// Tracing target for the per-request span.
+const TRACING_TARGET_REQUEST: &str = "nvisy_server::request";
+
+/// Builds the per-request tracing span carrying the method and path.
+///
+/// Every event logged while handling the request inherits these fields, so
+/// error responses (4xx/5xx) are always attributable to a route.
+fn request_span(request: &Request) -> tracing::Span {
+    tracing::info_span!(
+        target: TRACING_TARGET_REQUEST,
+        "request",
+        method = %request.method(),
+        path = %request.uri().path(),
+    )
+}
+
 /// Extension trait for `axum::`[`Router`] to apply observability middleware.
 ///
 /// This trait provides convenient methods to add observability features
@@ -52,7 +68,7 @@ where
             header::AUTHORIZATION,
             header::COOKIE,
         ]))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(request_span))
         .layer(SetRequestIdLayer::new(
             header::HeaderName::from_static("x-request-id"),
             MakeRequestUuid,
