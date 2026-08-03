@@ -13,6 +13,7 @@ use derive_more::{Deref, DerefMut, From};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
+use super::sanitize_error_message;
 use crate::handler::{Error, ErrorKind};
 
 /// Enhanced path parameter extractor with improved error handling.
@@ -95,7 +96,7 @@ impl From<PathRejection> for Error<'static> {
     fn from(rejection: PathRejection) -> Self {
         match rejection {
             PathRejection::FailedToDeserializePathParams(err) => {
-                let error_message = err.to_string();
+                let error_message = sanitize_error_message(&err.to_string());
                 let enhanced_context = enhance_deserialization_error(&error_message);
 
                 tracing::warn!(
@@ -107,12 +108,11 @@ impl From<PathRejection> for Error<'static> {
                     .with_message("Invalid path parameter format")
                     .with_context(format!(
                         "Path parameter deserialization failed: {}. {}",
-                        sanitize_error_message(&error_message),
-                        enhanced_context
+                        error_message, enhanced_context
                     ))
             }
             PathRejection::MissingPathParams(err) => {
-                let error_message = err.to_string();
+                let error_message = sanitize_error_message(&err.to_string());
 
                 tracing::warn!(
                     error = %error_message,
@@ -123,7 +123,7 @@ impl From<PathRejection> for Error<'static> {
                     .with_message("Required path parameter missing")
                     .with_context(format!(
                         "Path parameter extraction failed: {}. Ensure all required parameters are present in the URL path and match the expected route pattern.",
-                        sanitize_error_message(&error_message)
+                        error_message
                     ))
             }
             _ => {
@@ -152,19 +152,6 @@ fn enhance_deserialization_error(error_message: &str) -> &'static str {
     } else {
         "Check that the parameter format matches the expected type definition"
     }
-}
-
-/// Sanitizes error messages to prevent information leakage while keeping them useful.
-fn sanitize_error_message(message: &str) -> String {
-    // Remove potentially sensitive information while keeping the core error message
-    message
-        .lines()
-        .take(2) // Limit to first 2 lines to prevent excessive verbosity
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(150) // Limit message length
-        .collect()
 }
 
 impl<T> OperationInput for Path<T>

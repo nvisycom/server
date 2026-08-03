@@ -12,6 +12,7 @@ use derive_more::{Deref, DerefMut, From};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
+use super::sanitize_error_message;
 use crate::extract::Query;
 use crate::handler::{Error, ErrorKind};
 
@@ -81,11 +82,10 @@ where
     }
 }
 
-/// Enhances form parsing errors with detailed context and user-friendly messages.
+/// Converts a form rejection into a structured bad-request [`Error`].
 ///
-/// This function takes the raw Axum form rejection and converts it into a more
-/// informative error that helps developers understand what went wrong with the
-/// form data parsing.
+/// The deserializer message is sanitized before it becomes context so that
+/// submitted field values are not echoed back or logged.
 fn enhance_form_error(rejection: FormRejection) -> Error<'static> {
     tracing::debug!(
         target: "nvisy::extract::form",
@@ -94,104 +94,22 @@ fn enhance_form_error(rejection: FormRejection) -> Error<'static> {
     );
 
     match rejection {
-        FormRejection::FailedToDeserializeForm(err) => {
-            // Extract the inner serde_urlencoded error for more specific handling
-            let error_message = err.to_string();
-
-            if error_message.contains("missing field") {
-                let field_name = extract_field_name_from_error(&error_message);
-                ErrorKind::BadRequest
-                    .with_message("Missing required form field")
-                    .with_context(format!(
-                        "The form field '{}' is required but was not provided",
-                        field_name.unwrap_or("unknown")
-                    ))
-            } else if error_message.contains("invalid type")
-                || error_message.contains("invalid value")
-            {
-                ErrorKind::BadRequest
-                    .with_message("Invalid form field value")
-                    .with_context(format!(
-                        "Failed to parse form field: {}. Please check the field format and try again",
-                        error_message
-                    ))
-            } else if error_message.contains("duplicate field") {
-                let field_name = extract_field_name_from_error(&error_message);
-                ErrorKind::BadRequest
-                    .with_message("Duplicate form field")
-                    .with_context(format!(
-                        "The form field '{}' was provided multiple times. Please provide it only once",
-                        field_name.unwrap_or("unknown")
-                    ))
-            } else {
-                ErrorKind::BadRequest
-                    .with_message("Invalid form data")
-                    .with_context(format!("Failed to parse form data: {}", error_message))
-            }
-        }
-        FormRejection::InvalidFormContentType(err) => ErrorKind::BadRequest
+        FormRejection::FailedToDeserializeForm(err) => ErrorKind::BadRequest
+            .with_message("Invalid form data")
+            .with_context(sanitize_error_message(&err.to_string())),
+        FormRejection::InvalidFormContentType(_) => ErrorKind::BadRequest
             .with_message("Invalid content type for form data")
-            .with_context(format!(
-                "Expected 'application/x-www-form-urlencoded' content type, but received: {}. \
-                    Please set the correct Content-Type header for form submissions",
-                err
-            )),
-        FormRejection::BytesRejection(err) => ErrorKind::BadRequest
+            .with_context(
+                "Expected 'application/x-www-form-urlencoded'. \
+                Set the correct Content-Type header for form submissions",
+            ),
+        FormRejection::BytesRejection(_) => ErrorKind::BadRequest
             .with_message("Failed to read form data")
-            .with_context(format!(
-                "Could not read the request body as form data: {}. \
-                    This might indicate a network issue or malformed request",
-                err
-            )),
-        _ => {
-            // Fallback for other form rejection types
-            ErrorKind::BadRequest
-                .with_message("Invalid form submission")
-                .with_context(
-                    "The form data could not be processed. Please check your form fields and try again"
-                )
-        }
+            .with_context("The request body could not be read as form data"),
+        _ => ErrorKind::BadRequest
+            .with_message("Invalid form submission")
+            .with_context("The form data could not be processed"),
     }
-}
-
-/// Attempts to extract the field name from a serde error message.
-///
-/// This is a best-effort function that tries to parse field names from
-/// error messages to provide more helpful error context.
-fn extract_field_name_from_error(error_message: &str) -> Option<&str> {
-    // Try to extract field name from common serde error patterns
-    if let Some(start) = error_message.find('`')
-        && let Some(end) = error_message[start + 1..].find('`')
-    {
-        return Some(&error_message[start + 1..start + 1 + end]);
-    }
-
-    // Try alternative patterns for "missing field X"
-    if error_message.contains("missing field ")
-        && let Some(start) = error_message.find("missing field ")
-    {
-        let field_part = &error_message[start + 14..]; // "missing field " is 14 chars
-        if let Some(end) = field_part.find(' ') {
-            return Some(&field_part[..end]);
-        } else {
-            // Field name might be at the end of the message
-            return Some(field_part.trim());
-        }
-    }
-
-    // Try pattern for "duplicate field X"
-    if error_message.contains("duplicate field ")
-        && let Some(start) = error_message.find("duplicate field ")
-    {
-        let field_part = &error_message[start + 16..]; // "duplicate field " is 16 chars
-        if let Some(end) = field_part.find(' ') {
-            return Some(&field_part[..end]);
-        } else {
-            return Some(field_part.trim());
-        }
-    }
-
-    None
 }
 
 impl<T> OperationInput for Form<T>

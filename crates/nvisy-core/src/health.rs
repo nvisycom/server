@@ -5,7 +5,6 @@
 //! report (and any transport concerns) is left to the consumer.
 
 use std::borrow::Cow;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +29,30 @@ impl HealthStatus {
     pub const fn is_healthy(self) -> bool {
         matches!(self, Self::Healthy)
     }
+
+    /// Aggregates per-component results into an overall status: [`Unhealthy`]
+    /// when there are no components or none are healthy, [`Healthy`] when all
+    /// are, and [`Degraded`] otherwise.
+    ///
+    /// [`Unhealthy`]: Self::Unhealthy
+    /// [`Healthy`]: Self::Healthy
+    /// [`Degraded`]: Self::Degraded
+    #[must_use]
+    pub fn from_components(components: &[ComponentHealth]) -> Self {
+        if components.is_empty() {
+            return Self::Unhealthy;
+        }
+
+        let healthy = components.iter().filter(|c| c.status.is_healthy()).count();
+
+        if healthy == 0 {
+            Self::Unhealthy
+        } else if healthy == components.len() {
+            Self::Healthy
+        } else {
+            Self::Degraded
+        }
+    }
 }
 
 /// Health of a single service component.
@@ -41,10 +64,6 @@ pub struct ComponentHealth {
     pub name: Cow<'static, str>,
     /// Status of this component.
     pub status: HealthStatus,
-    /// How long the health check took, when measured.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "Option<u64>"))]
-    pub latency: Option<Duration>,
 }
 
 impl ComponentHealth {
@@ -53,7 +72,6 @@ impl ComponentHealth {
         Self {
             name: name.into(),
             status: HealthStatus::Healthy,
-            latency: None,
         }
     }
 
@@ -62,15 +80,7 @@ impl ComponentHealth {
         Self {
             name: name.into(),
             status: HealthStatus::Unhealthy,
-            latency: None,
         }
-    }
-
-    /// Attaches a measured check latency.
-    #[must_use]
-    pub fn with_latency(mut self, latency: Duration) -> Self {
-        self.latency = Some(latency);
-        self
     }
 }
 
@@ -79,4 +89,47 @@ impl ComponentHealth {
 pub trait HealthCheck: Send + Sync {
     /// Probes the component and returns its current health.
     async fn check_health(&self) -> ComponentHealth;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ComponentHealth, HealthStatus};
+
+    #[test]
+    fn no_components_is_unhealthy() {
+        assert_eq!(HealthStatus::from_components(&[]), HealthStatus::Unhealthy);
+    }
+
+    #[test]
+    fn all_healthy_is_healthy() {
+        let components = [ComponentHealth::healthy("a"), ComponentHealth::healthy("b")];
+        assert_eq!(
+            HealthStatus::from_components(&components),
+            HealthStatus::Healthy
+        );
+    }
+
+    #[test]
+    fn some_healthy_is_degraded() {
+        let components = [
+            ComponentHealth::healthy("a"),
+            ComponentHealth::unhealthy("b"),
+        ];
+        assert_eq!(
+            HealthStatus::from_components(&components),
+            HealthStatus::Degraded
+        );
+    }
+
+    #[test]
+    fn none_healthy_is_unhealthy() {
+        let components = [
+            ComponentHealth::unhealthy("a"),
+            ComponentHealth::unhealthy("b"),
+        ];
+        assert_eq!(
+            HealthStatus::from_components(&components),
+            HealthStatus::Unhealthy
+        );
+    }
 }

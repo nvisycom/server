@@ -161,7 +161,6 @@ impl WebhookEmitter {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     webhook_id = %webhook.id,
-                    url = %webhook.url,
                     error = %err,
                     "Skipping webhook with invalid URL"
                 );

@@ -24,7 +24,7 @@ impl HealthCheck for NatsClient {
                     ping_ms = latency.as_millis(),
                     "NATS health check passed"
                 );
-                ComponentHealth::healthy(COMPONENT_NAME).with_latency(latency)
+                ComponentHealth::healthy(COMPONENT_NAME)
             }
             Err(e) => {
                 tracing::warn!(

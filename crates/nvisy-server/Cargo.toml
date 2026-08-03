@@ -52,7 +52,7 @@ tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
 # OpenAPI/Documentation
-aide = { workspace = true, features = ["axum", "axum-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
+aide = { workspace = true, features = ["axum", "axum-query", "axum-extra-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
 schemars = { workspace = true, features = [] }
 
 # Observability

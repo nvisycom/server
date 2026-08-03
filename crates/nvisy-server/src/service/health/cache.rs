@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use jiff::Timestamp;
-use nvisy_core::health::{ComponentHealth, HealthCheck, HealthStatus};
+use nvisy_core::health::{ComponentHealth, HealthCheck};
 
 use super::snapshot::{HealthCacheEntry, HealthSnapshot};
 use super::{HealthConfig, TRACING_TARGET};
@@ -52,26 +52,23 @@ impl HealthCache {
     /// Otherwise all registered components are checked concurrently.
     pub async fn check(&self) -> Health {
         if let Some(snapshot) = self.cache.get_cached().await {
-            return Self::snapshot_to_health(snapshot);
+            return snapshot.into();
         }
 
         let snapshot = self.check_all_components().await;
         self.cache.store(snapshot.clone()).await;
-        Self::snapshot_to_health(snapshot)
+        snapshot.into()
     }
 
-    /// Returns the last cached [`Health`] without performing any checks.
+    /// Returns the last cached [`Health`], regardless of expiry.
     ///
-    /// Falls back to an unhealthy response with no component checks when
-    /// no snapshot has been cached yet.
+    /// When no snapshot has been cached yet (cold cache) this performs a real
+    /// check to populate the cache, so an early unauthenticated probe reports
+    /// the true status instead of a spurious unhealthy response.
     pub async fn get_cached_health(&self) -> Health {
         match self.cache.get_last().await {
-            Some(snapshot) => Self::snapshot_to_health(snapshot),
-            None => Health {
-                status: HealthStatus::Unhealthy,
-                checks: Vec::new(),
-                timestamp: Timestamp::now(),
-            },
+            Some(snapshot) => snapshot.into(),
+            None => self.check().await,
         }
     }
 
@@ -83,26 +80,6 @@ impl HealthCache {
             target: TRACING_TARGET,
             "Health cache invalidated"
         );
-    }
-
-    /// Converts a [`HealthSnapshot`] into a [`Health`] response.
-    fn snapshot_to_health(snapshot: HealthSnapshot) -> Health {
-        let all_healthy = snapshot.components.iter().all(|c| c.status.is_healthy());
-        let any_healthy = snapshot.components.iter().any(|c| c.status.is_healthy());
-
-        let status = if snapshot.components.is_empty() || !any_healthy {
-            HealthStatus::Unhealthy
-        } else if all_healthy {
-            HealthStatus::Healthy
-        } else {
-            HealthStatus::Degraded
-        };
-
-        Health {
-            status,
-            checks: snapshot.components,
-            timestamp: snapshot.timestamp,
-        }
     }
 
     /// Probes all registered components concurrently.
@@ -134,6 +111,8 @@ impl HealthCache {
 mod tests {
     use std::borrow::Cow;
 
+    use nvisy_core::health::HealthStatus;
+
     use super::*;
 
     /// A checker that always reports the given status.
@@ -148,7 +127,6 @@ mod tests {
             ComponentHealth {
                 name: Cow::Borrowed(self.name),
                 status: self.status,
-                latency: None,
             }
         }
     }
@@ -196,5 +174,15 @@ mod tests {
         let health = cache.check().await;
         assert_eq!(health.status, HealthStatus::Unhealthy);
         assert!(health.checks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cold_cache_reports_true_status() {
+        // With nothing cached yet, the unauthenticated path must reflect the
+        // real component status rather than a spurious unhealthy response.
+        let cache = cache(vec![checker("a", HealthStatus::Healthy)]);
+        let health = cache.get_cached_health().await;
+        assert_eq!(health.status, HealthStatus::Healthy);
+        assert_eq!(health.checks.len(), 1);
     }
 }

@@ -239,7 +239,6 @@ where
         tracing::debug!(
             target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
-            email = %account.email_address,
             is_admin = account.is_admin,
             "account validation successful"
         );
@@ -279,7 +278,6 @@ where
                 token_id = %auth_claims.token_id,
                 token_admin_claim = auth_claims.is_admin,
                 current_admin_status = account.is_admin,
-                email = %account.email_address,
                 "critical: admin privilege mismatch detected between token and database"
             );
 
