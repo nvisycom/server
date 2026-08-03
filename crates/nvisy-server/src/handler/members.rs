@@ -90,7 +90,6 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        member = %path_params.username,
         member_id = tracing::field::Empty,
     )
 )]
@@ -109,6 +108,7 @@ async fn get_member(
         .await?;
 
     let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
+    tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
 
     let Some((workspace_member, account)) = conn
         .find_workspace_member_with_account(workspace.id, member_account_id)
@@ -150,7 +150,6 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        member = %path_params.username,
         member_id = tracing::field::Empty,
     )
 )]
@@ -170,6 +169,7 @@ async fn delete_member(
         .await?;
 
     let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
+    tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
 
     // Prevent self-removal (use leave endpoint instead)
     if auth_state.account_id == member_account_id {
@@ -241,7 +241,6 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        member = %path_params.username,
         member_id = tracing::field::Empty,
         new_role = ?request.role,
     )
@@ -263,6 +262,7 @@ async fn update_member(
         .await?;
 
     let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
+    tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
 
     // Prevent self-role-update
     if auth_state.account_id == member_account_id {

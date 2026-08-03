@@ -59,7 +59,7 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
     skip_all,
     fields(
         requester_id = %auth_claims.account_id,
-        target = %path_params.username,
+        target_id = tracing::field::Empty,
     )
 )]
 async fn get_account(
@@ -75,6 +75,7 @@ async fn get_account(
         .find_account_by_username(&path_params.username)
         .await?
         .ok_or_else(|| Error::not_found("account"))?;
+    tracing::Span::current().record("target_id", tracing::field::display(account.id));
 
     // Accessible only to accounts that share a workspace. A non-shared account is
     // reported as not-found (not forbidden) so this endpoint cannot be used to

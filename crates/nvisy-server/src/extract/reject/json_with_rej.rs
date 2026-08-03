@@ -14,6 +14,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::sanitize_error_message;
 use crate::handler::{Error, ErrorKind};
 
 /// Maximum allowed JSON payload size in bytes (1MB).
@@ -159,14 +160,6 @@ impl From<JsonRejection> for Error<'static> {
             }
         }
     }
-}
-
-/// Sanitizes error messages to prevent information leakage while keeping them useful.
-fn sanitize_error_message(message: &str) -> String {
-    // Limit to first 3 lines to prevent excessive verbosity.
-    let lines = message.lines().take(3).collect::<Vec<_>>();
-    // Limit message length.
-    lines.join(" ").chars().take(200).collect()
 }
 
 impl<T> OperationInput for Json<T>

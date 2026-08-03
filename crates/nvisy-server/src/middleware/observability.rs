@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use axum::Router;
-use axum::extract::{ConnectInfo, Request};
+use axum::extract::Request;
 use axum::http::header;
 use axum::middleware::{Next, from_fn};
 use axum::response::Response;
@@ -17,7 +17,6 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
 use super::RouteCategory;
-use crate::extract::AppConnectInfo;
 
 /// Tracing target for request metrics.
 const TRACING_TARGET_METRICS: &str = "nvisy_server::metrics";
@@ -66,16 +65,11 @@ where
 }
 
 /// Request metrics middleware with categorization and timing.
-pub async fn track_categorized_metrics(
-    ConnectInfo(connect_info): ConnectInfo<AppConnectInfo>,
-    request: Request,
-    next: Next,
-) -> Response {
+pub async fn track_categorized_metrics(request: Request, next: Next) -> Response {
     let start_time = Instant::now();
     let method = request.method().clone();
     let uri = request.uri().clone();
     let category = RouteCategory::from_uri(&uri);
-    let client_ip = connect_info.addr.ip();
 
     let request_size = request
         .headers()
@@ -89,7 +83,6 @@ pub async fn track_categorized_metrics(
         method = %method,
         uri = %uri,
         category = category.as_str(),
-        client_ip = %client_ip,
         request_size = request_size,
         "request started"
     );
@@ -111,7 +104,6 @@ pub async fn track_categorized_metrics(
         category = category.as_str(),
         status = %response.status(),
         duration_ms = duration.as_millis() as u64,
-        client_ip = %client_ip,
         request_size = request_size,
         response_size = response_size,
         "request completed"
