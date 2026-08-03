@@ -340,7 +340,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/policies/{policySlug}/",
             get_with(read_policy, read_policy_docs)
-                .put_with(update_policy, update_policy_docs)
+                .patch_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),
         )
         .with_path_items(|item| item.tag("Policies"))

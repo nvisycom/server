@@ -399,7 +399,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/webhooks/{webhookId}/",
             get_with(read_webhook, read_webhook_docs)
-                .put_with(update_webhook, update_webhook_docs)
+                .patch_with(update_webhook, update_webhook_docs)
                 .delete_with(delete_webhook, delete_webhook_docs),
         )
         .api_route(

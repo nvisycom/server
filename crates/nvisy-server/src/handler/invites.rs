@@ -317,7 +317,7 @@ async fn reply_to_invite(
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<InvitePathParams>,
     Json(request): Json<ReplyInvite>,
-) -> Result<(StatusCode, Json<Invite>)> {
+) -> Result<(StatusCode, Json<Option<Member>>)> {
     tracing::info!(target: TRACING_TARGET, "Responding to workspace invitation");
 
     let mut conn = pg_client.get_connection().await?;
@@ -331,7 +331,7 @@ async fn reply_to_invite(
             .with_resource("workspace_invite"));
     }
 
-    let workspace_invite = if request.accept_invite {
+    if request.accept_invite {
         // Check if user is already a member
         if conn
             .find_workspace_member(invite.workspace_id, auth_state.account_id)
@@ -348,41 +348,48 @@ async fn reply_to_invite(
         let invited_role = invite.invited_role;
         let account_id = auth_state.account_id;
 
-        let accepted = conn
+        let (workspace_member, account) = conn
             .transaction(async |conn| {
-                let accepted = conn.accept_workspace_invite(invite_id, account_id).await?;
+                conn.accept_workspace_invite(invite_id, account_id).await?;
 
                 let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
                 conn.add_workspace_member(new_member).await?;
 
-                Ok::<_, PgError>(accepted)
+                let result = conn
+                    .find_workspace_member_with_account(workspace_id, account_id)
+                    .await?
+                    .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))?;
+
+                Ok::<_, PgError>(result)
             })
             .await?;
 
         tracing::info!(target: TRACING_TARGET, "Invitation accepted");
-        accepted
+        Ok((
+            StatusCode::CREATED,
+            Json(Some(Member::from_model(workspace_member, account))),
+        ))
     } else {
-        let declined = conn
-            .reject_workspace_invite(path_params.invite_id, auth_state.account_id)
+        conn.reject_workspace_invite(path_params.invite_id, auth_state.account_id)
             .await?;
 
         tracing::info!(target: TRACING_TARGET, "Invitation declined");
-        declined
-    };
-
-    Ok((
-        StatusCode::OK,
-        Json(Invite::from_model(workspace_invite, workspace.slug)),
-    ))
+        Ok((StatusCode::OK, Json(None)))
+    }
 }
 
 fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Reply to invitation")
-        .description("Allows the invitee to accept or decline a workspace invitation.")
-        .response::<200, Json<Invite>>()
+        .description(
+            "Accepts or declines a workspace invitation. On accept the user becomes a \
+             member and the new membership is returned; on decline no membership is created.",
+        )
+        .response::<200, Json<Option<Member>>>()
+        .response::<201, Json<Member>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Generates a shareable invite code for a workspace.
