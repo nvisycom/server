@@ -184,7 +184,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::provider.eq(provider))
             .filter(dsl::deleted_at.is_null())
-            .order(dsl::name.asc())
+            .order(dsl::display_name.asc())
             .select(WorkspaceConnection::as_select())
             .load(self)
             .await

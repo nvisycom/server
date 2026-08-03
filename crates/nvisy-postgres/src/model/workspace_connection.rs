@@ -22,8 +22,8 @@ pub struct WorkspaceConnection {
     pub workspace_id: Uuid,
     /// Reference to the account that created this connection.
     pub account_id: Uuid,
-    /// Human-readable connection name.
-    pub name: String,
+    /// Human-readable connection display name.
+    pub display_name: String,
     /// Provider type for indexing (e.g., "openai", "postgres", "s3").
     pub provider: String,
     /// Encrypted connection data (XChaCha20-Poly1305 encrypted JSON).
@@ -50,8 +50,8 @@ pub struct NewWorkspaceConnection {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
-    /// Connection name.
-    pub name: String,
+    /// Connection display name.
+    pub display_name: String,
     /// Provider type for indexing.
     pub provider: String,
     /// Encrypted connection data.
@@ -67,8 +67,8 @@ pub struct NewWorkspaceConnection {
 #[diesel(table_name = workspace_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspaceConnection {
-    /// Connection name.
-    pub name: Option<String>,
+    /// Connection display name.
+    pub display_name: Option<String>,
     /// Provider type.
     pub provider: Option<String>,
     /// Encrypted connection data.

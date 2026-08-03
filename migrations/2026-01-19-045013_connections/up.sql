@@ -35,10 +35,10 @@ CREATE TABLE workspace_connections (
     CONSTRAINT workspace_connections_workspace_id_id_key UNIQUE (workspace_id, id),
 
     -- Core attributes
-    name            TEXT            NOT NULL,
+    display_name    TEXT            NOT NULL,
     provider        TEXT            NOT NULL,
 
-    CONSTRAINT workspace_connections_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_connections_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
 
     -- Encrypted connection data (XChaCha20-Poly1305 encrypted JSON)
@@ -79,8 +79,8 @@ CREATE INDEX workspace_connections_provider_idx
     ON workspace_connections (provider, workspace_id)
     WHERE deleted_at IS NULL;
 
-CREATE UNIQUE INDEX workspace_connections_name_unique_idx
-    ON workspace_connections (workspace_id, lower(trim(name)))
+CREATE UNIQUE INDEX workspace_connections_display_name_unique_idx
+    ON workspace_connections (workspace_id, lower(trim(display_name)))
     WHERE deleted_at IS NULL;
 
 CREATE INDEX workspace_connections_active_idx
@@ -94,7 +94,7 @@ COMMENT ON TABLE workspace_connections IS
 COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
 COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_connections.name IS 'Human-readable connection name (1-255 chars)';
+COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
 COMMENT ON COLUMN workspace_connections.provider IS 'Provider type (openai, postgres, s3, pinecone, etc.)';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with credentials and context';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled for syncing';

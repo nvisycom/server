@@ -172,7 +172,7 @@ async fn update_api_token(
     }
 
     let update_token = UpdateAccountApiToken {
-        name: request.name,
+        display_name: request.display_name,
         ..Default::default()
     };
 

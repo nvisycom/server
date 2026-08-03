@@ -11,8 +11,8 @@ CREATE TABLE workspaces (
     description      TEXT             DEFAULT NULL,
     avatar_url       TEXT             DEFAULT NULL,
 
-    CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 3 AND 32),
-    CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 2000),
+    CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 32),
+    CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 500),
 
     -- Human-readable URL identity. Mirrors the WorkspaceSlug newtype: lowercase
     -- alphanumeric with single internal dashes, 3-32 characters.
@@ -78,10 +78,10 @@ COMMENT ON TABLE workspaces IS
     'Enhanced workspace management with comprehensive features, quotas, and security controls.';
 
 COMMENT ON COLUMN workspaces.id IS 'Unique workspace identifier (UUID)';
-COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (3-32 characters)';
-COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 2000 characters)';
+COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (2-32 characters)';
+COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 500 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
-COMMENT ON COLUMN workspaces.require_approval IS 'Require approval for new member requests';
+COMMENT ON COLUMN workspaces.require_approval IS 'Require approval before processed files become visible';
 COMMENT ON COLUMN workspaces.tags IS 'Array of tags for workspace classification and search';
 COMMENT ON COLUMN workspaces.metadata IS 'Extended workspace metadata (JSON, 2B-8KB)';
 COMMENT ON COLUMN workspaces.settings IS 'Workspace-specific settings and preferences (JSON, 2B-8KB)';

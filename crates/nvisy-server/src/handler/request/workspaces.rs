@@ -23,13 +23,13 @@ use crate::handler::{ErrorKind, Result};
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWorkspace {
-    /// Display name of the workspace (3-32 characters).
-    #[validate(length(min = 3, max = 32))]
+    /// Display name of the workspace (2-32 characters).
+    #[validate(length(min = 2, max = 32))]
     pub display_name: String,
     /// Optional URL slug. Derived from the display name when omitted.
     pub slug: Option<Slug>,
-    /// Optional description of the workspace (max 200 characters).
-    #[validate(length(max = 200))]
+    /// Optional description of the workspace (max 500 characters).
+    #[validate(length(max = 500))]
     pub description: Option<String>,
     /// Whether approval is required for processed files to be visible.
     pub require_approval: Option<bool>,
@@ -82,8 +82,8 @@ impl CreateWorkspace {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWorkspace {
-    /// New display name for the workspace (3-32 characters).
-    #[validate(length(min = 3, max = 32))]
+    /// New display name for the workspace (2-32 characters).
+    #[validate(length(min = 2, max = 32))]
     pub display_name: Option<String>,
     /// New description for the workspace (max 500 characters).
     #[validate(length(max = 500))]

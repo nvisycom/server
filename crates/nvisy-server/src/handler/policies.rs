@@ -56,7 +56,9 @@ async fn create_policy(
         .await?;
 
     let definition = &request.definition;
-    let name = request.name.unwrap_or_else(|| definition.name.to_string());
+    let display_name = request
+        .display_name
+        .unwrap_or_else(|| definition.name.to_string());
     let description = request
         .description
         .or_else(|| definition.description.clone());
@@ -67,7 +69,7 @@ async fn create_policy(
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
         slug: request.slug,
-        name,
+        display_name,
         description,
         version,
         definition: encrypted,
@@ -238,7 +240,7 @@ async fn update_policy(
     };
 
     let updates = UpdateWorkspacePolicy {
-        name: request.name,
+        display_name: request.display_name,
         description: request.description,
         version,
         definition,

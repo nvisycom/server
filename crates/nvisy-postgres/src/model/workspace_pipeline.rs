@@ -20,8 +20,8 @@ pub struct WorkspacePipeline {
     pub account_id: Uuid,
     /// URL-safe pipeline identifier, unique within the workspace.
     pub slug: Slug,
-    /// Pipeline name.
-    pub name: String,
+    /// Pipeline display name.
+    pub display_name: String,
     /// Pipeline description.
     pub description: Option<String>,
     /// Pipeline lifecycle status.
@@ -55,8 +55,8 @@ pub struct NewWorkspacePipeline {
     pub account_id: Uuid,
     /// URL-safe pipeline identifier, unique within the workspace.
     pub slug: Slug,
-    /// Pipeline name.
-    pub name: String,
+    /// Pipeline display name.
+    pub display_name: String,
     /// Pipeline description.
     pub description: Option<String>,
     /// Pipeline status.
@@ -78,8 +78,8 @@ pub struct NewWorkspacePipeline {
 #[diesel(table_name = workspace_pipelines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspacePipeline {
-    /// Pipeline name.
-    pub name: Option<String>,
+    /// Pipeline display name.
+    pub display_name: Option<String>,
     /// Pipeline description.
     pub description: Option<Option<String>>,
     /// Pipeline status.

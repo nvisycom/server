@@ -70,7 +70,7 @@ async fn create_connection(
     let new_connection = NewWorkspaceConnection {
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
-        name: request.name,
+        display_name: request.display_name,
         provider: request.provider,
         encrypted_data,
         is_active: None,
@@ -273,7 +273,7 @@ async fn update_connection(
         .transpose()?;
 
     let update_data = UpdateWorkspaceConnection {
-        name: request.name,
+        display_name: request.display_name,
         encrypted_data,
         ..Default::default()
     };

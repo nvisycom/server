@@ -15,8 +15,8 @@ use super::Page;
 pub struct ApiToken {
     /// Unique identifier for the token.
     pub id: Uuid,
-    /// Human-readable name for the API token.
-    pub name: String,
+    /// Human-readable display name for the API token.
+    pub display_name: String,
     /// Type of token (web, api, etc.).
     pub session_type: ApiTokenType,
     /// Timestamp of token creation.
@@ -38,7 +38,7 @@ impl ApiToken {
     pub fn from_model(token: AccountApiToken) -> Self {
         Self {
             id: token.id,
-            name: token.name,
+            display_name: token.display_name,
             session_type: token.session_type,
             issued_at: token.issued_at.into(),
             expired_at: token.expired_at.map(Into::into),
@@ -60,7 +60,7 @@ impl ApiToken {
     pub fn with_jwt(self, jwt: String) -> ApiTokenWithJWT {
         ApiTokenWithJWT {
             id: self.id,
-            name: self.name,
+            display_name: self.display_name,
             session_type: self.session_type,
             issued_at: self.issued_at,
             expired_at: self.expired_at,
@@ -78,8 +78,8 @@ pub type ApiTokensPage = Page<ApiToken>;
 pub struct ApiTokenWithJWT {
     /// Unique identifier for the token.
     pub id: Uuid,
-    /// Human-readable name for the API token.
-    pub name: String,
+    /// Human-readable display name for the API token.
+    pub display_name: String,
     /// Type of token (web, mobile, api, etc.).
     pub session_type: ApiTokenType,
     /// Timestamp of token creation.

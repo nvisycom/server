@@ -24,8 +24,8 @@ pub struct WorkspacePolicy {
     pub account_id: Uuid,
     /// URL-safe policy identifier, unique within the workspace.
     pub slug: Slug,
-    /// Human-readable policy name.
-    pub name: String,
+    /// Human-readable policy display name.
+    pub display_name: String,
     /// Policy description.
     pub description: Option<String>,
     /// Semver of the policy body.
@@ -53,8 +53,8 @@ pub struct NewWorkspacePolicy {
     pub account_id: Uuid,
     /// URL-safe policy identifier, unique within the workspace.
     pub slug: Slug,
-    /// Policy name.
-    pub name: String,
+    /// Policy display name.
+    pub display_name: String,
     /// Policy description.
     pub description: Option<String>,
     /// Semver of the policy body.
@@ -70,8 +70,8 @@ pub struct NewWorkspacePolicy {
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateWorkspacePolicy {
-    /// Policy name.
-    pub name: Option<String>,
+    /// Policy display name.
+    pub display_name: Option<String>,
     /// Policy description.
     pub description: Option<Option<String>>,
     /// Semver of the policy body.

@@ -53,11 +53,11 @@ CREATE TABLE workspace_pipelines (
     CONSTRAINT workspace_pipelines_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
     -- Core attributes
-    name            TEXT             NOT NULL,
+    display_name    TEXT             NOT NULL,
     description     TEXT             DEFAULT NULL,
     status          PIPELINE_STATUS  NOT NULL DEFAULT 'draft',
 
-    CONSTRAINT workspace_pipelines_name_length CHECK (length(trim(name)) BETWEEN 2 AND 128),
+    CONSTRAINT workspace_pipelines_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 128),
     CONSTRAINT workspace_pipelines_description_length CHECK (description IS NULL OR length(description) <= 500),
 
     -- Engine detection + redaction config (nvisy_schema plan as JSON):
@@ -107,8 +107,8 @@ CREATE INDEX workspace_pipelines_status_idx
     ON workspace_pipelines (status, workspace_id)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX workspace_pipelines_name_trgm_idx
-    ON workspace_pipelines USING gin (name gin_trgm_ops)
+CREATE INDEX workspace_pipelines_display_name_trgm_idx
+    ON workspace_pipelines USING gin (display_name gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
 -- Comments
@@ -118,7 +118,7 @@ COMMENT ON TABLE workspace_pipelines IS
 COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
 COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_pipelines.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_pipelines.name IS 'Pipeline name (2-128 chars)';
+COMMENT ON COLUMN workspace_pipelines.display_name IS 'Pipeline display name (2-128 chars)';
 COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 500 chars)';
 COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';
 COMMENT ON COLUMN workspace_pipelines.definition IS 'Pipeline definition JSON (steps, input/output schemas, etc.)';
@@ -210,7 +210,7 @@ CREATE VIEW active_workspace_pipeline_runs AS
 SELECT
     pr.id,
     pr.pipeline_id,
-    p.name AS pipeline_name,
+    p.display_name AS pipeline_name,
     p.workspace_id,
     pr.account_id,
     pr.trigger_type,
@@ -230,7 +230,7 @@ CREATE VIEW workspace_pipeline_run_history AS
 SELECT
     pr.id,
     pr.pipeline_id,
-    p.name AS pipeline_name,
+    p.display_name AS pipeline_name,
     p.workspace_id,
     pr.trigger_type,
     pr.status,

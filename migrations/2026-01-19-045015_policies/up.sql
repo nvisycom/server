@@ -22,11 +22,11 @@ CREATE TABLE workspace_policies (
     CONSTRAINT workspace_policies_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
     -- Core attributes
-    name            TEXT            NOT NULL,
+    display_name    TEXT            NOT NULL,
     description     TEXT            DEFAULT NULL,
     version         TEXT            NOT NULL,
 
-    CONSTRAINT workspace_policies_name_length CHECK (length(trim(name)) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_policies_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_policies_description_length CHECK (description IS NULL OR length(description) <= 4096),
     CONSTRAINT workspace_policies_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
 
@@ -63,8 +63,8 @@ CREATE INDEX workspace_policies_account_idx
     ON workspace_policies (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE UNIQUE INDEX workspace_policies_name_unique_idx
-    ON workspace_policies (workspace_id, lower(trim(name)))
+CREATE UNIQUE INDEX workspace_policies_display_name_unique_idx
+    ON workspace_policies (workspace_id, lower(trim(display_name)))
     WHERE deleted_at IS NULL;
 
 -- Comments
@@ -74,7 +74,7 @@ COMMENT ON TABLE workspace_policies IS
 COMMENT ON COLUMN workspace_policies.id IS 'Unique policy identifier';
 COMMENT ON COLUMN workspace_policies.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_policies.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_policies.name IS 'Human-readable policy name (1-255 chars)';
+COMMENT ON COLUMN workspace_policies.display_name IS 'Human-readable policy display name (1-255 chars)';
 COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
 COMMENT ON COLUMN workspace_policies.version IS 'Semver of the policy body';
 COMMENT ON COLUMN workspace_policies.definition IS 'Encrypted policy body (XChaCha20-Poly1305, workspace-derived key)';

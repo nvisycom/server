@@ -19,14 +19,14 @@ use validator::Validate;
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWebhook {
-    /// Human-readable name for the webhook (1-100 characters).
-    #[validate(length(min = 1, max = 100))]
+    /// Human-readable name for the webhook (1-128 characters).
+    #[validate(length(min = 1, max = 128))]
     pub display_name: String,
     /// Detailed description of the webhook's purpose (max 500 characters).
     #[validate(length(max = 500))]
     pub description: String,
     /// The URL to send webhook payloads to.
-    #[validate(url, length(min = 1, max = 2048))]
+    #[validate(url, length(max = 2048))]
     pub url: String,
     /// List of event types this webhook should receive.
     pub events: Vec<WebhookEvent>,
@@ -77,14 +77,14 @@ impl CreateWebhook {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWebhook {
-    /// Updated human-readable name for the webhook (1-100 characters).
-    #[validate(length(min = 1, max = 100))]
+    /// Updated human-readable name for the webhook (1-128 characters).
+    #[validate(length(min = 1, max = 128))]
     pub display_name: Option<String>,
     /// Updated description of the webhook's purpose (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
     /// Updated URL to send webhook payloads to.
-    #[validate(url, length(min = 1, max = 2048))]
+    #[validate(url, length(max = 2048))]
     pub url: Option<String>,
     /// Updated list of event types this webhook should receive.
     pub events: Option<Vec<WebhookEvent>>,

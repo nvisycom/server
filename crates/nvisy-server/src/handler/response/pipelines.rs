@@ -20,8 +20,8 @@ pub struct Pipeline {
     pub workspace_slug: Slug,
     /// Handle of the account that created this pipeline.
     pub creator_username: Username,
-    /// Pipeline name.
-    pub name: String,
+    /// Pipeline display name.
+    pub display_name: String,
     /// Pipeline description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -90,7 +90,7 @@ impl Pipeline {
             slug: pipeline.slug,
             workspace_slug,
             creator_username,
-            name: pipeline.name,
+            display_name: pipeline.display_name,
             description: pipeline.description,
             status: pipeline.status,
             definition,
@@ -111,8 +111,8 @@ pub type PipelinesPage = Page<Pipeline>;
 pub struct PipelineSummary {
     /// URL slug of the pipeline, unique within its workspace.
     pub slug: Slug,
-    /// Pipeline name.
-    pub name: String,
+    /// Pipeline display name.
+    pub display_name: String,
     /// Pipeline description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -129,7 +129,7 @@ impl PipelineSummary {
     pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
         Self {
             slug: pipeline.slug,
-            name: pipeline.name,
+            display_name: pipeline.display_name,
             description: pipeline.description,
             status: pipeline.status,
             created_at: pipeline.created_at.into(),

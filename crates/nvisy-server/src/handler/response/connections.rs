@@ -21,8 +21,8 @@ pub struct Connection {
     pub workspace_slug: Slug,
     /// Handle of the account that created this connection.
     pub creator_username: Username,
-    /// Human-readable connection name.
-    pub name: String,
+    /// Human-readable connection display name.
+    pub display_name: String,
     /// Provider type (e.g., "openai", "postgres", "s3").
     pub provider: String,
     /// When the connection last synced successfully, if ever.
@@ -49,7 +49,7 @@ impl Connection {
             id: ConnectionId::from_uuid(connection.id),
             workspace_slug,
             creator_username,
-            name: connection.name,
+            display_name: connection.display_name,
             provider: connection.provider,
             last_synced,
             created_at: connection.created_at.into(),

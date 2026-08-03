@@ -227,7 +227,7 @@ impl WorkspacePipelineRepository for PgConnection {
 
         // Apply search filter
         if let Some(term) = search_term {
-            base_query = base_query.filter(dsl::name.trgm_similar_to(term));
+            base_query = base_query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
         let total = if pagination.include_count {
@@ -254,7 +254,7 @@ impl WorkspacePipelineRepository for PgConnection {
         }
 
         if let Some(term) = search_term {
-            query = query.filter(dsl::name.trgm_similar_to(term));
+            query = query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
         let limit = pagination.limit + 1;
@@ -323,7 +323,7 @@ impl WorkspacePipelineRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::status.eq(PipelineStatus::Enabled))
             .filter(dsl::deleted_at.is_null())
-            .order(dsl::name.asc())
+            .order(dsl::display_name.asc())
             .select(WorkspacePipeline::as_select())
             .load(self)
             .await
@@ -391,9 +391,9 @@ impl WorkspacePipelineRepository for PgConnection {
 
         let pipelines = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::name.trgm_similar_to(search_term))
+            .filter(dsl::display_name.trgm_similar_to(search_term))
             .filter(dsl::deleted_at.is_null())
-            .order(dsl::name.asc())
+            .order(dsl::display_name.asc())
             .limit(limit)
             .select(WorkspacePipeline::as_select())
             .load(self)

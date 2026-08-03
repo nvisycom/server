@@ -20,8 +20,8 @@ pub struct AccountApiToken {
     pub id: Uuid,
     /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-    /// Human-readable name for the API token.
-    pub name: String,
+    /// Human-readable display name for the API token.
+    pub display_name: String,
     /// Type of token (web, mobile, api, etc.).
     pub session_type: ApiTokenType,
     /// IP address from which the token was initiated.
@@ -47,8 +47,8 @@ pub struct AccountApiToken {
 pub struct NewAccountApiToken {
     /// Reference to the account this token belongs to.
     pub account_id: Uuid,
-    /// Human-readable name for the API token.
-    pub name: String,
+    /// Human-readable display name for the API token.
+    pub display_name: String,
     /// Type of token (web, mobile, api, etc.).
     pub session_type: Option<ApiTokenType>,
     /// IP address from which the token was initiated.
@@ -68,8 +68,8 @@ pub struct NewAccountApiToken {
 pub struct UpdateAccountApiToken {
     /// Timestamp of most recent token activity.
     pub last_used_at: Option<Option<Timestamp>>,
-    /// Updated name for the API token.
-    pub name: Option<String>,
+    /// Updated display name for the API token.
+    pub display_name: Option<String>,
     /// Flag indicating if this is a "remember me" extended token.
     pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid.
