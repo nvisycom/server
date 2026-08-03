@@ -29,10 +29,12 @@ pub struct PolicyPathParams {
 #[serde(rename_all = "camelCase")]
 pub struct CreatePolicy {
     /// Optional display name override. Defaults to the policy's own name.
-    pub name: Option<String>,
+    #[validate(length(min = 1, max = 255))]
+    pub display_name: Option<String>,
     /// URL slug, unique within the workspace and immutable after creation.
     pub slug: Slug,
     /// Optional description override. Defaults to the policy's own description.
+    #[validate(length(max = 4096))]
     pub description: Option<String>,
     /// The structured policy body consumed by the engine.
     pub definition: SchemaPolicy,
@@ -44,9 +46,9 @@ pub struct CreatePolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePolicy {
-    /// Human-readable policy name.
+    /// Human-readable policy display name.
     #[validate(length(min = 1, max = 255))]
-    pub name: Option<String>,
+    pub display_name: Option<String>,
     /// Policy description.
     #[validate(length(max = 4096))]
     pub description: Option<Option<String>>,

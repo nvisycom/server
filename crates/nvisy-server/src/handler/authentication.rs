@@ -98,7 +98,7 @@ async fn login(
     let expired_at = Timestamp::now() + Span::new().hours(90 * 24);
     let new_token = NewAccountApiToken {
         account_id: account.id,
-        name: ua_parser.parse(user_agent.as_str()),
+        display_name: ua_parser.parse(user_agent.as_str()),
         ip_address: None,
         user_agent: Some(user_agent.to_string()),
         is_remembered: Some(request.remember_me),
@@ -195,7 +195,7 @@ async fn signup(
     let user_agent_str = user_agent.to_string();
     let new_token = NewAccountApiToken {
         account_id: account.id,
-        name: ua_parser.parse(&user_agent_str),
+        display_name: ua_parser.parse(&user_agent_str),
         ip_address: None,
         user_agent: Some(user_agent_str),
         is_remembered: Some(request.remember_me),

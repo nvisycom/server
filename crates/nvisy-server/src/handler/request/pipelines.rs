@@ -119,9 +119,9 @@ impl PipelineDefinition {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePipeline {
-    /// Pipeline name (2-128 characters).
+    /// Pipeline display name (2-128 characters).
     #[validate(length(min = 2, max = 128))]
-    pub name: String,
+    pub display_name: String,
     /// URL slug, unique within the workspace and immutable after creation.
     pub slug: Slug,
     /// Optional description of the pipeline (max 500 characters).
@@ -162,7 +162,7 @@ impl CreatePipeline {
             workspace_id,
             account_id,
             slug: self.slug,
-            name: self.name,
+            display_name: self.display_name,
             description: self.description,
             status: None,
             definition: Some(definition),
@@ -195,9 +195,9 @@ fn split_definition(
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePipeline {
-    /// New name for the pipeline (2-128 characters).
+    /// New display name for the pipeline (2-128 characters).
     #[validate(length(min = 2, max = 128))]
-    pub name: Option<String>,
+    pub display_name: Option<String>,
     /// New description for the pipeline (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
@@ -225,7 +225,7 @@ impl UpdatePipeline {
             None => (None, None),
         };
         let model = UpdatePipelineModel {
-            name: self.name,
+            display_name: self.display_name,
             description: self.description.map(Some),
             status: self.status,
             definition,

@@ -52,7 +52,7 @@ CREATE TABLE workspace_webhooks (
 
     CONSTRAINT workspace_webhooks_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 128),
     CONSTRAINT workspace_webhooks_description_length CHECK (length(description) <= 500),
-    CONSTRAINT workspace_webhooks_url_length CHECK (length(url) BETWEEN 10 AND 2048),
+    CONSTRAINT workspace_webhooks_url_length CHECK (length(url) <= 2048),
     CONSTRAINT workspace_webhooks_url_format CHECK (url ~ '^https?://'),
 
     -- Event configuration

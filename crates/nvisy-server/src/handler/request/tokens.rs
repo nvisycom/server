@@ -70,9 +70,9 @@ impl TokenExpiration {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateApiToken {
-    /// Human-readable name for the API token (1-100 characters).
+    /// Human-readable display name for the API token (1-100 characters).
     #[validate(length(min = 1, max = 100))]
-    pub name: String,
+    pub display_name: String,
 
     /// When the token expires.
     pub expires_in: TokenExpiration,
@@ -86,7 +86,7 @@ impl CreateApiToken {
     /// * `account_id` - The account this token belongs to.
     /// * `user_agent` - The user agent string of the client.
     pub fn into_model(self, account_id: Uuid, user_agent: String) -> Result<NewAccountApiToken> {
-        let sanitized_name = self.name.trim().to_string();
+        let sanitized_name = self.display_name.trim().to_string();
         if sanitized_name.is_empty() {
             return Err(crate::handler::ErrorKind::BadRequest
                 .with_resource("api_token")
@@ -95,7 +95,7 @@ impl CreateApiToken {
 
         Ok(NewAccountApiToken {
             account_id,
-            name: sanitized_name,
+            display_name: sanitized_name,
             ip_address: None,
             user_agent: Some(user_agent),
             session_type: Some(ApiTokenType::Api),
@@ -109,7 +109,7 @@ impl CreateApiToken {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateApiToken {
-    /// Updated name for the API token (1-100 characters).
+    /// Updated display name for the API token (1-100 characters).
     #[validate(length(min = 1, max = 100))]
-    pub name: Option<String>,
+    pub display_name: Option<String>,
 }

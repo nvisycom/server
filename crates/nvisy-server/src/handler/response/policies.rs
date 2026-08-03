@@ -20,8 +20,8 @@ pub struct Policy {
     pub workspace_slug: Slug,
     /// Handle of the account that created this policy.
     pub creator_username: Username,
-    /// Human-readable policy name.
-    pub name: String,
+    /// Human-readable policy display name.
+    pub display_name: String,
     /// Policy description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -54,7 +54,7 @@ impl Policy {
             slug: policy.slug,
             workspace_slug,
             creator_username,
-            name: policy.name,
+            display_name: policy.display_name,
             description: policy.description,
             version: policy.version,
             definition,

@@ -23,9 +23,9 @@ pub struct ConnectionPathParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateConnection {
-    /// Human-readable connection name.
+    /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
-    pub name: String,
+    pub display_name: String,
     /// Provider type (e.g., "openai", "postgres", "s3").
     #[validate(length(min = 1, max = 64))]
     pub provider: String,
@@ -38,9 +38,9 @@ pub struct CreateConnection {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateConnection {
-    /// Human-readable connection name.
+    /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
-    pub name: Option<String>,
+    pub display_name: Option<String>,
     /// Connection data to be encrypted (credentials + context).
     /// If provided, replaces the existing encrypted data.
     pub data: Option<serde_json::Value>,

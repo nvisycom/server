@@ -120,11 +120,11 @@ CREATE TABLE account_api_tokens (
     account_id            UUID        NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Token metadata
-    name                  TEXT        NOT NULL,
+    display_name          TEXT        NOT NULL,
     session_type          API_TOKEN_TYPE NOT NULL DEFAULT 'web',
 
-    CONSTRAINT account_api_tokens_name_not_empty CHECK (trim(name) <> ''),
-    CONSTRAINT account_api_tokens_name_length CHECK (length(name) <= 100),
+    CONSTRAINT account_api_tokens_display_name_not_empty CHECK (trim(display_name) <> ''),
+    CONSTRAINT account_api_tokens_display_name_length CHECK (length(display_name) <= 100),
 
     -- Security context
     ip_address            INET        DEFAULT NULL,
@@ -157,7 +157,7 @@ COMMENT ON TABLE account_api_tokens IS
 
 COMMENT ON COLUMN account_api_tokens.id IS 'Unique token identifier (UUID primary key)';
 COMMENT ON COLUMN account_api_tokens.account_id IS 'Reference to the account this token belongs to';
-COMMENT ON COLUMN account_api_tokens.name IS 'Human-readable name for the token (max 100 characters)';
+COMMENT ON COLUMN account_api_tokens.display_name IS 'Human-readable display name for the token (max 100 characters)';
 COMMENT ON COLUMN account_api_tokens.session_type IS 'Type of client that created the session (web, mobile, api, desktop)';
 COMMENT ON COLUMN account_api_tokens.ip_address IS 'IP address where the session was created';
 COMMENT ON COLUMN account_api_tokens.user_agent IS 'User agent of the client that created the session';
