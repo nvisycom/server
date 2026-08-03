@@ -37,6 +37,35 @@ pub struct Connection {
 /// Paginated list of connections.
 pub type ConnectionsPage = Page<Connection>;
 
+/// Result of a connection reachability check.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionVerification {
+    /// Whether the backing store was reachable with the stored credentials.
+    pub reachable: bool,
+    /// Failure reason when not reachable; omitted on success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ConnectionVerification {
+    /// A successful verification.
+    pub fn reachable() -> Self {
+        Self {
+            reachable: true,
+            error: None,
+        }
+    }
+
+    /// A failed verification carrying the reason.
+    pub fn unreachable(error: impl Into<String>) -> Self {
+        Self {
+            reachable: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
 impl Connection {
     /// Creates a response from a database model and its creator's handle.
     pub fn from_model(

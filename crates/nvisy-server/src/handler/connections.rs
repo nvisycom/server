@@ -31,10 +31,12 @@ use crate::extract::{
 use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, UpdateConnection,
 };
-use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
+use crate::handler::response::{
+    Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
+};
 use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, Result};
-use crate::service::{CryptoService, ServiceState};
+use crate::service::{CryptoService, ObjectService, ServiceState};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -351,6 +353,72 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Verifies that a connection's backing object store is reachable.
+///
+/// Decrypts the stored credentials and attempts a lightweight reachability
+/// check against the provider. Returns `200` with a [`ConnectionVerification`]
+/// describing the outcome: a store that is reachable but rejects the
+/// credentials reports `reachable: false` with the reason, rather than an HTTP
+/// error. Requires `ViewConnections` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        connection_id = %path_params.connection_id,
+    )
+)]
+async fn verify_connection(
+    State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
+    State(object): State<ObjectService>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<ConnectionPathParams>,
+) -> Result<(StatusCode, Json<ConnectionVerification>)> {
+    tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
+        .await?;
+
+    let (connection, _, _) =
+        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+
+    let credentials: serde_json::Value =
+        crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+
+    let verification = match object.connect(&connection.provider, credentials).await {
+        Ok(client) => match client.verify_reachable().await {
+            Ok(()) => {
+                tracing::info!(target: TRACING_TARGET, "Connection verified");
+                ConnectionVerification::reachable()
+            }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
+                ConnectionVerification::unreachable(err.to_string())
+            }
+        },
+        Err(err) => {
+            tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
+            ConnectionVerification::unreachable(err.to_string())
+        }
+    };
+
+    Ok((StatusCode::OK, Json(verification)))
+}
+
+fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Verify connection")
+        .description("Checks whether the connection's backing store is reachable with its stored credentials.")
+        .response::<200, Json<ConnectionVerification>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Finds a connection within a workspace by id, with its creator's handle, or
 /// returns a NotFound error.
 async fn find_connection(
@@ -386,6 +454,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(read_connection, read_connection_docs)
                 .patch_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/verify/",
+            post_with(verify_connection, verify_connection_docs),
         )
         .with_path_items(|item| item.tag("Connections"))
 }

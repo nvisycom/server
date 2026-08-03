@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod engine;
 mod health;
+mod object;
 mod security;
 mod webhook;
 
@@ -17,6 +18,7 @@ pub(crate) use crate::service::crypto::HashingReader;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
+pub use crate::service::object::ObjectService;
 pub use crate::service::security::{
     PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
@@ -44,6 +46,7 @@ pub struct ServiceState {
 
     // Internal services:
     pub health_cache: HealthCache,
+    pub object: ObjectService,
     pub password: PasswordService,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
@@ -87,6 +90,7 @@ impl ServiceState {
             engine,
 
             health_cache: HealthCache::new(&health_config, health_checkers),
+            object: ObjectService::new(),
             password: PasswordService::new(),
             session_keys,
             user_agent_parser: UserAgentParser::new(),
@@ -139,6 +143,7 @@ impl_di!(
     crypto: CryptoService,
     engine: EngineService,
     health_cache: HealthCache,
+    object: ObjectService,
     password: PasswordService,
     session_keys: SessionKeys,
     user_agent_parser: UserAgentParser,

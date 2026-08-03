@@ -2,18 +2,23 @@
 //!
 //! Works with AWS S3, MinIO, and any S3-compatible service.
 
+use std::fmt;
+
 use derive_more::Deref;
 use object_store::aws::AmazonS3Builder;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::Client;
+use super::{Client, redact};
 use crate::client::ObjectStoreClient;
-use crate::types::Error;
+use crate::error::Error;
 
 /// Typed credentials for S3-compatible provider.
-#[derive(Debug, Deserialize, Serialize)]
+///
+/// Secret fields are masked in the [`Debug`] output; the struct is
+/// deserialize-only and never serialized back out.
+#[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct S3Credentials {
@@ -39,6 +44,22 @@ pub struct S3Credentials {
 
 fn default_region() -> String {
     "us-east-1".to_string()
+}
+
+impl fmt::Debug for S3Credentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("S3Credentials")
+            .field("bucket", &self.bucket)
+            .field("region", &self.region)
+            .field("endpoint", &self.endpoint)
+            .field("access_key_id", &redact(self.access_key_id.as_deref()))
+            .field(
+                "secret_access_key",
+                &redact(self.secret_access_key.as_deref()),
+            )
+            .field("session_token", &redact(self.session_token.as_deref()))
+            .finish()
+    }
 }
 
 /// S3-backed object storage client.
@@ -76,7 +97,7 @@ impl Client for S3Provider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::connection(e.to_string(), Self::ID, true))?;
+            .map_err(|e| Error::connection(e.to_string(), Self::ID))?;
 
         Ok(Self(ObjectStoreClient::new(store)))
     }
