@@ -3,8 +3,10 @@
 use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
-use nvisy_core::health::ComponentHealth;
+use nvisy_core::health::{ComponentHealth, HealthStatus};
 use tokio::sync::RwLock;
+
+use crate::handler::response::Health;
 
 /// Cached health snapshot containing per-component results and a timestamp.
 #[derive(Debug, Clone)]
@@ -15,6 +17,16 @@ pub(super) struct HealthSnapshot {
     pub(super) checked_at: Instant,
     /// RFC 3339 timestamp for the response.
     pub(super) timestamp: Timestamp,
+}
+
+impl From<HealthSnapshot> for Health {
+    fn from(snapshot: HealthSnapshot) -> Self {
+        Health {
+            status: HealthStatus::from_components(&snapshot.components),
+            checks: snapshot.components,
+            timestamp: snapshot.timestamp,
+        }
+    }
 }
 
 /// A health snapshot behind a TTL: cached values expire after `cache_duration`.

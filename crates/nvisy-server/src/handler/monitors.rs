@@ -10,7 +10,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_core::health::HealthStatus;
 
-use super::request::CheckHealth;
 use super::response::Health;
 use crate::extract::{AuthState, Json, Version};
 use crate::handler::Result;
@@ -46,10 +45,7 @@ async fn health_status(
     State(health_service): State<HealthCache>,
     auth_state: Option<AuthState>,
     version: Version,
-    request: Option<Json<CheckHealth>>,
 ) -> Result<(StatusCode, Json<Health>)> {
-    let Json(request) = request.unwrap_or_default();
-
     let is_authenticated = auth_state.is_some();
     let is_admin = auth_state.as_ref().is_some_and(|auth| auth.is_admin);
     let account_id = auth_state.as_ref().map(|auth| auth.account_id);
@@ -60,31 +56,23 @@ async fn health_status(
         is_authenticated,
         is_admin,
         version = %version,
-        use_cache = request.use_cache,
         "Health status check requested"
     );
 
-    // Determine whether to use cached or real-time health check
-    // - Unauthenticated: always use cache (fast response for load balancers)
-    // - Authenticated: real-time check unless explicitly cached
-    let use_cached = if !is_authenticated {
-        true
-    } else {
-        request.use_cache.unwrap_or(false)
-    };
-
-    let health = if use_cached {
-        tracing::trace!(
-            target: TRACING_TARGET,
-            "Using cached health status"
-        );
-        health_service.get_cached_health().await
-    } else {
+    // Unauthenticated callers (load balancers, uptime probes) get the cached
+    // status for a fast response; authenticated callers get a real-time check.
+    let health = if is_authenticated {
         tracing::trace!(
             target: TRACING_TARGET,
             "Performing real-time health check"
         );
         health_service.check().await
+    } else {
+        tracing::trace!(
+            target: TRACING_TARGET,
+            "Using cached health status"
+        );
+        health_service.get_cached_health().await
     };
 
     let status_code = match health.status {
@@ -95,7 +83,7 @@ async fn health_status(
     tracing::debug!(
         target: TRACING_TARGET,
         status = ?health.status,
-        used_cache = use_cached,
+        used_cache = !is_authenticated,
         components = health.checks.len(),
         "Health status response"
     );
