@@ -25,6 +25,7 @@ mod workspaces;
 use std::collections::HashSet;
 
 use aide::axum::ApiRouter;
+use axum::http::{Method, Uri};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
@@ -34,9 +35,25 @@ pub use utility::{BuiltinModule, CustomRoutes, RouterMapFn};
 use crate::middleware::{require_authentication, validate_token_middleware};
 use crate::service::ServiceState;
 
-#[inline]
-async fn handler() -> Response {
-    ErrorKind::NotFound.into_response()
+/// Tracing target for unmatched-route fallbacks.
+const TRACING_TARGET_FALLBACK: &str = "nvisy_server::handler::fallback";
+
+/// Fallback for requests that match no route.
+///
+/// Logs the method and path so unmatched requests are diagnosable, and echoes
+/// the path in the response context.
+async fn handler(method: Method, uri: Uri) -> Response {
+    tracing::warn!(
+        target: TRACING_TARGET_FALLBACK,
+        %method,
+        path = %uri.path(),
+        "No route matched request"
+    );
+
+    ErrorKind::NotFound
+        .with_resource("route")
+        .with_context(format!("No route matches {method} {}", uri.path()))
+        .into_response()
 }
 
 /// Returns an [`ApiRouter`] with all private routes, minus any excluded module.
