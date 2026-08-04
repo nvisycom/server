@@ -153,7 +153,7 @@ impl WebhookWorker {
         })?;
 
         if response.is_success() {
-            tracing::info!(
+            tracing::debug!(
                 target: TRACING_TARGET,
                 request_id = %request.request_id,
                 webhook_id = %request.context.webhook_id,

@@ -24,6 +24,12 @@ pub trait EventStream: Clone + Send + Sync + 'static {
     /// expected processing time so a slow-but-healthy job is not redelivered
     /// and run a second time concurrently.
     const ACK_WAIT: Option<Duration> = None;
+
+    /// Maximum number of delivery attempts before the server stops redelivering a
+    /// message. `None` means unlimited (redeliver until the message ages out).
+    /// Set this to bound retries for consumers that nack on failure, so a
+    /// permanently-failing message is not redelivered indefinitely.
+    const MAX_DELIVER: Option<i64> = None;
 }
 
 /// Stream for webhook delivery.
@@ -35,6 +41,7 @@ pub struct WebhookStream;
 impl EventStream for WebhookStream {
     const CONSUMER_NAME: &'static str = "webhook-worker";
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60));
+    const MAX_DELIVER: Option<i64> = Some(5);
     const NAME: &'static str = "WEBHOOKS";
     const SUBJECT: &'static str = "webhooks";
 }

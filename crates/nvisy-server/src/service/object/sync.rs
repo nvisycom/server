@@ -149,7 +149,7 @@ impl ConnectionSyncService {
         self.reconcile_deletions(connection, account_id, &remote_keys)
             .await;
 
-        tracing::info!(target: TRACING_TARGET, imported, "Import sync complete");
+        tracing::debug!(target: TRACING_TARGET, imported, "Import sync complete");
         Ok(imported)
     }
 
@@ -357,7 +357,7 @@ impl ConnectionSyncService {
             .put_multipart(remote_key, file.mime_type.as_deref(), body)
             .await?;
 
-        tracing::info!(target: TRACING_TARGET, "File exported");
+        tracing::debug!(target: TRACING_TARGET, "File exported");
         Ok(())
     }
 
