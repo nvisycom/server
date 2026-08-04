@@ -10,7 +10,7 @@ mod stream_pub;
 mod stream_sub;
 
 pub use event_pub::EventPublisher;
-pub use event_stream::{EventStream, WebhookStream};
+pub use event_stream::{ConnectionSyncStream, EventStream, WebhookStream};
 pub use event_sub::EventSubscriber;
 pub use stream_pub::StreamPublisher;
 pub use stream_sub::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};

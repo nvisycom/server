@@ -38,6 +38,20 @@ impl KvBucket for ChatHistoryBucket {
     const TTL: Option<Duration> = Some(Duration::from_secs(30 * 60)); // 30 minutes
 }
 
+/// Bucket for short-lived distributed leader-election locks.
+///
+/// Entries expire quickly so a crashed holder never blocks future ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct SchedulerLocksBucket;
+
+impl KvBucket for SchedulerLocksBucket {
+    const DESCRIPTION: &'static str = "Short-lived scheduler leader-election locks";
+    const NAME: &'static str = "scheduler_locks";
+    // Comfortably above the scheduler tick interval so a period's lock outlives
+    // its period despite clock skew; per-period keys expire on their own.
+    const TTL: Option<Duration> = Some(Duration::from_secs(5 * 60));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

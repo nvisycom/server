@@ -36,6 +36,15 @@ CREATE TABLE workspace_files (
     tags                    TEXT[]           NOT NULL DEFAULT '{}',
     source                  FILE_SOURCE      NOT NULL DEFAULT 'uploaded',
 
+    -- Origin for imported files: the connection and remote object key they came
+    -- from. NULL for uploaded files. Used to skip re-importing the same object.
+    -- No FK: workspace_connections is created by a later migration, and the FK
+    -- would fail here; deletion behavior is handled in application logic.
+    source_connection_id    UUID             DEFAULT NULL,
+    source_key              TEXT             DEFAULT NULL,
+
+    CONSTRAINT workspace_files_source_key_length CHECK (source_key IS NULL OR length(source_key) BETWEEN 1 AND 1024),
+
     CONSTRAINT workspace_files_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_files_original_filename_length CHECK (length(original_filename) BETWEEN 1 AND 255),
     CONSTRAINT workspace_files_file_extension_format CHECK (file_extension ~ '^[a-zA-Z0-9]{1,20}$'),
@@ -100,6 +109,12 @@ CREATE INDEX workspace_files_source_idx
     ON workspace_files (source, workspace_id)
     WHERE deleted_at IS NULL;
 
+-- One live imported file per (connection, remote key): makes re-imports
+-- idempotent and backs the "already imported" lookup during sync.
+CREATE UNIQUE INDEX workspace_files_source_object_unique_idx
+    ON workspace_files (source_connection_id, source_key)
+    WHERE source_connection_id IS NOT NULL AND deleted_at IS NULL;
+
 -- Trigger function to auto-set version_number based on parent
 CREATE OR REPLACE FUNCTION set_workspace_file_version_number()
 RETURNS TRIGGER AS $$
@@ -140,6 +155,8 @@ COMMENT ON COLUMN workspace_files.file_extension IS 'File extension (1-20 alphan
 COMMENT ON COLUMN workspace_files.mime_type IS 'MIME type of the file';
 COMMENT ON COLUMN workspace_files.tags IS 'Classification tags (max 32)';
 COMMENT ON COLUMN workspace_files.source IS 'How the file was created (uploaded, imported, generated)';
+COMMENT ON COLUMN workspace_files.source_connection_id IS 'Connection an imported file came from (NULL for uploads)';
+COMMENT ON COLUMN workspace_files.source_key IS 'Remote object key an imported file came from (NULL for uploads)';
 COMMENT ON COLUMN workspace_files.file_size_bytes IS 'File size in bytes';
 COMMENT ON COLUMN workspace_files.file_hash_sha256 IS 'SHA256 content hash';
 COMMENT ON COLUMN workspace_files.storage_path IS 'Storage system path';

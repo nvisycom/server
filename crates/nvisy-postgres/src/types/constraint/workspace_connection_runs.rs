@@ -21,6 +21,10 @@ pub enum WorkspaceConnectionRunConstraints {
     // Chronological constraints
     #[strum(serialize = "workspace_connection_runs_completed_after_started")]
     CompletedAfterStarted,
+
+    // Uniqueness constraints
+    #[strum(serialize = "workspace_connection_runs_one_active_idx")]
+    OneActivePerConnection,
 }
 
 impl WorkspaceConnectionRunConstraints {
@@ -38,6 +42,10 @@ impl WorkspaceConnectionRunConstraints {
 
             WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
                 ConstraintCategory::Chronological
+            }
+
+            WorkspaceConnectionRunConstraints::OneActivePerConnection => {
+                ConstraintCategory::Uniqueness
             }
         }
     }

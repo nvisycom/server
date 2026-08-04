@@ -15,7 +15,7 @@ use nvisy_postgres::model::{NewWorkspaceConnectionRun, WorkspaceConnection};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionRunRepository, WorkspaceFileRepository,
 };
-use nvisy_postgres::types::{ConnectionId, SyncStatus, SyncTriggerType};
+use nvisy_postgres::types::{ConnectionId, SyncMode, SyncStatus, SyncTriggerType};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -23,7 +23,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{
-    ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, SyncConnection, SyncDirection,
+    ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, SyncConnection,
 };
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
 use crate::handler::{Error, ErrorKind, Result};
@@ -65,20 +65,37 @@ async fn sync_connection(
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
-    // Resolve the export target (if any) before starting the run, so a bad
-    // request fails fast with a 400/404 rather than a failed run.
-    let export_file = match request.direction {
-        SyncDirection::Export => {
+    if !connection.is_active {
+        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
+    }
+
+    // Reject a new sync while one is already running for this connection.
+    if let Some(latest) = conn
+        .find_latest_workspace_connection_run(connection.id)
+        .await?
+        && latest.is_in_progress()
+    {
+        return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
+    }
+
+    // For export, resolve the target file + destination key up front so a bad
+    // request fails fast (400/404) rather than as a failed run.
+    let export = match connection.sync_mode {
+        SyncMode::Export => {
             let file_id = request.file_id.ok_or_else(|| {
                 ErrorKind::BadRequest.with_message("fileId is required to export")
             })?;
+            let key = request
+                .key
+                .clone()
+                .ok_or_else(|| ErrorKind::BadRequest.with_message("key is required to export"))?;
             let file = conn
                 .find_file_in_workspace(workspace.id, file_id)
                 .await?
                 .ok_or_else(|| Error::not_found("file"))?;
-            Some(file)
+            Some((file, key))
         }
-        SyncDirection::Import => None,
+        SyncMode::Import => None,
     };
 
     let credentials: serde_json::Value =
@@ -95,36 +112,14 @@ async fn sync_connection(
     let run = conn.create_workspace_connection_run(new_run).await?;
 
     // Perform the transfer in the background; the run tracks its outcome. The
-    // transfer itself runs in an inner task so that a panic is caught (via the
-    // join error) and recorded as a failed run rather than leaving it stuck in
-    // `Running`.
+    // transfer runs in an inner task so that a panic is caught (via the join
+    // error) and recorded as a failed run rather than left stuck in `Running`.
     let run_id = run.id;
     let account_id = auth_state.account_id;
     tokio::spawn(async move {
-        let transfer = connection_sync.clone();
-        let key = request.key;
-        let work = tokio::spawn(async move {
-            match request.direction {
-                SyncDirection::Import => transfer
-                    .import_object(&connection, credentials, account_id, &key)
-                    .await
-                    .map(|_| ()),
-                SyncDirection::Export => {
-                    let file = export_file.expect("export file resolved above");
-                    transfer
-                        .export_file(&connection, credentials, &file, &key)
-                        .await
-                }
-            }
-        });
-
-        let result = match work.await {
-            Ok(result) => result,
-            Err(join_err) => Err(ErrorKind::InternalServerError
-                .with_message("Sync task terminated unexpectedly")
-                .with_context(join_err.to_string())),
-        };
-        connection_sync.finish_run(run_id, result).await;
+        connection_sync
+            .run_transfer(run_id, connection, credentials, account_id, export)
+            .await;
     });
 
     Ok((StatusCode::ACCEPTED, Json(ConnectionSync::from_model(run))))

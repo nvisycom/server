@@ -22,6 +22,15 @@ CREATE TYPE SYNC_TRIGGER_TYPE AS ENUM (
 COMMENT ON TYPE SYNC_TRIGGER_TYPE IS
     'How a connection sync run was initiated.';
 
+-- Whether a connection imports data in or exports data out
+CREATE TYPE SYNC_MODE AS ENUM (
+    'import',       -- Fetch objects from the connection into the workspace
+    'export'        -- Push workspace files out to the connection
+);
+
+COMMENT ON TYPE SYNC_MODE IS
+    'Direction a connection syncs: import into, or export out of, the workspace.';
+
 -- Workspace connections table (encrypted provider credentials + context)
 CREATE TABLE workspace_connections (
     -- Primary identifier
@@ -38,8 +47,16 @@ CREATE TABLE workspace_connections (
     display_name    TEXT            NOT NULL,
     provider        TEXT            NOT NULL,
 
+    -- Sync configuration
+    sync_mode       SYNC_MODE       NOT NULL DEFAULT 'import',
+    -- Cron expression for scheduled syncs; NULL means manual-only.
+    schedule_cron   TEXT            DEFAULT NULL,
+
     CONSTRAINT workspace_connections_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
+    CONSTRAINT workspace_connections_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
+    -- Scheduled syncs are import-only for now; export is manual.
+    CONSTRAINT workspace_connections_schedule_import_only CHECK (schedule_cron IS NULL OR sync_mode = 'import'),
 
     -- Encrypted connection data (XChaCha20-Poly1305 encrypted JSON)
     -- Contains: {"type": "postgres", "credentials": {...}, "context": {...}}
@@ -96,6 +113,8 @@ COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace refere
 COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
 COMMENT ON COLUMN workspace_connections.provider IS 'Provider type (openai, postgres, s3, pinecone, etc.)';
+COMMENT ON COLUMN workspace_connections.sync_mode IS 'Whether the connection imports data in or exports data out';
+COMMENT ON COLUMN workspace_connections.schedule_cron IS 'Cron expression for scheduled imports; NULL means manual-only';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with credentials and context';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled for syncing';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
@@ -150,6 +169,13 @@ CREATE INDEX workspace_connection_runs_account_idx
 
 CREATE INDEX workspace_connection_runs_status_idx
     ON workspace_connection_runs (status, started_at DESC)
+    WHERE status IN ('pending', 'running');
+
+-- At most one active (pending/running) run per connection. Enforces the
+-- one-in-flight-sync invariant at the database level, closing the race between
+-- checking for an in-flight run and inserting a new one.
+CREATE UNIQUE INDEX workspace_connection_runs_one_active_idx
+    ON workspace_connection_runs (connection_id)
     WHERE status IN ('pending', 'running');
 
 -- Comments

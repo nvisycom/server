@@ -51,6 +51,14 @@ pub trait WorkspaceFileRepository {
         file_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<(WorkspaceFile, Username)>>> + Send;
 
+    /// Returns the remote object keys already imported (live) from a connection.
+    ///
+    /// Used to skip re-importing objects during a connection sync.
+    fn imported_keys_for_connection(
+        &mut self,
+        connection_id: Uuid,
+    ) -> impl Future<Output = PgResult<Vec<String>>> + Send;
+
     /// Lists all files uploaded by a specific account with offset pagination.
     fn offset_list_account_files(
         &mut self,
@@ -193,6 +201,21 @@ impl WorkspaceFileRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(file)
+    }
+
+    async fn imported_keys_for_connection(&mut self, connection_id: Uuid) -> PgResult<Vec<String>> {
+        use schema::workspace_files::{self, dsl};
+
+        let keys = workspace_files::table
+            .filter(dsl::source_connection_id.eq(connection_id))
+            .filter(dsl::source_key.is_not_null())
+            .filter(dsl::deleted_at.is_null())
+            .select(dsl::source_key.assume_not_null())
+            .load::<String>(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(keys)
     }
 
     async fn find_file_in_workspace_with_creator(

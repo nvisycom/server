@@ -1054,6 +1054,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "croner"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4aa42bcd3d846ebf66e15bd528d1087f75d1c6c1c66ebff626178a106353c576"
+dependencies = [
+ "chrono",
+ "derive_builder",
+ "strum 0.27.2",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3805,6 +3816,8 @@ dependencies = [
  "axum-test",
  "bytes",
  "chacha20poly1305",
+ "chrono",
+ "croner",
  "derive_more",
  "dotenvy",
  "futures",

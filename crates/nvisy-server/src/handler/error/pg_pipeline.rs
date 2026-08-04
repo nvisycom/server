@@ -135,6 +135,9 @@ impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
             WorkspaceConnectionRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Sync run metadata size exceeds maximum limit")
             }
+            WorkspaceConnectionRunConstraints::OneActivePerConnection => {
+                ErrorKind::Conflict.with_message("A sync is already in progress")
+            }
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
             | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()

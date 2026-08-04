@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnection;
-use nvisy_postgres::types::{ConnectionId, Slug, Username};
+use nvisy_postgres::types::{ConnectionId, Slug, SyncMode, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +25,11 @@ pub struct Connection {
     pub display_name: String,
     /// Provider type (e.g., "openai", "postgres", "s3").
     pub provider: String,
+    /// Whether the connection imports data in or exports data out.
+    pub sync_mode: SyncMode,
+    /// Cron expression for scheduled imports, if configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_cron: Option<String>,
     /// When the connection last synced successfully, if ever.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_synced: Option<Timestamp>,
@@ -80,6 +85,8 @@ impl Connection {
             creator_username,
             display_name: connection.display_name,
             provider: connection.provider,
+            sync_mode: connection.sync_mode,
+            schedule_cron: connection.schedule_cron,
             last_synced,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),

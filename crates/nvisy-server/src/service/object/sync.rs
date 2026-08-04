@@ -5,11 +5,13 @@
 //! [`WorkspaceFile`]; export pushes a stored file back out to the connection.
 //! Both directions stream end to end and keep files encrypted at rest in NATS.
 
+use std::collections::HashSet;
 use std::path::Path as StdPath;
 use std::str::FromStr;
 
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket};
+use nvisy_object::client::ObjectStoreClient;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{
     NewWorkspaceFile, UpdateWorkspaceConnectionRun, WorkspaceConnection, WorkspaceFile,
@@ -25,6 +27,9 @@ use crate::service::{CryptoService, HashingReader, Measurements};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::object::sync";
+
+/// Maximum wall-clock time for a single sync transfer before it is failed.
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// Moves objects between an external connection and the internal file store.
 #[derive(Clone)]
@@ -52,31 +57,78 @@ impl ConnectionSyncService {
         }
     }
 
-    /// Imports a single object from the connection into the workspace file store.
+    /// Imports every not-yet-imported object from the connection.
     ///
-    /// Streams the object's bytes from the external store, encrypts them with
-    /// the workspace key, and writes them to the NATS files bucket, then records
-    /// a [`WorkspaceFile`] with [`FileSource::Imported`]. `remote_key` is
-    /// resolved relative to the connection's configured root path.
+    /// Lists the objects under the connection's root path, skips those already
+    /// imported (by remote key), and streams the rest into the workspace file
+    /// store. A single object failing is logged and skipped rather than aborting
+    /// the whole sync. Returns the number of objects imported.
     #[tracing::instrument(
-        name = "sync.import_object",
+        name = "sync.import_new",
         skip_all,
-        fields(connection_id = %connection.id, key = %remote_key),
+        fields(connection_id = %connection.id),
     )]
-    pub async fn import_object(
+    pub async fn import_new(
         &self,
         connection: &WorkspaceConnection,
         credentials: serde_json::Value,
         account_id: Uuid,
-        remote_key: &str,
-    ) -> Result<WorkspaceFile> {
-        tracing::debug!(target: TRACING_TARGET, "Importing object from connection");
+    ) -> Result<u64> {
+        tracing::debug!(target: TRACING_TARGET, "Importing new objects from connection");
 
         let client = self
             .object
             .connect(&connection.provider, credentials)
             .await?;
 
+        // List the source; keys are already scoped to the connection's root path
+        // by the provider's PrefixStore.
+        let objects = client.list("").await?;
+
+        let mut conn = self.postgres.get_connection().await?;
+        let already_imported: HashSet<String> = conn
+            .imported_keys_for_connection(connection.id)
+            .await?
+            .into_iter()
+            .collect();
+        drop(conn);
+
+        let mut imported = 0u64;
+        for object in objects {
+            let key = object.location.as_ref().to_owned();
+            if already_imported.contains(&key) {
+                continue;
+            }
+            match self.import_one(&client, connection, account_id, &key).await {
+                Ok(_) => imported += 1,
+                Err(err) => {
+                    // Tolerate a single bad object; the rest of the sync proceeds.
+                    tracing::warn!(
+                        target: TRACING_TARGET,
+                        key = %key, error = %err,
+                        "Skipping object that failed to import",
+                    );
+                }
+            }
+        }
+
+        tracing::info!(target: TRACING_TARGET, imported, "Import sync complete");
+        Ok(imported)
+    }
+
+    /// Imports one object at `remote_key` using an already-connected `client`.
+    ///
+    /// Streams the object's bytes from the external store, encrypts them with
+    /// the workspace key, writes them to the NATS files bucket, and records a
+    /// [`WorkspaceFile`] with [`FileSource::Imported`] and its source origin. If
+    /// recording fails, the just-written object is deleted so none is orphaned.
+    async fn import_one(
+        &self,
+        client: &ObjectStoreClient,
+        connection: &WorkspaceConnection,
+        account_id: Uuid,
+        remote_key: &str,
+    ) -> Result<WorkspaceFile> {
         // Stream external bytes -> hash+measure -> encrypt -> NATS files bucket.
         let source = client.get_stream(remote_key).await?;
         let (measured, measurements) = HashingReader::new(stream_to_reader(source));
@@ -91,11 +143,11 @@ impl ConnectionSyncService {
 
         // The object now exists in storage; if recording it in the database
         // fails, delete it so no orphaned object is left behind.
-        let file = match self
+        match self
             .record_imported_file(connection, account_id, remote_key, &file_key, &measurements)
             .await
         {
-            Ok(file) => file,
+            Ok(file) => Ok(file),
             Err(err) => {
                 if let Err(cleanup) = store.delete(&file_key).await {
                     tracing::error!(
@@ -104,12 +156,9 @@ impl ConnectionSyncService {
                         "Failed to delete orphaned object after import bookkeeping failure",
                     );
                 }
-                return Err(err);
+                Err(err)
             }
-        };
-
-        tracing::info!(target: TRACING_TARGET, file_id = %file.id, "Object imported");
-        Ok(file)
+        }
     }
 
     /// Inserts the [`WorkspaceFile`] row for a freshly imported object.
@@ -132,6 +181,8 @@ impl ConnectionSyncService {
             original_filename: Some(filename),
             file_extension: extension,
             source: Some(FileSource::Imported),
+            source_connection_id: Some(connection.id),
+            source_key: Some(remote_key.to_owned()),
             file_size_bytes: measurements.bytes() as i64,
             file_hash_sha256: measurements.sha256().to_vec(),
             storage_path: file_key.to_string(),
@@ -189,12 +240,52 @@ impl ConnectionSyncService {
         Ok(())
     }
 
+    /// Runs a sync transfer to completion and records the run's outcome.
+    ///
+    /// The transfer runs in an inner task bounded by a fixed timeout: a panic
+    /// surfaces as a join error and a hung backend as a timeout, both recorded
+    /// as a failed run rather than leaving it stuck `Running`. `export` selects
+    /// the direction: `None` imports all new objects, `Some((file, key))` pushes
+    /// a file out. Shared by the manual endpoint and the scheduled worker.
+    pub async fn run_transfer(
+        &self,
+        run_id: Uuid,
+        connection: WorkspaceConnection,
+        credentials: serde_json::Value,
+        account_id: Uuid,
+        export: Option<(WorkspaceFile, String)>,
+    ) {
+        let transfer = self.clone();
+        let work = tokio::spawn(async move {
+            match export {
+                None => {
+                    transfer
+                        .import_new(&connection, credentials, account_id)
+                        .await
+                }
+                Some((file, key)) => transfer
+                    .export_file(&connection, credentials, &file, &key)
+                    .await
+                    .map(|()| 1),
+            }
+        });
+
+        let result = match tokio::time::timeout(SYNC_TIMEOUT, work).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(join_err)) => Err(ErrorKind::InternalServerError
+                .with_message("Sync task terminated unexpectedly")
+                .with_context(join_err.to_string())),
+            Err(_elapsed) => Err(ErrorKind::InternalServerError.with_message("Sync timed out")),
+        };
+        self.finish_run(run_id, result).await;
+    }
+
     /// Records the outcome of a background sync run: completes it (one object
     /// transferred) on success, or marks it failed with a safe error message.
     ///
     /// Errors updating the run are logged rather than propagated, since this
     /// runs after the response has already been sent.
-    pub async fn finish_run(&self, run_id: Uuid, result: Result<()>) {
+    pub async fn finish_run(&self, run_id: Uuid, result: Result<u64>) {
         let mut conn = match self.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
@@ -208,11 +299,9 @@ impl ConnectionSyncService {
         };
 
         let outcome = match result {
-            Ok(()) => {
-                // A sync transfers exactly one object today (single-key import
-                // or single-file export).
+            Ok(records_synced) => {
                 let updates = UpdateWorkspaceConnectionRun {
-                    records_synced: Some(1),
+                    records_synced: Some(records_synced as i64),
                     ..Default::default()
                 };
                 if let Err(err) = conn.update_workspace_connection_run(run_id, updates).await {

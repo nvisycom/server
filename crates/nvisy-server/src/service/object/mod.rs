@@ -8,9 +8,13 @@ use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers;
 
 mod bridge;
+mod schedule;
 mod sync;
+mod worker;
 
+pub use schedule::{is_cron_due, is_valid_cron};
 pub use sync::ConnectionSyncService;
+pub use worker::{ConnectionSyncJob, ConnectionSyncWorker};
 
 /// Tracing target for object storage operations.
 const TRACING_TARGET: &str = "nvisy_server::service::object";

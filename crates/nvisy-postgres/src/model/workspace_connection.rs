@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_connections;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, SyncMode};
 
 /// Workspace connection model representing encrypted provider connections.
 ///
@@ -26,6 +26,10 @@ pub struct WorkspaceConnection {
     pub display_name: String,
     /// Provider type for indexing (e.g., "openai", "postgres", "s3").
     pub provider: String,
+    /// Whether the connection imports data in or exports data out.
+    pub sync_mode: SyncMode,
+    /// Cron expression for scheduled imports; `None` means manual-only.
+    pub schedule_cron: Option<String>,
     /// Encrypted connection data (XChaCha20-Poly1305 encrypted JSON).
     /// Contains credentials and context for resumption.
     pub encrypted_data: Vec<u8>,
@@ -54,6 +58,10 @@ pub struct NewWorkspaceConnection {
     pub display_name: String,
     /// Provider type for indexing.
     pub provider: String,
+    /// Sync direction (defaults to import).
+    pub sync_mode: Option<SyncMode>,
+    /// Cron expression for scheduled imports.
+    pub schedule_cron: Option<String>,
     /// Encrypted connection data.
     pub encrypted_data: Vec<u8>,
     /// Whether the connection is enabled for syncing.
@@ -71,6 +79,10 @@ pub struct UpdateWorkspaceConnection {
     pub display_name: Option<String>,
     /// Provider type.
     pub provider: Option<String>,
+    /// Sync direction.
+    pub sync_mode: Option<SyncMode>,
+    /// Cron expression for scheduled imports (`Some(None)` clears it).
+    pub schedule_cron: Option<Option<String>>,
     /// Encrypted connection data.
     pub encrypted_data: Option<Vec<u8>>,
     /// Whether the connection is enabled for syncing.

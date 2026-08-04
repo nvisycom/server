@@ -18,7 +18,10 @@ pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
-pub use crate::service::object::{ConnectionSyncService, ObjectService};
+pub use crate::service::object::{
+    ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, ObjectService, is_cron_due,
+    is_valid_cron,
+};
 pub use crate::service::security::{
     PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
 };

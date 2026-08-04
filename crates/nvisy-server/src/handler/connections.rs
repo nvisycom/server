@@ -35,8 +35,8 @@ use crate::handler::response::{
     Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
 };
 use crate::handler::utility::resolve_creator_username;
-use crate::handler::{Error, Result};
-use crate::service::{CryptoService, ObjectService, ServiceState};
+use crate::handler::{Error, ErrorKind, Result};
+use crate::service::{CryptoService, ObjectService, ServiceState, is_valid_cron};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -67,6 +67,12 @@ async fn create_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
+    if let Some(cron) = &request.schedule_cron
+        && !is_valid_cron(cron)
+    {
+        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+    }
+
     let encrypted_data = crypto.encrypt_json(workspace.id, &request.data)?;
 
     let new_connection = NewWorkspaceConnection {
@@ -74,6 +80,8 @@ async fn create_connection(
         account_id: auth_state.account_id,
         display_name: request.display_name,
         provider: request.provider,
+        sync_mode: Some(request.sync_mode),
+        schedule_cron: request.schedule_cron,
         encrypted_data,
         is_active: None,
         metadata: None,
@@ -269,6 +277,12 @@ async fn update_connection(
     let (existing, _, _) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
+    if let Some(cron) = &request.schedule_cron
+        && !is_valid_cron(cron)
+    {
+        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+    }
+
     let encrypted_data = request
         .data
         .map(|data| crypto.encrypt_json(workspace.id, &data))
@@ -276,6 +290,8 @@ async fn update_connection(
 
     let update_data = UpdateWorkspaceConnection {
         display_name: request.display_name,
+        sync_mode: request.sync_mode,
+        schedule_cron: request.schedule_cron.map(Some),
         encrypted_data,
         ..Default::default()
     };

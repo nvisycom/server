@@ -33,6 +33,22 @@ impl EventStream for WebhookStream {
     const SUBJECT: &'static str = "webhooks";
 }
 
+/// Work queue for connection sync jobs.
+///
+/// Scheduled syncs are enqueued here. A single shared durable consumer delivers
+/// each job to one instance at a time (at-least-once); consumers make jobs
+/// idempotent so a redelivery is safe. Messages expire after 1 hour so a
+/// backlog cannot pile up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct ConnectionSyncStream;
+
+impl EventStream for ConnectionSyncStream {
+    const CONSUMER_NAME: &'static str = "connection-sync-worker";
+    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
+    const NAME: &'static str = "CONNECTION_SYNCS";
+    const SUBJECT: &'static str = "connection.sync.jobs";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

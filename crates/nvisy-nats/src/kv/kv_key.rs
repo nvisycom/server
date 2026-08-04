@@ -68,6 +68,32 @@ impl From<Uuid> for TokenKey {
     }
 }
 
+/// A free-form string key for named locks and similar coordination entries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LockKey(pub String);
+
+impl KvKey for LockKey {}
+
+impl fmt::Display for LockKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for LockKey {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_owned()))
+    }
+}
+
+impl From<&str> for LockKey {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

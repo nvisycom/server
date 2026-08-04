@@ -26,8 +26,8 @@ pub use constraint::{
 };
 pub use enums::{
     ActivityCategory, ActivityType, ApiTokenType, ArtifactType, FileSource, InviteStatus,
-    NotificationEvent, PipelineRunStatus, PipelineStatus, PipelineTriggerType, SyncStatus,
-    SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
+    NotificationEvent, PipelineRunStatus, PipelineStatus, PipelineTriggerType, SyncMode,
+    SyncStatus, SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{FileFilter, InviteFilter, MemberFilter};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};

@@ -17,29 +17,19 @@ pub struct ConnectionSyncPathParams {
     pub sync_id: Uuid,
 }
 
-/// Direction of a connection sync.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum SyncDirection {
-    /// Pull an object from the connection into the workspace file store.
-    Import,
-    /// Push a workspace file out to the connection.
-    Export,
-}
-
 /// Request payload to trigger a connection sync.
 ///
-/// A sync transfers a single object: import pulls one `key` from the
-/// connection; export pushes one `file_id` to one `key`. Prefix/batch syncs
-/// are not supported yet.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+/// The direction is determined by the connection's configured `sync_mode`.
+/// - Import connections need no body: the sync fetches every not-yet-imported
+///   object under the connection's root path.
+/// - Export connections push one workspace file (`file_id`) to one object
+///   `key`; both are required for export and ignored for import.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncConnection {
-    /// Whether to import from or export to the connection.
-    pub direction: SyncDirection,
-    /// A single object key within the connection, relative to its root path.
-    #[validate(length(min = 1, max = 1024))]
-    pub key: String,
-    /// The workspace file to export. Required for `export`, ignored for `import`.
+    /// The workspace file to export (export connections only).
     pub file_id: Option<Uuid>,
+    /// The destination object key for an export, relative to the root path.
+    #[validate(length(min = 1, max = 1024))]
+    pub key: Option<String>,
 }

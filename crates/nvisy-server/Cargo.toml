@@ -93,6 +93,10 @@ anyhow = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 
+# Cron parsing
+croner = { workspace = true, features = [] }
+chrono = { workspace = true, features = [] }
+
 # Domain datatypes & data structures
 url = { workspace = true, features = [] }
 
