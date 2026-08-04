@@ -1,17 +1,22 @@
 //! Azure Blob Storage provider using [`object_store::azure::MicrosoftAzureBuilder`].
 
+use std::fmt;
+
 use derive_more::Deref;
 use object_store::azure::MicrosoftAzureBuilder;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::Client;
+use super::{Client, redact};
 use crate::client::ObjectStoreClient;
-use crate::types::Error;
+use crate::error::Error;
 
 /// Typed credentials for Azure Blob Storage.
-#[derive(Debug, Deserialize, Serialize)]
+///
+/// Secret fields are masked in the [`Debug`] output; the struct is
+/// deserialize-only and never serialized back out.
+#[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AzureCredentials {
@@ -28,6 +33,18 @@ pub struct AzureCredentials {
     /// Custom endpoint URL (for Azure Stack or Azurite).
     #[serde(default)]
     pub endpoint: Option<String>,
+}
+
+impl fmt::Debug for AzureCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AzureCredentials")
+            .field("container", &self.container)
+            .field("account_name", &self.account_name)
+            .field("access_key", &redact(self.access_key.as_deref()))
+            .field("sas_token", &redact(self.sas_token.as_deref()))
+            .field("endpoint", &self.endpoint)
+            .finish()
+    }
 }
 
 /// Azure Blob Storage-backed object storage client.
@@ -49,18 +66,7 @@ impl Client for AzureProvider {
         }
 
         if let Some(sas) = &creds.sas_token {
-            let pairs: Vec<(String, String)> = sas
-                .trim_start_matches('?')
-                .split('&')
-                .filter_map(|pair| {
-                    let mut parts = pair.splitn(2, '=');
-                    Some((
-                        parts.next()?.to_string(),
-                        parts.next().unwrap_or("").to_string(),
-                    ))
-                })
-                .collect();
-            builder = builder.with_sas_authorization(pairs);
+            builder = builder.with_sas_authorization(parse_sas(sas));
         }
 
         if let Some(endpoint) = &creds.endpoint {
@@ -69,8 +75,53 @@ impl Client for AzureProvider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::connection(e.to_string(), Self::ID, true))?;
+            .map_err(|e| Error::connection(e.to_string(), Self::ID))?;
 
         Ok(Self(ObjectStoreClient::new(store)))
+    }
+}
+
+/// Parses a SAS token query string into key/value pairs.
+///
+/// Accepts an optional leading `?`, splits on `&`, and treats a pair with no
+/// `=` as a key with an empty value. Empty segments (e.g. a trailing `&`) are
+/// skipped.
+fn parse_sas(sas: &str) -> Vec<(String, String)> {
+    sas.trim_start_matches('?')
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| match pair.split_once('=') {
+            Some((key, value)) => (key.to_string(), value.to_string()),
+            None => (pair.to_string(), String::new()),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_sas;
+
+    #[test]
+    fn parses_leading_question_mark_and_pairs() {
+        let pairs = parse_sas("?sv=2021&sig=ab%2Fcd");
+        assert_eq!(
+            pairs,
+            vec![
+                ("sv".to_string(), "2021".to_string()),
+                ("sig".to_string(), "ab%2Fcd".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_equals_in_value_and_skips_empty_segments() {
+        let pairs = parse_sas("a=b=c&&flag");
+        assert_eq!(
+            pairs,
+            vec![
+                ("a".to_string(), "b=c".to_string()),
+                ("flag".to_string(), String::new()),
+            ]
+        );
     }
 }

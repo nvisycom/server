@@ -112,6 +112,12 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
                 }
                 WorkspaceConnectionConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Connection metadata size exceeds maximum limit"),
+                WorkspaceConnectionConstraints::ScheduleCronLength => {
+                    ErrorKind::BadRequest.with_message("Connection schedule cron length is invalid")
+                }
+                WorkspaceConnectionConstraints::ScheduleImportOnly => {
+                    ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
+                }
                 WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A connection with this identifier already exists"),
                 WorkspaceConnectionConstraints::NameUnique => {
@@ -135,7 +141,11 @@ impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
             WorkspaceConnectionRunConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Sync run metadata size exceeds maximum limit")
             }
+            WorkspaceConnectionRunConstraints::OneActivePerConnection => {
+                ErrorKind::Conflict.with_message("A sync is already in progress")
+            }
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
+            | WorkspaceConnectionRunConstraints::AttemptPositive
             | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }

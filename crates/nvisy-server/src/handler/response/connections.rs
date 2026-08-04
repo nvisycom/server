@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnection;
-use nvisy_postgres::types::{ConnectionId, Slug, Username};
+use nvisy_postgres::types::{ConnectionId, Slug, SyncDeletionPolicy, SyncMode, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -23,8 +23,15 @@ pub struct Connection {
     pub creator_username: Username,
     /// Human-readable connection display name.
     pub display_name: String,
-    /// Provider type (e.g., "openai", "postgres", "s3").
+    /// Object store provider (`s3`, `azure`, `gcs`).
     pub provider: String,
+    /// Whether the connection imports data in or exports data out.
+    pub sync_mode: SyncMode,
+    /// Cron expression for scheduled imports, if configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_cron: Option<String>,
+    /// How an import reconciles files whose source object was deleted.
+    pub deletion_policy: SyncDeletionPolicy,
     /// When the connection last synced successfully, if ever.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_synced: Option<Timestamp>,
@@ -36,6 +43,35 @@ pub struct Connection {
 
 /// Paginated list of connections.
 pub type ConnectionsPage = Page<Connection>;
+
+/// Result of a connection reachability check.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionVerification {
+    /// Whether the backing store was reachable with the stored credentials.
+    pub reachable: bool,
+    /// Failure reason when not reachable; omitted on success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ConnectionVerification {
+    /// A successful verification.
+    pub fn reachable() -> Self {
+        Self {
+            reachable: true,
+            error: None,
+        }
+    }
+
+    /// A failed verification carrying the reason.
+    pub fn unreachable(error: impl Into<String>) -> Self {
+        Self {
+            reachable: false,
+            error: Some(error.into()),
+        }
+    }
+}
 
 impl Connection {
     /// Creates a response from a database model and its creator's handle.
@@ -51,6 +87,9 @@ impl Connection {
             creator_username,
             display_name: connection.display_name,
             provider: connection.provider,
+            sync_mode: connection.sync_mode,
+            schedule_cron: connection.schedule_cron,
+            deletion_policy: connection.deletion_policy,
             last_synced,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),

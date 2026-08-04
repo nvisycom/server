@@ -117,6 +117,29 @@ where
         })
     }
 
+    /// Atomically create a value only if the key does not already exist.
+    ///
+    /// Returns `Ok(true)` if this call created the entry, `Ok(false)` if the key
+    /// was already present. This is the put-if-absent primitive for distributed
+    /// locks / leader election: combined with a bucket TTL, exactly one caller
+    /// wins the create and the entry auto-expires if the winner dies.
+    #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
+    pub async fn create(&self, key: &K, value: &V) -> Result<bool> {
+        use async_nats::jetstream::kv::CreateErrorKind;
+
+        let key_str = key.to_string();
+        let json = serde_json::to_vec(value)?;
+        match self.store.create(&key_str, json.into()).await {
+            Ok(_revision) => Ok(true),
+            // A create against an existing key is the "lock already held" case,
+            // not an error. Any other failure (network, ack, publish) is a real
+            // infrastructure error and must be propagated rather than masqueraded
+            // as a lost lock.
+            Err(err) if err.kind() == CreateErrorKind::AlreadyExists => Ok(false),
+            Err(err) => Err(Error::operation("kv_create", err.to_string())),
+        }
+    }
+
     /// Get a value from the store.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn get(&self, key: &K) -> Result<Option<KvValue<V>>> {

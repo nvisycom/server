@@ -1,6 +1,6 @@
 //! Connection request types.
 
-use nvisy_postgres::types::ConnectionId;
+use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -26,11 +26,20 @@ pub struct CreateConnection {
     /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
     pub display_name: String,
-    /// Provider type (e.g., "openai", "postgres", "s3").
+    /// Object store provider (`s3`, `azure`, `gcs`).
     #[validate(length(min = 1, max = 64))]
     pub provider: String,
-    /// Connection data to be encrypted (credentials + context).
-    /// The structure depends on the provider type.
+    /// Whether the connection imports data in or exports data out.
+    #[serde(default)]
+    pub sync_mode: SyncMode,
+    /// Cron expression for scheduled imports; omit for manual-only.
+    #[validate(length(min = 9, max = 100))]
+    pub schedule_cron: Option<String>,
+    /// How an import reconciles files whose source object was deleted.
+    #[serde(default)]
+    pub deletion_policy: SyncDeletionPolicy,
+    /// Connection data to be encrypted (provider credentials + optional root
+    /// path). The structure depends on the provider type.
     pub data: serde_json::Value,
 }
 
@@ -41,8 +50,16 @@ pub struct UpdateConnection {
     /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
-    /// Connection data to be encrypted (credentials + context).
-    /// If provided, replaces the existing encrypted data.
+    /// Whether the connection imports data in or exports data out.
+    pub sync_mode: Option<SyncMode>,
+    /// Cron expression for scheduled imports. Omit to leave unchanged; send
+    /// `null` to clear it (make the connection manual-only).
+    #[validate(length(min = 9, max = 100))]
+    pub schedule_cron: Option<Option<String>>,
+    /// How an import reconciles files whose source object was deleted.
+    pub deletion_policy: Option<SyncDeletionPolicy>,
+    /// Connection data to be encrypted (provider credentials + optional root
+    /// path). If provided, replaces the existing encrypted data.
     pub data: Option<serde_json::Value>,
 }
 

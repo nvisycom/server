@@ -26,10 +26,10 @@ schema = ["dep:schemars"]
 [dependencies]
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
 
 # Async runtime
 tokio = { workspace = true, features = ["sync"] }
-async-trait = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 
 # Derive macros
@@ -37,7 +37,6 @@ derive_more = { workspace = true, features = ["deref"] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
-uuid = { workspace = true, features = [] }
 
 # Cloud object storage (S3, Azure Blob, GCS)
 object_store = { workspace = true, features = ["aws", "azure", "gcp"] }

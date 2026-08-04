@@ -37,10 +37,15 @@ where
     /// If the stream doesn't exist, it will be created with the configuration
     /// from the `EventStream` trait.
     pub(crate) async fn new(jetstream: &Context) -> Result<Self> {
-        let subscriber =
-            StreamSubscriber::new_with_max_age(jetstream, S::NAME, S::CONSUMER_NAME, S::MAX_AGE)
-                .await?
-                .with_filter_subject(format!("{}.>", S::NAME));
+        let subscriber = StreamSubscriber::new_with_max_age(
+            jetstream,
+            S::NAME,
+            S::CONSUMER_NAME,
+            S::MAX_AGE,
+            S::ACK_WAIT,
+        )
+        .await?
+        .with_filter_subject(format!("{}.>", S::NAME));
         Ok(Self {
             subscriber,
             _stream: PhantomData,

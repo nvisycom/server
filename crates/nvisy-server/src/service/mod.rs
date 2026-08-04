@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod engine;
 mod health;
+mod object;
 mod security;
 mod webhook;
 
@@ -13,10 +14,14 @@ use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
-pub(crate) use crate::service::crypto::HashingReader;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
+pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
+pub use crate::service::object::{
+    ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, ObjectService, is_cron_due,
+    is_valid_cron,
+};
 pub use crate::service::security::{
     PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
@@ -43,7 +48,9 @@ pub struct ServiceState {
     pub engine: EngineService,
 
     // Internal services:
+    pub connection_sync: ConnectionSyncService,
     pub health_cache: HealthCache,
+    pub object: ObjectService,
     pub password: PasswordService,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
@@ -78,6 +85,15 @@ impl ServiceState {
             Arc::new(webhook_service.clone()),
         ];
 
+        let object = ObjectService::new();
+        let connection_sync = ConnectionSyncService::new(
+            postgres_client.clone(),
+            nats_client.clone(),
+            crypto.clone(),
+            object.clone(),
+            webhook_emitter.clone(),
+        );
+
         let service_state = Self {
             postgres: postgres_client,
             nats: nats_client,
@@ -86,7 +102,9 @@ impl ServiceState {
             crypto,
             engine,
 
+            connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
+            object,
             password: PasswordService::new(),
             session_keys,
             user_agent_parser: UserAgentParser::new(),
@@ -136,9 +154,11 @@ impl_di!(
 
 // Internal services:
 impl_di!(
+    connection_sync: ConnectionSyncService,
     crypto: CryptoService,
     engine: EngineService,
     health_cache: HealthCache,
+    object: ObjectService,
     password: PasswordService,
     session_keys: SessionKeys,
     user_agent_parser: UserAgentParser,

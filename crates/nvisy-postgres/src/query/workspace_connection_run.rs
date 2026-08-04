@@ -102,24 +102,40 @@ pub trait WorkspaceConnectionRunRepository {
         updates: UpdateWorkspaceConnectionRun,
     ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
 
-    /// Marks a run as completed successfully.
+    /// Marks a run as completed successfully with its final record count, only if
+    /// it is still active.
+    ///
+    /// Returns the updated run, or `None` if the run was already in a terminal
+    /// state (e.g. cancelled or reaped) and was therefore left unchanged. The
+    /// count is written under the same status guard so a terminal run's fields
+    /// are never mutated after the fact.
     fn complete_workspace_connection_run(
         &mut self,
         run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
+        records_synced: i64,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
-    /// Marks a run as failed, recording the error detail.
+    /// Marks a run as failed, recording the error detail, only if it is still
+    /// active. Returns `None` if the run was already terminal.
     fn fail_workspace_connection_run(
         &mut self,
         run_id: Uuid,
         error_message: &str,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
-    /// Marks a run as cancelled.
+    /// Marks a run as cancelled, only if it is still active. Returns `None` if
+    /// the run was already terminal and was therefore left unchanged.
     fn cancel_workspace_connection_run(
         &mut self,
         run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+
+    /// Fails all `Running` runs that started before `cutoff`, returning the
+    /// number reaped. Recovers runs orphaned by a crash mid-sync.
+    fn fail_stale_running_runs(
+        &mut self,
+        cutoff: jiff_diesel::Timestamp,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
 impl WorkspaceConnectionRunRepository for PgConnection {
@@ -427,19 +443,28 @@ impl WorkspaceConnectionRunRepository for PgConnection {
     async fn complete_workspace_connection_run(
         &mut self,
         run_id: Uuid,
-    ) -> PgResult<WorkspaceConnectionRun> {
+        records_synced: i64,
+    ) -> PgResult<Option<WorkspaceConnectionRun>> {
         use diesel::dsl::now;
         use schema::workspace_connection_runs::{self, dsl};
 
-        let run = diesel::update(workspace_connection_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(SyncStatus::Completed),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspaceConnectionRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
+        // Only transition from an active state, so a run already cancelled/reaped
+        // is not resurrected as completed and its record count is not rewritten.
+        let run = diesel::update(
+            workspace_connection_runs::table
+                .filter(dsl::id.eq(run_id))
+                .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
+        )
+        .set((
+            dsl::status.eq(SyncStatus::Completed),
+            dsl::records_synced.eq(records_synced),
+            dsl::completed_at.eq(now),
+        ))
+        .returning(WorkspaceConnectionRun::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(PgError::from)?;
 
         Ok(run)
     }
@@ -448,20 +473,27 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         &mut self,
         run_id: Uuid,
         error_message: &str,
-    ) -> PgResult<WorkspaceConnectionRun> {
+    ) -> PgResult<Option<WorkspaceConnectionRun>> {
         use diesel::dsl::now;
         use schema::workspace_connection_runs::{self, dsl};
 
-        let run = diesel::update(workspace_connection_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(SyncStatus::Failed),
-                dsl::error_message.eq(error_message),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspaceConnectionRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
+        // Only transition from an active state, so a terminal run is not
+        // overwritten.
+        let run = diesel::update(
+            workspace_connection_runs::table
+                .filter(dsl::id.eq(run_id))
+                .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
+        )
+        .set((
+            dsl::status.eq(SyncStatus::Failed),
+            dsl::error_message.eq(error_message),
+            dsl::completed_at.eq(now),
+        ))
+        .returning(WorkspaceConnectionRun::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(PgError::from)?;
 
         Ok(run)
     }
@@ -469,20 +501,48 @@ impl WorkspaceConnectionRunRepository for PgConnection {
     async fn cancel_workspace_connection_run(
         &mut self,
         run_id: Uuid,
-    ) -> PgResult<WorkspaceConnectionRun> {
+    ) -> PgResult<Option<WorkspaceConnectionRun>> {
         use diesel::dsl::now;
         use schema::workspace_connection_runs::{self, dsl};
 
-        let run = diesel::update(workspace_connection_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(SyncStatus::Cancelled),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspaceConnectionRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
+        // Only transition from an active state, so a run that already completed,
+        // failed, or was reaped is not overwritten as cancelled.
+        let run = diesel::update(
+            workspace_connection_runs::table
+                .filter(dsl::id.eq(run_id))
+                .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
+        )
+        .set((
+            dsl::status.eq(SyncStatus::Cancelled),
+            dsl::completed_at.eq(now),
+        ))
+        .returning(WorkspaceConnectionRun::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(PgError::from)?;
 
         Ok(run)
+    }
+
+    async fn fail_stale_running_runs(&mut self, cutoff: jiff_diesel::Timestamp) -> PgResult<usize> {
+        use diesel::dsl::now;
+        use schema::workspace_connection_runs::{self, dsl};
+
+        let reaped = diesel::update(
+            workspace_connection_runs::table
+                .filter(dsl::status.eq(SyncStatus::Running))
+                .filter(dsl::started_at.lt(cutoff)),
+        )
+        .set((
+            dsl::status.eq(SyncStatus::Failed),
+            dsl::error_message.eq("Sync did not complete (reaped as stale)"),
+            dsl::completed_at.eq(now),
+        ))
+        .execute(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(reaped)
     }
 }

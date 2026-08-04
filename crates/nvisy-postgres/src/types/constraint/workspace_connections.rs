@@ -11,7 +11,7 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceConnectionConstraints {
     // Name validation constraints
-    #[strum(serialize = "workspace_connections_name_length")]
+    #[strum(serialize = "workspace_connections_display_name_length")]
     NameLength,
 
     // Provider validation constraints
@@ -26,10 +26,16 @@ pub enum WorkspaceConnectionConstraints {
     #[strum(serialize = "workspace_connections_metadata_size")]
     MetadataSize,
 
+    // Schedule validation constraints
+    #[strum(serialize = "workspace_connections_schedule_cron_length")]
+    ScheduleCronLength,
+    #[strum(serialize = "workspace_connections_schedule_import_only")]
+    ScheduleImportOnly,
+
     // Uniqueness constraints
     #[strum(serialize = "workspace_connections_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-    #[strum(serialize = "workspace_connections_name_unique_idx")]
+    #[strum(serialize = "workspace_connections_display_name_unique_idx")]
     NameUnique,
 
     // Chronological constraints
@@ -51,7 +57,9 @@ impl WorkspaceConnectionConstraints {
             WorkspaceConnectionConstraints::NameLength
             | WorkspaceConnectionConstraints::ProviderLength
             | WorkspaceConnectionConstraints::DataSize
-            | WorkspaceConnectionConstraints::MetadataSize => ConstraintCategory::Validation,
+            | WorkspaceConnectionConstraints::MetadataSize
+            | WorkspaceConnectionConstraints::ScheduleCronLength
+            | WorkspaceConnectionConstraints::ScheduleImportOnly => ConstraintCategory::Validation,
 
             WorkspaceConnectionConstraints::WorkspaceIdIdUnique
             | WorkspaceConnectionConstraints::NameUnique => ConstraintCategory::Uniqueness,

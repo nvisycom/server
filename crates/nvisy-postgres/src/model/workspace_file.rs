@@ -34,6 +34,10 @@ pub struct WorkspaceFile {
     pub tags: Vec<Option<String>>,
     /// How the file was created (uploaded, imported, generated).
     pub source: FileSource,
+    /// Connection an imported file came from (`None` for uploads).
+    pub source_connection_id: Option<Uuid>,
+    /// Remote object key an imported file came from (`None` for uploads).
+    pub source_key: Option<String>,
     /// File size in bytes.
     pub file_size_bytes: i64,
     /// SHA-256 hash of the file.
@@ -75,6 +79,10 @@ pub struct NewWorkspaceFile {
     pub tags: Option<Vec<Option<String>>>,
     /// How the file was created.
     pub source: Option<FileSource>,
+    /// Connection an imported file came from.
+    pub source_connection_id: Option<Uuid>,
+    /// Remote object key an imported file came from.
+    pub source_key: Option<String>,
     /// File size in bytes.
     pub file_size_bytes: i64,
     /// SHA-256 hash.

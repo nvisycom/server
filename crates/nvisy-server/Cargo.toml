@@ -33,12 +33,13 @@ nvisy-engine = { workspace = true }
 # Internal crates
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
+nvisy-object = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
-tokio-util = { workspace = true, features = [] }
+tokio-util = { workspace = true, features = ["io"] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 async-stream = { workspace = true, features = [] }
@@ -91,6 +92,10 @@ anyhow = { workspace = true, features = [] }
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
+
+# Cron parsing
+croner = { workspace = true, features = [] }
+chrono = { workspace = true, features = [] }
 
 # Domain datatypes & data structures
 url = { workspace = true, features = [] }

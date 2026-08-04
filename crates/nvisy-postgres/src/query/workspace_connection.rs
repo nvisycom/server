@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
-use crate::types::{CursorPage, CursorPagination, OffsetPagination, Username};
+use crate::types::{CursorPage, CursorPagination, OffsetPagination, SyncMode, Username};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection database operations.
@@ -51,6 +51,12 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         provider: &str,
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
+
+    /// Lists all active, import-mode connections that have a sync schedule,
+    /// across every workspace. Used by the scheduled-sync worker.
+    fn list_scheduled_connections(
+        &mut self,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
 
     /// Lists all connections in a workspace with offset pagination.
@@ -185,6 +191,22 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::provider.eq(provider))
             .filter(dsl::deleted_at.is_null())
             .order(dsl::display_name.asc())
+            .select(WorkspaceConnection::as_select())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(connections)
+    }
+
+    async fn list_scheduled_connections(&mut self) -> PgResult<Vec<WorkspaceConnection>> {
+        use schema::workspace_connections::{self, dsl};
+
+        let connections = workspace_connections::table
+            .filter(dsl::schedule_cron.is_not_null())
+            .filter(dsl::sync_mode.eq(SyncMode::Import))
+            .filter(dsl::is_active.eq(true))
+            .filter(dsl::deleted_at.is_null())
             .select(WorkspaceConnection::as_select())
             .load(self)
             .await

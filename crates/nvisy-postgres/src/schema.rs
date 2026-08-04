@@ -38,6 +38,14 @@ pub mod sql_types {
     pub struct PipelineTriggerType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "sync_deletion_policy"))]
+    pub struct SyncDeletionPolicy;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "sync_mode"))]
+    pub struct SyncMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "sync_status"))]
     pub struct SyncStatus;
 
@@ -148,6 +156,7 @@ diesel::table! {
         trigger_type -> SyncTriggerType,
         status -> SyncStatus,
         records_synced -> Int8,
+        attempt -> Int4,
         error_message -> Nullable<Text>,
         metadata -> Jsonb,
         started_at -> Timestamptz,
@@ -157,6 +166,8 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::SyncMode;
+    use super::sql_types::SyncDeletionPolicy;
 
     workspace_connections (id) {
         id -> Uuid,
@@ -164,6 +175,9 @@ diesel::table! {
         account_id -> Uuid,
         display_name -> Text,
         provider -> Text,
+        sync_mode -> SyncMode,
+        schedule_cron -> Nullable<Text>,
+        deletion_policy -> SyncDeletionPolicy,
         encrypted_data -> Bytea,
         is_active -> Bool,
         metadata -> Jsonb,
@@ -189,6 +203,8 @@ diesel::table! {
         mime_type -> Nullable<Text>,
         tags -> Array<Nullable<Text>>,
         source -> FileSource,
+        source_connection_id -> Nullable<Uuid>,
+        source_key -> Nullable<Text>,
         file_size_bytes -> Int8,
         file_hash_sha256 -> Bytea,
         storage_path -> Text,

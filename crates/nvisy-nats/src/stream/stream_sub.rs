@@ -18,6 +18,7 @@ struct StreamSubscriberInner {
     stream_name: String,
     consumer_name: String,
     filter_subject: Option<String>,
+    ack_wait: Option<Duration>,
 }
 
 /// Type-safe stream subscriber with compile-time guarantees.
@@ -45,6 +46,7 @@ where
         stream_name: &str,
         consumer_name: &str,
         max_age: Option<Duration>,
+        ack_wait: Option<Duration>,
     ) -> Result<Self> {
         // Try to get existing stream, create if it doesn't exist
         match jetstream.get_stream(stream_name).await {
@@ -89,6 +91,7 @@ where
                 stream_name: stream_name.to_string(),
                 consumer_name: consumer_name.to_string(),
                 filter_subject: None,
+                ack_wait,
             }),
             _marker: PhantomData,
         })
@@ -113,6 +116,10 @@ where
             ack_policy: consumer::AckPolicy::Explicit,
             ..Default::default()
         };
+
+        if let Some(ack_wait) = self.inner.ack_wait {
+            consumer_config.ack_wait = ack_wait;
+        }
 
         if let Some(filter) = &self.inner.filter_subject {
             consumer_config.filter_subject = filter.clone();
@@ -166,6 +173,10 @@ where
             ack_policy: consumer::AckPolicy::Explicit,
             ..Default::default()
         };
+
+        if let Some(ack_wait) = self.inner.ack_wait {
+            consumer_config.ack_wait = ack_wait;
+        }
 
         if let Some(filter) = &self.inner.filter_subject {
             consumer_config.filter_subject = filter.clone();

@@ -15,6 +15,6 @@ pub(crate) use encryption::{
 };
 pub use error::{CryptoError, CryptoResult};
 pub(crate) use generation::generate_secret;
-pub(crate) use hashing_reader::HashingReader;
+pub(crate) use hashing_reader::{HashingReader, Measurements};
 pub(crate) use key::EncryptionKey;
 pub use service::{CryptoConfig, CryptoService};

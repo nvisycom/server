@@ -31,10 +31,12 @@ use crate::extract::{
 use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, UpdateConnection,
 };
-use crate::handler::response::{Connection, ConnectionsPage, ErrorResponse};
+use crate::handler::response::{
+    Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
+};
 use crate::handler::utility::resolve_creator_username;
-use crate::handler::{Error, Result};
-use crate::service::{CryptoService, ServiceState};
+use crate::handler::{Error, ErrorKind, Result};
+use crate::service::{CryptoService, ObjectService, ServiceState, is_valid_cron};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -65,6 +67,19 @@ async fn create_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
+    if let Some(cron) = &request.schedule_cron {
+        if !is_valid_cron(cron) {
+            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+        }
+        // Scheduling is import-only; reject an export connection with a cron up
+        // front rather than surfacing the DB CHECK as a generic error.
+        if request.sync_mode.is_export() {
+            return Err(
+                ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
+            );
+        }
+    }
+
     let encrypted_data = crypto.encrypt_json(workspace.id, &request.data)?;
 
     let new_connection = NewWorkspaceConnection {
@@ -72,6 +87,9 @@ async fn create_connection(
         account_id: auth_state.account_id,
         display_name: request.display_name,
         provider: request.provider,
+        sync_mode: Some(request.sync_mode),
+        schedule_cron: request.schedule_cron,
+        deletion_policy: Some(request.deletion_policy),
         encrypted_data,
         is_active: None,
         metadata: None,
@@ -267,6 +285,14 @@ async fn update_connection(
     let (existing, _, _) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
+    // Only a newly-set cron is validated; `Some(None)` clears it and `None`
+    // leaves it unchanged.
+    if let Some(Some(cron)) = &request.schedule_cron
+        && !is_valid_cron(cron)
+    {
+        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+    }
+
     let encrypted_data = request
         .data
         .map(|data| crypto.encrypt_json(workspace.id, &data))
@@ -274,6 +300,9 @@ async fn update_connection(
 
     let update_data = UpdateWorkspaceConnection {
         display_name: request.display_name,
+        sync_mode: request.sync_mode,
+        schedule_cron: request.schedule_cron,
+        deletion_policy: request.deletion_policy,
         encrypted_data,
         ..Default::default()
     };
@@ -351,6 +380,74 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Verifies that a connection's backing object store is reachable.
+///
+/// Decrypts the stored credentials and attempts a lightweight reachability
+/// check against the provider. Returns `200` with a [`ConnectionVerification`]
+/// describing the outcome: a store that is reachable but rejects the
+/// credentials reports `reachable: false` with the reason, rather than an HTTP
+/// error. Requires `ViewConnections` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        connection_id = %path_params.connection_id,
+    )
+)]
+async fn verify_connection(
+    State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
+    State(object): State<ObjectService>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<ConnectionPathParams>,
+) -> Result<(StatusCode, Json<ConnectionVerification>)> {
+    tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
+        .await?;
+
+    let (connection, _, _) =
+        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+
+    let credentials: serde_json::Value =
+        crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+
+    let verification = match object.connect(&connection.provider, credentials).await {
+        Ok(client) => match client.verify_reachable().await {
+            Ok(()) => {
+                tracing::info!(target: TRACING_TARGET, "Connection verified");
+                ConnectionVerification::reachable()
+            }
+            Err(err) => {
+                // Log the full error, but return only a safe kind-based reason so
+                // backend URLs/bucket names are not exposed to the client.
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
+                ConnectionVerification::unreachable(err.kind().reason())
+            }
+        },
+        Err(err) => {
+            tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
+            ConnectionVerification::unreachable(err.kind().reason())
+        }
+    };
+
+    Ok((StatusCode::OK, Json(verification)))
+}
+
+fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Verify connection")
+        .description("Checks whether the connection's backing store is reachable with its stored credentials.")
+        .response::<200, Json<ConnectionVerification>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Finds a connection within a workspace by id, with its creator's handle, or
 /// returns a NotFound error.
 async fn find_connection(
@@ -386,6 +483,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(read_connection, read_connection_docs)
                 .patch_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/verify/",
+            post_with(verify_connection, verify_connection_docs),
         )
         .with_path_items(|item| item.tag("Connections"))
 }

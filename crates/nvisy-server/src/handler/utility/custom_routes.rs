@@ -24,6 +24,8 @@ pub enum BuiltinModule {
     Workspaces,
     /// Provider connections.
     Connections,
+    /// Connection syncs (import/export runs).
+    ConnectionSyncs,
     /// Workspace invitations.
     Invites,
     /// Workspace members.
