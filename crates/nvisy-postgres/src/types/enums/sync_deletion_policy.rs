@@ -22,25 +22,19 @@ pub enum SyncDeletionPolicy {
     #[default]
     Ignore,
 
-    /// Soft-delete the imported file and emit a desync event.
-    #[db_rename = "soft_delete"]
-    #[serde(rename = "soft_delete")]
-    SoftDelete,
-
-    /// Permanently remove the imported file and its stored object.
-    #[db_rename = "hard_delete"]
-    #[serde(rename = "hard_delete")]
-    HardDelete,
+    /// Delete the imported file when its source object is gone: the file row is
+    /// soft-deleted (preserving import provenance) and its stored object is
+    /// removed to reclaim storage.
+    #[db_rename = "delete"]
+    #[serde(rename = "delete")]
+    Delete,
 }
 
 impl SyncDeletionPolicy {
     /// Returns whether deleted source objects are reconciled at all.
     #[inline]
     pub fn removes_files(self) -> bool {
-        matches!(
-            self,
-            SyncDeletionPolicy::SoftDelete | SyncDeletionPolicy::HardDelete
-        )
+        matches!(self, SyncDeletionPolicy::Delete)
     }
 }
 
@@ -52,15 +46,14 @@ mod tests {
     fn default_is_ignore_and_never_removes() {
         assert_eq!(SyncDeletionPolicy::default(), SyncDeletionPolicy::Ignore);
         assert!(!SyncDeletionPolicy::Ignore.removes_files());
-        assert!(SyncDeletionPolicy::SoftDelete.removes_files());
-        assert!(SyncDeletionPolicy::HardDelete.removes_files());
+        assert!(SyncDeletionPolicy::Delete.removes_files());
     }
 
     #[test]
     fn serde_uses_snake_case() {
-        let json = serde_json::to_string(&SyncDeletionPolicy::SoftDelete).unwrap();
-        assert_eq!(json, "\"soft_delete\"");
-        let parsed: SyncDeletionPolicy = serde_json::from_str("\"hard_delete\"").unwrap();
-        assert_eq!(parsed, SyncDeletionPolicy::HardDelete);
+        let json = serde_json::to_string(&SyncDeletionPolicy::Delete).unwrap();
+        assert_eq!(json, "\"delete\"");
+        let parsed: SyncDeletionPolicy = serde_json::from_str("\"ignore\"").unwrap();
+        assert_eq!(parsed, SyncDeletionPolicy::Ignore);
     }
 }

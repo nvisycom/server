@@ -34,8 +34,7 @@ COMMENT ON TYPE SYNC_MODE IS
 -- What an import does with a file whose source object no longer exists
 CREATE TYPE SYNC_DELETION_POLICY AS ENUM (
     'ignore',       -- Leave the imported file untouched (additive-only)
-    'soft_delete',  -- Soft-delete the imported file and emit a desync event
-    'hard_delete'   -- Permanently remove the imported file and its stored object
+    'delete'        -- Soft-delete the file and remove its stored object
 );
 
 COMMENT ON TYPE SYNC_DELETION_POLICY IS

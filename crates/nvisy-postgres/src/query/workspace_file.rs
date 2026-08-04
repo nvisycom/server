@@ -69,16 +69,6 @@ pub trait WorkspaceFileRepository {
         connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Vec<(String, Uuid, String)>>> + Send;
 
-    /// Permanently deletes a file row (as opposed to the soft delete performed
-    /// by [`delete_workspace_file`]). The caller is responsible for removing the
-    /// backing stored object.
-    ///
-    /// [`delete_workspace_file`]: Self::delete_workspace_file
-    fn hard_delete_workspace_file(
-        &mut self,
-        file_id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
-
     /// Lists all files uploaded by a specific account with offset pagination.
     fn offset_list_account_files(
         &mut self,
@@ -258,17 +248,6 @@ impl WorkspaceFileRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(files)
-    }
-
-    async fn hard_delete_workspace_file(&mut self, file_id: Uuid) -> PgResult<()> {
-        use schema::workspace_files::{self, dsl};
-
-        diesel::delete(workspace_files::table.filter(dsl::id.eq(file_id)))
-            .execute(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(())
     }
 
     async fn find_file_in_workspace_with_creator(

@@ -132,11 +132,10 @@ impl ConnectionSyncService {
     /// Removes imported files whose source object no longer exists, per the
     /// connection's [`SyncDeletionPolicy`].
     ///
-    /// `Ignore` leaves everything untouched. `SoftDelete` marks each vanished
-    /// file deleted; `HardDelete` also removes its stored object. Either removal
-    /// policy emits a single `ConnectionDesynced` event when anything changed.
-    /// Failures on individual files are logged and skipped so one bad file does
-    /// not abort reconciliation.
+    /// `Ignore` leaves everything untouched. `Delete` soft-deletes each vanished
+    /// file and removes its stored object, emitting a single `ConnectionDesynced`
+    /// event when anything changed. Failures on individual files are logged and
+    /// skipped so one bad file does not abort reconciliation.
     async fn reconcile_deletions(
         &self,
         connection: &WorkspaceConnection,
@@ -169,10 +168,7 @@ impl ConnectionSyncService {
             if remote_keys.contains(&source_key) {
                 continue;
             }
-            if let Err(err) = self
-                .remove_vanished_file(connection, file_id, &storage_path)
-                .await
-            {
+            if let Err(err) = self.remove_vanished_file(file_id, &storage_path).await {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     key = %source_key, error = %err,
@@ -197,34 +193,24 @@ impl ConnectionSyncService {
         }
     }
 
-    /// Removes a single file whose source object is gone, per the connection's
-    /// policy: soft-delete only, or hard-delete plus stored-object removal.
-    async fn remove_vanished_file(
-        &self,
-        connection: &WorkspaceConnection,
-        file_id: Uuid,
-        storage_path: &str,
-    ) -> Result<()> {
+    /// Deletes a single file whose source object is gone.
+    ///
+    /// The file row is soft-deleted first so it stops being readable, then its
+    /// stored object is removed to reclaim storage. Object removal is
+    /// best-effort: the row is already tombstoned, so a failure only leaves an
+    /// orphaned object, which is logged.
+    async fn remove_vanished_file(&self, file_id: Uuid, storage_path: &str) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
-        match connection.deletion_policy {
-            SyncDeletionPolicy::Ignore => {}
-            SyncDeletionPolicy::SoftDelete => {
-                conn.delete_workspace_file(file_id).await?;
-            }
-            SyncDeletionPolicy::HardDelete => {
-                conn.hard_delete_workspace_file(file_id).await?;
-                // Best-effort stored-object removal; the row is already gone, so
-                // a failure here only leaves an orphaned object, logged below.
-                if let Ok(file_key) = FileKey::from_str(storage_path) {
-                    let store = self.nats.object_store::<FilesBucket>().await?;
-                    if let Err(err) = store.delete(&file_key).await {
-                        tracing::error!(
-                            target: TRACING_TARGET,
-                            error = %err,
-                            "Failed to delete stored object after hard delete",
-                        );
-                    }
-                }
+        conn.delete_workspace_file(file_id).await?;
+
+        if let Ok(file_key) = FileKey::from_str(storage_path) {
+            let store = self.nats.object_store::<FilesBucket>().await?;
+            if let Err(err) = store.delete(&file_key).await {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    "Failed to delete stored object for vanished source object",
+                );
             }
         }
         Ok(())
