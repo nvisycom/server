@@ -91,6 +91,7 @@ impl ServiceState {
             nats_client.clone(),
             crypto.clone(),
             object.clone(),
+            webhook_emitter.clone(),
         );
 
         let service_state = Self {

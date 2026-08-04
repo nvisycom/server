@@ -82,6 +82,7 @@ async fn create_connection(
         provider: request.provider,
         sync_mode: Some(request.sync_mode),
         schedule_cron: request.schedule_cron,
+        deletion_policy: Some(request.deletion_policy),
         encrypted_data,
         is_active: None,
         metadata: None,
@@ -292,6 +293,7 @@ async fn update_connection(
         display_name: request.display_name,
         sync_mode: request.sync_mode,
         schedule_cron: request.schedule_cron.map(Some),
+        deletion_policy: request.deletion_policy,
         encrypted_data,
         ..Default::default()
     };

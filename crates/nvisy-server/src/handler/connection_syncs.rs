@@ -107,6 +107,7 @@ async fn sync_connection(
         trigger_type: Some(SyncTriggerType::Manual),
         status: Some(SyncStatus::Running),
         records_synced: Some(0),
+        attempt: Some(1),
         metadata: None,
     };
     let run = conn.create_workspace_connection_run(new_run).await?;
@@ -224,6 +225,65 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Cancels an in-progress sync run.
+///
+/// Transitions the run to `Cancelled` if it is still pending or running; a run
+/// that already finished is returned unchanged as a `409 Conflict`. The
+/// background transfer is bounded by the sync timeout and its completion is
+/// status-guarded, so a cancelled run is never overwritten. Requires
+/// `ManageConnections` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        connection_id = %path_params.connection_id,
+        sync_id = %path_params.sync_id,
+    )
+)]
+async fn cancel_connection_sync(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<ConnectionSyncPathParams>,
+) -> Result<(StatusCode, Json<ConnectionSync>)> {
+    tracing::debug!(target: TRACING_TARGET, "Cancelling connection sync");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
+        .await?;
+
+    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+
+    // Resolve the run within the workspace + connection before mutating it.
+    let run = conn
+        .find_connection_run_in_workspace(workspace.id, path_params.sync_id)
+        .await?
+        .filter(|run| run.connection_id == connection.id)
+        .ok_or_else(|| Error::not_found("connection_sync"))?;
+
+    let cancelled = conn
+        .cancel_workspace_connection_run(run.id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::Conflict.with_message("Sync is not in progress and cannot be cancelled")
+        })?;
+
+    Ok((StatusCode::OK, Json(ConnectionSync::from_model(cancelled))))
+}
+
+fn cancel_connection_sync_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Cancel connection sync")
+        .description("Cancels an in-progress sync run. A run that already finished returns 409.")
+        .response::<200, Json<ConnectionSync>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
 /// Finds a connection within a workspace by id, or returns a NotFound error.
 async fn find_connection(
     conn: &mut PgConn,
@@ -251,6 +311,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/{syncId}/",
             get_with(read_connection_sync, read_connection_sync_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/{syncId}/cancel/",
+            post_with(cancel_connection_sync, cancel_connection_sync_docs),
         )
         .with_path_items(|item| item.tag("Connections"))
 }

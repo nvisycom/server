@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_connections;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, SyncMode};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, SyncDeletionPolicy, SyncMode};
 
 /// Workspace connection model representing encrypted provider connections.
 ///
@@ -30,6 +30,8 @@ pub struct WorkspaceConnection {
     pub sync_mode: SyncMode,
     /// Cron expression for scheduled imports; `None` means manual-only.
     pub schedule_cron: Option<String>,
+    /// How an import reconciles files whose source object was deleted.
+    pub deletion_policy: SyncDeletionPolicy,
     /// Encrypted connection data (XChaCha20-Poly1305 encrypted JSON).
     /// Contains the provider credentials and optional root path.
     pub encrypted_data: Vec<u8>,
@@ -62,6 +64,8 @@ pub struct NewWorkspaceConnection {
     pub sync_mode: Option<SyncMode>,
     /// Cron expression for scheduled imports.
     pub schedule_cron: Option<String>,
+    /// Deletion reconciliation policy (defaults to ignore).
+    pub deletion_policy: Option<SyncDeletionPolicy>,
     /// Encrypted connection data.
     pub encrypted_data: Vec<u8>,
     /// Whether the connection is enabled for syncing.
@@ -83,6 +87,8 @@ pub struct UpdateWorkspaceConnection {
     pub sync_mode: Option<SyncMode>,
     /// Cron expression for scheduled imports (`Some(None)` clears it).
     pub schedule_cron: Option<Option<String>>,
+    /// Deletion reconciliation policy.
+    pub deletion_policy: Option<SyncDeletionPolicy>,
     /// Encrypted connection data.
     pub encrypted_data: Option<Vec<u8>>,
     /// Whether the connection is enabled for syncing.

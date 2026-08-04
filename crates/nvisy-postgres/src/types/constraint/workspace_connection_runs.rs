@@ -13,6 +13,8 @@ pub enum WorkspaceConnectionRunConstraints {
     // Size / validation constraints
     #[strum(serialize = "workspace_connection_runs_records_synced_non_negative")]
     RecordsSyncedNonNegative,
+    #[strum(serialize = "workspace_connection_runs_attempt_positive")]
+    AttemptPositive,
     #[strum(serialize = "workspace_connection_runs_error_message_length")]
     ErrorMessageLength,
     #[strum(serialize = "workspace_connection_runs_metadata_size")]
@@ -37,6 +39,7 @@ impl WorkspaceConnectionRunConstraints {
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
+            | WorkspaceConnectionRunConstraints::AttemptPositive
             | WorkspaceConnectionRunConstraints::ErrorMessageLength
             | WorkspaceConnectionRunConstraints::MetadataSize => ConstraintCategory::Validation,
 

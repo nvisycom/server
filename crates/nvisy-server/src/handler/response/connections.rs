@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnection;
-use nvisy_postgres::types::{ConnectionId, Slug, SyncMode, Username};
+use nvisy_postgres::types::{ConnectionId, Slug, SyncDeletionPolicy, SyncMode, Username};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,8 @@ pub struct Connection {
     /// Cron expression for scheduled imports, if configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule_cron: Option<String>,
+    /// How an import reconciles files whose source object was deleted.
+    pub deletion_policy: SyncDeletionPolicy,
     /// When the connection last synced successfully, if ever.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_synced: Option<Timestamp>,
@@ -87,6 +89,7 @@ impl Connection {
             provider: connection.provider,
             sync_mode: connection.sync_mode,
             schedule_cron: connection.schedule_cron,
+            deletion_policy: connection.deletion_policy,
             last_synced,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),

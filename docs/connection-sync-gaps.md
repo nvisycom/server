@@ -40,40 +40,49 @@ Fixed: comments now list only the supported object-store providers.
 - `crates/nvisy-server/src/handler/request/connections.rs`, `.../response/connections.rs`
 - Factory: `crates/nvisy-object/src/providers/mod.rs:74-87`
 
-## 3. Sync cancellation — `tracked`
+## 3. Sync cancellation — `done`
 
-`SyncStatus::Cancelled` exists but is never set. There is no cancel endpoint,
-and the transfer runs as a detached `tokio::spawn` with no stored handle, so an
-in-flight run can only end by completing, failing, or hitting the 30-minute
-`SYNC_TIMEOUT`. Highest-impact functional gap.
+Added `POST /connections/{id}/syncs/{syncId}/cancel/`. The run transitions to
+`Cancelled` only from an active state (a finished run returns 409); the existing
+`cancel_workspace_connection_run` query is now status-guarded and returns
+`Option`. The background transfer is not force-aborted, but its completion is
+status-guarded (`complete`/`fail` only transition from active states) so a
+cancelled run is never overwritten, and the 30-minute timeout bounds the work.
 
-- Enum (unused): `crates/nvisy-postgres/src/types/enums/sync_status.rs:40`
-- Routes (no cancel): `crates/nvisy-server/src/handler/connection_syncs.rs:239-256`
-- Detached task: `crates/nvisy-server/src/handler/connection_syncs.rs:119-123`
+- `crates/nvisy-server/src/handler/connection_syncs.rs` (cancel handler + route)
+- `crates/nvisy-postgres/src/query/workspace_connection_run.rs` (status-guarded cancel)
 
-## 4. Source-deletion handling — `tracked`
+## 4. Source-deletion handling — `done`
 
-Import is strictly additive. When an object is deleted at the source, the
-corresponding `workspace_file` is not removed or marked. The
-`WebhookEvent::ConnectionDesynced` event is defined but never emitted.
+Per-connection `deletion_policy` (`SYNC_DELETION_POLICY` enum) controls what an
+import does when a previously-imported source object is gone: `ignore` (default,
+additive-only), `soft_delete` (mark the file deleted + emit `ConnectionDesynced`),
+or `hard_delete` (also remove the stored NATS object). Reconciliation reuses the
+single source listing and tolerates per-file failures; a desync event fires once
+per run when anything was removed.
 
-- `crates/nvisy-server/src/service/object/sync.rs:96-113`
+- `crates/nvisy-postgres/src/types/enums/sync_deletion_policy.rs`
+- `crates/nvisy-server/src/service/object/sync.rs` (`reconcile_deletions`)
+- `crates/nvisy-postgres/src/query/workspace_file.rs` (`imported_files_for_connection`, `hard_delete_workspace_file`)
 
 ## 5. Webhook-triggered sync — `tracked`
 
 `SyncTriggerType::Webhook` is a dead enum value: no inbound endpoint or consumer
 ever constructs a webhook-triggered run. The webhook subsystem is outbound-only.
+Filed as [#175](https://github.com/nvisycom/server/issues/175) — low priority
+since manual sync via the API already covers the use case.
 
 - Enum (unused): `crates/nvisy-postgres/src/types/enums/sync_trigger_type.rs:29`
 
-## 6. Failure retry / backoff — `tracked`
+## 6. Failure retry / backoff — `done`
 
-A cleanly failed run is fail-and-forget. JetStream provides crash-redelivery
-(job redelivered if the process dies before ack), but there is no retry or
-backoff for business-level failures.
+Scheduled runs carry a 1-based `attempt`. On a failed scheduled run the worker
+re-enqueues the job with `attempt + 1`, up to a bounded maximum, after a linear
+backoff that runs in a detached task so the consumer is not blocked. Manual runs
+are not retried (the caller can re-trigger). Crash-redelivery via JetStream is
+unchanged and independent.
 
-- `crates/nvisy-server/src/service/object/sync.rs:288-321`
-- `crates/nvisy-server/src/service/object/worker.rs:197-206`
+- `crates/nvisy-server/src/service/object/worker.rs` (`maybe_retry`, job `attempt`)
 
 ## 7. Scheduled export — `deferred`
 

@@ -23,6 +23,8 @@ pub struct ConnectionSync {
     pub status: SyncStatus,
     /// Number of objects transferred so far.
     pub records_synced: i64,
+    /// 1-based attempt number; scheduled syncs may be retried on failure.
+    pub attempt: i32,
     /// Failure reason when the sync failed; omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
@@ -42,6 +44,7 @@ impl ConnectionSync {
             trigger_type: run.trigger_type,
             status: run.status,
             records_synced: run.records_synced,
+            attempt: run.attempt,
             error_message: run.error_message,
             started_at: run.started_at.into(),
             completed_at: run.completed_at.map(Into::into),

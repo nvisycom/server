@@ -119,11 +119,12 @@ pub trait WorkspaceConnectionRunRepository {
         error_message: &str,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
-    /// Marks a run as cancelled.
+    /// Marks a run as cancelled, only if it is still active. Returns `None` if
+    /// the run was already terminal and was therefore left unchanged.
     fn cancel_workspace_connection_run(
         &mut self,
         run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
     /// Fails all `Running` runs that started before `cutoff`, returning the
     /// number reaped. Recovers runs orphaned by a crash mid-sync.
@@ -494,19 +495,26 @@ impl WorkspaceConnectionRunRepository for PgConnection {
     async fn cancel_workspace_connection_run(
         &mut self,
         run_id: Uuid,
-    ) -> PgResult<WorkspaceConnectionRun> {
+    ) -> PgResult<Option<WorkspaceConnectionRun>> {
         use diesel::dsl::now;
         use schema::workspace_connection_runs::{self, dsl};
 
-        let run = diesel::update(workspace_connection_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(SyncStatus::Cancelled),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspaceConnectionRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
+        // Only transition from an active state, so a run that already completed,
+        // failed, or was reaped is not overwritten as cancelled.
+        let run = diesel::update(
+            workspace_connection_runs::table
+                .filter(dsl::id.eq(run_id))
+                .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
+        )
+        .set((
+            dsl::status.eq(SyncStatus::Cancelled),
+            dsl::completed_at.eq(now),
+        ))
+        .returning(WorkspaceConnectionRun::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(PgError::from)?;
 
         Ok(run)
     }

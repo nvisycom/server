@@ -139,6 +139,7 @@ impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
                 ErrorKind::Conflict.with_message("A sync is already in progress")
             }
             WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
+            | WorkspaceConnectionRunConstraints::AttemptPositive
             | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }

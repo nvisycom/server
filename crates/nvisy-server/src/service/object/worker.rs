@@ -42,6 +42,13 @@ const STALE_RUN_AGE_HOURS: i64 = 6;
 /// Fixed KV key for the per-tick scheduler leader-election lock.
 const SCHEDULER_LOCK_KEY: &str = "connection-sync-scheduler";
 
+/// Maximum number of attempts for a scheduled sync before it is left failed.
+const MAX_SYNC_ATTEMPTS: i32 = 3;
+
+/// Base backoff before re-enqueueing a failed scheduled sync. Each attempt
+/// waits this multiplied by the attempt number (linear backoff).
+const RETRY_BACKOFF: Duration = Duration::from_secs(30);
+
 /// A scheduled sync job: enqueued by the scheduler, consumed by any instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionSyncJob {
@@ -49,6 +56,16 @@ pub struct ConnectionSyncJob {
     pub workspace_id: Uuid,
     /// Connection to sync.
     pub connection_id: Uuid,
+    /// 1-based attempt number; a failed run re-enqueues with this incremented,
+    /// up to a bounded maximum.
+    #[serde(default = "first_attempt")]
+    pub attempt: i32,
+}
+
+/// Default attempt for jobs enqueued before this field existed, and for the
+/// first attempt of a new job.
+fn first_attempt() -> i32 {
+    1
 }
 
 type JobPublisher = EventPublisher<ConnectionSyncJob, ConnectionSyncStream>;
@@ -171,6 +188,7 @@ impl ConnectionSyncWorker {
             let job = ConnectionSyncJob {
                 workspace_id: connection.workspace_id,
                 connection_id: connection.id,
+                attempt: 1,
             };
             if let Err(err) = publisher.publish(&job).await {
                 tracing::error!(
@@ -236,7 +254,7 @@ impl ConnectionSyncWorker {
             return;
         }
 
-        let (credentials, run_id) = match self.begin_run(&connection).await {
+        let (credentials, run_id) = match self.begin_run(&connection, job.attempt).await {
             Ok(started) => started,
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Failed to start scheduled run");
@@ -247,9 +265,78 @@ impl ConnectionSyncWorker {
         // Scheduled syncs are import-only; imported files are attributed to the
         // connection's creator. Runs through the shared transfer path.
         let account_id = connection.account_id;
+        let connection_id = connection.id;
+        let workspace_id = connection.workspace_id;
         self.sync
             .run_transfer(run_id, connection, credentials, account_id, None)
             .await;
+
+        self.maybe_retry(workspace_id, connection_id, run_id, job.attempt)
+            .await;
+    }
+
+    /// Re-enqueues a scheduled job after a failed run, up to
+    /// [`MAX_SYNC_ATTEMPTS`]. Reads the run's final status; a run that was
+    /// cancelled or completed is not retried.
+    ///
+    /// The linear backoff runs in a detached task so the consumer can ack and
+    /// move on immediately rather than blocking the whole queue during the wait.
+    async fn maybe_retry(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        run_id: Uuid,
+        attempt: i32,
+    ) {
+        if attempt >= MAX_SYNC_ATTEMPTS {
+            return;
+        }
+
+        let failed = {
+            let mut conn = match self.postgres.get_connection().await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");
+                    return;
+                }
+            };
+            match conn.find_workspace_connection_run_by_id(run_id).await {
+                Ok(Some(run)) => run.is_failed(),
+                Ok(None) => false,
+                Err(err) => {
+                    tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");
+                    return;
+                }
+            }
+        };
+        if !failed {
+            return;
+        }
+
+        let next_attempt = attempt + 1;
+        let backoff = RETRY_BACKOFF * attempt as u32;
+        let nats = self.nats.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(backoff).await;
+
+            let job = ConnectionSyncJob {
+                workspace_id,
+                connection_id,
+                attempt: next_attempt,
+            };
+            let publisher: JobPublisher = match nats.event_publisher().await {
+                Ok(publisher) => publisher,
+                Err(err) => {
+                    tracing::error!(target: TRACING_TARGET, %connection_id, error = %err, "Failed to build publisher for retry");
+                    return;
+                }
+            };
+            if let Err(err) = publisher.publish(&job).await {
+                tracing::error!(target: TRACING_TARGET, %connection_id, error = %err, "Failed to re-enqueue failed sync");
+            } else {
+                tracing::info!(target: TRACING_TARGET, %connection_id, attempt = next_attempt, "Re-enqueued failed scheduled sync");
+            }
+        });
     }
 
     /// Loads the connection for a job, scoped to its workspace.
@@ -263,10 +350,12 @@ impl ConnectionSyncWorker {
             .await?)
     }
 
-    /// Decrypts credentials and opens a `Scheduled` run for the connection.
+    /// Decrypts credentials and opens a `Scheduled` run for the connection at the
+    /// given attempt number.
     async fn begin_run(
         &self,
         connection: &WorkspaceConnection,
+        attempt: i32,
     ) -> Result<(serde_json::Value, Uuid)> {
         let credentials = self
             .crypto
@@ -279,6 +368,7 @@ impl ConnectionSyncWorker {
             trigger_type: Some(SyncTriggerType::Scheduled),
             status: Some(SyncStatus::Running),
             records_synced: Some(0),
+            attempt: Some(attempt),
             metadata: None,
         };
         let run = conn.create_workspace_connection_run(new_run).await?;

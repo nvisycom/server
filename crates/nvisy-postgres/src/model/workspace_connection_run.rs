@@ -31,6 +31,8 @@ pub struct WorkspaceConnectionRun {
     pub status: SyncStatus,
     /// Number of records processed.
     pub records_synced: i64,
+    /// 1-based attempt number; scheduled runs may be retried up to a limit.
+    pub attempt: i32,
     /// Failure detail when status is failed.
     pub error_message: Option<String>,
     /// Non-encrypted metadata for filtering/display.
@@ -56,6 +58,8 @@ pub struct NewWorkspaceConnectionRun {
     pub status: Option<SyncStatus>,
     /// Number of records processed.
     pub records_synced: Option<i64>,
+    /// 1-based attempt number (defaults to 1).
+    pub attempt: Option<i32>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<JsonValue>,
 }

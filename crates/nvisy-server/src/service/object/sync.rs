@@ -17,13 +17,13 @@ use nvisy_postgres::model::{
     NewWorkspaceFile, UpdateWorkspaceConnectionRun, WorkspaceConnection, WorkspaceFile,
 };
 use nvisy_postgres::query::{WorkspaceConnectionRunRepository, WorkspaceFileRepository};
-use nvisy_postgres::types::FileSource;
+use nvisy_postgres::types::{FileSource, SyncDeletionPolicy};
 use uuid::Uuid;
 
 use super::ObjectService;
 use super::bridge::{reader_to_stream, stream_to_reader};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{CryptoService, HashingReader, Measurements};
+use crate::service::{CryptoService, HashingReader, Measurements, WebhookEmitter};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::object::sync";
@@ -39,6 +39,7 @@ pub struct ConnectionSyncService {
     nats: NatsClient,
     crypto: CryptoService,
     object: ObjectService,
+    webhook: WebhookEmitter,
 }
 
 impl ConnectionSyncService {
@@ -48,21 +49,26 @@ impl ConnectionSyncService {
         nats: NatsClient,
         crypto: CryptoService,
         object: ObjectService,
+        webhook: WebhookEmitter,
     ) -> Self {
         Self {
             postgres,
             nats,
             crypto,
             object,
+            webhook,
         }
     }
 
-    /// Imports every not-yet-imported object from the connection.
+    /// Imports every not-yet-imported object from the connection and reconciles
+    /// deletions according to the connection's deletion policy.
     ///
     /// Lists the objects under the connection's root path, skips those already
     /// imported (by remote key), and streams the rest into the workspace file
     /// store. A single object failing is logged and skipped rather than aborting
-    /// the whole sync. Returns the number of objects imported.
+    /// the whole sync. Files whose source object is no longer present are then
+    /// reconciled per the connection's policy (removed and desynced, or left
+    /// untouched). Returns the number of objects imported.
     #[tracing::instrument(
         name = "sync.import_new",
         skip_all,
@@ -81,9 +87,14 @@ impl ConnectionSyncService {
             .connect(&connection.provider, credentials)
             .await?;
 
-        // List the source; keys are already scoped to the connection's root path
-        // by the provider's PrefixStore.
+        // List the source once; keys are already scoped to the connection's root
+        // path by the provider's PrefixStore. The listing is reused both to
+        // import new objects and to detect ones that have been deleted.
         let objects = client.list("").await?;
+        let remote_keys: HashSet<String> = objects
+            .iter()
+            .map(|o| o.location.as_ref().to_owned())
+            .collect();
 
         let mut conn = self.postgres.get_connection().await?;
         let already_imported: HashSet<String> = conn
@@ -94,12 +105,11 @@ impl ConnectionSyncService {
         drop(conn);
 
         let mut imported = 0u64;
-        for object in objects {
-            let key = object.location.as_ref().to_owned();
-            if already_imported.contains(&key) {
+        for key in &remote_keys {
+            if already_imported.contains(key) {
                 continue;
             }
-            match self.import_one(&client, connection, account_id, &key).await {
+            match self.import_one(&client, connection, account_id, key).await {
                 Ok(_) => imported += 1,
                 Err(err) => {
                     // Tolerate a single bad object; the rest of the sync proceeds.
@@ -112,8 +122,112 @@ impl ConnectionSyncService {
             }
         }
 
+        self.reconcile_deletions(connection, account_id, &remote_keys)
+            .await;
+
         tracing::info!(target: TRACING_TARGET, imported, "Import sync complete");
         Ok(imported)
+    }
+
+    /// Removes imported files whose source object no longer exists, per the
+    /// connection's [`SyncDeletionPolicy`].
+    ///
+    /// `Ignore` leaves everything untouched. `SoftDelete` marks each vanished
+    /// file deleted; `HardDelete` also removes its stored object. Either removal
+    /// policy emits a single `ConnectionDesynced` event when anything changed.
+    /// Failures on individual files are logged and skipped so one bad file does
+    /// not abort reconciliation.
+    async fn reconcile_deletions(
+        &self,
+        connection: &WorkspaceConnection,
+        account_id: Uuid,
+        remote_keys: &HashSet<String>,
+    ) {
+        if connection.deletion_policy == SyncDeletionPolicy::Ignore {
+            return;
+        }
+
+        let imported = {
+            let mut conn = match self.postgres.get_connection().await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    tracing::error!(target: TRACING_TARGET, error = %err, "Failed to list imported files for reconciliation");
+                    return;
+                }
+            };
+            match conn.imported_files_for_connection(connection.id).await {
+                Ok(files) => files,
+                Err(err) => {
+                    tracing::error!(target: TRACING_TARGET, error = %err, "Failed to list imported files for reconciliation");
+                    return;
+                }
+            }
+        };
+
+        let mut removed = 0u64;
+        for (source_key, file_id, storage_path) in imported {
+            if remote_keys.contains(&source_key) {
+                continue;
+            }
+            if let Err(err) = self
+                .remove_vanished_file(connection, file_id, &storage_path)
+                .await
+            {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    key = %source_key, error = %err,
+                    "Failed to reconcile deleted source object",
+                );
+            } else {
+                removed += 1;
+            }
+        }
+
+        if removed > 0 {
+            tracing::info!(target: TRACING_TARGET, removed, "Reconciled deleted source objects");
+            let _ = self
+                .webhook
+                .emit_connection_desynced(
+                    connection.workspace_id,
+                    connection.id,
+                    Some(account_id),
+                    Some(serde_json::json!({ "removed": removed })),
+                )
+                .await;
+        }
+    }
+
+    /// Removes a single file whose source object is gone, per the connection's
+    /// policy: soft-delete only, or hard-delete plus stored-object removal.
+    async fn remove_vanished_file(
+        &self,
+        connection: &WorkspaceConnection,
+        file_id: Uuid,
+        storage_path: &str,
+    ) -> Result<()> {
+        let mut conn = self.postgres.get_connection().await?;
+        match connection.deletion_policy {
+            SyncDeletionPolicy::Ignore => {}
+            SyncDeletionPolicy::SoftDelete => {
+                conn.delete_workspace_file(file_id).await?;
+            }
+            SyncDeletionPolicy::HardDelete => {
+                conn.hard_delete_workspace_file(file_id).await?;
+                // Best-effort stored-object removal; the row is already gone, so
+                // a failure here only leaves an orphaned object, logged below.
+                if let Ok(file_key) = FileKey::from_str(storage_path) {
+                    let store = self.nats.object_store::<FilesBucket>().await?;
+                    if let Err(err) = store.delete(&file_key).await {
+                        tracing::error!(
+                            target: TRACING_TARGET,
+                            error = %err,
+                            "Failed to delete stored object after hard delete",
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Imports one object at `remote_key` using an already-connected `client`.

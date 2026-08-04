@@ -1,6 +1,6 @@
 //! Connection request types.
 
-use nvisy_postgres::types::{ConnectionId, SyncMode};
+use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -35,8 +35,11 @@ pub struct CreateConnection {
     /// Cron expression for scheduled imports; omit for manual-only.
     #[validate(length(min = 9, max = 100))]
     pub schedule_cron: Option<String>,
-    /// Connection data to be encrypted (credentials + context).
-    /// The structure depends on the provider type.
+    /// How an import reconciles files whose source object was deleted.
+    #[serde(default)]
+    pub deletion_policy: SyncDeletionPolicy,
+    /// Connection data to be encrypted (provider credentials + optional root
+    /// path). The structure depends on the provider type.
     pub data: serde_json::Value,
 }
 
@@ -52,8 +55,10 @@ pub struct UpdateConnection {
     /// Cron expression for scheduled imports; send `null` to clear it.
     #[validate(length(min = 9, max = 100))]
     pub schedule_cron: Option<String>,
-    /// Connection data to be encrypted (credentials + context).
-    /// If provided, replaces the existing encrypted data.
+    /// How an import reconciles files whose source object was deleted.
+    pub deletion_policy: Option<SyncDeletionPolicy>,
+    /// Connection data to be encrypted (provider credentials + optional root
+    /// path). If provided, replaces the existing encrypted data.
     pub data: Option<serde_json::Value>,
 }
 
