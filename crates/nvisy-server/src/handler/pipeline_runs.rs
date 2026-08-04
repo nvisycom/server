@@ -12,7 +12,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use bytes::Bytes;
-use nvisy_engine::policy::Policy as SchemaPolicy;
+use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
 use nvisy_engine::{AnalyzedDocument, Document};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, IntermediateKey, IntermediatesBucket};

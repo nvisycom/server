@@ -1,6 +1,6 @@
 //! Policy request types.
 
-use nvisy_engine::policy::Policy as SchemaPolicy;
+use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ pub struct PolicyPathParams {
 /// Request payload for creating a new workspace policy.
 ///
 /// The `definition` is a structured policy the redaction engine consumes;
-/// its `name`, `description`, and `version` drive the stored columns unless
-/// overridden here.
+/// its `name` and `description` drive the stored columns unless overridden
+/// here.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePolicy {
