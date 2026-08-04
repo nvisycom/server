@@ -139,6 +139,9 @@ bytes = { version = "1.10", features = ["serde"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
 
+# Image processing
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+
 # Cron parsing
 croner = { version = "3" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }

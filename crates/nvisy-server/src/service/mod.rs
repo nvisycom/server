@@ -1,5 +1,6 @@
 //! Application state and dependency injection.
 
+mod avatar;
 pub mod crypto;
 pub mod engine;
 mod health;
@@ -14,6 +15,7 @@ use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
+pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
@@ -48,6 +50,7 @@ pub struct ServiceState {
     pub engine: EngineService,
 
     // Internal services:
+    pub avatar: AvatarService,
     pub connection_sync: ConnectionSyncService,
     pub health_cache: HealthCache,
     pub object: ObjectService,
@@ -86,6 +89,7 @@ impl ServiceState {
         ];
 
         let object = ObjectService::new();
+        let avatar = AvatarService::new(nats_client.clone(), postgres_client.clone());
         let connection_sync = ConnectionSyncService::new(
             postgres_client.clone(),
             nats_client.clone(),
@@ -102,6 +106,7 @@ impl ServiceState {
             crypto,
             engine,
 
+            avatar,
             connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
             object,
@@ -154,6 +159,7 @@ impl_di!(
 
 // Internal services:
 impl_di!(
+    avatar: AvatarService,
     connection_sync: ConnectionSyncService,
     crypto: CryptoService,
     engine: EngineService,

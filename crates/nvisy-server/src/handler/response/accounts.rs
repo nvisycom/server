@@ -25,6 +25,9 @@ pub struct Account {
     pub display_name: Option<String>,
     /// Email address associated with the account.
     pub email_address: String,
+    /// Serve path of the account's avatar, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 
     /// Timestamp when the account was created.
     pub created_at: Timestamp,
@@ -42,6 +45,7 @@ impl Account {
 
             display_name: account.display_name,
             email_address: account.email_address,
+            avatar_url: account.avatar_url,
 
             created_at: account.created_at.into(),
             updated_at: account.updated_at.into(),
@@ -62,6 +66,9 @@ pub struct PublicAccount {
     /// Display name of the account holder, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Serve path of the account's avatar, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     /// Timestamp when the account was created.
     pub created_at: Timestamp,
 }
@@ -71,6 +78,7 @@ impl PublicAccount {
         Self {
             username: account.username,
             display_name: account.display_name,
+            avatar_url: account.avatar_url,
             created_at: account.created_at.into(),
         }
     }

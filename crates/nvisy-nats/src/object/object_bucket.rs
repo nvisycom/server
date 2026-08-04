@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use super::object_key::{AccountKey, FileKey, IntermediateKey, ObjectKey};
+use super::object_key::{AccountKey, FileKey, IntermediateKey, ObjectKey, WorkspaceKey};
 
 /// Marker trait for object storage buckets.
 ///
@@ -71,6 +71,19 @@ impl ObjectBucket for AvatarsBucket {
 
     const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "ACCOUNT_AVATARS";
+}
+
+/// Storage for workspace avatars (logos).
+///
+/// No expiration, avatars are retained indefinitely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct WorkspaceAvatarsBucket;
+
+impl ObjectBucket for WorkspaceAvatarsBucket {
+    type Key = WorkspaceKey;
+
+    const MAX_AGE: Option<Duration> = None;
+    const NAME: &'static str = "WORKSPACE_AVATARS";
 }
 
 #[cfg(test)]

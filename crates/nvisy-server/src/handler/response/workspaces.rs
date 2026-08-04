@@ -20,6 +20,9 @@ pub struct Workspace {
     /// Description of the workspace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Serve path of the workspace's avatar (logo), when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     /// Tags associated with the workspace.
     pub tags: Vec<String>,
     /// Whether approval is required to processed files to be visible.
@@ -42,6 +45,7 @@ impl Workspace {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
+            avatar_url: workspace.avatar_url,
             tags,
             require_approval: workspace.require_approval,
             creator_username,
@@ -62,6 +66,7 @@ impl Workspace {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
+            avatar_url: workspace.avatar_url,
             tags,
             require_approval: workspace.require_approval,
             creator_username,
