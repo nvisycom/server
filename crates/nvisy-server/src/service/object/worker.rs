@@ -19,7 +19,9 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{LockKey, SchedulerLocksBucket};
 use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewWorkspaceConnectionRun, WorkspaceConnection};
+use nvisy_postgres::model::{
+    NewWorkspaceConnectionRun, WorkspaceConnection, WorkspaceConnectionRun,
+};
 use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
 use nvisy_postgres::types::{SyncStatus, SyncTriggerType};
 use serde::{Deserialize, Serialize};
@@ -159,41 +161,49 @@ impl ConnectionSyncWorker {
             return Ok(());
         }
 
-        let mut conn = self.postgres.get_connection().await?;
-        let connections = conn.list_scheduled_connections().await?;
+        let connections = {
+            let mut conn = self.postgres.get_connection().await?;
+            conn.list_scheduled_connections().await?
+        };
+
+        // Snapshot each connection's latest run in one query, then release the DB
+        // connection before publishing so it is not held across NATS round-trips.
+        let due = {
+            let mut conn = self.postgres.get_connection().await?;
+            let mut due = Vec::new();
+            for connection in connections {
+                let Some(cron) = &connection.schedule_cron else {
+                    continue;
+                };
+                let latest = conn
+                    .find_latest_workspace_connection_run(connection.id)
+                    .await?;
+                // A run already in progress means this connection is busy; skip it.
+                if latest.as_ref().is_some_and(|run| run.is_in_progress()) {
+                    continue;
+                }
+                // Due-ness is measured from the last attempt (success or failure),
+                // not the last success, so a persistently failing connection is not
+                // re-enqueued every tick; retries are owned by maybe_retry.
+                let last_attempt = latest.map(|run| run.started_at.into());
+                if is_cron_due(cron, last_attempt, now) {
+                    due.push((connection.workspace_id, connection.id));
+                }
+            }
+            due
+        };
 
         let publisher: JobPublisher = self.nats.event_publisher().await?;
-        for connection in connections {
-            let Some(cron) = &connection.schedule_cron else {
-                continue;
-            };
-            let last_sync = conn
-                .last_successful_sync_at(&[connection.id])
-                .await?
-                .into_iter()
-                .next()
-                .map(|(_, ts)| ts.into());
-            if !is_cron_due(cron, last_sync, now) {
-                continue;
-            }
-            // Skip when a run is already in progress for this connection.
-            if let Some(latest) = conn
-                .find_latest_workspace_connection_run(connection.id)
-                .await?
-                && latest.is_in_progress()
-            {
-                continue;
-            }
-
+        for (workspace_id, connection_id) in due {
             let job = ConnectionSyncJob {
-                workspace_id: connection.workspace_id,
-                connection_id: connection.id,
+                workspace_id,
+                connection_id,
                 attempt: 1,
             };
             if let Err(err) = publisher.publish(&job).await {
                 tracing::error!(
                     target: TRACING_TARGET,
-                    connection_id = %connection.id, error = %err,
+                    %connection_id, error = %err,
                     "Failed to enqueue scheduled sync",
                 );
             }
@@ -218,7 +228,7 @@ impl ConnectionSyncWorker {
                             // ack redelivers the job; the import is idempotent
                             // (already-imported keys are skipped), so a redelivery
                             // is safe.
-                            self.run_job(job).await;
+                            self.run_job(job, &cancel).await;
                             if let Err(err) = message.ack().await {
                                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to ack job");
                             }
@@ -237,7 +247,7 @@ impl ConnectionSyncWorker {
 
     /// Runs one scheduled import job: loads the connection, opens a `Scheduled`
     /// run, and performs the import.
-    async fn run_job(&self, job: ConnectionSyncJob) {
+    async fn run_job(&self, job: ConnectionSyncJob, cancel: &CancellationToken) {
         let connection = match self.load_connection(&job).await {
             Ok(Some(connection)) => connection,
             Ok(None) => {
@@ -254,10 +264,28 @@ impl ConnectionSyncWorker {
             return;
         }
 
+        // A job may be delivered more than once (at-least-once), or a duplicate
+        // may have been enqueued. If a run is already in progress for this
+        // connection, skip rather than starting a second concurrent run. The
+        // one-active-run unique index is the authoritative guard; this check just
+        // avoids the noisy index violation on the common redelivery case.
+        match self.load_latest_run(&connection).await {
+            Ok(Some(run)) if run.is_in_progress() => {
+                tracing::debug!(target: TRACING_TARGET, connection_id = %connection.id, "Sync already in progress; skipping duplicate job");
+                return;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Failed to check in-progress run");
+                return;
+            }
+        }
+
         let (credentials, run_id) = match self.begin_run(&connection, job.attempt).await {
             Ok(started) => started,
             Err(err) => {
-                tracing::error!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Failed to start scheduled run");
+                // A concurrent run beat us to the unique index; treat as benign.
+                tracing::debug!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Skipping scheduled run: could not open (likely already active)");
                 return;
             }
         };
@@ -271,7 +299,7 @@ impl ConnectionSyncWorker {
             .run_transfer(run_id, connection, credentials, account_id, None)
             .await;
 
-        self.maybe_retry(workspace_id, connection_id, run_id, job.attempt)
+        self.maybe_retry(workspace_id, connection_id, run_id, job.attempt, cancel)
             .await;
     }
 
@@ -281,12 +309,15 @@ impl ConnectionSyncWorker {
     ///
     /// The linear backoff runs in a detached task so the consumer can ack and
     /// move on immediately rather than blocking the whole queue during the wait.
+    /// The task also stops on the worker's cancellation token so a shutdown does
+    /// not leave a sleeping re-enqueue behind.
     async fn maybe_retry(
         &self,
         workspace_id: Uuid,
         connection_id: Uuid,
         run_id: Uuid,
         attempt: i32,
+        cancel: &CancellationToken,
     ) {
         if attempt >= MAX_SYNC_ATTEMPTS {
             return;
@@ -316,8 +347,14 @@ impl ConnectionSyncWorker {
         let next_attempt = attempt + 1;
         let backoff = RETRY_BACKOFF * attempt as u32;
         let nats = self.nats.clone();
+        let cancel = cancel.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(backoff).await;
+            // Wait out the backoff, but abandon the retry if the worker is
+            // shutting down so no sleeping task outlives the process.
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(backoff) => {}
+            }
 
             let job = ConnectionSyncJob {
                 workspace_id,
@@ -347,6 +384,17 @@ impl ConnectionSyncWorker {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn
             .find_connection_in_workspace(job.workspace_id, job.connection_id)
+            .await?)
+    }
+
+    /// Loads the most recent run for a connection (its current sync state).
+    async fn load_latest_run(
+        &self,
+        connection: &WorkspaceConnection,
+    ) -> Result<Option<WorkspaceConnectionRun>> {
+        let mut conn = self.postgres.get_connection().await?;
+        Ok(conn
+            .find_latest_workspace_connection_run(connection.id)
             .await?)
     }
 

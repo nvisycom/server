@@ -52,9 +52,10 @@ pub struct UpdateConnection {
     pub display_name: Option<String>,
     /// Whether the connection imports data in or exports data out.
     pub sync_mode: Option<SyncMode>,
-    /// Cron expression for scheduled imports; send `null` to clear it.
+    /// Cron expression for scheduled imports. Omit to leave unchanged; send
+    /// `null` to clear it (make the connection manual-only).
     #[validate(length(min = 9, max = 100))]
-    pub schedule_cron: Option<String>,
+    pub schedule_cron: Option<Option<String>>,
     /// How an import reconciles files whose source object was deleted.
     pub deletion_policy: Option<SyncDeletionPolicy>,
     /// Connection data to be encrypted (provider credentials + optional root

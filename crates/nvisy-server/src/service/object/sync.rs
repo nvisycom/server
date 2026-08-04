@@ -5,19 +5,19 @@
 //! [`WorkspaceFile`]; export pushes a stored file back out to the connection.
 //! Both directions stream end to end and keep files encrypted at rest in NATS.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path as StdPath;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket};
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{
-    NewWorkspaceFile, UpdateWorkspaceConnectionRun, WorkspaceConnection, WorkspaceFile,
-};
+use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
 use nvisy_postgres::query::{WorkspaceConnectionRunRepository, WorkspaceFileRepository};
 use nvisy_postgres::types::{FileSource, SyncDeletionPolicy};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::ObjectService;
@@ -31,6 +31,12 @@ const TRACING_TARGET: &str = "nvisy_server::service::object::sync";
 /// Maximum wall-clock time for a single sync transfer before it is failed.
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
+/// How a transfer ended: either it ran to a result/timeout, or it was cancelled.
+enum Outcome {
+    Finished(Result<u64>),
+    Cancelled,
+}
+
 /// Moves objects between an external connection and the internal file store.
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
@@ -40,6 +46,11 @@ pub struct ConnectionSyncService {
     crypto: CryptoService,
     object: ObjectService,
     webhook: WebhookEmitter,
+    // Cancellation tokens for transfers running in this process, keyed by run id.
+    // Cancellation is best-effort and process-local: it aborts a transfer only on
+    // the instance running it. Cross-instance runs are stopped by the DB status
+    // flip plus the status-guarded finalizers.
+    running: Arc<Mutex<HashMap<Uuid, CancellationToken>>>,
 }
 
 impl ConnectionSyncService {
@@ -57,6 +68,21 @@ impl ConnectionSyncService {
             crypto,
             object,
             webhook,
+            running: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Signals a locally-running transfer to stop, if this instance is running
+    /// it. Returns whether a token was found and cancelled. This is best-effort:
+    /// a run executing on another instance is not reached here and relies on the
+    /// DB status flip instead.
+    pub fn cancel_local(&self, run_id: Uuid) -> bool {
+        let guard = self.running.lock().expect("sync cancel registry poisoned");
+        if let Some(token) = guard.get(&run_id) {
+            token.cancel();
+            true
+        } else {
+            false
         }
     }
 
@@ -346,7 +372,11 @@ impl ConnectionSyncService {
     /// surfaces as a join error and a hung backend as a timeout, both recorded
     /// as a failed run rather than leaving it stuck `Running`. `export` selects
     /// the direction: `None` imports all new objects, `Some((file, key))` pushes
-    /// a file out. Shared by the manual endpoint and the scheduled worker.
+    /// a file out. A cancel signal (see [`cancel_local`]) aborts the transfer and
+    /// records the run as cancelled. Shared by the manual endpoint and the
+    /// scheduled worker.
+    ///
+    /// [`cancel_local`]: Self::cancel_local
     pub async fn run_transfer(
         &self,
         run_id: Uuid,
@@ -355,8 +385,14 @@ impl ConnectionSyncService {
         account_id: Uuid,
         export: Option<(WorkspaceFile, String)>,
     ) {
+        let token = CancellationToken::new();
+        self.running
+            .lock()
+            .expect("sync cancel registry poisoned")
+            .insert(run_id, token.clone());
+
         let transfer = self.clone();
-        let work = tokio::spawn(async move {
+        let mut work = tokio::spawn(async move {
             match export {
                 None => {
                     transfer
@@ -370,14 +406,35 @@ impl ConnectionSyncService {
             }
         });
 
-        let result = match tokio::time::timeout(SYNC_TIMEOUT, work).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(join_err)) => Err(ErrorKind::InternalServerError
-                .with_message("Sync task terminated unexpectedly")
-                .with_context(join_err.to_string())),
-            Err(_elapsed) => Err(ErrorKind::InternalServerError.with_message("Sync timed out")),
+        // Race the transfer against a cancel signal and a hard timeout. The join
+        // handle is polled by mutable reference so it can still be aborted in the
+        // cancel/timeout branches.
+        let outcome = tokio::select! {
+            _ = token.cancelled() => {
+                work.abort();
+                Outcome::Cancelled
+            }
+            _ = tokio::time::sleep(SYNC_TIMEOUT) => {
+                work.abort();
+                Outcome::Finished(Err(ErrorKind::InternalServerError.with_message("Sync timed out")))
+            }
+            joined = &mut work => match joined {
+                Ok(result) => Outcome::Finished(result),
+                Err(join_err) => Outcome::Finished(Err(ErrorKind::InternalServerError
+                    .with_message("Sync task terminated unexpectedly")
+                    .with_context(join_err.to_string()))),
+            },
         };
-        self.finish_run(run_id, result).await;
+
+        self.running
+            .lock()
+            .expect("sync cancel registry poisoned")
+            .remove(&run_id);
+
+        match outcome {
+            Outcome::Finished(result) => self.finish_run(run_id, result).await,
+            Outcome::Cancelled => self.cancel_run(run_id).await,
+        }
     }
 
     /// Records the outcome of a background sync run: completes it (one object
@@ -400,14 +457,8 @@ impl ConnectionSyncService {
 
         let outcome = match result {
             Ok(records_synced) => {
-                let updates = UpdateWorkspaceConnectionRun {
-                    records_synced: Some(records_synced as i64),
-                    ..Default::default()
-                };
-                if let Err(err) = conn.update_workspace_connection_run(run_id, updates).await {
-                    tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record sync count");
-                }
-                conn.complete_workspace_connection_run(run_id).await
+                conn.complete_workspace_connection_run(run_id, records_synced as i64)
+                    .await
             }
             Err(err) => {
                 // Log the full error (may include backend URLs/details) but
@@ -426,6 +477,22 @@ impl ConnectionSyncService {
                 %run_id, error = %err,
                 "Failed to finalize sync run",
             );
+        }
+    }
+
+    /// Marks a cancelled run's row as cancelled. The status transition is
+    /// guarded, so if the cancel handler already flipped the row (or it reached
+    /// another terminal state first) this is a harmless no-op.
+    async fn cancel_run(&self, run_id: Uuid) {
+        let mut conn = match self.postgres.get_connection().await {
+            Ok(conn) => conn,
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record cancellation: no connection");
+                return;
+            }
+        };
+        if let Err(err) = conn.cancel_workspace_connection_run(run_id).await {
+            tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record sync cancellation");
         }
     }
 }

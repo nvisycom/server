@@ -125,13 +125,18 @@ where
     /// wins the create and the entry auto-expires if the winner dies.
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
     pub async fn create(&self, key: &K, value: &V) -> Result<bool> {
+        use async_nats::jetstream::kv::CreateErrorKind;
+
         let key_str = key.to_string();
         let json = serde_json::to_vec(value)?;
         match self.store.create(&key_str, json.into()).await {
             Ok(_revision) => Ok(true),
             // A create against an existing key is the "lock already held" case,
-            // not an error worth propagating.
-            Err(_) => Ok(false),
+            // not an error. Any other failure (network, ack, publish) is a real
+            // infrastructure error and must be propagated rather than masqueraded
+            // as a lost lock.
+            Err(err) if err.kind() == CreateErrorKind::AlreadyExists => Ok(false),
+            Err(err) => Err(Error::operation("kv_create", err.to_string())),
         }
     }
 

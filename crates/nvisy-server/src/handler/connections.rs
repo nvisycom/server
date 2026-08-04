@@ -67,10 +67,17 @@ async fn create_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    if let Some(cron) = &request.schedule_cron
-        && !is_valid_cron(cron)
-    {
-        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+    if let Some(cron) = &request.schedule_cron {
+        if !is_valid_cron(cron) {
+            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+        }
+        // Scheduling is import-only; reject an export connection with a cron up
+        // front rather than surfacing the DB CHECK as a generic error.
+        if request.sync_mode.is_export() {
+            return Err(
+                ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
+            );
+        }
     }
 
     let encrypted_data = crypto.encrypt_json(workspace.id, &request.data)?;
@@ -278,7 +285,9 @@ async fn update_connection(
     let (existing, _, _) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
-    if let Some(cron) = &request.schedule_cron
+    // Only a newly-set cron is validated; `Some(None)` clears it and `None`
+    // leaves it unchanged.
+    if let Some(Some(cron)) = &request.schedule_cron
         && !is_valid_cron(cron)
     {
         return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
@@ -292,7 +301,7 @@ async fn update_connection(
     let update_data = UpdateWorkspaceConnection {
         display_name: request.display_name,
         sync_mode: request.sync_mode,
-        schedule_cron: request.schedule_cron.map(Some),
+        schedule_cron: request.schedule_cron,
         deletion_policy: request.deletion_policy,
         encrypted_data,
         ..Default::default()
@@ -415,13 +424,15 @@ async fn verify_connection(
                 ConnectionVerification::reachable()
             }
             Err(err) => {
+                // Log the full error, but return only a safe kind-based reason so
+                // backend URLs/bucket names are not exposed to the client.
                 tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
-                ConnectionVerification::unreachable(err.to_string())
+                ConnectionVerification::unreachable(err.kind().reason())
             }
         },
         Err(err) => {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
-            ConnectionVerification::unreachable(err.to_string())
+            ConnectionVerification::unreachable(err.kind().reason())
         }
     };
 

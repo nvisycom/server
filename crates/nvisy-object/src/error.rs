@@ -39,6 +39,24 @@ impl ErrorKind {
     pub fn is_retryable(self) -> bool {
         matches!(self, Self::Runtime | Self::Connection)
     }
+
+    /// A safe, user-facing reason for this failure that does not expose backend
+    /// URLs, bucket names, or other infrastructure detail. Suitable for return
+    /// in API responses (e.g. connection verification).
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NotFound => "The object or bucket was not found",
+            Self::AlreadyExists => "The object already exists",
+            Self::Precondition => "A precondition was not met",
+            Self::NotModified => "The object was not modified",
+            Self::PermissionDenied => "Access was denied by the store",
+            Self::Unauthenticated => "The credentials were rejected",
+            Self::NotSupported => "The operation is not supported by this store",
+            Self::Connection => "Could not connect to the store",
+            Self::Runtime => "The store returned an error",
+        }
+    }
 }
 
 /// An error carrying a classified [`ErrorKind`], a message, and an optional

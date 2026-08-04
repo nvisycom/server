@@ -102,13 +102,17 @@ pub trait WorkspaceConnectionRunRepository {
         updates: UpdateWorkspaceConnectionRun,
     ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
 
-    /// Marks a run as completed successfully, only if it is still active.
+    /// Marks a run as completed successfully with its final record count, only if
+    /// it is still active.
     ///
     /// Returns the updated run, or `None` if the run was already in a terminal
-    /// state (e.g. reaped) and was therefore left unchanged.
+    /// state (e.g. cancelled or reaped) and was therefore left unchanged. The
+    /// count is written under the same status guard so a terminal run's fields
+    /// are never mutated after the fact.
     fn complete_workspace_connection_run(
         &mut self,
         run_id: Uuid,
+        records_synced: i64,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
 
     /// Marks a run as failed, recording the error detail, only if it is still
@@ -439,12 +443,13 @@ impl WorkspaceConnectionRunRepository for PgConnection {
     async fn complete_workspace_connection_run(
         &mut self,
         run_id: Uuid,
+        records_synced: i64,
     ) -> PgResult<Option<WorkspaceConnectionRun>> {
         use diesel::dsl::now;
         use schema::workspace_connection_runs::{self, dsl};
 
-        // Only transition from an active state, so a run already reaped/failed is
-        // not resurrected as completed.
+        // Only transition from an active state, so a run already cancelled/reaped
+        // is not resurrected as completed and its record count is not rewritten.
         let run = diesel::update(
             workspace_connection_runs::table
                 .filter(dsl::id.eq(run_id))
@@ -452,6 +457,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         )
         .set((
             dsl::status.eq(SyncStatus::Completed),
+            dsl::records_synced.eq(records_synced),
             dsl::completed_at.eq(now),
         ))
         .returning(WorkspaceConnectionRun::as_returning())

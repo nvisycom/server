@@ -243,6 +243,7 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn cancel_connection_sync(
     State(pg_client): State<PgClient>,
+    State(connection_sync): State<ConnectionSyncService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionSyncPathParams>,
@@ -270,6 +271,11 @@ async fn cancel_connection_sync(
         .ok_or_else(|| {
             ErrorKind::Conflict.with_message("Sync is not in progress and cannot be cancelled")
         })?;
+
+    // Signal the transfer to stop if it is running on this instance. A run on
+    // another instance is stopped by the status flip above plus the
+    // status-guarded finalizers.
+    connection_sync.cancel_local(run.id);
 
     Ok((StatusCode::OK, Json(ConnectionSync::from_model(cancelled))))
 }

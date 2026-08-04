@@ -18,6 +18,12 @@ pub trait EventStream: Clone + Send + Sync + 'static {
 
     /// Default consumer name for this stream.
     const CONSUMER_NAME: &'static str;
+
+    /// How long the server waits for an ack before redelivering a message.
+    /// `None` uses the JetStream default (30s). Set this above the longest
+    /// expected processing time so a slow-but-healthy job is not redelivered
+    /// and run a second time concurrently.
+    const ACK_WAIT: Option<Duration> = None;
 }
 
 /// Stream for webhook delivery.
@@ -43,6 +49,9 @@ impl EventStream for WebhookStream {
 pub struct ConnectionSyncStream;
 
 impl EventStream for ConnectionSyncStream {
+    // A sync transfer is bounded by a 30-minute timeout; allow ack time to
+    // exceed that so a slow-but-healthy job is not redelivered mid-run.
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(35 * 60));
     const CONSUMER_NAME: &'static str = "connection-sync-worker";
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
     const NAME: &'static str = "CONNECTION_SYNCS";
