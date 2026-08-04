@@ -184,10 +184,13 @@ impl WorkspaceFile {
 
     /// Returns the SHA-256 hash as a hex string.
     pub fn hash_hex(&self) -> String {
-        self.file_hash_sha256
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect()
+        use std::fmt::Write;
+
+        let mut hex = String::with_capacity(self.file_hash_sha256.len() * 2);
+        for byte in &self.file_hash_sha256 {
+            let _ = write!(hex, "{byte:02x}");
+        }
+        hex
     }
 
     /// Returns whether this is the original version (version 1).

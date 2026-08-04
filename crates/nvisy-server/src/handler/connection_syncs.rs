@@ -87,7 +87,6 @@ async fn sync_connection(
             })?;
             let key = request
                 .key
-                .clone()
                 .ok_or_else(|| ErrorKind::BadRequest.with_message("key is required to export"))?;
             let file = conn
                 .find_file_in_workspace(workspace.id, file_id)

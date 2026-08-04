@@ -47,6 +47,7 @@ where
         consumer_name: &str,
         max_age: Option<Duration>,
         ack_wait: Option<Duration>,
+        filter_subject: Option<String>,
     ) -> Result<Self> {
         // Try to get existing stream, create if it doesn't exist
         match jetstream.get_stream(stream_name).await {
@@ -90,21 +91,11 @@ where
                 jetstream: jetstream.clone(),
                 stream_name: stream_name.to_string(),
                 consumer_name: consumer_name.to_string(),
-                filter_subject: None,
+                filter_subject,
                 ack_wait,
             }),
             _marker: PhantomData,
         })
-    }
-
-    /// Add a subject filter to the subscriber (builder pattern).
-    pub fn with_filter_subject(self, filter: impl Into<String>) -> Self {
-        let mut inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| (*arc).clone());
-        inner.filter_subject = Some(filter.into());
-        Self {
-            inner: Arc::new(inner),
-            _marker: PhantomData,
-        }
     }
 
     /// Subscribe to the stream and get a typed message stream.
@@ -157,6 +148,7 @@ where
 
         Ok(TypedMessageStream {
             consumer,
+            messages: None,
             _marker: PhantomData,
         })
     }
@@ -300,8 +292,14 @@ where
 }
 
 /// Type-safe message stream wrapper.
+///
+/// Holds a single long-lived pull-consumer message stream and polls it
+/// repeatedly. The stream is opened lazily on the first [`next`](Self::next) and
+/// then reused, so messages already fetched into its buffer are not dropped
+/// between calls.
 pub struct TypedMessageStream<T> {
     consumer: Consumer<consumer::pull::Config>,
+    messages: Option<consumer::pull::Stream>,
     _marker: PhantomData<T>,
 }
 
@@ -321,37 +319,41 @@ where
         }
     }
 
-    /// Fetch the next message from the stream.
+    /// Fetch the next message from the persistent message stream.
     pub async fn next(&mut self) -> Result<Option<TypedMessage<T>>> {
-        match self.consumer.messages().await {
-            Ok(mut messages) => {
-                if let Some(msg) = messages.next().await {
-                    match msg {
-                        Ok(message) => {
-                            let payload: T = serde_json::from_slice(&message.payload)?;
+        // Open the message stream once and reuse it across calls; recreating it
+        // each call would drop any already-fetched-but-unpolled messages.
+        if self.messages.is_none() {
+            let messages = self
+                .consumer
+                .messages()
+                .await
+                .map_err(|e| Error::operation("messages_stream", e.to_string()))?;
+            self.messages = Some(messages);
+        }
+        let messages = self.messages.as_mut().expect("message stream initialized");
 
-                            tracing::debug!(
-                                target: TRACING_TARGET_STREAM,
-                                subject = %message.subject,
-                                "Received typed message"
-                            );
+        match messages.next().await {
+            Some(Ok(message)) => {
+                let payload: T = serde_json::from_slice(&message.payload)?;
 
-                            Ok(Some(TypedMessage { payload, message }))
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                target: TRACING_TARGET_STREAM,
-                                error = %e,
-                                "Error receiving message"
-                            );
-                            Err(Error::operation("message_receive", e.to_string()))
-                        }
-                    }
-                } else {
-                    Ok(None)
-                }
+                tracing::debug!(
+                    target: TRACING_TARGET_STREAM,
+                    subject = %message.subject,
+                    "Received typed message"
+                );
+
+                Ok(Some(TypedMessage { payload, message }))
             }
-            Err(e) => Err(Error::operation("messages_stream", e.to_string())),
+            Some(Err(e)) => {
+                tracing::warn!(
+                    target: TRACING_TARGET_STREAM,
+                    error = %e,
+                    "Error receiving message"
+                );
+                Err(Error::operation("message_receive", e.to_string()))
+            }
+            None => Ok(None),
         }
     }
 }

@@ -10,8 +10,8 @@ use crate::model::{
     Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
 };
 use crate::types::{
-    Cursor, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
-    OffsetPagination, SortOrder, Username, WorkspaceRole,
+    CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField, OffsetPagination,
+    SortOrder, Username, WorkspaceRole,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -329,37 +329,17 @@ impl WorkspaceMemberRepository for PgConnection {
             );
         }
 
-        let fetch_limit = pagination.fetch_limit();
-        let mut items: Vec<WorkspaceMember> = query
+        let items: Vec<WorkspaceMember> = query
             .select(WorkspaceMember::as_select())
             .order((dsl::created_at.desc(), dsl::account_id.desc()))
-            .limit(fetch_limit)
+            .limit(pagination.fetch_limit())
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        let has_more = items.len() as i64 > pagination.limit;
-        if has_more {
-            items.pop();
-        }
-
-        let next_cursor = if has_more {
-            items.last().map(|m| {
-                Cursor {
-                    timestamp: m.created_at.into(),
-                    id: m.account_id,
-                }
-                .encode()
-            })
-        } else {
-            None
-        };
-
-        Ok(CursorPage {
-            items,
-            total,
-            next_cursor,
-        })
+        Ok(CursorPage::new(items, total, pagination.limit, |m| {
+            (m.created_at.into(), m.account_id)
+        }))
     }
 
     async fn list_account_workspaces(

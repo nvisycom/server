@@ -282,7 +282,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             query = query.filter(dsl::status.eq(status));
         }
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
         let items: Vec<(WorkspaceConnectionRun, Option<Username>)> =
             if let Some(cursor) = &pagination.after {
@@ -362,7 +362,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             None
         };
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
         let selection = (
             WorkspaceConnectionRun::as_select(),
             connections::id,

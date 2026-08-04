@@ -84,20 +84,23 @@ pub async fn validate_token_middleware(
             .with_resource("authorization"));
     }
 
-    // Verify token exists in database and update last_used_at
+    // Verify token exists in database and update last_used_at. A genuine
+    // not-found means the token was revoked (401); any other database error is
+    // an infrastructure failure and must not be masqueraded as an auth failure.
     let mut conn = pg_database.get_connection().await?;
-    let token = conn.touch_account_api_token(auth_claims.token_id).await;
-
-    if token.is_err() {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            account_id = %auth_claims.account_id,
-            token_id = %auth_claims.token_id,
-            "token not found in database"
-        );
-        return Err(ErrorKind::Unauthorized
-            .with_context("Authentication token not found")
-            .with_resource("authorization"));
+    if let Err(error) = conn.touch_account_api_token(auth_claims.token_id).await {
+        if error.is_not_found() {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                account_id = %auth_claims.account_id,
+                token_id = %auth_claims.token_id,
+                "token not found in database"
+            );
+            return Err(ErrorKind::Unauthorized
+                .with_context("Authentication token not found")
+                .with_resource("authorization"));
+        }
+        return Err(error.into());
     }
 
     Ok(next.run(request).await)

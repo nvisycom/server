@@ -99,7 +99,10 @@ impl Workspace {
 
     /// Returns the flattened tags (removing None values).
     pub fn get_tags(&self) -> Vec<String> {
-        self.tags.iter().filter_map(|tag| tag.clone()).collect()
+        self.tags
+            .iter()
+            .filter_map(|tag| tag.as_deref().map(str::to_owned))
+            .collect()
     }
 
     /// Returns whether the workspace has tags.
@@ -109,9 +112,7 @@ impl Workspace {
 
     /// Returns whether the workspace contains a specific tag.
     pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags
-            .iter()
-            .any(|t| t.as_ref() == Some(&tag.to_string()))
+        self.tags.iter().any(|t| t.as_deref() == Some(tag))
     }
 
     /// Returns whether the workspace has a description.

@@ -10,6 +10,8 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use serde::{Deserialize, Serialize};
 
+use crate::types::utilities::{HandleViolation, validate_handle};
+
 /// Minimum length of a slug, in characters.
 pub const SLUG_MIN_LENGTH: usize = 3;
 
@@ -102,21 +104,10 @@ impl Slug {
 
     /// Checks the slug invariants without allocating.
     fn validate(value: &str) -> Result<(), SlugError> {
-        let length = value.chars().count();
-        if !(SLUG_MIN_LENGTH..=SLUG_MAX_LENGTH).contains(&length) {
-            return Err(SlugError::Length);
-        }
-
-        let valid_chars = value
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-        let bounded = !value.starts_with('-') && !value.ends_with('-');
-        let no_double_dash = !value.contains("--");
-
-        if valid_chars && bounded && no_double_dash {
-            Ok(())
-        } else {
-            Err(SlugError::Format)
+        match validate_handle(value, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH) {
+            Ok(()) => Ok(()),
+            Err(HandleViolation::Length) => Err(SlugError::Length),
+            Err(HandleViolation::Format) => Err(SlugError::Format),
         }
     }
 }

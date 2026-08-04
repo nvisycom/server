@@ -98,10 +98,7 @@ impl ServerConfig {
     /// Returns whether the server binds to all interfaces (0.0.0.0 or ::).
     #[must_use]
     pub const fn binds_to_all_interfaces(&self) -> bool {
-        match self.host {
-            IpAddr::V4(addr) => addr.is_unspecified(),
-            IpAddr::V6(addr) => addr.is_unspecified(),
-        }
+        self.host.is_unspecified()
     }
 
     /// Returns whether TLS is configured.
@@ -127,7 +124,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             host: default_host(),
-            port: 8080,
+            port: 3000,
             shutdown_timeout: Duration::from_secs(30),
             #[cfg(feature = "tls")]
             tls_cert_path: PathBuf::from("cert.pem"),
@@ -147,7 +144,7 @@ mod tests {
     fn default_config() {
         let config = ServerConfig::default();
         assert!(config.binds_to_all_interfaces());
-        assert_eq!(config.port, 8080);
+        assert_eq!(config.port, 3000);
         assert_eq!(config.shutdown_timeout, Duration::from_secs(30));
     }
 
@@ -156,7 +153,7 @@ mod tests {
         let config = ServerConfig::default();
         let addr = config.socket_addr();
         assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        assert_eq!(addr.port(), 8080);
+        assert_eq!(addr.port(), 3000);
     }
 
     #[test]

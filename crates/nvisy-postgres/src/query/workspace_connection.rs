@@ -279,7 +279,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             query = query.filter(dsl::provider.eq(provider));
         }
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
         let items: Vec<(WorkspaceConnection, Username)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);

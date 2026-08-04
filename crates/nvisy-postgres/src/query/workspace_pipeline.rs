@@ -257,7 +257,7 @@ impl WorkspacePipelineRepository for PgConnection {
             query = query.filter(dsl::display_name.trgm_similar_to(term));
         }
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
         let items: Vec<(WorkspacePipeline, Username)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);

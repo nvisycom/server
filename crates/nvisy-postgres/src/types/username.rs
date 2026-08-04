@@ -10,6 +10,8 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use serde::{Deserialize, Serialize};
 
+use crate::types::utilities::{HandleViolation, validate_handle};
+
 /// Minimum length of a username, in characters.
 pub const USERNAME_MIN_LENGTH: usize = 3;
 
@@ -75,21 +77,10 @@ impl Username {
 
     /// Checks the username invariants without allocating.
     fn validate(value: &str) -> Result<(), UsernameError> {
-        let length = value.chars().count();
-        if !(USERNAME_MIN_LENGTH..=USERNAME_MAX_LENGTH).contains(&length) {
-            return Err(UsernameError::Length);
-        }
-
-        let valid_chars = value
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-        let bounded = !value.starts_with('-') && !value.ends_with('-');
-        let no_double_dash = !value.contains("--");
-
-        if valid_chars && bounded && no_double_dash {
-            Ok(())
-        } else {
-            Err(UsernameError::Format)
+        match validate_handle(value, USERNAME_MIN_LENGTH, USERNAME_MAX_LENGTH) {
+            Ok(()) => Ok(()),
+            Err(HandleViolation::Length) => Err(UsernameError::Length),
+            Err(HandleViolation::Format) => Err(UsernameError::Format),
         }
     }
 }

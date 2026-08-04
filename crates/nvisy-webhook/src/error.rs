@@ -2,7 +2,6 @@
 
 use hipstr::HipStr;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
-use thiserror::Error;
 
 /// Type alias for boxed dynamic errors that can be sent across threads.
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
@@ -44,16 +43,34 @@ impl ErrorKind {
 
 /// Structured error describing a webhook delivery failure.
 #[must_use]
-#[derive(Debug, Error)]
-#[error("[{kind}]{}", message.as_ref().map(|m| format!(": {m}")).unwrap_or_default())]
+#[derive(Debug)]
 pub struct Error {
     /// The kind of delivery error that occurred.
     pub kind: ErrorKind,
     /// Primary error message.
     pub message: Option<HipStr<'static>>,
     /// Underlying source error, if any.
-    #[source]
     pub source: Option<BoxedError>,
+}
+
+impl std::fmt::Display for Error {
+    /// Renders as `[{kind}]` with an optional `: {message}` suffix, writing
+    /// directly into the formatter without an intermediate allocation.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}]", self.kind)?;
+        if let Some(message) = &self.message {
+            write!(f, ": {message}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source.as_ref() as &(dyn std::error::Error + 'static))
+    }
 }
 
 impl Error {

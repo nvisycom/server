@@ -127,6 +127,15 @@ impl PgError {
             .is_some_and(|name| name.ends_with("_slug_key"))
     }
 
+    /// Returns whether this error is a "no rows returned" result, i.e. a query
+    /// that expected a row found none.
+    ///
+    /// Distinguishes a genuine not-found from an infrastructure failure so
+    /// callers can map the former to a 404/401 and the latter to a 500.
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, PgError::Query(Error::NotFound))
+    }
+
     /// Returns whether this error indicates a transient failure that might succeed on retry.
     ///
     /// Transient errors include timeouts and certain connection issues that may

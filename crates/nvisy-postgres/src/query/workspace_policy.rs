@@ -200,7 +200,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
         let items: Vec<(WorkspacePolicy, Username)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);

@@ -447,7 +447,7 @@ impl WorkspaceFileRepository for PgConnection {
             query = query.filter(dsl::file_extension.eq_any(extensions));
         }
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
         // Apply cursor filter if present
         let items: Vec<(WorkspaceFile, Username)> = if let Some(cursor) = &pagination.after {

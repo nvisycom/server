@@ -269,16 +269,16 @@ async fn logout(
         tracing::warn!(target: TRACING_TARGET, "Logout completed but token was not found");
     }
 
-    // Opportunistically clean up expired sessions for this account (fire and forget)
-    tokio::spawn(async move {
-        if let Err(e) = conn.cleanup_expired_account_api_tokens().await {
-            tracing::debug!(
-                target: TRACING_TARGET_CLEANUP,
-                error = %e,
-                "Failed to cleanup expired sessions during logout"
-            );
-        }
-    });
+    // Opportunistically clean up expired sessions for this account. Run inline on
+    // the request's connection so a pooled slot is not pinned to a detached task;
+    // this is best-effort, so a failure is only logged.
+    if let Err(e) = conn.cleanup_expired_account_api_tokens().await {
+        tracing::debug!(
+            target: TRACING_TARGET_CLEANUP,
+            error = %e,
+            "Failed to cleanup expired sessions during logout"
+        );
+    }
 
     Ok(StatusCode::OK)
 }

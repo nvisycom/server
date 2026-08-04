@@ -169,24 +169,22 @@ where
 
                 Ok(Some(GetResult::new(reader, info)))
             }
+            Err(e) if matches!(e.kind(), object_store::GetErrorKind::NotFound) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    key = %key_str,
+                    "Object not found"
+                );
+                Ok(None)
+            }
             Err(e) => {
-                let error_str = e.to_string();
-                if error_str.contains("not found") || error_str.contains("no message found") {
-                    tracing::debug!(
-                        target: TRACING_TARGET,
-                        key = %key_str,
-                        "Object not found"
-                    );
-                    Ok(None)
-                } else {
-                    tracing::error!(
-                        target: TRACING_TARGET,
-                        key = %key_str,
-                        error = %e,
-                        "Failed to get object"
-                    );
-                    Err(Error::operation("get", e.to_string()))
-                }
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    key = %key_str,
+                    error = %e,
+                    "Failed to get object"
+                );
+                Err(Error::operation("get", e.to_string()))
             }
         }
     }
@@ -197,14 +195,8 @@ where
 
         match self.inner.info(&key_str).await {
             Ok(info) => Ok(Some(info)),
-            Err(e) => {
-                let error_str = e.to_string();
-                if error_str.contains("not found") {
-                    Ok(None)
-                } else {
-                    Err(Error::operation("info", e.to_string()))
-                }
-            }
+            Err(e) if matches!(e.kind(), object_store::InfoErrorKind::NotFound) => Ok(None),
+            Err(e) => Err(Error::operation("info", e.to_string())),
         }
     }
 

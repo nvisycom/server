@@ -179,8 +179,9 @@ impl PasswordHasher {
 
         // Generate a random dummy password (16 characters)
         let password_len = rand::random_range(16..32);
+        let mut rng = rand::rng();
         let dummy_password: String = (0..password_len)
-            .map(|_| rand::rng().sample(Alphanumeric) as char)
+            .map(|_| rng.sample(Alphanumeric) as char)
             .collect();
 
         // Hash the dummy password and verify, this will always fail

@@ -9,7 +9,9 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{Account, NewAccountNotification, NewWorkspaceMember, WorkspaceInvite};
+use nvisy_postgres::model::{
+    Account, NewAccountNotification, NewWorkspaceMember, WorkspaceInvite, WorkspaceMember,
+};
 use nvisy_postgres::query::{
     AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
     WorkspaceMemberRepository, WorkspaceRepository,
@@ -332,37 +334,8 @@ async fn reply_to_invite(
     }
 
     if request.accept_invite {
-        // Check if user is already a member
-        if conn
-            .find_workspace_member(invite.workspace_id, auth_state.account_id)
-            .await?
-            .is_some()
-        {
-            return Err(ErrorKind::Conflict
-                .with_message("You are already a member of this workspace")
-                .with_resource("workspace_member"));
-        }
-
-        let invite_id = invite.id;
-        let workspace_id = invite.workspace_id;
-        let invited_role = invite.invited_role;
-        let account_id = auth_state.account_id;
-
-        let (workspace_member, account) = conn
-            .transaction(async |conn| {
-                conn.accept_workspace_invite(invite_id, account_id).await?;
-
-                let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
-                conn.add_workspace_member(new_member).await?;
-
-                let result = conn
-                    .find_workspace_member_with_account(workspace_id, account_id)
-                    .await?
-                    .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))?;
-
-                Ok::<_, PgError>(result)
-            })
-            .await?;
+        let (workspace_member, account) =
+            accept_invite_as_member(&mut conn, &invite, auth_state.account_id).await?;
 
         tracing::info!(target: TRACING_TARGET, "Invitation accepted");
         Ok((
@@ -535,37 +508,10 @@ async fn reply_to_invite_code(
     }
 
     if accept {
-        // Check if user is already a member
-        if conn
-            .find_workspace_member(invite.workspace_id, auth_state.account_id)
-            .await?
-            .is_some()
-        {
-            return Err(ErrorKind::Conflict
-                .with_message("You are already a member of this workspace")
-                .with_resource("workspace_member"));
-        }
-
-        let invite_id = invite.id;
         let workspace_id = invite.workspace_id;
         let invited_role = invite.invited_role;
-        let account_id = auth_state.account_id;
-
-        let (workspace_member, account) = conn
-            .transaction(async |conn| {
-                conn.accept_workspace_invite(invite_id, account_id).await?;
-
-                let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
-                conn.add_workspace_member(new_member).await?;
-
-                let result = conn
-                    .find_workspace_member_with_account(workspace_id, account_id)
-                    .await?
-                    .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))?;
-
-                Ok::<_, PgError>(result)
-            })
-            .await?;
+        let (workspace_member, account) =
+            accept_invite_as_member(&mut conn, &invite, auth_state.account_id).await?;
 
         tracing::info!(
             target: TRACING_TARGET,
@@ -603,6 +549,46 @@ fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
+}
+
+/// Accepts an invite on behalf of an account and returns the new membership.
+///
+/// Rejects with a Conflict if the account is already a member, then, in a single
+/// transaction, marks the invite accepted, adds the member, and reads it back
+/// with its account. Shared by the invite-id and invite-code accept paths.
+async fn accept_invite_as_member(
+    conn: &mut PgConn,
+    invite: &WorkspaceInvite,
+    account_id: Uuid,
+) -> Result<(WorkspaceMember, Account)> {
+    if conn
+        .find_workspace_member(invite.workspace_id, account_id)
+        .await?
+        .is_some()
+    {
+        return Err(ErrorKind::Conflict
+            .with_message("You are already a member of this workspace")
+            .with_resource("workspace_member"));
+    }
+
+    let invite_id = invite.id;
+    let workspace_id = invite.workspace_id;
+    let invited_role = invite.invited_role;
+
+    let member = conn
+        .transaction(async |conn| {
+            conn.accept_workspace_invite(invite_id, account_id).await?;
+
+            let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
+            conn.add_workspace_member(new_member).await?;
+
+            conn.find_workspace_member_with_account(workspace_id, account_id)
+                .await?
+                .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))
+        })
+        .await?;
+
+    Ok(member)
 }
 
 /// Finds an invite within a workspace or returns NotFound error.
