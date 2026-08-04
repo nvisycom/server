@@ -20,7 +20,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
-use crate::handler::response::{ErrorResponse, PoliciesPage, Policy};
+use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
 use crate::handler::utility::resolve_creator_username;
 use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
@@ -30,9 +30,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 
 /// Creates a new workspace policy.
 ///
-/// The request body carries a structured policy definition; its name,
-/// description, and version drive the stored record unless overridden.
-/// Requires `ManagePolicies` permission for the workspace.
+/// The request body carries a structured policy definition; its name and
+/// description drive the stored record unless overridden. Requires
+/// `ManagePolicies` permission for the workspace.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -62,7 +62,6 @@ async fn create_policy(
     let description = request
         .description
         .or_else(|| definition.description.clone());
-    let version = definition.version.to_string();
     let encrypted = crypto.encrypt_json(workspace.id, definition)?;
 
     let new_policy = NewWorkspacePolicy {
@@ -71,7 +70,6 @@ async fn create_policy(
         slug: request.slug,
         display_name,
         description,
-        version,
         definition: encrypted,
         metadata: None,
     };
@@ -113,7 +111,6 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_policies(
     State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Query(pagination): Query<CursorPagination>,
@@ -136,9 +133,11 @@ async fn list_policies(
         "Workspace policies listed",
     );
 
-    let page = PoliciesPage::try_from_cursor_page(page, |(model, creator_username)| {
-        Policy::from_model(model, workspace.slug.clone(), creator_username, &crypto)
-    })?;
+    // The list carries only metadata; the encrypted definition is decrypted only
+    // by the single-policy endpoint, so a page costs no per-item decryption.
+    let page = PoliciesPage::from_cursor_page(page, |(model, creator_username)| {
+        PolicySummary::from_model(model, workspace.slug.clone(), creator_username)
+    });
 
     Ok((StatusCode::OK, Json(page)))
 }
@@ -203,7 +202,7 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 /// Updates a workspace policy.
 ///
 /// All fields are optional; replacing the definition replaces the whole
-/// policy body (and its version). Requires `ManagePolicies` permission.
+/// policy body. Requires `ManagePolicies` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -231,18 +230,14 @@ async fn update_policy(
     // Confirm the policy exists in this workspace before mutating.
     let (existing, _) = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
-    let (version, definition) = match &request.definition {
-        Some(definition) => {
-            let encrypted = crypto.encrypt_json(workspace.id, definition)?;
-            (Some(definition.version.to_string()), Some(encrypted))
-        }
-        None => (None, None),
+    let definition = match &request.definition {
+        Some(definition) => Some(crypto.encrypt_json(workspace.id, definition)?),
+        None => None,
     };
 
     let updates = UpdateWorkspacePolicy {
         display_name: request.display_name,
         description: request.description,
-        version,
         definition,
         ..Default::default()
     };

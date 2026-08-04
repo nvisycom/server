@@ -333,7 +333,6 @@ diesel::table! {
         slug -> Text,
         display_name -> Text,
         description -> Nullable<Text>,
-        version -> Text,
         definition -> Bytea,
         metadata -> Jsonb,
         created_at -> Timestamptz,

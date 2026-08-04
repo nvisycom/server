@@ -24,14 +24,12 @@ CREATE TABLE workspace_policies (
     -- Core attributes
     display_name    TEXT            NOT NULL,
     description     TEXT            DEFAULT NULL,
-    version         TEXT            NOT NULL,
 
     CONSTRAINT workspace_policies_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_policies_description_length CHECK (description IS NULL OR length(description) <= 4096),
-    CONSTRAINT workspace_policies_version_length CHECK (length(trim(version)) BETWEEN 1 AND 64),
 
-    -- Policy body (nvisy_schema::policy::Policy as JSON: rules, labels,
-    -- fallback, retention, applies_when predicate). Stored XChaCha20-Poly1305
+    -- Policy body (nvisy_schema::policy::PolicyDefinition as JSON: rules, labels,
+    -- fallback, retention, `when` predicate). Stored XChaCha20-Poly1305
     -- encrypted with the workspace-derived key.
     definition      BYTEA           NOT NULL,
 
@@ -76,7 +74,6 @@ COMMENT ON COLUMN workspace_policies.workspace_id IS 'Parent workspace reference
 COMMENT ON COLUMN workspace_policies.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_policies.display_name IS 'Human-readable policy display name (1-255 chars)';
 COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
-COMMENT ON COLUMN workspace_policies.version IS 'Semver of the policy body';
 COMMENT ON COLUMN workspace_policies.definition IS 'Encrypted policy body (XChaCha20-Poly1305, workspace-derived key)';
 COMMENT ON COLUMN workspace_policies.metadata IS 'Metadata for filtering/display';
 COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
