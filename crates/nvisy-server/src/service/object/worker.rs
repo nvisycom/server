@@ -98,11 +98,26 @@ impl ConnectionSyncWorker {
         }
     }
 
-    /// Runs the worker until cancelled: reaps stale runs, then drives the
-    /// scheduler tick and the job consumer concurrently.
+    /// Runs the worker until cancelled, logging its lifecycle (start, stop,
+    /// failure).
     pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting connection sync worker");
 
+        let result = self.run_inner(cancel).await;
+
+        match &result {
+            Ok(()) => tracing::info!(target: TRACING_TARGET, "Connection sync worker stopped"),
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Connection sync worker failed")
+            }
+        }
+
+        result
+    }
+
+    /// Reaps stale runs, then drives the scheduler tick and the job consumer
+    /// concurrently until cancelled.
+    async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
         if let Err(err) = self.reap_stale_runs().await {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to reap stale runs");
         }
@@ -221,7 +236,10 @@ impl ConnectionSyncWorker {
 
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
+                _ = cancel.cancelled() => {
+                    tracing::info!(target: TRACING_TARGET, "Connection sync worker shutdown requested");
+                    break;
+                }
                 result = stream.next_with_timeout(Duration::from_secs(5)) => {
                     match result {
                         Ok(Some(mut message)) => {

@@ -19,6 +19,7 @@ struct StreamSubscriberInner {
     consumer_name: String,
     filter_subject: Option<String>,
     ack_wait: Option<Duration>,
+    max_deliver: Option<i64>,
 }
 
 /// Type-safe stream subscriber with compile-time guarantees.
@@ -47,6 +48,7 @@ where
         consumer_name: &str,
         max_age: Option<Duration>,
         ack_wait: Option<Duration>,
+        max_deliver: Option<i64>,
         filter_subject: Option<String>,
     ) -> Result<Self> {
         // Try to get existing stream, create if it doesn't exist
@@ -93,6 +95,7 @@ where
                 consumer_name: consumer_name.to_string(),
                 filter_subject,
                 ack_wait,
+                max_deliver,
             }),
             _marker: PhantomData,
         })
@@ -110,6 +113,10 @@ where
 
         if let Some(ack_wait) = self.inner.ack_wait {
             consumer_config.ack_wait = ack_wait;
+        }
+
+        if let Some(max_deliver) = self.inner.max_deliver {
+            consumer_config.max_deliver = max_deliver;
         }
 
         if let Some(filter) = &self.inner.filter_subject {
@@ -168,6 +175,10 @@ where
 
         if let Some(ack_wait) = self.inner.ack_wait {
             consumer_config.ack_wait = ack_wait;
+        }
+
+        if let Some(max_deliver) = self.inner.max_deliver {
+            consumer_config.max_deliver = max_deliver;
         }
 
         if let Some(filter) = &self.inner.filter_subject {
