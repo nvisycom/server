@@ -148,9 +148,10 @@ impl ConnectionSyncWorker {
 
         // Leader election for this wall-clock period: the lock key is the period
         // itself, so exactly one instance wins per period regardless of each
-        // instance's tick phase. The bucket TTL reclaims old period keys.
+        // instance's tick phase. The bucket TTL reclaims old period keys. Segments
+        // are joined with `.`, which NATS KV keys allow (`[-/_=.a-zA-Z0-9]`).
         let period = now.as_second() / TICK_INTERVAL.as_secs() as i64;
-        let lock_key = LockKey::from(format!("{SCHEDULER_LOCK_KEY}:{period}").as_str());
+        let lock_key = LockKey::from(format!("{SCHEDULER_LOCK_KEY}.{period}").as_str());
         let locks = self
             .nats
             .kv_store::<LockKey, u64, SchedulerLocksBucket>()
