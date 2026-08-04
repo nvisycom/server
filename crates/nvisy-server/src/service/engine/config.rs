@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use nvisy_engine::entity::ConfidenceThreshold;
 use nvisy_engine::plan::{EnricherParams, MergingStrategyParams, TiebreakerParams};
+use nvisy_engine::primitive::ConfidenceThreshold;
 use nvisy_engine::provider::{LlmConfig, LlmRecognizer, NerConfig, NerRecognizer};
 use serde::{Deserialize, Serialize};
 
