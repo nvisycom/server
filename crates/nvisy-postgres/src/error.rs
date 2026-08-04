@@ -119,12 +119,21 @@ impl PgError {
     /// constraint on any resource (workspace or workspace-scoped config).
     ///
     /// Matches by constraint name so a single check covers every table's slug
-    /// unique index without enumerating each constraint enum. Slug uniqueness
+    /// unique index without enumerating each constraint enum. Handle uniqueness
     /// constraints are named `*_slug_key` (global) or `*_workspace_id_slug_key`
     /// (per workspace).
     pub fn is_slug_conflict(&self) -> bool {
         self.constraint()
             .is_some_and(|name| name.ends_with("_slug_key"))
+    }
+
+    /// Returns whether this error is a "no rows returned" result, i.e. a query
+    /// that expected a row found none.
+    ///
+    /// Distinguishes a genuine not-found from an infrastructure failure so
+    /// callers can map the former to a 404/401 and the latter to a 500.
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, PgError::Query(Error::NotFound))
     }
 
     /// Returns whether this error indicates a transient failure that might succeed on retry.

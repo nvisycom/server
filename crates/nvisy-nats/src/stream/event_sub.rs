@@ -43,9 +43,9 @@ where
             S::CONSUMER_NAME,
             S::MAX_AGE,
             S::ACK_WAIT,
+            Some(format!("{}.>", S::NAME)),
         )
-        .await?
-        .with_filter_subject(format!("{}.>", S::NAME));
+        .await?;
         Ok(Self {
             subscriber,
             _stream: PhantomData,

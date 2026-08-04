@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use crate::Error;
+
 /// Configuration for NATS connections with sensible defaults.
 #[derive(Debug, Clone)]
 pub struct NatsConfig {
@@ -116,24 +118,28 @@ impl NatsConfig {
     }
 
     /// Validate the configuration and return any issues.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> crate::Result<()> {
         let servers = self.servers();
 
         if servers.is_empty() {
-            return Err("At least one server URL must be provided".to_string());
+            return Err(Error::invalid_config(
+                "At least one server URL must be provided",
+            ));
         }
 
         for server in servers {
             if server.is_empty() {
-                return Err("Server URL cannot be empty".to_string());
+                return Err(Error::invalid_config("Server URL cannot be empty"));
             }
             if !server.starts_with("nats://") {
-                return Err(format!("Invalid server URL format: {}", server));
+                return Err(Error::invalid_config(format!(
+                    "Invalid server URL format: {server}"
+                )));
             }
         }
 
         if self.nats_token.is_empty() {
-            return Err("Token cannot be empty".to_string());
+            return Err(Error::invalid_config("Token cannot be empty"));
         }
 
         Ok(())

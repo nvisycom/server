@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{PipelineStatus, Slug, Username};
+use nvisy_postgres::types::{Handle, PipelineStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,11 +15,11 @@ use crate::handler::request::PipelineDefinition;
 #[serde(rename_all = "camelCase")]
 pub struct Pipeline {
     /// URL slug of the pipeline, unique within its workspace.
-    pub slug: Slug,
-    /// Slug of the workspace this pipeline belongs to.
-    pub workspace_slug: Slug,
+    pub slug: Handle,
+    /// Handle of the workspace this pipeline belongs to.
+    pub workspace_slug: Handle,
     /// Handle of the account that created this pipeline.
-    pub creator_username: Username,
+    pub creator_username: Handle,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -46,9 +46,9 @@ impl Pipeline {
     /// JSON does not decode to the current schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
-        workspace_slug: Slug,
-        creator_username: Username,
-        policy_slugs: Vec<Slug>,
+        workspace_slug: Handle,
+        creator_username: Handle,
+        policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
         Self::assemble(
             pipeline,
@@ -62,10 +62,10 @@ impl Pipeline {
     /// Creates a pipeline response with artifacts and reference slugs.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
-        workspace_slug: Slug,
-        creator_username: Username,
+        workspace_slug: Handle,
+        creator_username: Handle,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
-        policy_slugs: Vec<Slug>,
+        policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
         let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
         Self::assemble(
@@ -80,10 +80,10 @@ impl Pipeline {
     /// Shared assembly: decodes the stored config and merges the references.
     fn assemble(
         pipeline: model::WorkspacePipeline,
-        workspace_slug: Slug,
-        creator_username: Username,
+        workspace_slug: Handle,
+        creator_username: Handle,
         artifacts: Vec<Artifact>,
-        policy_slugs: Vec<Slug>,
+        policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
         let definition = PipelineDefinition::from_parts(pipeline.definition, policy_slugs)?;
         Ok(Self {
@@ -110,7 +110,7 @@ pub type PipelinesPage = Page<Pipeline>;
 #[serde(rename_all = "camelCase")]
 pub struct PipelineSummary {
     /// URL slug of the pipeline, unique within its workspace.
-    pub slug: Slug,
+    pub slug: Handle,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.

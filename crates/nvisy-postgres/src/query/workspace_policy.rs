@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-use crate::types::{CursorPage, CursorPagination, OffsetPagination, Username};
+use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace policy database operations.
@@ -37,7 +37,7 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<(WorkspacePolicy, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspacePolicy, Handle)>>> + Send;
 
     /// Lists all policies in a workspace with offset pagination.
     fn offset_list_workspace_policies(
@@ -52,7 +52,7 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePolicy, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePolicy, Handle)>>> + Send;
 
     /// Updates a policy with new data.
     fn update_workspace_policy(
@@ -133,7 +133,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<(WorkspacePolicy, Username)>> {
+    ) -> PgResult<Option<(WorkspacePolicy, Handle)>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -176,7 +176,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspacePolicy, Username)>> {
+    ) -> PgResult<CursorPage<(WorkspacePolicy, Handle)>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -200,9 +200,9 @@ impl WorkspacePolicyRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspacePolicy, Username)> = if let Some(cursor) = &pagination.after {
+        let items: Vec<(WorkspacePolicy, Handle)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
             query
@@ -231,7 +231,7 @@ impl WorkspacePolicyRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(p, _): &(WorkspacePolicy, Username)| (p.created_at.into(), p.id),
+            |(p, _): &(WorkspacePolicy, Handle)| (p.created_at.into(), p.id),
         ))
     }
 

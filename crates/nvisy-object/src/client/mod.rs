@@ -260,10 +260,7 @@ impl ObjectStoreClient {
             }
         }
 
-        match writer.finish().await {
-            Ok(result) => Ok(result.into()),
-            Err(e) => Err(Error::from(e)),
-        }
+        writer.finish().await.map(Into::into).map_err(Error::from)
     }
 }
 

@@ -25,7 +25,7 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineArtifactRepository,
     WorkspacePipelineRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{ArtifactType, PipelineRunStatus, Username};
+use nvisy_postgres::types::{ArtifactType, Handle, PipelineRunStatus};
 use nvisy_postgres::{PgClient, PgConn};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -561,7 +561,7 @@ async fn find_pipeline_run(
     conn: &mut PgConn,
     workspace_id: Uuid,
     run_id: Uuid,
-) -> Result<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)> {
+) -> Result<(WorkspacePipelineRun, WorkspacePipeline, Option<Handle>)> {
     conn.find_workspace_run_by_id(workspace_id, run_id)
         .await?
         .ok_or_else(|| Error::not_found("pipeline_run"))

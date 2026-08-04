@@ -16,7 +16,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::accounts;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt, Username};
+use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt};
 
 /// Main account model representing a user account in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -32,7 +32,7 @@ pub struct Account {
     /// Temporarily disables account access while preserving data.
     pub is_suspended: bool,
     /// Public account handle, unique across all accounts.
-    pub username: Username,
+    pub username: Handle,
     /// Optional human-readable name for UI and communications (2-100 chars).
     pub display_name: Option<String>,
     /// Primary email for authentication and communications (validated format).
@@ -61,7 +61,7 @@ pub struct Account {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount {
     /// Public account handle, unique across all accounts.
-    pub username: Username,
+    pub username: Handle,
     /// Optional human-readable name for UI and communications (2-100 chars).
     pub display_name: Option<String>,
     /// Primary email for authentication and communications (validated format).
@@ -82,7 +82,7 @@ pub struct NewAccount {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccount {
     /// Public account handle, unique across all accounts.
-    pub username: Option<Username>,
+    pub username: Option<Handle>,
     /// Human-readable name for UI and communications (`Some(None)` clears it).
     pub display_name: Option<Option<String>>,
     /// Primary email for authentication and communications.

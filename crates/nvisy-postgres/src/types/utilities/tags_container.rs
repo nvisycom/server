@@ -34,8 +34,8 @@ impl Tags {
         Self(tags.into_iter().map(|s| Some(s.into())).collect())
     }
 
-    /// Returns the raw vector of optional strings.
-    pub fn as_raw(&self) -> &Vec<Option<String>> {
+    /// Returns the raw slice of optional strings.
+    pub fn as_raw(&self) -> &[Option<String>] {
         &self.0
     }
 
@@ -46,7 +46,7 @@ impl Tags {
 
     /// Returns a vector containing only the non-empty tag strings.
     pub fn as_strings(&self) -> Vec<String> {
-        self.0.iter().filter_map(|tag| tag.clone()).collect()
+        self.iter().map(str::to_owned).collect()
     }
 
     /// Returns an iterator over the non-empty tag strings.

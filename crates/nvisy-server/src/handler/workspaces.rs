@@ -12,7 +12,7 @@ use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, Wor
 use nvisy_postgres::query::{
     WorkspaceActivityRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 
 use crate::extract::{
@@ -378,7 +378,7 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns the handle of the account that created the workspace addressed by
 /// `slug`, or a NotFound error if no such workspace exists.
-async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Username> {
+async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Handle> {
     conn.find_workspace_by_slug(slug)
         .await?
         .map(|(_, creator_username)| creator_username)

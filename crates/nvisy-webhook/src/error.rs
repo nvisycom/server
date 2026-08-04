@@ -45,7 +45,7 @@ impl ErrorKind {
 /// Structured error describing a webhook delivery failure.
 #[must_use]
 #[derive(Debug, Error)]
-#[error("[{kind}]{}", message.as_ref().map(|m| format!(": {m}")).unwrap_or_default())]
+#[error("{}", self.display())]
 pub struct Error {
     /// The kind of delivery error that occurred.
     pub kind: ErrorKind,
@@ -57,6 +57,14 @@ pub struct Error {
 }
 
 impl Error {
+    /// Renders the error as `[{kind}]` with an optional `: {message}` suffix.
+    fn display(&self) -> String {
+        match &self.message {
+            Some(message) => format!("[{}]: {message}", self.kind),
+            None => format!("[{}]", self.kind),
+        }
+    }
+
     /// Creates a new error with the given kind.
     pub fn new(kind: ErrorKind) -> Self {
         Self {

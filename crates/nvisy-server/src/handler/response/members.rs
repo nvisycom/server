@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{Account, WorkspaceMember};
-use nvisy_postgres::types::{Username, WorkspaceRole};
+use nvisy_postgres::types::{Handle, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use super::Page;
 #[serde(rename_all = "camelCase")]
 pub struct Member {
     /// Handle of the member's account.
-    pub username: Username,
+    pub username: Handle,
     /// Email address of the member.
     pub email_address: String,
     /// Display name of the member, when set.

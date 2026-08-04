@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
-use crate::types::{CursorPage, CursorPagination, OffsetPagination, SyncMode, Username};
+use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination, SyncMode};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection database operations.
@@ -44,7 +44,7 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceConnection, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceConnection, Handle)>>> + Send;
 
     /// Finds connections by provider type within a workspace.
     fn find_workspace_connections_by_provider(
@@ -73,7 +73,7 @@ pub trait WorkspaceConnectionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         provider_filter: Option<&str>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnection, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnection, Handle)>>> + Send;
 
     /// Updates a connection with new data.
     fn update_workspace_connection(
@@ -161,7 +161,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceConnection, Username)>> {
+    ) -> PgResult<Option<(WorkspaceConnection, Handle)>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -241,7 +241,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         provider_filter: Option<&str>,
-    ) -> PgResult<CursorPage<(WorkspaceConnection, Username)>> {
+    ) -> PgResult<CursorPage<(WorkspaceConnection, Handle)>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -279,9 +279,9 @@ impl WorkspaceConnectionRepository for PgConnection {
             query = query.filter(dsl::provider.eq(provider));
         }
 
-        let limit = pagination.limit + 1;
+        let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspaceConnection, Username)> = if let Some(cursor) = &pagination.after {
+        let items: Vec<(WorkspaceConnection, Handle)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
             query
@@ -310,7 +310,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(c, _): &(WorkspaceConnection, Username)| (c.created_at.into(), c.id),
+            |(c, _): &(WorkspaceConnection, Handle)| (c.created_at.into(), c.id),
         ))
     }
 

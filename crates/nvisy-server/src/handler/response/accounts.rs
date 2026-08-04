@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     /// Public handle of the account.
-    pub username: Username,
+    pub username: Handle,
     /// Whether the account email has been verified.
     pub is_activated: bool,
     /// Whether the account has administrator privileges.
@@ -58,7 +58,7 @@ impl Account {
 #[serde(rename_all = "camelCase")]
 pub struct PublicAccount {
     /// Public handle of the account.
-    pub username: Username,
+    pub username: Handle,
     /// Display name of the account holder, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,

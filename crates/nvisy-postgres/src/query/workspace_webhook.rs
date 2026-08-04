@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    Cursor, CursorPage, CursorPagination, OffsetPagination, Username, WebhookEvent, WebhookStatus,
+    CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent, WebhookStatus,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -41,7 +41,7 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceWebhook, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceWebhook, Handle)>>> + Send;
 
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
@@ -56,7 +56,7 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceWebhook, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceWebhook, Handle)>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
@@ -174,7 +174,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceWebhook, Username)>> {
+    ) -> PgResult<Option<(WorkspaceWebhook, Handle)>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -217,7 +217,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspaceWebhook, Username)>> {
+    ) -> PgResult<CursorPage<(WorkspaceWebhook, Handle)>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -252,37 +252,17 @@ impl WorkspaceWebhookRepository for PgConnection {
             );
         }
 
-        let fetch_limit = pagination.fetch_limit();
-        let mut items: Vec<(WorkspaceWebhook, Username)> = query
+        let items: Vec<(WorkspaceWebhook, Handle)> = query
             .select((WorkspaceWebhook::as_select(), accounts::username))
             .order((dsl::created_at.desc(), dsl::id.desc()))
-            .limit(fetch_limit)
+            .limit(pagination.fetch_limit())
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        let has_more = items.len() as i64 > pagination.limit;
-        if has_more {
-            items.pop();
-        }
-
-        let next_cursor = if has_more {
-            items.last().map(|(w, _)| {
-                Cursor {
-                    timestamp: w.created_at.into(),
-                    id: w.id,
-                }
-                .encode()
-            })
-        } else {
-            None
-        };
-
-        Ok(CursorPage {
-            items,
-            total,
-            next_cursor,
-        })
+        Ok(CursorPage::new(items, total, pagination.limit, |(w, _)| {
+            (w.created_at.into(), w.id)
+        }))
     }
 
     async fn update_workspace_webhook(

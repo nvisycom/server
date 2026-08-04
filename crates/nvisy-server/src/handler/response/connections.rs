@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceConnection;
-use nvisy_postgres::types::{ConnectionId, Slug, SyncDeletionPolicy, SyncMode, Username};
+use nvisy_postgres::types::{ConnectionId, Handle, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,10 +17,10 @@ use super::Page;
 pub struct Connection {
     /// Opaque identifier of the connection.
     pub id: ConnectionId,
-    /// Slug of the workspace this connection belongs to.
-    pub workspace_slug: Slug,
+    /// Handle of the workspace this connection belongs to.
+    pub workspace_slug: Handle,
     /// Handle of the account that created this connection.
-    pub creator_username: Username,
+    pub creator_username: Handle,
     /// Human-readable connection display name.
     pub display_name: String,
     /// Object store provider (`s3`, `azure`, `gcs`).
@@ -77,8 +77,8 @@ impl Connection {
     /// Creates a response from a database model and its creator's handle.
     pub fn from_model(
         connection: WorkspaceConnection,
-        workspace_slug: Slug,
-        creator_username: Username,
+        workspace_slug: Handle,
+        creator_username: Handle,
         last_synced: Option<Timestamp>,
     ) -> Self {
         Self {

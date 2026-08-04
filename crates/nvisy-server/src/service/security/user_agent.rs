@@ -81,9 +81,7 @@ impl UserAgentParser {
                 if !category.is_empty() && category != VALUE_UNKNOWN {
                     let device = match category {
                         "pc" => "Desktop",
-                        "smartphone" => "Mobile",
-                        "mobilephone" => "Mobile",
-                        "tablet" => "Mobile",
+                        "smartphone" | "mobilephone" | "tablet" => "Mobile",
                         "crawler" => "Bot",
                         _ => "Other",
                     };

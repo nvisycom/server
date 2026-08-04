@@ -1,7 +1,7 @@
 //! Account request types.
 
 use nvisy_postgres::model::UpdateAccount as UpdateAccountModel;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
@@ -12,7 +12,7 @@ use validator::{Validate, ValidationError};
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAccount {
     /// New account handle.
-    pub username: Option<Username>,
+    pub username: Option<Handle>,
     /// New display name (2-32 characters).
     #[validate(length(min = 2, max = 32))]
     #[validate(custom(function = "validate_display_name_format"))]

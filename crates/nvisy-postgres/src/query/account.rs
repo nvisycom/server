@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{Account, NewAccount, UpdateAccount};
-use crate::types::Username;
+use crate::types::Handle;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for account database operations.
@@ -48,7 +48,7 @@ pub trait AccountRepository {
     /// accounts. Comparison is case-insensitive.
     fn find_account_by_username(
         &mut self,
-        username: &Username,
+        username: &Handle,
     ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
 
     /// Finds an account by either email address or username.
@@ -122,17 +122,15 @@ pub trait AccountRepository {
     /// Checks if a username is already registered in the system.
     ///
     /// Used during registration to prevent duplicate handles.
-    fn username_exists(
-        &mut self,
-        username: &Username,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    fn username_exists(&mut self, username: &Handle)
+    -> impl Future<Output = PgResult<bool>> + Send;
 
     /// Checks if a username is used by another account.
     ///
     /// Used during account updates to prevent duplicate handles.
     fn username_exists_for_other(
         &mut self,
-        username: &Username,
+        username: &Handle,
         exclude_account_id: Uuid,
     ) -> impl Future<Output = PgResult<bool>> + Send;
 }
@@ -181,7 +179,7 @@ impl AccountRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn find_account_by_username(&mut self, username: &Username) -> PgResult<Option<Account>> {
+    async fn find_account_by_username(&mut self, username: &Handle) -> PgResult<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         accounts::table
@@ -203,7 +201,7 @@ impl AccountRepository for PgConnection {
         // account. Still issue a lookup (guaranteed to miss) so every branch
         // performs one query and the login flow's timing stays uniform,
         // regardless of whether the identifier was syntactically valid.
-        match Username::parse(identifier.trim()) {
+        match Handle::parse(identifier.trim()) {
             Ok(username) => self.find_account_by_username(&username).await,
             Err(_) => self.find_account_by_email(identifier).await,
         }
@@ -312,7 +310,7 @@ impl AccountRepository for PgConnection {
         Ok(count > 0)
     }
 
-    async fn username_exists(&mut self, username: &Username) -> PgResult<bool> {
+    async fn username_exists(&mut self, username: &Handle) -> PgResult<bool> {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
@@ -328,7 +326,7 @@ impl AccountRepository for PgConnection {
 
     async fn username_exists_for_other(
         &mut self,
-        username: &Username,
+        username: &Handle,
         exclude_account_id: Uuid,
     ) -> PgResult<bool> {
         use schema::accounts::{self, dsl};

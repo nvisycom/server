@@ -6,7 +6,7 @@
 
 use nvisy_postgres::PgConn;
 use nvisy_postgres::query::AccountRepository;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
@@ -15,7 +15,7 @@ use crate::handler::{ErrorKind, Result};
 ///
 /// The account is expected to exist — typically the authenticated caller — so a
 /// missing row is a server-side inconsistency rather than a client error.
-pub async fn resolve_creator_username(conn: &mut PgConn, account_id: Uuid) -> Result<Username> {
+pub async fn resolve_creator_username(conn: &mut PgConn, account_id: Uuid) -> Result<Handle> {
     conn.find_account_by_id(account_id)
         .await?
         .map(|account| account.username)
@@ -29,7 +29,7 @@ pub async fn resolve_creator_username(conn: &mut PgConn, account_id: Uuid) -> Re
 pub async fn resolve_trigger_username(
     conn: &mut PgConn,
     account_id: Option<Uuid>,
-) -> Result<Option<Username>> {
+) -> Result<Option<Handle>> {
     let Some(account_id) = account_id else {
         return Ok(None);
     };

@@ -12,7 +12,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::{Slug, Username};
+use nvisy_postgres::types::Handle;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -343,7 +343,7 @@ async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
     pipeline_slug: &str,
-) -> Result<(WorkspacePipeline, Username)> {
+) -> Result<(WorkspacePipeline, Handle)> {
     conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
@@ -382,8 +382,8 @@ async fn resolve_references(
 async fn build_response(
     conn: &mut PgConnection,
     pipeline: WorkspacePipeline,
-    workspace_slug: Slug,
-    creator_username: Username,
+    workspace_slug: Handle,
+    creator_username: Handle,
 ) -> Result<Pipeline> {
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
     Pipeline::from_model(pipeline, workspace_slug, creator_username, policy_slugs)
