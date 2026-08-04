@@ -4,10 +4,10 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_engine::entity::ConfidenceThreshold;
 use nvisy_engine::plan::{
     LabelCatalogParams, MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams,
 };
+use nvisy_engine::primitive::ConfidenceThreshold;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, PipelineStatus};
 use schemars::JsonSchema;
