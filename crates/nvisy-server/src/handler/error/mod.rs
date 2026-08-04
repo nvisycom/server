@@ -3,6 +3,7 @@
 mod crypto_error;
 mod http_error;
 mod nats_error;
+mod object_error;
 mod pg_account;
 mod pg_document;
 mod pg_error;

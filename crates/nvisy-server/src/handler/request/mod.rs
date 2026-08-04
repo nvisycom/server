@@ -2,6 +2,7 @@
 
 mod accounts;
 mod authentications;
+mod connection_syncs;
 mod connections;
 mod files;
 mod invites;
@@ -18,6 +19,7 @@ mod workspaces;
 
 pub use accounts::*;
 pub use authentications::*;
+pub use connection_syncs::*;
 pub use connections::*;
 pub use files::*;
 pub use invites::*;

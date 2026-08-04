@@ -7,6 +7,11 @@
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers;
 
+mod bridge;
+mod sync;
+
+pub use sync::ConnectionSyncService;
+
 /// Tracing target for object storage operations.
 const TRACING_TARGET: &str = "nvisy_server::service::object";
 

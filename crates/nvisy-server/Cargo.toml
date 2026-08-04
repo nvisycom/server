@@ -39,7 +39,7 @@ nvisy-webhook = { workspace = true, features = ["schema"] }
 
 # Async runtime
 tokio = { workspace = true, features = [] }
-tokio-util = { workspace = true, features = [] }
+tokio-util = { workspace = true, features = ["io"] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 async-stream = { workspace = true, features = [] }

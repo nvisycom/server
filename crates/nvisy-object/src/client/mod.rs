@@ -25,6 +25,10 @@ mod put_output;
 pub use get_output::GetOutput;
 pub use put_output::PutOutput;
 
+/// Maximum number of in-flight multipart part uploads, bounding memory and
+/// concurrent requests during a streaming [`put_multipart`](ObjectStoreClient::put_multipart).
+const MULTIPART_MAX_CONCURRENCY: usize = 8;
+
 /// Parses a caller-supplied key into an object-store [`Path`], surfacing a
 /// malformed key as an error rather than silently normalizing it.
 fn parse_key(key: &str) -> Result<Path, Error> {
@@ -239,7 +243,15 @@ impl ObjectStoreClient {
 
         while let Some(chunk) = stream.next().await {
             match chunk {
-                Ok(bytes) => writer.put(bytes),
+                Ok(bytes) => {
+                    // Bound in-flight part uploads so a large body cannot spawn
+                    // an unbounded number of concurrent requests.
+                    if let Err(e) = writer.wait_for_capacity(MULTIPART_MAX_CONCURRENCY).await {
+                        let _ = writer.abort().await;
+                        return Err(Error::from(e));
+                    }
+                    writer.put(bytes);
+                }
                 Err(e) => {
                     // Abort so the backend does not retain orphaned parts.
                     let _ = writer.abort().await;

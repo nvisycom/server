@@ -8,11 +8,40 @@ use std::ops::Deref;
 
 pub use azure::{AzureCredentials, AzureProvider};
 pub use gcs::{GcsCredentials, GcsProvider};
+use object_store::prefix::PrefixStore;
 pub use s3::{S3Credentials, S3Provider};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::client::ObjectStoreClient;
 use crate::error::Error;
+
+/// Cross-provider connection config: an optional root prefix shared by every
+/// provider, plus the provider-specific credentials flattened alongside it.
+///
+/// The credential JSON is flat — e.g. `{ "bucket": "b", "rootPath": "in/",
+/// "accessKeyId": "..." }` — with `rootPath` peeled off here and the rest
+/// deserialized into `C`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderConfig<C> {
+    /// Optional root prefix within the bucket/container; keys resolve relative
+    /// to it.
+    #[serde(default)]
+    root_path: Option<String>,
+    /// Provider-specific credentials.
+    #[serde(flatten)]
+    credentials: C,
+}
+
+/// Scopes a client's keys under `root_path` when one is set, so callers address
+/// objects relative to it.
+fn with_root_path(client: ObjectStoreClient, root_path: Option<&str>) -> ObjectStoreClient {
+    match root_path.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(prefix) => ObjectStoreClient::new(PrefixStore::new(client.0, prefix)),
+        None => client,
+    }
+}
 
 /// Authenticated connection to an object storage backend.
 ///
@@ -57,15 +86,18 @@ pub async fn connect(
     }
 }
 
-/// Deserializes `raw_credentials` into `C::Credentials` and connects, yielding
-/// the shared inner client.
+/// Deserializes `raw_credentials` into `ProviderConfig<C::Credentials>`,
+/// connects, and scopes the client under the config's root path.
 async fn connect_with<C: Client>(
     raw_credentials: serde_json::Value,
 ) -> Result<ObjectStoreClient, Error> {
-    let credentials: C::Credentials = serde_json::from_value(raw_credentials)
+    let config: ProviderConfig<C::Credentials> = serde_json::from_value(raw_credentials)
         .map_err(|e| Error::connection(e.to_string(), C::ID))?;
-    let provider = C::connect(&credentials).await?;
-    Ok((*provider).clone())
+    let provider = C::connect(&config.credentials).await?;
+    Ok(with_root_path(
+        (*provider).clone(),
+        config.root_path.as_deref(),
+    ))
 }
 
 /// Renders a secret field for [`Debug`]: `<set>` when present, `<unset>` when
@@ -105,5 +137,17 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Connection);
+    }
+
+    #[tokio::test]
+    async fn connect_accepts_flattened_root_path() {
+        // `rootPath` sits flat alongside provider credentials and must not
+        // interfere with deserializing the provider-specific fields.
+        let creds = json!({
+            "bucket": "test-bucket",
+            "region": "us-east-1",
+            "rootPath": "incoming/documents",
+        });
+        assert!(connect("s3", creds).await.is_ok());
     }
 }
