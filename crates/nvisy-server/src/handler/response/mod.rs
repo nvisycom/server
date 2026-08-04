@@ -48,7 +48,7 @@ pub use workspaces::*;
 /// cursor-based pagination support. When `next_cursor` is present, there
 /// are more items to fetch.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "{T}sPage")]
+#[schemars(rename = "{T}Page")]
 #[serde(rename_all = "camelCase")]
 pub struct Page<T> {
     /// Items in this page.
