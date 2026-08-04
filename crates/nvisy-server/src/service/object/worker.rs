@@ -18,6 +18,7 @@ use jiff::{Span, Timestamp};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{LockKey, SchedulerLocksBucket};
 use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
+use nvisy_object::providers::ConnectionConfig;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{
     NewWorkspaceConnectionRun, WorkspaceConnection, WorkspaceConnectionRun,
@@ -282,7 +283,7 @@ impl ConnectionSyncWorker {
             }
         }
 
-        let (credentials, run_id) = match self.begin_run(&connection, job.attempt).await {
+        let (config, run_id) = match self.begin_run(&connection, job.attempt).await {
             Ok(started) => started,
             Err(err) => {
                 // A concurrent run beat us to the unique index; treat as benign.
@@ -297,7 +298,7 @@ impl ConnectionSyncWorker {
         let connection_id = connection.id;
         let workspace_id = connection.workspace_id;
         self.sync
-            .run_transfer(run_id, connection, credentials, account_id, None)
+            .run_transfer(run_id, connection, config, account_id, None)
             .await;
 
         self.maybe_retry(workspace_id, connection_id, run_id, job.attempt, cancel)
@@ -399,14 +400,14 @@ impl ConnectionSyncWorker {
             .await?)
     }
 
-    /// Decrypts credentials and opens a `Scheduled` run for the connection at the
-    /// given attempt number.
+    /// Decrypts the connection config and opens a `Scheduled` run for the
+    /// connection at the given attempt number.
     async fn begin_run(
         &self,
         connection: &WorkspaceConnection,
         attempt: i32,
-    ) -> Result<(serde_json::Value, Uuid)> {
-        let credentials = self
+    ) -> Result<(ConnectionConfig, Uuid)> {
+        let config = self
             .crypto
             .decrypt_json(connection.workspace_id, &connection.encrypted_data)?;
 
@@ -421,6 +422,6 @@ impl ConnectionSyncWorker {
             metadata: None,
         };
         let run = conn.create_workspace_connection_run(new_run).await?;
-        Ok((credentials, run.id))
+        Ok((config, run.id))
     }
 }

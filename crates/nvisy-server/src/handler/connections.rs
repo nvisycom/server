@@ -17,6 +17,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_object::providers::ConnectionConfig;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
@@ -80,13 +81,16 @@ async fn create_connection(
         }
     }
 
-    let encrypted_data = crypto.encrypt_json(workspace.id, &request.data)?;
+    // The provider column is derived from the typed config so the two can never
+    // disagree; the full config is encrypted at rest.
+    let provider = request.config.provider_id().to_owned();
+    let encrypted_data = crypto.encrypt_json(workspace.id, &request.config)?;
 
     let new_connection = NewWorkspaceConnection {
         workspace_id: workspace.id,
         account_id: auth_state.account_id,
         display_name: request.display_name,
-        provider: request.provider,
+        provider,
         sync_mode: Some(request.sync_mode),
         schedule_cron: request.schedule_cron,
         deletion_policy: Some(request.deletion_policy),
@@ -293,13 +297,19 @@ async fn update_connection(
         return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
     }
 
-    let encrypted_data = request
-        .data
-        .map(|data| crypto.encrypt_json(workspace.id, &data))
-        .transpose()?;
+    // Replacing the config re-derives the provider column and re-encrypts the
+    // blob together, so they stay in lockstep.
+    let (provider, encrypted_data) = match &request.config {
+        Some(config) => (
+            Some(config.provider_id().to_owned()),
+            Some(crypto.encrypt_json(workspace.id, config)?),
+        ),
+        None => (None, None),
+    };
 
     let update_data = UpdateWorkspaceConnection {
         display_name: request.display_name,
+        provider,
         sync_mode: request.sync_mode,
         schedule_cron: request.schedule_cron,
         deletion_policy: request.deletion_policy,
@@ -382,7 +392,7 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 
 /// Verifies that a connection's backing object store is reachable.
 ///
-/// Decrypts the stored credentials and attempts a lightweight reachability
+/// Decrypts the stored connection config and attempts a lightweight reachability
 /// check against the provider. Returns `200` with a [`ConnectionVerification`]
 /// describing the outcome: a store that is reachable but rejects the
 /// credentials reports `reachable: false` with the reason, rather than an HTTP
@@ -414,10 +424,9 @@ async fn verify_connection(
     let (connection, _, _) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
-    let credentials: serde_json::Value =
-        crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
 
-    let verification = match object.connect(&connection.provider, credentials).await {
+    let verification = match object.connect(&config).await {
         Ok(client) => match client.verify_reachable().await {
             Ok(()) => {
                 tracing::info!(target: TRACING_TARGET, "Connection verified");
