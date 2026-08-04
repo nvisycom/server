@@ -46,7 +46,7 @@ where
         // Try to get existing stream first
         match jetstream.get_stream(stream_name).await {
             Ok(_) => {
-                tracing::debug!(
+                tracing::trace!(
                     target: TRACING_TARGET_STREAM,
                     stream = %stream_name,
                     type_name = std::any::type_name::<T>(),

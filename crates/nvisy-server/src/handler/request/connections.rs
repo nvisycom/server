@@ -36,6 +36,9 @@ pub struct CreateConnection {
     /// How an import reconciles files whose source object was deleted.
     #[serde(default)]
     pub deletion_policy: SyncDeletionPolicy,
+    /// Whether the connection is enabled for syncing. Omit to default to active;
+    /// set `false` to create it disabled.
+    pub is_active: Option<bool>,
     /// Typed provider configuration (provider tag + its credentials + optional
     /// root path), encrypted at rest. The `provider` tag selects which
     /// credential shape is required.
@@ -57,6 +60,10 @@ pub struct UpdateConnection {
     pub schedule_cron: Option<Option<String>>,
     /// How an import reconciles files whose source object was deleted.
     pub deletion_policy: Option<SyncDeletionPolicy>,
+    /// Whether the connection is enabled for syncing. `false` disables it
+    /// (pausing scheduled syncs and rejecting manual ones); omit to leave
+    /// unchanged.
+    pub is_active: Option<bool>,
     /// Typed provider configuration. If provided, fully replaces the stored
     /// config (and, with it, the provider). Omit to leave it unchanged.
     pub config: Option<ConnectionConfig>,
@@ -66,6 +73,8 @@ pub struct UpdateConnection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionsQuery {
-    /// Filter by provider type.
-    pub provider: Option<String>,
+    /// Filter by provider (`s3`, `azure`, `gcs`). Repeatable; a connection
+    /// matches if it uses any of the given providers. Empty means no filter.
+    #[serde(default)]
+    pub provider: Vec<String>,
 }

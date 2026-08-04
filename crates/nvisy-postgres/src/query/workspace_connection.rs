@@ -68,11 +68,14 @@ pub trait WorkspaceConnectionRepository {
 
     /// Lists all connections in a workspace with cursor pagination, each paired
     /// with the handle of the account that created it.
+    ///
+    /// An empty `providers` slice means no provider filter; otherwise a
+    /// connection matches if its provider is any of the given ones.
     fn cursor_list_workspace_connections(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-        provider_filter: Option<&str>,
+        providers: &[String],
     ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnection, Handle)>>> + Send;
 
     /// Updates a connection with new data.
@@ -240,7 +243,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-        provider_filter: Option<&str>,
+        providers: &[String],
     ) -> PgResult<CursorPage<(WorkspaceConnection, Handle)>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
@@ -251,9 +254,9 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        // Apply provider filter
-        if let Some(provider) = provider_filter {
-            base_query = base_query.filter(dsl::provider.eq(provider));
+        // Apply provider filter (any-of)
+        if !providers.is_empty() {
+            base_query = base_query.filter(dsl::provider.eq_any(providers.to_vec()));
         }
 
         let total = if pagination.include_count {
@@ -275,8 +278,8 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        if let Some(provider) = provider_filter {
-            query = query.filter(dsl::provider.eq(provider));
+        if !providers.is_empty() {
+            query = query.filter(dsl::provider.eq_any(providers.to_vec()));
         }
 
         let limit = pagination.fetch_limit();

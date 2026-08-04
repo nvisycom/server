@@ -77,7 +77,8 @@ pub trait WorkspaceConnectionRunRepository {
     ///
     /// Runs carry no workspace reference of their own, so this joins through the
     /// owning connection and filters on its workspace. An optional status filter
-    /// narrows the result; use [`cursor_list_workspace_connection_runs`] for a
+    /// and a set of providers narrow the result; an empty `providers` slice means
+    /// no provider filter. Use [`cursor_list_workspace_connection_runs`] for a
     /// single connection.
     ///
     /// [`cursor_list_workspace_connection_runs`]: Self::cursor_list_workspace_connection_runs
@@ -86,6 +87,7 @@ pub trait WorkspaceConnectionRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
+        providers: &[String],
     ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnectionRun, Uuid, Option<Handle>)>>> + Send;
 
     /// Gets the most recent run for a connection (its current sync state).
@@ -328,6 +330,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
+        providers: &[String],
     ) -> PgResult<CursorPage<(WorkspaceConnectionRun, Uuid, Option<Handle>)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_connection_runs::dsl as runs;
@@ -345,6 +348,9 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                 .into_boxed();
             if let Some(status) = status_filter {
                 query = query.filter(runs::status.eq(status));
+            }
+            if !providers.is_empty() {
+                query = query.filter(connections::provider.eq_any(providers.to_vec()));
             }
             query
         };
