@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket};
 use nvisy_object::client::ObjectStoreClient;
+use nvisy_object::providers::ConnectionConfig;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
 use nvisy_postgres::query::{WorkspaceConnectionRunRepository, WorkspaceFileRepository};
@@ -103,15 +104,12 @@ impl ConnectionSyncService {
     pub async fn import_new(
         &self,
         connection: &WorkspaceConnection,
-        credentials: serde_json::Value,
+        config: &ConnectionConfig,
         account_id: Uuid,
     ) -> Result<u64> {
         tracing::debug!(target: TRACING_TARGET, "Importing new objects from connection");
 
-        let client = self
-            .object
-            .connect(&connection.provider, credentials)
-            .await?;
+        let client = self.object.connect(config).await?;
 
         // List the source once; keys are already scoped to the connection's root
         // path by the provider's PrefixStore. The listing is reused both to
@@ -331,16 +329,13 @@ impl ConnectionSyncService {
     pub async fn export_file(
         &self,
         connection: &WorkspaceConnection,
-        credentials: serde_json::Value,
+        config: &ConnectionConfig,
         file: &WorkspaceFile,
         remote_key: &str,
     ) -> Result<()> {
         tracing::debug!(target: TRACING_TARGET, "Exporting file to connection");
 
-        let client = self
-            .object
-            .connect(&connection.provider, credentials)
-            .await?;
+        let client = self.object.connect(config).await?;
 
         let store = self.nats.object_store::<FilesBucket>().await?;
         let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
@@ -381,7 +376,7 @@ impl ConnectionSyncService {
         &self,
         run_id: Uuid,
         connection: WorkspaceConnection,
-        credentials: serde_json::Value,
+        config: ConnectionConfig,
         account_id: Uuid,
         export: Option<(WorkspaceFile, String)>,
     ) {
@@ -394,13 +389,9 @@ impl ConnectionSyncService {
         let transfer = self.clone();
         let mut work = tokio::spawn(async move {
             match export {
-                None => {
-                    transfer
-                        .import_new(&connection, credentials, account_id)
-                        .await
-                }
+                None => transfer.import_new(&connection, &config, account_id).await,
                 Some((file, key)) => transfer
-                    .export_file(&connection, credentials, &file, &key)
+                    .export_file(&connection, &config, &file, &key)
                     .await
                     .map(|()| 1),
             }

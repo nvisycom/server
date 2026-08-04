@@ -6,7 +6,7 @@ use derive_more::Deref;
 use object_store::gcp::GoogleCloudStorageBuilder;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{Client, redact};
 use crate::client::ObjectStoreClient;
@@ -14,9 +14,10 @@ use crate::error::Error;
 
 /// Typed credentials for Google Cloud Storage.
 ///
-/// Secret fields are masked in the [`Debug`] output; the struct is
-/// deserialize-only and never serialized back out.
-#[derive(Deserialize)]
+/// Secret fields are masked in the [`Debug`] output. Serialization exists only
+/// to persist the credentials encrypted at rest; they are never returned in API
+/// responses.
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GcsCredentials {

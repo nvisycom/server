@@ -11,6 +11,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_object::providers::ConnectionConfig;
 use nvisy_postgres::model::{NewWorkspaceConnectionRun, WorkspaceConnection};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionRunRepository, WorkspaceFileRepository,
@@ -34,10 +35,10 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_syncs";
 
 /// Triggers a sync between the connection and the workspace file store.
 ///
-/// Decrypts the stored credentials, opens a `Manual` sync run, and performs the
-/// import or export in the background. Returns `202 Accepted` with the created
-/// sync immediately; poll the sync detail endpoint for completion. Requires
-/// `ManageConnections` permission.
+/// Decrypts the stored connection config, opens a `Manual` sync run, and
+/// performs the import or export in the background. Returns `202 Accepted` with
+/// the created sync immediately; poll the sync detail endpoint for completion.
+/// Requires `RunConnectionSyncs` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -60,7 +61,7 @@ async fn sync_connection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
+        .authorize_workspace(&mut conn, workspace.id, Permission::RunConnectionSyncs)
         .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
@@ -97,8 +98,7 @@ async fn sync_connection(
         SyncMode::Import => None,
     };
 
-    let credentials: serde_json::Value =
-        crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
 
     let new_run = NewWorkspaceConnectionRun {
         connection_id: connection.id,
@@ -118,7 +118,7 @@ async fn sync_connection(
     let account_id = auth_state.account_id;
     tokio::spawn(async move {
         connection_sync
-            .run_transfer(run_id, connection, credentials, account_id, export)
+            .run_transfer(run_id, connection, config, account_id, export)
             .await;
     });
 
@@ -230,7 +230,7 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
 /// that already finished is returned unchanged as a `409 Conflict`. The
 /// background transfer is bounded by the sync timeout and its completion is
 /// status-guarded, so a cancelled run is never overwritten. Requires
-/// `ManageConnections` permission.
+/// `RunConnectionSyncs` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -252,7 +252,7 @@ async fn cancel_connection_sync(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
+        .authorize_workspace(&mut conn, workspace.id, Permission::RunConnectionSyncs)
         .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;

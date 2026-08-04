@@ -1,11 +1,11 @@
 //! Object storage service.
 //!
 //! Bridges stored workspace connections to the [`nvisy_object`] providers: a
-//! connection carries a provider id (e.g. `s3`) and encrypted credential JSON,
-//! which this service turns into a connected [`ObjectStoreClient`] at runtime.
+//! connection carries an encrypted, typed [`ConnectionConfig`], which this
+//! service turns into a connected [`ObjectStoreClient`] at runtime.
 
 use nvisy_object::client::ObjectStoreClient;
-use nvisy_object::providers;
+use nvisy_object::providers::{self, ConnectionConfig};
 
 mod bridge;
 mod schedule;
@@ -33,20 +33,17 @@ impl ObjectService {
         Self
     }
 
-    /// Connects to the object store identified by `provider` using the given
-    /// decrypted credential JSON.
+    /// Connects to the object store described by the typed [`ConnectionConfig`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the provider is unknown or the credentials do not
-    /// match the provider's expected shape or are rejected by the backend.
-    #[tracing::instrument(name = "object.connect", skip_all, fields(provider = %provider))]
+    /// Returns an error if the backend rejects the credentials.
+    #[tracing::instrument(name = "object.connect", skip_all, fields(provider = %config.provider_id()))]
     pub async fn connect(
         &self,
-        provider: &str,
-        credentials: serde_json::Value,
+        config: &ConnectionConfig,
     ) -> Result<ObjectStoreClient, nvisy_object::error::Error> {
         tracing::debug!(target: TRACING_TARGET, "Connecting to object store");
-        providers::connect(provider, credentials).await
+        providers::connect(config).await
     }
 }

@@ -62,6 +62,8 @@ pub enum Permission {
     ViewConnections,
     /// Can create, modify, and manage workspace connections.
     ManageConnections,
+    /// Can trigger and cancel connection syncs.
+    RunConnectionSyncs,
 
     // Policy permissions
     /// Can view workspace policies.
@@ -113,7 +115,8 @@ impl Permission {
             | Self::CreatePipelines
             | Self::UpdatePipelines
             | Self::DeletePipelines
-            | Self::RunPipelines => WorkspaceRole::Member,
+            | Self::RunPipelines
+            | Self::RunConnectionSyncs => WorkspaceRole::Member,
 
             // Admin-level permissions (manage workspace resources)
             Self::UpdateWorkspace

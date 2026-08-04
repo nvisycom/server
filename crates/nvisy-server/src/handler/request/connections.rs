@@ -1,5 +1,6 @@
 //! Connection request types.
 
+use nvisy_object::providers::ConnectionConfig;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,9 +27,6 @@ pub struct CreateConnection {
     /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
     pub display_name: String,
-    /// Object store provider (`s3`, `azure`, `gcs`).
-    #[validate(length(min = 1, max = 64))]
-    pub provider: String,
     /// Whether the connection imports data in or exports data out.
     #[serde(default)]
     pub sync_mode: SyncMode,
@@ -38,9 +36,10 @@ pub struct CreateConnection {
     /// How an import reconciles files whose source object was deleted.
     #[serde(default)]
     pub deletion_policy: SyncDeletionPolicy,
-    /// Connection data to be encrypted (provider credentials + optional root
-    /// path). The structure depends on the provider type.
-    pub data: serde_json::Value,
+    /// Typed provider configuration (provider tag + its credentials + optional
+    /// root path), encrypted at rest. The `provider` tag selects which
+    /// credential shape is required.
+    pub config: ConnectionConfig,
 }
 
 /// Request payload for updating an existing workspace connection.
@@ -58,9 +57,9 @@ pub struct UpdateConnection {
     pub schedule_cron: Option<Option<String>>,
     /// How an import reconciles files whose source object was deleted.
     pub deletion_policy: Option<SyncDeletionPolicy>,
-    /// Connection data to be encrypted (provider credentials + optional root
-    /// path). If provided, replaces the existing encrypted data.
-    pub data: Option<serde_json::Value>,
+    /// Typed provider configuration. If provided, fully replaces the stored
+    /// config (and, with it, the provider). Omit to leave it unchanged.
+    pub config: Option<ConnectionConfig>,
 }
 
 /// Query parameters for listing connections.
