@@ -3726,7 +3726,6 @@ dependencies = [
 name = "nvisy-object"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bytes",
  "derive_more",
  "futures",
@@ -3736,7 +3735,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
