@@ -26,6 +26,7 @@ pub enum SortOrder {
 /// Generic sort specification with field and order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename = "Sort{F}"))]
 pub struct SortBy<F> {
     /// The field to sort by.
     pub field: F,
