@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use nvisy_postgres::query::WorkspacePolicyRepository;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -323,7 +323,7 @@ async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
     policy_slug: &str,
-) -> Result<(WorkspacePolicy, Username)> {
+) -> Result<(WorkspacePolicy, Handle)> {
     conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))

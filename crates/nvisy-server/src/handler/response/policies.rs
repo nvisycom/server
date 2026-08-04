@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use nvisy_engine::policy::Policy as SchemaPolicy;
 use nvisy_postgres::model::WorkspacePolicy;
-use nvisy_postgres::types::{Slug, Username};
+use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,11 +15,11 @@ use crate::service::CryptoService;
 #[serde(rename_all = "camelCase")]
 pub struct Policy {
     /// URL slug of the policy, unique within its workspace.
-    pub slug: Slug,
-    /// Slug of the workspace this policy belongs to.
-    pub workspace_slug: Slug,
+    pub slug: Handle,
+    /// Handle of the workspace this policy belongs to.
+    pub workspace_slug: Handle,
     /// Handle of the account that created this policy.
-    pub creator_username: Username,
+    pub creator_username: Handle,
     /// Human-readable policy display name.
     pub display_name: String,
     /// Policy description.
@@ -43,8 +43,8 @@ impl Policy {
     /// decrypting the definition.
     pub fn from_model(
         policy: WorkspacePolicy,
-        workspace_slug: Slug,
-        creator_username: Username,
+        workspace_slug: Handle,
+        creator_username: Handle,
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =

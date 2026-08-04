@@ -166,7 +166,7 @@ async fn signup(
     }
     if conn.username_exists(&request.username).await? {
         tracing::warn!(target: TRACING_TARGET, "Signup failed: username already taken");
-        return Err(ErrorKind::Conflict.with_message("Username is already taken"));
+        return Err(ErrorKind::Conflict.with_message("Handle is already taken"));
     }
 
     let new_account = NewAccount {

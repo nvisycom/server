@@ -8,7 +8,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
-use crate::types::{CursorPage, CursorPagination, OffsetPagination, PipelineStatus, Username};
+use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination, PipelineStatus};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for pipeline database operations.
@@ -45,7 +45,7 @@ pub trait WorkspacePipelineRepository {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<(WorkspacePipeline, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspacePipeline, Handle)>>> + Send;
 
     /// Lists all pipelines in a workspace with offset pagination.
     fn offset_list_workspace_pipelines(
@@ -62,7 +62,7 @@ pub trait WorkspacePipelineRepository {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipeline, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipeline, Handle)>>> + Send;
 
     /// Lists all pipelines created by an account with offset pagination.
     fn offset_list_account_pipelines(
@@ -165,7 +165,7 @@ impl WorkspacePipelineRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<(WorkspacePipeline, Username)>> {
+    ) -> PgResult<Option<(WorkspacePipeline, Handle)>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
@@ -210,7 +210,7 @@ impl WorkspacePipelineRepository for PgConnection {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> PgResult<CursorPage<(WorkspacePipeline, Username)>> {
+    ) -> PgResult<CursorPage<(WorkspacePipeline, Handle)>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
@@ -259,7 +259,7 @@ impl WorkspacePipelineRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspacePipeline, Username)> = if let Some(cursor) = &pagination.after {
+        let items: Vec<(WorkspacePipeline, Handle)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
             query
@@ -288,7 +288,7 @@ impl WorkspacePipelineRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(p, _): &(WorkspacePipeline, Username)| (p.created_at.into(), p.id),
+            |(p, _): &(WorkspacePipeline, Handle)| (p.created_at.into(), p.id),
         ))
     }
 

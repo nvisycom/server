@@ -9,7 +9,7 @@ use nvisy_engine::plan::{
     LabelCatalogParams, MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams,
 };
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
-use nvisy_postgres::types::{PipelineStatus, Slug};
+use nvisy_postgres::types::{Handle, PipelineStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -59,7 +59,7 @@ pub struct PipelineDefinition {
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
-    pub policy_slugs: Vec<Slug>,
+    pub policy_slugs: Vec<Handle>,
 }
 
 /// A pipeline's deduplication intent.
@@ -89,7 +89,7 @@ impl PipelineDefinition {
     /// The references live in a join table, so they are stripped from the JSON to
     /// keep a single source of truth. Serialization failure is surfaced rather
     /// than swallowed so a bad config never gets silently persisted as empty.
-    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Slug>)> {
+    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Handle>)> {
         let policy_slugs = std::mem::take(&mut self.policy_slugs);
         let config = serde_json::to_value(&self)?;
         Ok((config, policy_slugs))
@@ -103,7 +103,7 @@ impl PipelineDefinition {
     /// config to return silently.
     pub fn from_parts(
         config: serde_json::Value,
-        policy_slugs: Vec<Slug>,
+        policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
         let mut definition: Self = serde_json::from_value(config)?;
         definition.policy_slugs = policy_slugs;
@@ -123,7 +123,7 @@ pub struct CreatePipeline {
     #[validate(length(min = 2, max = 128))]
     pub display_name: String,
     /// URL slug, unique within the workspace and immutable after creation.
-    pub slug: Slug,
+    pub slug: Handle,
     /// Optional description of the pipeline (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
@@ -138,7 +138,7 @@ pub struct CreatePipeline {
 #[derive(Debug, Default, Clone)]
 pub struct PipelineReferences {
     /// Slugs of the policies the pipeline references.
-    pub policy_slugs: Vec<Slug>,
+    pub policy_slugs: Vec<Handle>,
 }
 
 impl CreatePipeline {

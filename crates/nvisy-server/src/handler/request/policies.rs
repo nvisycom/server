@@ -1,7 +1,7 @@
 //! Policy request types.
 
 use nvisy_engine::policy::Policy as SchemaPolicy;
-use nvisy_postgres::types::Slug;
+use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -32,7 +32,7 @@ pub struct CreatePolicy {
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
     /// URL slug, unique within the workspace and immutable after creation.
-    pub slug: Slug,
+    pub slug: Handle,
     /// Optional description override. Defaults to the policy's own description.
     #[validate(length(max = 4096))]
     pub description: Option<String>,

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Slug, Username, WebhookEvent, WebhookId, WebhookStatus};
+use nvisy_postgres::types::{Handle, WebhookEvent, WebhookId, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,8 +17,8 @@ use super::Page;
 pub struct Webhook {
     /// Opaque identifier of the webhook.
     pub id: WebhookId,
-    /// Slug of the workspace this webhook belongs to.
-    pub workspace_slug: Slug,
+    /// Handle of the workspace this webhook belongs to.
+    pub workspace_slug: Handle,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Detailed description of the webhook's purpose.
@@ -35,7 +35,7 @@ pub struct Webhook {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_triggered_at: Option<Timestamp>,
     /// Handle of the account that created this webhook.
-    pub creator_username: Username,
+    pub creator_username: Handle,
     /// Timestamp when this webhook was first created.
     pub created_at: Timestamp,
     /// Timestamp when this webhook was last modified.
@@ -45,8 +45,8 @@ pub struct Webhook {
 impl Webhook {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
-        workspace_slug: Slug,
-        creator_username: Username,
+        workspace_slug: Handle,
+        creator_username: Handle,
     ) -> Self {
         let events = webhook.subscribed_events();
         let headers = webhook.parsed_headers();
@@ -90,8 +90,8 @@ pub struct WebhookCreated {
 impl WebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
-        workspace_slug: Slug,
-        creator_username: Username,
+        workspace_slug: Handle,
+        creator_username: Handle,
         secret: String,
     ) -> Self {
         Self {

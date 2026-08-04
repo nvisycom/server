@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{NotificationEvent, Slug, Username, WorkspaceRole};
+use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use super::Page;
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     /// URL-safe workspace identifier.
-    pub slug: Slug,
+    pub slug: Handle,
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.
@@ -25,7 +25,7 @@ pub struct Workspace {
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
     /// Handle of the account that created this workspace.
-    pub creator_username: Username,
+    pub creator_username: Handle,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
     /// Timestamp when the workspace was created.
@@ -36,7 +36,7 @@ pub struct Workspace {
 
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
-    pub fn from_model(workspace: model::Workspace, creator_username: Username) -> Self {
+    pub fn from_model(workspace: model::Workspace, creator_username: Handle) -> Self {
         let tags = workspace.get_tags();
         Self {
             slug: workspace.slug,
@@ -55,7 +55,7 @@ impl Workspace {
     pub fn from_model_with_membership(
         workspace: model::Workspace,
         member: model::WorkspaceMember,
-        creator_username: Username,
+        creator_username: Handle,
     ) -> Self {
         let tags = workspace.get_tags();
         Self {

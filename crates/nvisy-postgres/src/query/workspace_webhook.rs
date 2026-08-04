@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    CursorPage, CursorPagination, OffsetPagination, Username, WebhookEvent, WebhookStatus,
+    CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent, WebhookStatus,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -41,7 +41,7 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceWebhook, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceWebhook, Handle)>>> + Send;
 
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
@@ -56,7 +56,7 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceWebhook, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceWebhook, Handle)>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
@@ -174,7 +174,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceWebhook, Username)>> {
+    ) -> PgResult<Option<(WorkspaceWebhook, Handle)>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -217,7 +217,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspaceWebhook, Username)>> {
+    ) -> PgResult<CursorPage<(WorkspaceWebhook, Handle)>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -252,7 +252,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             );
         }
 
-        let items: Vec<(WorkspaceWebhook, Username)> = query
+        let items: Vec<(WorkspaceWebhook, Handle)> = query
             .select((WorkspaceWebhook::as_select(), accounts::username))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(pagination.fetch_limit())

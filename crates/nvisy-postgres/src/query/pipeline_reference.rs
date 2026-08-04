@@ -12,7 +12,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::PipelinePolicy;
-use crate::types::Slug;
+use crate::types::Handle;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for pipeline reference join tables.
@@ -41,7 +41,7 @@ pub trait PipelineReferenceRepository {
     fn list_pipeline_policy_slugs(
         &mut self,
         pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<Slug>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<Handle>>> + Send;
 
     /// Resolves policy slugs to their ids within a workspace, preserving order.
     ///
@@ -51,7 +51,7 @@ pub trait PipelineReferenceRepository {
     fn resolve_policy_slugs(
         &mut self,
         workspace_id: Uuid,
-        slugs: &[Slug],
+        slugs: &[Handle],
     ) -> impl Future<Output = PgResult<Option<Vec<Uuid>>>> + Send;
 }
 
@@ -107,7 +107,7 @@ impl PipelineReferenceRepository for PgConnection {
         Ok(ids)
     }
 
-    async fn list_pipeline_policy_slugs(&mut self, pipeline_id: Uuid) -> PgResult<Vec<Slug>> {
+    async fn list_pipeline_policy_slugs(&mut self, pipeline_id: Uuid) -> PgResult<Vec<Handle>> {
         use schema::{workspace_pipeline_policies, workspace_policies};
 
         // Join to the parent so soft-deleted policies (deleted_at set, join row
@@ -130,7 +130,7 @@ impl PipelineReferenceRepository for PgConnection {
     async fn resolve_policy_slugs(
         &mut self,
         workspace_id: Uuid,
-        slugs: &[Slug],
+        slugs: &[Handle],
     ) -> PgResult<Option<Vec<Uuid>>> {
         use schema::workspace_policies::{self, dsl};
 
@@ -139,7 +139,7 @@ impl PipelineReferenceRepository for PgConnection {
         }
 
         let wanted: Vec<String> = slugs.iter().map(|slug| slug.as_str().to_owned()).collect();
-        let found: Vec<(Slug, Uuid)> = workspace_policies::table
+        let found: Vec<(Handle, Uuid)> = workspace_policies::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .filter(dsl::slug.eq_any(&wanted))
@@ -154,8 +154,8 @@ impl PipelineReferenceRepository for PgConnection {
 
 /// Maps the requested slugs to ids in request order, returning `None` if any
 /// requested slug is missing from the resolved set.
-fn map_slugs_to_ids(requested: &[Slug], found: Vec<(Slug, Uuid)>) -> Option<Vec<Uuid>> {
-    let by_slug: std::collections::HashMap<Slug, Uuid> = found.into_iter().collect();
+fn map_slugs_to_ids(requested: &[Handle], found: Vec<(Handle, Uuid)>) -> Option<Vec<Uuid>> {
+    let by_slug: std::collections::HashMap<Handle, Uuid> = found.into_iter().collect();
     requested
         .iter()
         .map(|slug| by_slug.get(slug).copied())

@@ -9,7 +9,7 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
-use crate::types::{ActivityType, CursorPage, CursorPagination, OffsetPagination, Username};
+use crate::types::{ActivityType, CursorPage, CursorPagination, Handle, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Parameters for logging entity-specific activities.
@@ -52,7 +52,7 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceActivity, Option<Username>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceActivity, Option<Handle>)>>> + Send;
 
     /// Gets recent activities across all workspaces for a specific user.
     fn get_account_recent_activity(
@@ -175,7 +175,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspaceActivity, Option<Username>)>> {
+    ) -> PgResult<CursorPage<(WorkspaceActivity, Option<Handle>)>> {
         use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
@@ -209,7 +209,7 @@ impl WorkspaceActivityRepository for PgConnection {
             );
         }
 
-        let items: Vec<(WorkspaceActivity, Option<Username>)> = query
+        let items: Vec<(WorkspaceActivity, Option<Handle>)> = query
             .select((
                 WorkspaceActivity::as_select(),
                 accounts::username.nullable(),

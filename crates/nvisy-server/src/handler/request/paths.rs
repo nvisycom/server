@@ -1,6 +1,6 @@
 //! Path parameter types for HTTP handlers.
 
-use nvisy_postgres::types::{RunId, Username, WebhookId};
+use nvisy_postgres::types::{Handle, RunId, WebhookId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,7 +11,7 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct MemberPathParams {
     /// Public handle of the member's account.
-    pub username: Username,
+    pub username: Handle,
 }
 
 /// Path parameters for invite operations.
@@ -71,7 +71,7 @@ pub struct TokenPathParams {
 #[serde(rename_all = "camelCase")]
 pub struct AccountPathParams {
     /// Public handle of the account.
-    pub username: Username,
+    pub username: Handle,
 }
 
 /// Path parameters for pipeline operations.

@@ -9,9 +9,7 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
-use crate::types::{
-    CursorPage, CursorPagination, OffsetPagination, PipelineRunStatus, Slug, Username,
-};
+use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination, PipelineRunStatus};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace pipeline run database operations.
@@ -36,7 +34,7 @@ pub trait WorkspacePipelineRunRepository {
         workspace_id: Uuid,
         run_id: Uuid,
     ) -> impl Future<
-        Output = PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)>>,
+        Output = PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Handle>)>>,
     > + Send;
 
     /// Finds a run by its `(pipeline, idempotency key)` pair, for detect replay.
@@ -60,7 +58,7 @@ pub trait WorkspacePipelineRunRepository {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipelineRun, Option<Username>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipelineRun, Option<Handle>)>>> + Send;
 
     /// Lists all runs across a workspace's pipelines with cursor pagination.
     ///
@@ -75,7 +73,7 @@ pub trait WorkspacePipelineRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipelineRun, Slug, Option<Username>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipelineRun, Handle, Option<Handle>)>>> + Send;
 
     /// Lists active runs (queued or running) for a specific pipeline.
     fn list_active_workspace_pipeline_runs(
@@ -149,7 +147,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         run_id: Uuid,
-    ) -> PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Username>)>> {
+    ) -> PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Handle>)>> {
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::{accounts, workspace_pipeline_runs, workspace_pipelines};
 
@@ -220,7 +218,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> PgResult<CursorPage<(WorkspacePipelineRun, Option<Username>)>> {
+    ) -> PgResult<CursorPage<(WorkspacePipelineRun, Option<Handle>)>> {
         use schema::workspace_pipeline_runs::dsl;
         use schema::{accounts, workspace_pipeline_runs};
 
@@ -257,7 +255,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspacePipelineRun, Option<Username>)> =
+        let items: Vec<(WorkspacePipelineRun, Option<Handle>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -293,7 +291,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(r, _): &(WorkspacePipelineRun, Option<Username>)| (r.started_at.into(), r.id),
+            |(r, _): &(WorkspacePipelineRun, Option<Handle>)| (r.started_at.into(), r.id),
         ))
     }
 
@@ -302,7 +300,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> PgResult<CursorPage<(WorkspacePipelineRun, Slug, Option<Username>)>> {
+    ) -> PgResult<CursorPage<(WorkspacePipelineRun, Handle, Option<Handle>)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::workspace_pipelines::dsl as pipelines;
@@ -342,7 +340,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
             accounts::username.nullable(),
         );
 
-        let items: Vec<(WorkspacePipelineRun, Slug, Option<Username>)> =
+        let items: Vec<(WorkspacePipelineRun, Handle, Option<Handle>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -372,7 +370,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(run, _, _): &(WorkspacePipelineRun, Slug, Option<Username>)| {
+            |(run, _, _): &(WorkspacePipelineRun, Handle, Option<Handle>)| {
                 (run.started_at.into(), run.id)
             },
         ))

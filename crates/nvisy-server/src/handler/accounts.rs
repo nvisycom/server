@@ -168,7 +168,7 @@ async fn update_own_account(
     {
         tracing::warn!(target: TRACING_TARGET, "Account update failed: username already taken");
         return Err(ErrorKind::Conflict
-            .with_message("Username is already taken")
+            .with_message("Handle is already taken")
             .with_resource("account"));
     }
 

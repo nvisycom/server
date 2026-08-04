@@ -1,6 +1,6 @@
 //! Authentication request types.
 
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -27,7 +27,7 @@ pub struct Login {
 #[serde(rename_all = "camelCase")]
 pub struct Signup {
     /// Public account handle, unique across all accounts.
-    pub username: Username,
+    pub username: Handle,
 
     /// Optional display name of the account.
     #[validate(length(min = 2, max = 32))]

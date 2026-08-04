@@ -9,7 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::types::{OffsetPagination, Username};
+use crate::types::{Handle, OffsetPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Maximum number of slug candidates tried before giving up when generating a
@@ -52,7 +52,7 @@ pub trait WorkspaceRepository {
     fn find_workspace_by_slug(
         &mut self,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<(Workspace, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(Workspace, Handle)>>> + Send;
 
     /// Updates a workspace with partial changes.
     fn update_workspace(
@@ -158,7 +158,7 @@ impl WorkspaceRepository for PgConnection {
     async fn find_workspace_by_slug(
         &mut self,
         slug_value: &str,
-    ) -> PgResult<Option<(Workspace, Username)>> {
+    ) -> PgResult<Option<(Workspace, Handle)>> {
         use schema::workspaces::dsl;
         use schema::{accounts, workspaces};
 

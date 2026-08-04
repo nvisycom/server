@@ -10,7 +10,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::{Username, WorkspaceRole};
+use nvisy_postgres::types::{Handle, WorkspaceRole};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -391,7 +391,7 @@ fn leave_workspace_docs(op: TransformOperation) -> TransformOperation {
 
 /// Resolves a member's public handle to its account id, recording the id on the
 /// current tracing span. Returns `NotFound` when no such account exists.
-async fn resolve_member_account_id(conn: &mut PgConn, username: &Username) -> Result<Uuid> {
+async fn resolve_member_account_id(conn: &mut PgConn, username: &Handle) -> Result<Uuid> {
     let account = conn
         .find_account_by_username(username)
         .await?

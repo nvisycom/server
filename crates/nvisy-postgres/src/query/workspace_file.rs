@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 use crate::types::{
-    CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, OffsetPagination,
-    SortOrder, Username,
+    CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, Handle, OffsetPagination,
+    SortOrder,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -49,7 +49,7 @@ pub trait WorkspaceFileRepository {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceFile, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspaceFile, Handle)>>> + Send;
 
     /// Returns the remote object keys already imported (live) from a connection.
     ///
@@ -114,7 +114,7 @@ pub trait WorkspaceFileRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceFile, Username)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceFile, Handle)>>> + Send;
 
     /// Finds workspace files with a matching SHA-256 hash.
     fn find_workspace_files_by_hash(
@@ -254,7 +254,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceFile, Username)>> {
+    ) -> PgResult<Option<(WorkspaceFile, Handle)>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -392,7 +392,7 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> PgResult<CursorPage<(WorkspaceFile, Username)>> {
+    ) -> PgResult<CursorPage<(WorkspaceFile, Handle)>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -450,7 +450,7 @@ impl WorkspaceFileRepository for PgConnection {
         let limit = pagination.fetch_limit();
 
         // Apply cursor filter if present
-        let items: Vec<(WorkspaceFile, Username)> = if let Some(cursor) = &pagination.after {
+        let items: Vec<(WorkspaceFile, Handle)> = if let Some(cursor) = &pagination.after {
             let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
             query
@@ -479,7 +479,7 @@ impl WorkspaceFileRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(f, _): &(WorkspaceFile, Username)| (f.created_at.into(), f.id),
+            |(f, _): &(WorkspaceFile, Handle)| (f.created_at.into(), f.id),
         ))
     }
 

@@ -21,7 +21,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
-use nvisy_postgres::types::{ConnectionId, Username};
+use nvisy_postgres::types::{ConnectionId, Handle};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -454,7 +454,7 @@ async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
     connection_id: ConnectionId,
-) -> Result<(WorkspaceConnection, Username, Option<jiff::Timestamp>)> {
+) -> Result<(WorkspaceConnection, Handle, Option<jiff::Timestamp>)> {
     let (connection, creator_username) = conn
         .find_connection_in_workspace_with_creator(workspace_id, connection_id.as_uuid())
         .await?

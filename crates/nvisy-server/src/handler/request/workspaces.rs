@@ -7,7 +7,7 @@
 use nvisy_postgres::model::{
     NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel, UpdateWorkspaceMember,
 };
-use nvisy_postgres::types::{NotificationEvent, Slug};
+use nvisy_postgres::types::{Handle, NotificationEvent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -27,7 +27,7 @@ pub struct CreateWorkspace {
     #[validate(length(min = 2, max = 32))]
     pub display_name: String,
     /// Optional URL slug. Derived from the display name when omitted.
-    pub slug: Option<Slug>,
+    pub slug: Option<Handle>,
     /// Optional description of the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
@@ -53,7 +53,7 @@ impl CreateWorkspace {
     pub fn into_model(self, account_id: Uuid) -> Result<NewWorkspace> {
         let slug = match self.slug {
             Some(slug) => slug,
-            None => Slug::derive(&self.display_name).ok_or_else(|| {
+            None => Handle::derive(&self.display_name).ok_or_else(|| {
                 ErrorKind::BadRequest
                     .with_message("Could not derive a slug from the display name; provide one")
                     .with_resource("workspace")

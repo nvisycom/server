@@ -1,7 +1,7 @@
 //! Authentication response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub struct AuthToken {
     /// The JWT API token for authentication.
     pub api_token: String,
     /// Handle of the authenticated account.
-    pub username: Username,
+    pub username: Handle,
     /// Timestamp when the token was issued.
     pub issued_at: Timestamp,
     /// Timestamp when the token expires.

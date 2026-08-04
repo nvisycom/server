@@ -17,7 +17,7 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_postgres::types::Username;
+use nvisy_postgres::types::Handle;
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
@@ -49,7 +49,7 @@ async fn find_file_with_creator(
     conn: &mut PgConn,
     workspace_id: Uuid,
     file_id: Uuid,
-) -> Result<(FileModel, Username)> {
+) -> Result<(FileModel, Handle)> {
     conn.find_file_in_workspace_with_creator(workspace_id, file_id)
         .await?
         .ok_or_else(|| Error::not_found("file"))

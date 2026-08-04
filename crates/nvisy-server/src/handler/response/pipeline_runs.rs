@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspacePipelineRun as PipelineRunModel;
-use nvisy_postgres::types::{PipelineRunStatus, PipelineTriggerType, RunId, Slug, Username};
+use nvisy_postgres::types::{Handle, PipelineRunStatus, PipelineTriggerType, RunId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,15 +18,15 @@ use super::Page;
 pub struct PipelineRun {
     /// Opaque identifier of the run.
     pub id: RunId,
-    /// Slug of the pipeline this run belongs to.
-    pub pipeline_slug: Slug,
-    /// Slug of the workspace this run belongs to.
-    pub workspace_slug: Slug,
+    /// Handle of the pipeline this run belongs to.
+    pub pipeline_slug: Handle,
+    /// Handle of the workspace this run belongs to.
+    pub workspace_slug: Handle,
     /// File this run analyzes / redacts.
     pub file_id: Uuid,
     /// Handle of the account that triggered the run, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trigger_username: Option<Username>,
+    pub trigger_username: Option<Handle>,
     /// How the run was triggered.
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
@@ -51,9 +51,9 @@ impl PipelineRun {
     /// owning pipeline and workspace, and the triggering account's handle.
     pub fn from_model(
         run: PipelineRunModel,
-        pipeline_slug: Slug,
-        workspace_slug: Slug,
-        trigger_username: Option<Username>,
+        pipeline_slug: Handle,
+        workspace_slug: Handle,
+        trigger_username: Option<Handle>,
     ) -> Self {
         Self {
             id: RunId::from_uuid(run.id),

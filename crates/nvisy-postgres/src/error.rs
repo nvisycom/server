@@ -119,7 +119,7 @@ impl PgError {
     /// constraint on any resource (workspace or workspace-scoped config).
     ///
     /// Matches by constraint name so a single check covers every table's slug
-    /// unique index without enumerating each constraint enum. Slug uniqueness
+    /// unique index without enumerating each constraint enum. Handle uniqueness
     /// constraints are named `*_slug_key` (global) or `*_workspace_id_slug_key`
     /// (per workspace).
     pub fn is_slug_conflict(&self) -> bool {

@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_postgres::types::{Username, WebhookId};
+use nvisy_postgres::types::{Handle, WebhookId};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::provider::WebhookRequest;
@@ -380,7 +380,7 @@ async fn find_webhook(
     conn: &mut PgConn,
     workspace_id: Uuid,
     webhook_id: Uuid,
-) -> Result<(WorkspaceWebhook, Username)> {
+) -> Result<(WorkspaceWebhook, Handle)> {
     conn.find_webhook_in_workspace_with_creator(workspace_id, webhook_id)
         .await?
         .ok_or_else(|| Error::not_found("webhook"))

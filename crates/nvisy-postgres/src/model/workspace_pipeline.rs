@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_pipelines;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, PipelineStatus, Slug};
+use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt, PipelineStatus};
 
 /// Workspace pipeline model representing a workflow definition in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -19,7 +19,7 @@ pub struct WorkspacePipeline {
     /// Reference to the account that created this pipeline.
     pub account_id: Uuid,
     /// URL-safe pipeline identifier, unique within the workspace.
-    pub slug: Slug,
+    pub slug: Handle,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -54,7 +54,7 @@ pub struct NewWorkspacePipeline {
     /// Account ID (required).
     pub account_id: Uuid,
     /// URL-safe pipeline identifier, unique within the workspace.
-    pub slug: Slug,
+    pub slug: Handle,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
