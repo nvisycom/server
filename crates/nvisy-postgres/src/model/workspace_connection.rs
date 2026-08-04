@@ -10,8 +10,8 @@ use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, SyncMode};
 
 /// Workspace connection model representing encrypted provider connections.
 ///
-/// Connections store both credentials and context (resumption state) for
-/// external providers like databases, cloud storage, and AI services.
+/// Connections store encrypted credentials for an external object store
+/// provider (s3, azure, gcs).
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -24,14 +24,14 @@ pub struct WorkspaceConnection {
     pub account_id: Uuid,
     /// Human-readable connection display name.
     pub display_name: String,
-    /// Provider type for indexing (e.g., "openai", "postgres", "s3").
+    /// Object store provider (`s3`, `azure`, `gcs`).
     pub provider: String,
     /// Whether the connection imports data in or exports data out.
     pub sync_mode: SyncMode,
     /// Cron expression for scheduled imports; `None` means manual-only.
     pub schedule_cron: Option<String>,
     /// Encrypted connection data (XChaCha20-Poly1305 encrypted JSON).
-    /// Contains credentials and context for resumption.
+    /// Contains the provider credentials and optional root path.
     pub encrypted_data: Vec<u8>,
     /// Whether the connection is enabled for syncing.
     pub is_active: bool,

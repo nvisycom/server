@@ -31,7 +31,7 @@ CREATE TYPE SYNC_MODE AS ENUM (
 COMMENT ON TYPE SYNC_MODE IS
     'Direction a connection syncs: import into, or export out of, the workspace.';
 
--- Workspace connections table (encrypted provider credentials + context)
+-- Workspace connections table (encrypted provider credentials)
 CREATE TABLE workspace_connections (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -58,9 +58,8 @@ CREATE TABLE workspace_connections (
     -- Scheduled syncs are import-only for now; export is manual.
     CONSTRAINT workspace_connections_schedule_import_only CHECK (schedule_cron IS NULL OR sync_mode = 'import'),
 
-    -- Encrypted connection data (XChaCha20-Poly1305 encrypted JSON)
-    -- Contains: {"type": "postgres", "credentials": {...}, "context": {...}}
-    -- The context includes resumption state (last cursor, offset, etc.)
+    -- Encrypted connection credentials (XChaCha20-Poly1305 encrypted JSON)
+    -- Contains the provider type, credentials, and optional root path.
     encrypted_data  BYTEA           NOT NULL,
 
     CONSTRAINT workspace_connections_data_size CHECK (length(encrypted_data) BETWEEN 1 AND 65536),
@@ -106,16 +105,16 @@ CREATE INDEX workspace_connections_active_idx
 
 -- Comments
 COMMENT ON TABLE workspace_connections IS
-    'Encrypted provider connections (credentials + context) scoped to workspaces.';
+    'Encrypted provider connections (credentials) scoped to workspaces.';
 
 COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
 COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
-COMMENT ON COLUMN workspace_connections.provider IS 'Provider type (openai, postgres, s3, pinecone, etc.)';
+COMMENT ON COLUMN workspace_connections.provider IS 'Object store provider (s3, azure, gcs)';
 COMMENT ON COLUMN workspace_connections.sync_mode IS 'Whether the connection imports data in or exports data out';
 COMMENT ON COLUMN workspace_connections.schedule_cron IS 'Cron expression for scheduled imports; NULL means manual-only';
-COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with credentials and context';
+COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with provider credentials';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled for syncing';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
@@ -135,9 +134,9 @@ CREATE TABLE workspace_connection_runs (
     trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
     status          SYNC_STATUS         NOT NULL DEFAULT 'running',
 
-    -- Number of records processed by this run. Resumption state (cursor,
-    -- offset) is not stored here; it lives in the connection's encrypted
-    -- context, which each run reads and advances.
+    -- Number of records processed by this run. Each run lists the source and
+    -- imports only objects not already imported, so runs are incremental across
+    -- invocations without any stored cursor.
     records_synced  BIGINT              NOT NULL DEFAULT 0,
 
     CONSTRAINT workspace_connection_runs_records_synced_non_negative CHECK (records_synced >= 0),

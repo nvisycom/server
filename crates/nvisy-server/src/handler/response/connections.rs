@@ -23,7 +23,7 @@ pub struct Connection {
     pub creator_username: Username,
     /// Human-readable connection display name.
     pub display_name: String,
-    /// Provider type (e.g., "openai", "postgres", "s3").
+    /// Object store provider (`s3`, `azure`, `gcs`).
     pub provider: String,
     /// Whether the connection imports data in or exports data out.
     pub sync_mode: SyncMode,

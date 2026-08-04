@@ -11,9 +11,10 @@ use crate::types::{SyncStatus, SyncTriggerType};
 /// A connection sync run: one synchronization execution of a connection.
 ///
 /// Each run records how it was triggered, how many records it processed, and
-/// its outcome. Resumption state (cursor, offset) lives in the connection's
-/// encrypted context, not on the run. The connection's current sync state is
-/// derived from its most recent run rather than stored on the connection.
+/// its outcome. Runs are incremental: each lists the source and imports only
+/// objects not already imported, so re-running a sync picks up new objects
+/// without any stored cursor. The connection's current sync state is derived
+/// from its most recent run rather than stored on the connection.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_connection_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

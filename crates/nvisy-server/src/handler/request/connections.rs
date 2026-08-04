@@ -26,7 +26,7 @@ pub struct CreateConnection {
     /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
     pub display_name: String,
-    /// Provider type (e.g., "openai", "postgres", "s3").
+    /// Object store provider (`s3`, `azure`, `gcs`).
     #[validate(length(min = 1, max = 64))]
     pub provider: String,
     /// Whether the connection imports data in or exports data out.
