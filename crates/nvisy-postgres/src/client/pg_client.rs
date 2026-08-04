@@ -178,7 +178,7 @@ impl PgClient {
     /// Returns an error if no connection is available within the timeout period.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub async fn get_connection(&self) -> PgResult<PgConn> {
-        tracing::debug!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
+        tracing::trace!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
 
         let start = Instant::now();
         let conn = self.inner.pool.get().await.map_err(|e| {
@@ -200,7 +200,7 @@ impl PgClient {
             );
         }
 
-        tracing::debug!(target: TRACING_TARGET_CONNECTION, elapsed = ?elapsed, "Connection acquired successfully");
+        tracing::trace!(target: TRACING_TARGET_CONNECTION, elapsed = ?elapsed, "Connection acquired successfully");
         Ok(PgConn::new(conn))
     }
 

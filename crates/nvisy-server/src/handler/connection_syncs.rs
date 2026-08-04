@@ -25,6 +25,7 @@ use crate::extract::{
 };
 use crate::handler::request::{
     ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, SyncConnection,
+    WorkspaceSyncsQuery,
 };
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
 use crate::handler::{Error, ErrorKind, Result};
@@ -179,6 +180,61 @@ fn list_connection_syncs_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Lists sync runs across every connection in the workspace, most recent first.
+///
+/// Optional `status` and repeatable `provider` query filters narrow the result
+/// (a sync matches if its connection uses any of the given providers). Requires
+/// `ViewConnections` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+    )
+)]
+async fn list_workspace_syncs(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Query(pagination): Query<CursorPagination>,
+    Query(query): Query<WorkspaceSyncsQuery>,
+) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace syncs");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
+        .await?;
+
+    let page = conn
+        .cursor_list_workspace_connection_runs_all(
+            workspace.id,
+            pagination.into(),
+            query.status,
+            &query.provider,
+        )
+        .await?;
+
+    let page = Page::from_cursor_page(page, |(run, _connection_id, _creator)| {
+        ConnectionSync::from_model(run)
+    });
+
+    Ok((StatusCode::OK, Json(page)))
+}
+
+fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List workspace syncs")
+        .description(
+            "Returns all sync runs across the workspace's connections, most recent first, \
+             with optional status and provider filters.",
+        )
+        .response::<200, Json<ConnectionSyncsPage>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Retrieves a single sync run for a connection.
 #[tracing::instrument(
     skip_all,
@@ -305,6 +361,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
+        .api_route(
+            "/workspaces/{workspaceSlug}/syncs/",
+            get_with(list_workspace_syncs, list_workspace_syncs_docs),
+        )
         .api_route(
             "/workspaces/{workspaceSlug}/connections/{connectionId}/sync/",
             post_with(sync_connection, sync_connection_docs),

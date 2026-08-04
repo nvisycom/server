@@ -54,7 +54,7 @@ where
         // Try to get existing stream, create if it doesn't exist
         match jetstream.get_stream(stream_name).await {
             Ok(_) => {
-                tracing::debug!(
+                tracing::trace!(
                     target: TRACING_TARGET_STREAM,
                     stream = %stream_name,
                     consumer = %consumer_name,

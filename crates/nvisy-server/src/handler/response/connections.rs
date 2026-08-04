@@ -32,6 +32,8 @@ pub struct Connection {
     pub schedule_cron: Option<String>,
     /// How an import reconciles files whose source object was deleted.
     pub deletion_policy: SyncDeletionPolicy,
+    /// Whether the connection is enabled for syncing.
+    pub is_active: bool,
     /// When the connection last synced successfully, if ever.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_synced: Option<Timestamp>,
@@ -90,6 +92,7 @@ impl Connection {
             sync_mode: connection.sync_mode,
             schedule_cron: connection.schedule_cron,
             deletion_policy: connection.deletion_policy,
+            is_active: connection.is_active,
             last_synced,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),

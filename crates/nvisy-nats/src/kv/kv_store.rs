@@ -55,7 +55,7 @@ where
 
         let store = match jetstream.get_key_value(B::NAME).await {
             Ok(store) => {
-                tracing::debug!(
+                tracing::trace!(
                     target: TRACING_TARGET_KV,
                     bucket = %B::NAME,
                     "Using existing KV bucket"

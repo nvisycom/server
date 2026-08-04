@@ -111,7 +111,7 @@ pub fn post_create(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResul
 pub fn pre_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResult<PoolError> {
     let is_broken = conn.is_broken();
 
-    tracing::debug!(
+    tracing::trace!(
         target: TRACING_TARGET_CONNECTION,
         hook = "pre_recycle",
         is_broken = is_broken,
@@ -142,7 +142,7 @@ pub fn pre_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResul
 pub fn post_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResult<PoolError> {
     let is_broken = conn.is_broken();
 
-    tracing::debug!(
+    tracing::trace!(
         target: TRACING_TARGET_CONNECTION,
         hook = "post_recycle",
         is_broken = is_broken,

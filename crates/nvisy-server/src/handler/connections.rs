@@ -95,7 +95,7 @@ async fn create_connection(
         schedule_cron: request.schedule_cron,
         deletion_policy: Some(request.deletion_policy),
         encrypted_data,
-        is_active: None,
+        is_active: request.is_active,
         metadata: None,
     };
 
@@ -163,11 +163,7 @@ async fn list_connections(
         .await?;
 
     let page = conn
-        .cursor_list_workspace_connections(
-            workspace.id,
-            pagination.into(),
-            query.provider.as_deref(),
-        )
+        .cursor_list_workspace_connections(workspace.id, pagination.into(), &query.provider)
         .await?;
 
     // One grouped query resolves last-synced for the whole page (not per row).
@@ -313,6 +309,7 @@ async fn update_connection(
         sync_mode: request.sync_mode,
         schedule_cron: request.schedule_cron,
         deletion_policy: request.deletion_policy,
+        is_active: request.is_active,
         encrypted_data,
         ..Default::default()
     };

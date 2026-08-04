@@ -1,10 +1,23 @@
 //! Connection sync request types.
 
-use nvisy_postgres::types::ConnectionId;
+use nvisy_postgres::types::{ConnectionId, SyncStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
+
+/// Query parameters for listing all syncs across a workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSyncsQuery {
+    /// Filter by sync status.
+    pub status: Option<SyncStatus>,
+    /// Filter by connection provider (`s3`, `azure`, `gcs`). Repeatable; a sync
+    /// matches if its connection uses any of the given providers. Empty means no
+    /// provider filter.
+    #[serde(default)]
+    pub provider: Vec<String>,
+}
 
 /// Path parameters for a specific connection sync.
 #[must_use]
