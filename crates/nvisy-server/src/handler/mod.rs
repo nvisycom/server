@@ -41,10 +41,11 @@ const TRACING_TARGET_FALLBACK: &str = "nvisy_server::handler::fallback";
 
 /// Fallback for requests that match no route.
 ///
-/// Logs the method and path so unmatched requests are diagnosable, and echoes
-/// the path in the response context.
+/// Logs the method and path at debug so unmatched requests are diagnosable when
+/// debugging, without warning on routine client probes, and echoes the path in
+/// the response context.
 async fn handler(method: Method, uri: Uri) -> Response {
-    tracing::warn!(
+    tracing::debug!(
         target: TRACING_TARGET_FALLBACK,
         %method,
         path = %uri.path(),

@@ -164,6 +164,55 @@ impl From<Uuid> for AccountKey {
     }
 }
 
+/// A validated key for workspace-scoped objects in NATS object storage.
+///
+/// The key format is `workspace_` prefix followed by the workspace ID, since
+/// these objects are uniquely identified by their owning workspace (e.g. the
+/// workspace avatar/logo).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WorkspaceKey {
+    pub workspace_id: Uuid,
+}
+
+impl ObjectKey for WorkspaceKey {
+    const PREFIX: &'static str = "workspace_";
+}
+
+impl WorkspaceKey {
+    /// Creates a new workspace key.
+    pub fn new(workspace_id: Uuid) -> Self {
+        Self { workspace_id }
+    }
+}
+
+impl fmt::Display for WorkspaceKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", Self::PREFIX, self.workspace_id)
+    }
+}
+
+impl FromStr for WorkspaceKey {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let payload = s.strip_prefix(Self::PREFIX).ok_or_else(|| {
+            Error::operation(
+                "parse_key",
+                format!("Invalid key prefix: expected '{}'", Self::PREFIX),
+            )
+        })?;
+        let workspace_id = Uuid::parse_str(payload)
+            .map_err(|e| Error::operation("parse_key", format!("Invalid workspace UUID: {}", e)))?;
+        Ok(Self::new(workspace_id))
+    }
+}
+
+impl From<Uuid> for WorkspaceKey {
+    fn from(workspace_id: Uuid) -> Self {
+        Self::new(workspace_id)
+    }
+}
+
 /// A validated key for intermediate pipeline objects in NATS object storage.
 ///
 /// Addresses a run's analyzed document — the engine's detection result held

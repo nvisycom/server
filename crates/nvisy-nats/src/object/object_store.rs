@@ -211,15 +211,27 @@ where
             "Deleting object"
         );
 
-        self.inner.delete(&key_str).await.map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                key = %key_str,
-                error = %e,
-                "Failed to delete object"
-            );
-            Error::operation("delete", e.to_string())
-        })?;
+        // Deleting a missing object is a no-op: delete is idempotent.
+        match self.inner.delete(&key_str).await {
+            Ok(()) => {}
+            Err(e) if matches!(e.kind(), object_store::DeleteErrorKind::NotFound) => {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    key = %key_str,
+                    "Object already absent; delete is a no-op"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    key = %key_str,
+                    error = %e,
+                    "Failed to delete object"
+                );
+                return Err(Error::operation("delete", e.to_string()));
+            }
+        }
 
         tracing::info!(
             target: TRACING_TARGET,

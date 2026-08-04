@@ -89,8 +89,8 @@ pub struct UpdateAccount {
     pub email_address: Option<String>,
     /// Securely hashed password.
     pub password_hash: Option<String>,
-    /// URL to profile avatar image.
-    pub avatar_url: Option<String>,
+    /// URL to profile avatar image (`Some(None)` clears it).
+    pub avatar_url: Option<Option<String>>,
     /// Timezone identifier.
     pub timezone: Option<String>,
     /// Preferred locale code.

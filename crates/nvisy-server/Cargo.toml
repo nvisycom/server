@@ -93,6 +93,9 @@ anyhow = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 
+# Image processing
+image = { workspace = true }
+
 # Cron parsing
 croner = { workspace = true, features = [] }
 chrono = { workspace = true, features = [] }

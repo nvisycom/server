@@ -44,6 +44,7 @@ use crate::kv::{
 };
 use crate::object::{
     AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
+    WorkspaceAvatarsBucket,
 };
 use crate::stream::{EventPublisher, EventStream, EventSubscriber, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
@@ -251,6 +252,12 @@ impl NatsClient {
     /// Get or create an avatar store for account avatars.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn avatar_store(&self) -> Result<ObjectStore<AvatarsBucket>> {
+        self.object_store().await
+    }
+
+    /// Get or create an avatar store for workspace avatars (logos).
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn workspace_avatar_store(&self) -> Result<ObjectStore<WorkspaceAvatarsBucket>> {
         self.object_store().await
     }
 }
