@@ -1,4 +1,4 @@
--- Drop all objects created in the documents migration
+-- Drop all objects created in the files migration
 -- Drop in reverse order of creation to avoid dependency issues
 
 -- Drop trigger before the function it depends on

@@ -16,6 +16,35 @@ type WebhookPublisher = EventPublisher<WebhookJob, WebhookStream>;
 /// Tracing target for webhook event emission.
 const TRACING_TARGET: &str = "nvisy_server::service::webhook";
 
+/// Generates per-event convenience wrappers inside the [`WebhookEmitter`] impl.
+///
+/// Each wrapper forwards its `resource_id`, `triggered_by`, and `data` to
+/// [`WebhookEmitter::emit`] with the associated [`WebhookEvent`] variant.
+macro_rules! emit_helpers {
+    ($($method:ident => $variant:ident),+ $(,)?) => {
+        $(
+            #[doc = concat!("Emit a [`WebhookEvent::", stringify!($variant), "`] event.")]
+            #[inline]
+            pub async fn $method(
+                &self,
+                workspace_id: Uuid,
+                resource_id: Uuid,
+                triggered_by: Option<Uuid>,
+                data: Option<serde_json::Value>,
+            ) -> Result<usize> {
+                self.emit(
+                    workspace_id,
+                    WebhookEvent::$variant,
+                    resource_id,
+                    triggered_by,
+                    data,
+                )
+                .await
+            }
+        )+
+    };
+}
+
 /// Webhook event emitter for publishing domain events.
 ///
 /// This service queries webhooks subscribed to specific events and publishes a
@@ -29,6 +58,30 @@ pub struct WebhookEmitter {
 }
 
 impl WebhookEmitter {
+    emit_helpers! {
+        emit_file_created => FileCreated,
+        emit_file_updated => FileUpdated,
+        emit_file_deleted => FileDeleted,
+        emit_member_added => MemberAdded,
+        emit_member_updated => MemberUpdated,
+        emit_member_deleted => MemberDeleted,
+        emit_connection_created => ConnectionCreated,
+        emit_connection_updated => ConnectionUpdated,
+        emit_connection_deleted => ConnectionDeleted,
+        emit_connection_sync_started => ConnectionSyncStarted,
+        emit_connection_sync_completed => ConnectionSyncCompleted,
+        emit_connection_sync_failed => ConnectionSyncFailed,
+        emit_pipeline_created => PipelineCreated,
+        emit_pipeline_updated => PipelineUpdated,
+        emit_pipeline_deleted => PipelineDeleted,
+        emit_pipeline_run_started => PipelineRunStarted,
+        emit_pipeline_run_completed => PipelineRunCompleted,
+        emit_pipeline_run_failed => PipelineRunFailed,
+        emit_policy_created => PolicyCreated,
+        emit_policy_updated => PolicyUpdated,
+        emit_policy_deleted => PolicyDeleted,
+    }
+
     /// Create a new webhook emitter.
     pub fn new(pg_client: PgClient, nats_client: NatsClient) -> Self {
         Self {
@@ -131,214 +184,5 @@ impl WebhookEmitter {
         );
 
         Ok(published)
-    }
-
-    /// Emit a file created event.
-    #[inline]
-    pub async fn emit_file_created(
-        &self,
-        workspace_id: Uuid,
-        file_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::FileCreated,
-            file_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a file updated event.
-    #[inline]
-    pub async fn emit_file_updated(
-        &self,
-        workspace_id: Uuid,
-        file_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::FileUpdated,
-            file_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a file deleted event.
-    #[inline]
-    pub async fn emit_file_deleted(
-        &self,
-        workspace_id: Uuid,
-        file_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::FileDeleted,
-            file_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a member added event.
-    #[inline]
-    pub async fn emit_member_added(
-        &self,
-        workspace_id: Uuid,
-        member_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::MemberAdded,
-            member_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a member updated event.
-    #[inline]
-    pub async fn emit_member_updated(
-        &self,
-        workspace_id: Uuid,
-        member_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::MemberUpdated,
-            member_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a member deleted event.
-    #[inline]
-    pub async fn emit_member_deleted(
-        &self,
-        workspace_id: Uuid,
-        member_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::MemberDeleted,
-            member_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a connection created event.
-    #[inline]
-    pub async fn emit_connection_created(
-        &self,
-        workspace_id: Uuid,
-        connection_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::ConnectionCreated,
-            connection_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a connection updated event.
-    #[inline]
-    pub async fn emit_connection_updated(
-        &self,
-        workspace_id: Uuid,
-        connection_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::ConnectionUpdated,
-            connection_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a connection deleted event.
-    #[inline]
-    pub async fn emit_connection_deleted(
-        &self,
-        workspace_id: Uuid,
-        connection_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::ConnectionDeleted,
-            connection_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a connection synced event.
-    #[inline]
-    pub async fn emit_connection_synced(
-        &self,
-        workspace_id: Uuid,
-        connection_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::ConnectionSynced,
-            connection_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a connection desynced event.
-    #[inline]
-    pub async fn emit_connection_desynced(
-        &self,
-        workspace_id: Uuid,
-        connection_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::ConnectionDesynced,
-            connection_id,
-            triggered_by,
-            data,
-        )
-        .await
     }
 }

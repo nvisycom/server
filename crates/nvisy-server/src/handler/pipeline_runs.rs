@@ -42,7 +42,7 @@ use crate::handler::request::{
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{CryptoService, EngineService, ServiceState};
+use crate::service::{CryptoService, EngineService, ServiceState, WebhookEmitter};
 
 /// Tracing target for pipeline run operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::runs";
@@ -65,6 +65,7 @@ async fn create_pipeline_run(
     State(nats): State<NatsClient>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
+    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
@@ -120,12 +121,36 @@ async fn create_pipeline_run(
     };
     let run = conn.create_workspace_pipeline_run(new_run).await?;
 
+    if let Err(err) = webhook_emitter
+        .emit_pipeline_run_started(
+            workspace.id,
+            run.id,
+            Some(auth_state.account_id),
+            Some(serde_json::json!({ "pipelineId": pipeline.id, "fileId": file.id })),
+        )
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            run_id = %run.id,
+            "Failed to emit pipeline:run.started webhook event"
+        );
+    }
+
     // Merge the pipeline's intent with the deployment defaults; rejects a
     // pipeline that enables recognizers this deployment lacks.
     let params = match engine.analyzer_params(&definition, request.scope) {
         Ok(params) => params,
         Err(err) => {
-            fail_run(&mut conn, run.id).await;
+            fail_run(
+                &mut conn,
+                &webhook_emitter,
+                workspace.id,
+                run.id,
+                auth_state.account_id,
+            )
+            .await;
             return Err(err);
         }
     };
@@ -135,7 +160,14 @@ async fn create_pipeline_run(
     let analyzed = match engine.analyze_document(document, &params).await {
         Ok(analyzed) => analyzed,
         Err(err) => {
-            fail_run(&mut conn, run.id).await;
+            fail_run(
+                &mut conn,
+                &webhook_emitter,
+                workspace.id,
+                run.id,
+                auth_state.account_id,
+            )
+            .await;
             return Err(analysis_error(err));
         }
     };
@@ -420,6 +452,7 @@ async fn redact_pipeline_run(
     State(nats): State<NatsClient>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
+    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -480,6 +513,23 @@ async fn redact_pipeline_run(
         )
         .await?;
 
+    if let Err(err) = webhook_emitter
+        .emit_pipeline_run_completed(
+            workspace.id,
+            run.id,
+            Some(auth_state.account_id),
+            Some(serde_json::json!({ "artifactFileId": artifact_file.id })),
+        )
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            run_id = %run.id,
+            "Failed to emit pipeline:run.completed webhook event"
+        );
+    }
+
     tracing::info!(
         target: TRACING_TARGET,
         run_id = %run.id,
@@ -513,8 +563,15 @@ fn redact_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Marks a run failed (best effort) after an engine error.
-async fn fail_run(conn: &mut PgConn, run_id: uuid::Uuid) {
+/// Marks a run failed (best effort) after an engine error and emits the
+/// `pipeline:run.failed` webhook event.
+async fn fail_run(
+    conn: &mut PgConn,
+    webhook_emitter: &WebhookEmitter,
+    workspace_id: uuid::Uuid,
+    run_id: uuid::Uuid,
+    triggered_by: uuid::Uuid,
+) {
     let update = UpdateWorkspacePipelineRun {
         status: Some(PipelineRunStatus::Failed),
         completed_at: Some(Some(jiff::Timestamp::now().into())),
@@ -522,6 +579,18 @@ async fn fail_run(conn: &mut PgConn, run_id: uuid::Uuid) {
     };
     if let Err(err) = conn.update_workspace_pipeline_run(run_id, update).await {
         tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to mark run failed");
+    }
+
+    if let Err(err) = webhook_emitter
+        .emit_pipeline_run_failed(workspace_id, run_id, Some(triggered_by), None)
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %err,
+            run_id = %run_id,
+            "Failed to emit pipeline:run.failed webhook event"
+        );
     }
 }
 
