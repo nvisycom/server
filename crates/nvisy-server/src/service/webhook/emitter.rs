@@ -1,58 +1,39 @@
 //! Webhook event emitter for publishing domain events to NATS.
 
-use std::collections::HashMap;
-use std::time::Duration;
-
 use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{EventPublisher, WebhookStream};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::WebhookEvent;
-use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
-use url::Url;
 use uuid::Uuid;
 
+use super::WebhookJob;
 use crate::Result;
-use crate::service::CryptoService;
 
 /// Type alias for webhook publisher.
-type WebhookPublisher = EventPublisher<WebhookRequest, WebhookStream>;
+type WebhookPublisher = EventPublisher<WebhookJob, WebhookStream>;
 
 /// Tracing target for webhook event emission.
 const TRACING_TARGET: &str = "nvisy_server::service::webhook";
 
-/// Default timeout for webhook delivery.
-const DEFAULT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The event details shared by every webhook request in one emission.
-struct EmitContext {
-    workspace_id: Uuid,
-    resource_id: Uuid,
-    resource_type: String,
-    event: String,
-    triggered_by: Option<Uuid>,
-    data: Option<serde_json::Value>,
-}
-
 /// Webhook event emitter for publishing domain events.
 ///
-/// This service queries webhooks subscribed to specific events and publishes
-/// requests to NATS for asynchronous delivery.
+/// This service queries webhooks subscribed to specific events and publishes a
+/// slim delivery job per webhook to NATS for asynchronous delivery. The worker
+/// loads endpoint, headers, and signing secret from the webhook's current
+/// configuration at delivery time.
 #[derive(Clone)]
 pub struct WebhookEmitter {
     pg_client: PgClient,
     nats_client: NatsClient,
-    crypto: CryptoService,
 }
 
 impl WebhookEmitter {
     /// Create a new webhook emitter.
-    pub fn new(pg_client: PgClient, nats_client: NatsClient, crypto: CryptoService) -> Self {
+    pub fn new(pg_client: PgClient, nats_client: NatsClient) -> Self {
         Self {
             pg_client,
             nats_client,
-            crypto,
         }
     }
 
@@ -60,8 +41,8 @@ impl WebhookEmitter {
     ///
     /// This method:
     /// 1. Queries all active webhooks subscribed to the event type
-    /// 2. Creates a `WebhookRequest` for each webhook
-    /// 3. Publishes the requests to NATS for asynchronous delivery
+    /// 2. Creates a `WebhookJob` for each webhook
+    /// 3. Publishes the jobs to NATS for asynchronous delivery
     ///
     /// # Arguments
     ///
@@ -104,175 +85,52 @@ impl WebhookEmitter {
             "Found webhooks subscribed to event"
         );
 
-        // Build a signed request per webhook, skipping any that can't be built.
         let event_subject = event.as_subject();
-        let context = EmitContext {
-            workspace_id,
-            resource_id,
-            resource_type: event.category().to_string(),
-            event: event.to_string(),
-            triggered_by,
-            data,
-        };
-
-        let requests: Vec<WebhookRequest> = webhooks
+        let jobs: Vec<WebhookJob> = webhooks
             .into_iter()
-            .filter_map(|webhook| self.build_request(webhook, &context))
+            .map(|webhook| WebhookJob {
+                webhook_id: webhook.id,
+                workspace_id,
+                event,
+                resource_id,
+                triggered_by,
+                data: data.clone(),
+            })
             .collect();
 
-        let request_count = requests.len();
+        // Publish every job before surfacing any error, so one failing publish
+        // does not silently drop the webhooks that follow it in the batch.
+        let publisher: WebhookPublisher = self.nats_client.event_publisher().await?;
+        let subject = format!("{workspace_id}.{event_subject}");
 
-        if request_count == 0 {
-            return Ok(0);
+        let mut published = 0usize;
+        let mut first_error = None;
+        for job in &jobs {
+            match publisher.publish_to(&subject, job).await {
+                Ok(()) => published += 1,
+                Err(err) => {
+                    tracing::error!(
+                        target: TRACING_TARGET,
+                        webhook_id = %job.webhook_id,
+                        error = %err,
+                        "Failed to publish webhook job"
+                    );
+                    first_error.get_or_insert(err);
+                }
+            }
         }
 
-        // Publish requests to NATS
-        let publisher: WebhookPublisher = self.nats_client.event_publisher().await?;
-
-        for request in &requests {
-            // Use workspace_id.event_subject as the routing subject
-            let subject = format!("{}.{}", request.context.workspace_id, event_subject);
-            publisher.publish_to(&subject, request).await?;
+        if let Some(err) = first_error {
+            return Err(err.into());
         }
 
         tracing::info!(
             target: TRACING_TARGET,
-            request_count,
-            "Published webhook requests"
+            published,
+            "Published webhook jobs"
         );
 
-        Ok(request_count)
-    }
-
-    /// Builds a signed delivery request for one webhook.
-    ///
-    /// Returns `None` — logging the reason — when the webhook can't be turned
-    /// into a valid request (bad URL, unrecoverable secret), so a single
-    /// misconfigured webhook doesn't abort the whole emission.
-    fn build_request(
-        &self,
-        webhook: WorkspaceWebhook,
-        ctx: &EmitContext,
-    ) -> Option<WebhookRequest> {
-        let url: Url = webhook
-            .url
-            .parse()
-            .inspect_err(|err| {
-                tracing::warn!(
-                    target: TRACING_TARGET,
-                    webhook_id = %webhook.id,
-                    error = %err,
-                    "Skipping webhook with invalid URL"
-                );
-            })
-            .ok()?;
-
-        let secret = self.decrypt_secret(&webhook, ctx.workspace_id)?;
-
-        let mut context = WebhookContext::new(webhook.id, ctx.workspace_id, ctx.resource_id)
-            .with_resource_type(&ctx.resource_type);
-        if let Some(account_id) = ctx.triggered_by {
-            context = context.with_account(account_id);
-        }
-        if let Some(metadata) = &ctx.data {
-            context = context.with_metadata(metadata.clone());
-        }
-
-        let mut request =
-            WebhookRequest::new(url, &ctx.event, format!("Event: {}", ctx.event), context)
-                .with_timeout(DEFAULT_DELIVERY_TIMEOUT)
-                .with_secret(secret);
-
-        if let Some(headers) = parse_headers(&webhook.headers) {
-            request = request.with_headers(headers);
-        }
-
-        Some(request)
-    }
-
-    /// Decrypts a webhook's stored signing secret, returning `None` (and logging)
-    /// if it can't be recovered — the request is signed or not sent at all.
-    fn decrypt_secret(&self, webhook: &WorkspaceWebhook, workspace_id: Uuid) -> Option<String> {
-        let plaintext = self
-            .crypto
-            .decrypt(workspace_id, &webhook.encrypted_secret)
-            .inspect_err(|err| {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    webhook_id = %webhook.id,
-                    error = %err,
-                    "Skipping webhook with undecryptable secret"
-                );
-            })
-            .ok()?;
-
-        String::from_utf8(plaintext)
-            .inspect_err(|err| {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    webhook_id = %webhook.id,
-                    error = %err,
-                    "Skipping webhook with non-UTF-8 secret"
-                );
-            })
-            .ok()
-    }
-
-    /// Emit a document created event.
-    #[inline]
-    pub async fn emit_document_created(
-        &self,
-        workspace_id: Uuid,
-        document_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::FileCreated,
-            document_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a document updated event.
-    #[inline]
-    pub async fn emit_document_updated(
-        &self,
-        workspace_id: Uuid,
-        document_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::FileUpdated,
-            document_id,
-            triggered_by,
-            data,
-        )
-        .await
-    }
-
-    /// Emit a document deleted event.
-    #[inline]
-    pub async fn emit_document_deleted(
-        &self,
-        workspace_id: Uuid,
-        document_id: Uuid,
-        triggered_by: Option<Uuid>,
-        data: Option<serde_json::Value>,
-    ) -> Result<usize> {
-        self.emit(
-            workspace_id,
-            WebhookEvent::FileDeleted,
-            document_id,
-            triggered_by,
-            data,
-        )
-        .await
+        Ok(published)
     }
 
     /// Emit a file created event.
@@ -483,16 +341,4 @@ impl WebhookEmitter {
         )
         .await
     }
-}
-
-/// Extracts a webhook's custom headers from its stored JSON, keeping only
-/// string values. Returns `None` when there are no usable headers.
-fn parse_headers(headers: &serde_json::Value) -> Option<HashMap<String, String>> {
-    let map: HashMap<String, String> = headers
-        .as_object()?
-        .iter()
-        .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
-        .collect();
-
-    (!map.is_empty()).then_some(map)
 }

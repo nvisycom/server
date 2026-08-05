@@ -12,13 +12,16 @@ use uuid::Uuid;
 use super::WebhookContext;
 
 /// A webhook delivery request.
-#[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+///
+/// This is the input to the delivery client, assembled at delivery time from a
+/// webhook's current configuration. It is never serialized onto NATS (the queued
+/// job is a slim identifier), so the signing secret lives here in plaintext
+/// without ever crossing — or resting in — the message stream.
+#[derive(Clone)]
 pub struct WebhookRequest {
     /// Unique identifier for this request.
     pub request_id: Uuid,
     /// The webhook endpoint URL.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub url: Url,
     /// The event type that triggered this webhook delivery.
     pub event: String,
@@ -29,12 +32,8 @@ pub struct WebhookRequest {
     /// Custom headers to include in the request.
     pub headers: HashMap<String, String>,
     /// Optional request timeout (uses client default if not set).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "Option<u64>"))]
     pub timeout: Option<Duration>,
     /// HMAC-SHA256 signing secret for request authentication.
-    #[serde(default, skip_serializing)]
-    #[cfg_attr(feature = "schema", schemars(skip))]
     pub secret: Option<String>,
 }
 

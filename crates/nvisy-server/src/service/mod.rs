@@ -79,8 +79,7 @@ impl ServiceState {
         let crypto = CryptoService::from_config(&crypto_config).await?;
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
-        let webhook_emitter =
-            WebhookEmitter::new(postgres_client.clone(), nats_client.clone(), crypto.clone());
+        let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
 
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
             Arc::new(postgres_client.clone()),
@@ -117,6 +116,26 @@ impl ServiceState {
         };
 
         Ok(service_state)
+    }
+
+    /// Builds the webhook delivery worker from this state.
+    pub fn webhook_worker(&self) -> WebhookWorker {
+        WebhookWorker::new(
+            self.postgres.clone(),
+            self.nats.clone(),
+            self.crypto.clone(),
+            self.webhook.clone(),
+        )
+    }
+
+    /// Builds the connection sync worker from this state.
+    pub fn connection_sync_worker(&self) -> ConnectionSyncWorker {
+        ConnectionSyncWorker::new(
+            self.postgres.clone(),
+            self.nats.clone(),
+            self.crypto.clone(),
+            self.connection_sync.clone(),
+        )
     }
 }
 

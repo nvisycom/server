@@ -14,6 +14,7 @@ use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::{Handle, WebhookId};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
+use nvisy_webhook::guard::UrlGuardExt;
 use nvisy_webhook::provider::WebhookRequest;
 use url::Url;
 use uuid::Uuid;
@@ -59,6 +60,8 @@ async fn create_webhook(
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::CreateWebhooks)
         .await?;
+
+    check_url_scheme(&request.url)?;
 
     // Generate the signing secret here so it is returned once and stored only
     // encrypted; the server decrypts it to sign each delivery.
@@ -233,6 +236,10 @@ async fn update_webhook(
     let (existing, _) =
         find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
+    if let Some(url) = &request.url {
+        check_url_scheme(url)?;
+    }
+
     let update_data = request.into_model(existing.status);
     conn.update_workspace_webhook(existing.id, update_data)
         .await?;
@@ -372,6 +379,19 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+}
+
+/// Rejects a webhook URL whose scheme is not `http`/`https` with a 400.
+///
+/// This is fast feedback at write time; the delivery worker additionally
+/// rejects hosts that resolve to non-routable addresses.
+fn check_url_scheme(url: &str) -> Result<()> {
+    let parsed: Url = url
+        .parse()
+        .map_err(|_| ErrorKind::BadRequest.with_message("invalid webhook URL"))?;
+    parsed
+        .check_scheme()
+        .map_err(|_| ErrorKind::BadRequest.with_message("webhook URL must use http or https"))
 }
 
 /// Finds a webhook within a workspace by id, with its creator's handle, or

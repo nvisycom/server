@@ -180,6 +180,12 @@ impl From<nvisy_postgres::PgError> for Error {
     }
 }
 
+impl From<crate::service::crypto::CryptoError> for Error {
+    fn from(err: crate::service::crypto::CryptoError) -> Self {
+        Error::internal("crypto", err.to_string()).with_source(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
