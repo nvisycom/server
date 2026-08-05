@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use crate::types::{
-    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, WithCreator,
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -39,7 +39,7 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspacePolicy>>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Lists all policies in a workspace with offset pagination.
     fn offset_list_workspace_policies(
@@ -54,7 +54,7 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspacePolicy>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Updates a policy with new data.
     fn update_workspace_policy(
@@ -135,7 +135,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<WithCreator<WorkspacePolicy>>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -154,9 +154,9 @@ impl WorkspacePolicyRepository for PgConnection {
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
             item,
-            creator: CreatorRow {
+            account: AccountRefRow {
                 username,
                 avatar_url,
             },
@@ -188,7 +188,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WithCreator<WorkspacePolicy>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -248,11 +248,11 @@ impl WorkspacePolicyRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithCreator<WorkspacePolicy>> = rows
+        let items: Vec<WithAccountRef<WorkspacePolicy>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },

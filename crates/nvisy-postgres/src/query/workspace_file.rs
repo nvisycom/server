@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 use crate::types::{
-    CreatorRow, CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, Handle,
-    OffsetPagination, SortOrder, WithCreator,
+    AccountRefRow, CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, Handle,
+    OffsetPagination, SortOrder, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -49,7 +49,7 @@ pub trait WorkspaceFileRepository {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspaceFile>>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceFile>>>> + Send;
 
     /// Returns the remote object keys already imported (live) from a connection.
     ///
@@ -115,7 +115,7 @@ pub trait WorkspaceFileRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceFile>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceFile>>>> + Send;
 
     /// Finds workspace files with a matching SHA-256 hash.
     fn find_workspace_files_by_hash(
@@ -255,7 +255,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> PgResult<Option<WithCreator<WorkspaceFile>>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -274,9 +274,9 @@ impl WorkspaceFileRepository for PgConnection {
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
             item,
-            creator: CreatorRow {
+            account: AccountRefRow {
                 username,
                 avatar_url,
             },
@@ -403,7 +403,7 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> PgResult<CursorPage<WithCreator<WorkspaceFile>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -495,11 +495,11 @@ impl WorkspaceFileRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithCreator<WorkspaceFile>> = rows
+        let items: Vec<WithAccountRef<WorkspaceFile>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },

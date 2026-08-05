@@ -22,10 +22,10 @@ use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
 };
 use crate::handler::response::{
-    ActivitiesPage, Activity, Creator, ErrorResponse, NotificationSettings, Page, Workspace,
+    AccountRef, ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace,
     WorkspacesPage,
 };
-use crate::handler::utility::{avatar_response, read_image_field, resolve_creator};
+use crate::handler::utility::{avatar_response, read_image_field, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
@@ -60,7 +60,7 @@ async fn create_workspace(
         .await?;
 
     // The creator is the authenticated caller; resolve their identity directly.
-    let creator = resolve_creator(&mut conn, creator_id).await?;
+    let creator = resolve_account_ref(&mut conn, creator_id).await?;
     let response = Workspace::from_model_with_membership(workspace, membership, creator);
 
     tracing::info!(
@@ -96,7 +96,7 @@ async fn list_workspaces(
         .await?;
 
     let response = Page::from_cursor_page(page, |(workspace, member, creator_username)| {
-        let creator = Creator::new(creator_username, None);
+        let creator = AccountRef::new(creator_username, None);
         Workspace::from_model_with_membership(workspace, member, creator)
     });
 
@@ -358,7 +358,7 @@ async fn list_activities(
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, |wc| {
-        Activity::from_model(wc.item, workspace.slug.clone(), wc.creator.into())
+        Activity::from_model(wc.item, workspace.slug.clone(), wc.account.into())
     });
 
     tracing::debug!(
@@ -380,10 +380,10 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns the public identity of the account that created the workspace
 /// addressed by `slug`, or a NotFound error if no such workspace exists.
-async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Creator> {
+async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<AccountRef> {
     conn.find_workspace_by_slug(slug)
         .await?
-        .map(|wc| wc.creator.into())
+        .map(|wc| wc.account.into())
         .ok_or_else(|| Error::not_found("workspace"))
 }
 

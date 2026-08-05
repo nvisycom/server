@@ -9,7 +9,9 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
 };
-use crate::types::{CreatorRow, CursorPage, CursorPagination, Handle, SyncStatus, WithCreator};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, Handle, SyncStatus, WithAccountRef,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection run database operations.
@@ -59,7 +61,7 @@ pub trait WorkspaceConnectionRunRepository {
         connection_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceConnectionRun>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceConnectionRun>>>> + Send;
 
     /// Lists all runs across a workspace's connections with cursor pagination.
     ///
@@ -76,7 +78,7 @@ pub trait WorkspaceConnectionRunRepository {
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
         providers: &[String],
-    ) -> impl Future<Output = PgResult<CursorPage<(WithCreator<WorkspaceConnectionRun>, Uuid)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspaceConnectionRun>, Uuid)>>> + Send;
 
     /// Gets the most recent run for a connection (its current sync state).
     fn find_latest_workspace_connection_run(
@@ -211,7 +213,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         connection_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> PgResult<CursorPage<WithCreator<WorkspaceConnectionRun>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceConnectionRun>>> {
         use schema::workspace_connection_runs::dsl;
         use schema::{accounts, workspace_connection_runs};
 
@@ -280,11 +282,11 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithCreator<WorkspaceConnectionRun>> = rows
+        let items: Vec<WithAccountRef<WorkspaceConnectionRun>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },
@@ -302,7 +304,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
         providers: &[String],
-    ) -> PgResult<CursorPage<(WithCreator<WorkspaceConnectionRun>, Uuid)>> {
+    ) -> PgResult<CursorPage<(WithAccountRef<WorkspaceConnectionRun>, Uuid)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_connection_runs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
@@ -372,13 +374,13 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<(WithCreator<WorkspaceConnectionRun>, Uuid)> = rows
+        let items: Vec<(WithAccountRef<WorkspaceConnectionRun>, Uuid)> = rows
             .into_iter()
             .map(|(item, connection_id, username, avatar_url)| {
                 (
-                    WithCreator {
+                    WithAccountRef {
                         item,
-                        creator: CreatorRow {
+                        account: AccountRefRow {
                             username,
                             avatar_url,
                         },
@@ -392,7 +394,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(wc, _): &(WithCreator<WorkspaceConnectionRun>, Uuid)| {
+            |(wc, _): &(WithAccountRef<WorkspaceConnectionRun>, Uuid)| {
                 (wc.item.started_at.into(), wc.item.id)
             },
         ))

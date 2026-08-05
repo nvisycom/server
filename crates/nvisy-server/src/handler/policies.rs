@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use nvisy_postgres::query::WorkspacePolicyRepository;
-use nvisy_postgres::types::WithCreator;
+use nvisy_postgres::types::WithAccountRef;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
 use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
-use crate::handler::utility::resolve_creator;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -79,7 +79,7 @@ async fn create_policy(
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator = resolve_creator(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -136,7 +136,7 @@ async fn list_policies(
     // The list carries only metadata; the encrypted definition is decrypted only
     // by the single-policy endpoint, so a page costs no per-item decryption.
     let page = PoliciesPage::from_cursor_page(page, |wc| {
-        PolicySummary::from_model(wc.item, workspace.slug.clone(), wc.creator.into())
+        PolicySummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -183,7 +183,7 @@ async fn read_policy(
         Json(Policy::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
             &crypto,
         )?),
     ))
@@ -254,7 +254,7 @@ async fn update_policy(
         Json(Policy::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
             &crypto,
         )?),
     ))
@@ -320,7 +320,7 @@ async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
     policy_slug: &str,
-) -> Result<WithCreator<WorkspacePolicy>> {
+) -> Result<WithAccountRef<WorkspacePolicy>> {
     conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))

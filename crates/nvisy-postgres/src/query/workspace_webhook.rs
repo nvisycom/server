@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent,
-    WebhookStatus, WithCreator,
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent,
+    WebhookStatus, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -42,7 +42,7 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspaceWebhook>>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceWebhook>>>> + Send;
 
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
@@ -57,7 +57,7 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceWebhook>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceWebhook>>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
@@ -175,7 +175,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> PgResult<Option<WithCreator<WorkspaceWebhook>>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -194,9 +194,9 @@ impl WorkspaceWebhookRepository for PgConnection {
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
             item,
-            creator: CreatorRow {
+            account: AccountRefRow {
                 username,
                 avatar_url,
             },
@@ -228,7 +228,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WithCreator<WorkspaceWebhook>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -275,11 +275,11 @@ impl WorkspaceWebhookRepository for PgConnection {
             .await
             .map_err(PgError::from)?;
 
-        let items: Vec<WithCreator<WorkspaceWebhook>> = rows
+        let items: Vec<WithAccountRef<WorkspaceWebhook>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },

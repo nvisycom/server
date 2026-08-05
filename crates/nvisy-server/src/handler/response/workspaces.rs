@@ -6,7 +6,7 @@ use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Creator, Page};
+use super::{AccountRef, Page};
 
 /// Workspace response.
 #[must_use]
@@ -28,7 +28,7 @@ pub struct Workspace {
     /// Whether approval is required to processed files to be visible.
     pub require_approval: bool,
     /// Account that created this workspace.
-    pub creator: Creator,
+    pub created_by: AccountRef,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
     /// Timestamp when the workspace was created.
@@ -39,7 +39,7 @@ pub struct Workspace {
 
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
-    pub fn from_model(workspace: model::Workspace, creator: Creator) -> Self {
+    pub fn from_model(workspace: model::Workspace, created_by: AccountRef) -> Self {
         let tags = workspace.get_tags();
         Self {
             slug: workspace.slug,
@@ -48,7 +48,7 @@ impl Workspace {
             avatar_url: workspace.avatar_url,
             tags,
             require_approval: workspace.require_approval,
-            creator,
+            created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
@@ -59,7 +59,7 @@ impl Workspace {
     pub fn from_model_with_membership(
         workspace: model::Workspace,
         member: model::WorkspaceMember,
-        creator: Creator,
+        created_by: AccountRef,
     ) -> Self {
         let tags = workspace.get_tags();
         Self {
@@ -69,7 +69,7 @@ impl Workspace {
             avatar_url: workspace.avatar_url,
             tags,
             require_approval: workspace.require_approval,
-            creator,
+            created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),

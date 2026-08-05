@@ -17,7 +17,7 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_postgres::types::WithCreator;
+use nvisy_postgres::types::WithAccountRef;
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::utility::resolve_creator;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{CryptoService, EngineService, HashingReader, ServiceState, WebhookEmitter};
@@ -49,7 +49,7 @@ async fn find_file_with_creator(
     conn: &mut PgConn,
     workspace_id: Uuid,
     file_id: Uuid,
-) -> Result<WithCreator<FileModel>> {
+) -> Result<WithAccountRef<FileModel>> {
     conn.find_file_in_workspace_with_creator(workspace_id, file_id)
         .await?
         .ok_or_else(|| Error::not_found("file"))
@@ -90,7 +90,7 @@ async fn list_files(
         .await?;
 
     let response = FilesPage::from_cursor_page(page, |wc| {
-        File::from_model(wc.item, workspace.slug.clone(), wc.creator.into())
+        File::from_model(wc.item, workspace.slug.clone(), wc.account.into())
     });
 
     tracing::debug!(
@@ -210,7 +210,7 @@ async fn upload_file(
     let file_store = nats_client.object_store::<FilesBucket>().await?;
 
     // The uploader is the caller; resolve their identity once for every file below.
-    let uploaded_by = resolve_creator(&mut conn, auth_claims.account_id).await?;
+    let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
@@ -321,7 +321,7 @@ async fn read_file(
         Json(File::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
         )),
     ))
 }
@@ -374,7 +374,7 @@ async fn update_file(
 
     let found = find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
     let updated_file = found.item;
-    let uploaded_by = found.creator;
+    let uploaded_by = found.account;
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({

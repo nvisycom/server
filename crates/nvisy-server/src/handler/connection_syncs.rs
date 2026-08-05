@@ -28,7 +28,7 @@ use crate::handler::request::{
     WorkspaceSyncsQuery,
 };
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
-use crate::handler::utility::resolve_creator;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{ConnectionSyncService, CryptoService, ServiceState};
 
@@ -124,7 +124,7 @@ async fn sync_connection(
             .await;
     });
 
-    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+    let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -173,7 +173,7 @@ async fn list_connection_syncs(
         .await?;
 
     let page = Page::from_cursor_page(page, |wc| {
-        ConnectionSync::from_model(wc.item, wc.creator.into())
+        ConnectionSync::from_model(wc.item, wc.account.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -225,7 +225,7 @@ async fn list_workspace_syncs(
         .await?;
 
     let page = Page::from_cursor_page(page, |(wc, _connection_id)| {
-        ConnectionSync::from_model(wc.item, wc.creator.into())
+        ConnectionSync::from_model(wc.item, wc.account.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -276,7 +276,7 @@ async fn read_connection_sync(
         .filter(|run| run.connection_id == connection.id)
         .ok_or_else(|| Error::not_found("connection_sync"))?;
 
-    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+    let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
     Ok((
         StatusCode::OK,
@@ -345,7 +345,7 @@ async fn cancel_connection_sync(
     // status-guarded finalizers.
     connection_sync.cancel_local(run.id);
 
-    let trigger = resolve_creator(&mut conn, cancelled.account_id).await?;
+    let trigger = resolve_account_ref(&mut conn, cancelled.account_id).await?;
 
     Ok((
         StatusCode::OK,

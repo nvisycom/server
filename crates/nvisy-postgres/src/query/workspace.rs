@@ -9,7 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::types::{CreatorRow, Handle, OffsetPagination, WithCreator};
+use crate::types::{AccountRefRow, Handle, OffsetPagination, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Maximum number of slug candidates tried before giving up when generating a
@@ -52,7 +52,7 @@ pub trait WorkspaceRepository {
     fn find_workspace_by_slug(
         &mut self,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<WithCreator<Workspace>>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<Workspace>>>> + Send;
 
     /// Updates a workspace with partial changes.
     fn update_workspace(
@@ -158,7 +158,7 @@ impl WorkspaceRepository for PgConnection {
     async fn find_workspace_by_slug(
         &mut self,
         slug_value: &str,
-    ) -> PgResult<Option<WithCreator<Workspace>>> {
+    ) -> PgResult<Option<WithAccountRef<Workspace>>> {
         use schema::workspaces::dsl;
         use schema::{accounts, workspaces};
 
@@ -176,9 +176,9 @@ impl WorkspaceRepository for PgConnection {
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
             item,
-            creator: CreatorRow {
+            account: AccountRefRow {
                 username,
                 avatar_url,
             },

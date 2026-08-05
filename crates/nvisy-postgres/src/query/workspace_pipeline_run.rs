@@ -10,8 +10,8 @@ use crate::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
 use crate::types::{
-    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineRunStatus,
-    WithCreator,
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineRunStatus,
+    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -59,7 +59,7 @@ pub trait WorkspacePipelineRunRepository {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspacePipelineRun>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>>> + Send;
 
     /// Lists all runs across a workspace's pipelines with cursor pagination.
     ///
@@ -74,7 +74,7 @@ pub trait WorkspacePipelineRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WithCreator<WorkspacePipelineRun>, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>>> + Send;
 
     /// Lists active runs (queued or running) for a specific pipeline.
     fn list_active_workspace_pipeline_runs(
@@ -217,7 +217,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> PgResult<CursorPage<WithCreator<WorkspacePipelineRun>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>> {
         use schema::workspace_pipeline_runs::dsl;
         use schema::{accounts, workspace_pipeline_runs};
 
@@ -288,11 +288,11 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithCreator<WorkspacePipelineRun>> = rows
+        let items: Vec<WithAccountRef<WorkspacePipelineRun>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },
@@ -309,7 +309,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> PgResult<CursorPage<(WithCreator<WorkspacePipelineRun>, Handle)>> {
+    ) -> PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::workspace_pipelines::dsl as pipelines;
@@ -376,13 +376,13 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<(WithCreator<WorkspacePipelineRun>, Handle)> = rows
+        let items: Vec<(WithAccountRef<WorkspacePipelineRun>, Handle)> = rows
             .into_iter()
             .map(|(item, slug, username, avatar_url)| {
                 (
-                    WithCreator {
+                    WithAccountRef {
                         item,
-                        creator: CreatorRow {
+                        account: AccountRefRow {
                             username,
                             avatar_url,
                         },
@@ -396,7 +396,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(wc, _): &(WithCreator<WorkspacePipelineRun>, Handle)| {
+            |(wc, _): &(WithAccountRef<WorkspacePipelineRun>, Handle)| {
                 (wc.item.started_at.into(), wc.item.id)
             },
         ))

@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Creator, Page};
+use super::{AccountRef, Page};
 
 /// Response type for a workspace activity.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -18,7 +18,7 @@ pub struct Activity {
     /// Handle of the workspace this activity belongs to.
     pub workspace_slug: Handle,
     /// Account that performed the activity.
-    pub actor: Creator,
+    pub performed_by: AccountRef,
     /// Type of activity.
     pub activity_type: ActivityType,
     /// Human-readable description.
@@ -31,11 +31,15 @@ pub struct Activity {
 pub type ActivitiesPage = Page<Activity>;
 
 impl Activity {
-    pub fn from_model(activity: WorkspaceActivity, workspace_slug: Handle, actor: Creator) -> Self {
+    pub fn from_model(
+        activity: WorkspaceActivity,
+        workspace_slug: Handle,
+        performed_by: AccountRef,
+    ) -> Self {
         Self {
             id: activity.id,
             workspace_slug,
-            actor,
+            performed_by,
             activity_type: activity.activity_type,
             description: activity.description,
             created_at: activity.created_at.into(),

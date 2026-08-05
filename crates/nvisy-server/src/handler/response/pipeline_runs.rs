@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Creator, Page};
+use super::{AccountRef, Page};
 
 /// Response type for a pipeline run.
 ///
@@ -25,7 +25,7 @@ pub struct PipelineRun {
     /// File this run analyzes / redacts.
     pub file_id: Uuid,
     /// Account that triggered the run.
-    pub trigger: Creator,
+    pub triggered_by: AccountRef,
     /// How the run was triggered.
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
@@ -52,14 +52,14 @@ impl PipelineRun {
         run: PipelineRunModel,
         pipeline_slug: Handle,
         workspace_slug: Handle,
-        trigger: Creator,
+        triggered_by: AccountRef,
     ) -> Self {
         Self {
             id: RunId::from_uuid(run.id),
             pipeline_slug,
             workspace_slug,
             file_id: run.file_id,
-            trigger,
+            triggered_by,
             trigger_type: run.trigger_type,
             status: run.status,
             metadata: run.metadata,

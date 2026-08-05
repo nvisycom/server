@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
 use crate::types::{
-    ActivityType, CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, WithCreator,
+    AccountRefRow, ActivityType, CursorPage, CursorPagination, Handle, OffsetPagination,
+    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -55,7 +56,7 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceActivity>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
     /// Gets recent activities across all workspaces for a specific user.
     fn get_account_recent_activity(
@@ -171,7 +172,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WithCreator<WorkspaceActivity>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>> {
         use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
@@ -217,11 +218,11 @@ impl WorkspaceActivityRepository for PgConnection {
             .await
             .map_err(PgError::from)?;
 
-        let items: Vec<WithCreator<WorkspaceActivity>> = rows
+        let items: Vec<WithAccountRef<WorkspaceActivity>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },

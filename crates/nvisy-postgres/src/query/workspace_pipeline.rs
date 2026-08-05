@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 use crate::types::{
-    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineStatus, WithCreator,
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineStatus,
+    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -47,7 +48,7 @@ pub trait WorkspacePipelineRepository {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspacePipeline>>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspacePipeline>>>> + Send;
 
     /// Lists all pipelines in a workspace with offset pagination.
     fn offset_list_workspace_pipelines(
@@ -64,7 +65,7 @@ pub trait WorkspacePipelineRepository {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspacePipeline>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePipeline>>>> + Send;
 
     /// Lists all pipelines created by an account with offset pagination.
     fn offset_list_account_pipelines(
@@ -167,7 +168,7 @@ impl WorkspacePipelineRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<WithCreator<WorkspacePipeline>>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspacePipeline>>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
@@ -186,9 +187,9 @@ impl WorkspacePipelineRepository for PgConnection {
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
             item,
-            creator: CreatorRow {
+            account: AccountRefRow {
                 username,
                 avatar_url,
             },
@@ -222,7 +223,7 @@ impl WorkspacePipelineRepository for PgConnection {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> PgResult<CursorPage<WithCreator<WorkspacePipeline>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePipeline>>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
@@ -305,11 +306,11 @@ impl WorkspacePipelineRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithCreator<WorkspacePipeline>> = rows
+        let items: Vec<WithAccountRef<WorkspacePipeline>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },

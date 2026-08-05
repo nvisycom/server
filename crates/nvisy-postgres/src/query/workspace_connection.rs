@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
 use crate::types::{
-    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, SyncMode, WithCreator,
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, SyncMode, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -46,7 +46,7 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspaceConnection>>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceConnection>>>> + Send;
 
     /// Finds connections by provider type within a workspace.
     fn find_workspace_connections_by_provider(
@@ -78,7 +78,7 @@ pub trait WorkspaceConnectionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         providers: &[String],
-    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceConnection>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceConnection>>>> + Send;
 
     /// Updates a connection with new data.
     fn update_workspace_connection(
@@ -166,7 +166,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> PgResult<Option<WithCreator<WorkspaceConnection>>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -185,9 +185,9 @@ impl WorkspaceConnectionRepository for PgConnection {
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
             item,
-            creator: CreatorRow {
+            account: AccountRefRow {
                 username,
                 avatar_url,
             },
@@ -256,7 +256,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         providers: &[String],
-    ) -> PgResult<CursorPage<WithCreator<WorkspaceConnection>>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -330,11 +330,11 @@ impl WorkspaceConnectionRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithCreator<WorkspaceConnection>> = rows
+        let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithCreator {
+            .map(|(item, username, avatar_url)| WithAccountRef {
                 item,
-                creator: CreatorRow {
+                account: AccountRefRow {
                     username,
                     avatar_url,
                 },

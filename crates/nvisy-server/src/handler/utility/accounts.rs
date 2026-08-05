@@ -8,18 +8,19 @@ use nvisy_postgres::PgConn;
 use nvisy_postgres::query::AccountRepository;
 use uuid::Uuid;
 
-use crate::handler::response::Creator;
+use crate::handler::response::AccountRef;
 use crate::handler::{ErrorKind, Result};
 
-/// Resolves the public identity of a required account (a resource's creator).
+/// Resolves a public reference to a required account (e.g. a resource's
+/// creator, or whoever triggered an action).
 ///
 /// The account is expected to exist — typically the authenticated caller — so a
 /// missing row is a server-side inconsistency rather than a client error.
-pub async fn resolve_creator(conn: &mut PgConn, account_id: Uuid) -> Result<Creator> {
+pub async fn resolve_account_ref(conn: &mut PgConn, account_id: Uuid) -> Result<AccountRef> {
     conn.find_account_by_id(account_id)
         .await?
-        .map(|account| Creator::new(account.username, account.avatar_url))
-        .ok_or_else(|| ErrorKind::InternalServerError.with_message("Creator account not found"))
+        .map(|account| AccountRef::new(account.username, account.avatar_url))
+        .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))
 }
 
 /// Builds the list of user-specific inputs a password is checked against for

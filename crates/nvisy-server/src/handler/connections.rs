@@ -22,7 +22,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
-use nvisy_postgres::types::{ConnectionId, WithCreator};
+use nvisy_postgres::types::{ConnectionId, WithAccountRef};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -35,7 +35,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
 };
-use crate::handler::utility::resolve_creator;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, ObjectService, ServiceState, is_valid_cron};
 
@@ -110,7 +110,7 @@ async fn create_connection(
 
     // The creator is the authenticated caller, and a fresh connection has no
     // sync runs yet, so last-synced is `None`.
-    let creator = resolve_creator(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -185,7 +185,7 @@ async fn list_connections(
         StatusCode::OK,
         Json(ConnectionsPage::from_cursor_page(page, |wc| {
             let synced = last_synced.get(&wc.item.id).copied();
-            Connection::from_model(wc.item, workspace.slug.clone(), wc.creator.into(), synced)
+            Connection::from_model(wc.item, workspace.slug.clone(), wc.account.into(), synced)
         })),
     ))
 }
@@ -237,7 +237,7 @@ async fn read_connection(
         Json(Connection::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
             last_synced,
         )),
     ))
@@ -326,7 +326,7 @@ async fn update_connection(
         Json(Connection::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
             last_synced,
         )),
     ))
@@ -463,7 +463,7 @@ async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
     connection_id: ConnectionId,
-) -> Result<(WithCreator<WorkspaceConnection>, Option<jiff::Timestamp>)> {
+) -> Result<(WithAccountRef<WorkspaceConnection>, Option<jiff::Timestamp>)> {
     let found = conn
         .find_connection_in_workspace_with_creator(workspace_id, connection_id.as_uuid())
         .await?

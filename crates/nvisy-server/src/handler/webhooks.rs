@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_postgres::types::{WebhookId, WithCreator};
+use nvisy_postgres::types::{WebhookId, WithAccountRef};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::guard::UrlGuardExt;
@@ -29,7 +29,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
 };
-use crate::handler::utility::resolve_creator;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -78,7 +78,7 @@ async fn create_webhook(
     );
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator = resolve_creator(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
 
     // WebhookCreated includes the secret, which is visible only once.
     Ok((
@@ -142,7 +142,7 @@ async fn list_webhooks(
     Ok((
         StatusCode::OK,
         Json(WebhooksPage::from_cursor_page(page, |wc| {
-            Webhook::from_model(wc.item, workspace.slug.clone(), wc.creator.into())
+            Webhook::from_model(wc.item, workspace.slug.clone(), wc.account.into())
         })),
     ))
 }
@@ -189,7 +189,7 @@ async fn read_webhook(
         Json(Webhook::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
         )),
     ))
 }
@@ -250,7 +250,7 @@ async fn update_webhook(
         Json(Webhook::from_model(
             found.item,
             workspace.slug,
-            found.creator.into(),
+            found.account.into(),
         )),
     ))
 }
@@ -425,7 +425,7 @@ async fn find_webhook(
     conn: &mut PgConn,
     workspace_id: Uuid,
     webhook_id: Uuid,
-) -> Result<WithCreator<WorkspaceWebhook>> {
+) -> Result<WithAccountRef<WorkspaceWebhook>> {
     conn.find_webhook_in_workspace_with_creator(workspace_id, webhook_id)
         .await?
         .ok_or_else(|| Error::not_found("webhook"))

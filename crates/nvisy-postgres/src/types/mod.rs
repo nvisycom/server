@@ -37,6 +37,6 @@ pub use sorting::{
     SortBy, SortOrder,
 };
 pub use utilities::{
-    CreatorRow, HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext, HasLastActivityAt,
-    HasOwnership, HasSecurityContext, HasUpdatedAt, Tags, WithCreator,
+    AccountRefRow, HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext,
+    HasLastActivityAt, HasOwnership, HasSecurityContext, HasUpdatedAt, Tags, WithAccountRef,
 };

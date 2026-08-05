@@ -6,7 +6,7 @@ use nvisy_postgres::types::{Handle, PipelineStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Artifact, Creator, Page};
+use super::{AccountRef, Artifact, Page};
 use crate::handler::request::PipelineDefinition;
 
 /// Pipeline response.
@@ -19,7 +19,7 @@ pub struct Pipeline {
     /// Handle of the workspace this pipeline belongs to.
     pub workspace_slug: Handle,
     /// Account that created this pipeline.
-    pub creator: Creator,
+    pub created_by: AccountRef,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -47,29 +47,41 @@ impl Pipeline {
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Handle,
-        creator: Creator,
+        created_by: AccountRef,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
-        Self::assemble(pipeline, workspace_slug, creator, Vec::new(), policy_slugs)
+        Self::assemble(
+            pipeline,
+            workspace_slug,
+            created_by,
+            Vec::new(),
+            policy_slugs,
+        )
     }
 
     /// Creates a pipeline response with artifacts and reference slugs.
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Handle,
-        creator: Creator,
+        created_by: AccountRef,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
         let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
-        Self::assemble(pipeline, workspace_slug, creator, artifacts, policy_slugs)
+        Self::assemble(
+            pipeline,
+            workspace_slug,
+            created_by,
+            artifacts,
+            policy_slugs,
+        )
     }
 
     /// Shared assembly: decodes the stored config and merges the references.
     fn assemble(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Handle,
-        creator: Creator,
+        created_by: AccountRef,
         artifacts: Vec<Artifact>,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
@@ -77,7 +89,7 @@ impl Pipeline {
         Ok(Self {
             slug: pipeline.slug,
             workspace_slug,
-            creator,
+            created_by,
             display_name: pipeline.display_name,
             description: pipeline.description,
             status: pipeline.status,

@@ -40,7 +40,7 @@ use crate::handler::request::{
     PipelineRunPathParams, WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
-use crate::handler::utility::resolve_creator;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, EngineService, ServiceState};
 
@@ -89,7 +89,7 @@ async fn create_pipeline_run(
             .await?
     {
         tracing::debug!(target: TRACING_TARGET, "Replaying run for idempotency key");
-        let trigger = resolve_creator(&mut conn, existing.account_id).await?;
+        let trigger = resolve_account_ref(&mut conn, existing.account_id).await?;
         return Ok((
             StatusCode::OK,
             Json(PipelineRun::from_model(
@@ -157,7 +157,7 @@ async fn create_pipeline_run(
 
     tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Pipeline run analyzed");
 
-    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+    let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -224,7 +224,7 @@ async fn list_pipeline_runs(
             wc.item,
             pipeline.slug.clone(),
             workspace.slug.clone(),
-            wc.creator.into(),
+            wc.account.into(),
         )
     });
 
@@ -285,7 +285,7 @@ async fn list_workspace_runs(
                     wc.item,
                     pipeline_slug,
                     workspace.slug.clone(),
-                    wc.creator.into(),
+                    wc.account.into(),
                 )
             },
         )),
@@ -330,7 +330,7 @@ async fn get_pipeline_run(
     let (run, pipeline) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
-    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+    let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");
 
@@ -487,7 +487,7 @@ async fn redact_pipeline_run(
         "Pipeline run redacted"
     );
 
-    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+    let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
     Ok((
         StatusCode::OK,

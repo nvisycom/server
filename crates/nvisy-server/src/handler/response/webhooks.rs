@@ -8,7 +8,7 @@ use nvisy_postgres::types::{Handle, WebhookEvent, WebhookId, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Creator, Page};
+use super::{AccountRef, Page};
 
 /// Workspace webhook response.
 #[must_use]
@@ -40,7 +40,7 @@ pub struct Webhook {
     /// Consecutive failed deliveries since the last success.
     pub consecutive_failures: i32,
     /// Account that created this webhook.
-    pub creator: Creator,
+    pub created_by: AccountRef,
     /// Timestamp when this webhook was first created.
     pub created_at: Timestamp,
     /// Timestamp when this webhook was last modified.
@@ -51,7 +51,7 @@ impl Webhook {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_slug: Handle,
-        creator: Creator,
+        created_by: AccountRef,
     ) -> Self {
         let events = webhook.subscribed_events();
         let headers = webhook.parsed_headers();
@@ -68,7 +68,7 @@ impl Webhook {
             last_success_at: webhook.last_success_at.map(Into::into),
             last_failure_at: webhook.last_failure_at.map(Into::into),
             consecutive_failures: webhook.consecutive_failures,
-            creator,
+            created_by,
             created_at: webhook.created_at.into(),
             updated_at: webhook.updated_at.into(),
         }
@@ -98,11 +98,11 @@ impl WebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_slug: Handle,
-        creator: Creator,
+        created_by: AccountRef,
         secret: String,
     ) -> Self {
         Self {
-            webhook: Webhook::from_model(webhook, workspace_slug, creator),
+            webhook: Webhook::from_model(webhook, workspace_slug, created_by),
             secret,
         }
     }
