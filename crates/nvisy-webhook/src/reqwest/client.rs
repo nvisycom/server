@@ -158,8 +158,12 @@ impl WebhookProvider for ReqwestClient {
                 http_request.header("X-Webhook-Signature", format!("sha256={signature}"));
         }
 
-        // Add custom headers
+        // Add custom headers, skipping any reserved name so a webhook cannot
+        // override or duplicate the signature and other server-set headers.
         for (name, value) in &request.headers {
+            if is_reserved_header(name) {
+                continue;
+            }
             http_request = http_request.header(name, value);
         }
 
@@ -179,6 +183,25 @@ impl WebhookProvider for ReqwestClient {
     async fn health_check(&self) -> Result<ComponentHealth> {
         Ok(ComponentHealth::healthy("webhook"))
     }
+}
+
+/// Header names the delivery client sets itself, which a webhook's custom
+/// headers must never override.
+const RESERVED_HEADERS: [&str; 5] = [
+    "content-type",
+    "x-webhook-event",
+    "x-webhook-timestamp",
+    "x-webhook-request-id",
+    "x-webhook-signature",
+];
+
+/// Returns whether a header name is reserved for server-set values.
+///
+/// HTTP header names are case-insensitive, so the comparison is too.
+fn is_reserved_header(name: &str) -> bool {
+    RESERVED_HEADERS
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
 }
 
 /// Resolves a webhook URL's host to its socket addresses for the SSRF guard.
@@ -233,6 +256,16 @@ mod tests {
         let sig1 = ReqwestClient::sign_payload(secret, timestamp, payload);
         let sig2 = ReqwestClient::sign_payload(secret, timestamp, payload);
         assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn reserved_headers_are_detected_case_insensitively() {
+        assert!(is_reserved_header("X-Webhook-Signature"));
+        assert!(is_reserved_header("x-webhook-signature"));
+        assert!(is_reserved_header("Content-Type"));
+        assert!(is_reserved_header("X-Webhook-Request-Id"));
+        assert!(!is_reserved_header("X-Custom-Header"));
+        assert!(!is_reserved_header("Authorization"));
     }
 
     #[test]

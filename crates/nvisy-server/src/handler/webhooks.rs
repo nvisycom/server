@@ -15,7 +15,7 @@ use nvisy_postgres::types::{Handle, WebhookId};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::guard::UrlGuardExt;
-use nvisy_webhook::provider::WebhookRequest;
+use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
 use url::Url;
 use uuid::Uuid;
 
@@ -327,11 +327,12 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn test_webhook(
     State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
     State(webhook_service): State<WebhookService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WebhookPathParams>,
-    ValidateJson(_request): ValidateJson<TestWebhook>,
+    ValidateJson(request): ValidateJson<TestWebhook>,
 ) -> Result<(StatusCode, Json<WebhookResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
 
@@ -351,8 +352,32 @@ async fn test_webhook(
             .with_resource("webhook")
     })?;
 
-    // Build the test webhook request
-    let webhook_request = WebhookRequest::test(url, webhook.id, webhook.workspace_id);
+    // Build a signed test request that mirrors a real delivery: decrypt the
+    // secret so the signature is present, carry the webhook's custom headers,
+    // and include the caller's payload so they can exercise their own body.
+    let secret = String::from_utf8(crypto.decrypt(workspace.id, &webhook.encrypted_secret)?)
+        .map_err(|_| {
+            ErrorKind::InternalServerError.with_message("webhook secret is not valid UTF-8")
+        })?;
+
+    let mut context =
+        WebhookContext::test(webhook.id, webhook.workspace_id).with_account(auth_state.account_id);
+    if let Some(payload) = request.payload {
+        context = context.with_metadata(payload);
+    }
+
+    let mut webhook_request = WebhookRequest::new(
+        url,
+        "webhook:test",
+        "This is a test webhook delivery",
+        context,
+    )
+    .with_secret(secret);
+    let headers = webhook.parsed_headers();
+    if !headers.is_empty() {
+        webhook_request = webhook_request.with_headers(headers);
+    }
+
     let response = webhook_service.deliver(&webhook_request).await?;
 
     // Record the outcome so the manual test also updates delivery health.
