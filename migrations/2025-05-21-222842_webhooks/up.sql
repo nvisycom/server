@@ -27,8 +27,22 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'connection:created',
     'connection:updated',
     'connection:deleted',
-    'connection:synced',
-    'connection:desynced'
+    'connection:sync.started',
+    'connection:sync.completed',
+    'connection:sync.failed',
+
+    -- Pipeline events
+    'pipeline:created',
+    'pipeline:updated',
+    'pipeline:deleted',
+    'pipeline:run.started',
+    'pipeline:run.completed',
+    'pipeline:run.failed',
+
+    -- Policy events
+    'policy:created',
+    'policy:updated',
+    'policy:deleted'
 );
 
 COMMENT ON TYPE WEBHOOK_EVENT IS

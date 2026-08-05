@@ -146,8 +146,7 @@ impl ConnectionSyncService {
             }
         }
 
-        self.reconcile_deletions(connection, account_id, &remote_keys)
-            .await;
+        self.reconcile_deletions(connection, &remote_keys).await;
 
         tracing::debug!(target: TRACING_TARGET, imported, "Import sync complete");
         Ok(imported)
@@ -157,13 +156,11 @@ impl ConnectionSyncService {
     /// connection's [`SyncDeletionPolicy`].
     ///
     /// `Ignore` leaves everything untouched. `Delete` soft-deletes each vanished
-    /// file and removes its stored object, emitting a single `ConnectionDesynced`
-    /// event when anything changed. Failures on individual files are logged and
-    /// skipped so one bad file does not abort reconciliation.
+    /// file and removes its stored object. Failures on individual files are logged
+    /// and skipped so one bad file does not abort reconciliation.
     async fn reconcile_deletions(
         &self,
         connection: &WorkspaceConnection,
-        account_id: Uuid,
         remote_keys: &HashSet<String>,
     ) {
         if connection.deletion_policy == SyncDeletionPolicy::Ignore {
@@ -205,15 +202,6 @@ impl ConnectionSyncService {
 
         if removed > 0 {
             tracing::info!(target: TRACING_TARGET, removed, "Reconciled deleted source objects");
-            let _ = self
-                .webhook
-                .emit_connection_desynced(
-                    connection.workspace_id,
-                    connection.id,
-                    Some(account_id),
-                    Some(serde_json::json!({ "removed": removed })),
-                )
-                .await;
         }
     }
 
@@ -386,6 +374,19 @@ impl ConnectionSyncService {
             .expect("sync cancel registry poisoned")
             .insert(run_id, token.clone());
 
+        let workspace_id = connection.workspace_id;
+        let connection_id = connection.id;
+
+        let _ = self
+            .webhook
+            .emit_connection_sync_started(
+                workspace_id,
+                run_id,
+                Some(account_id),
+                Some(serde_json::json!({ "connection_id": connection_id })),
+            )
+            .await;
+
         let transfer = self.clone();
         let mut work = tokio::spawn(async move {
             match export {
@@ -423,7 +424,47 @@ impl ConnectionSyncService {
             .remove(&run_id);
 
         match outcome {
-            Outcome::Finished(result) => self.finish_run(run_id, result).await,
+            Outcome::Finished(result) => {
+                let sync_event = match &result {
+                    Ok(records_synced) => (
+                        true,
+                        serde_json::json!({
+                            "connection_id": connection_id,
+                            "records_synced": records_synced,
+                        }),
+                    ),
+                    Err(err) => (
+                        false,
+                        serde_json::json!({
+                            "connection_id": connection_id,
+                            "error": err.message().unwrap_or("Sync failed"),
+                        }),
+                    ),
+                };
+
+                self.finish_run(run_id, result).await;
+
+                let (succeeded, data) = sync_event;
+                let _ = if succeeded {
+                    self.webhook
+                        .emit_connection_sync_completed(
+                            workspace_id,
+                            run_id,
+                            Some(account_id),
+                            Some(data),
+                        )
+                        .await
+                } else {
+                    self.webhook
+                        .emit_connection_sync_failed(
+                            workspace_id,
+                            run_id,
+                            Some(account_id),
+                            Some(data),
+                        )
+                        .await
+                };
+            }
             Outcome::Cancelled => self.cancel_run(run_id).await,
         }
     }
