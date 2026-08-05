@@ -16,32 +16,22 @@ use crate::service::ServiceState;
 /// one first leaves the path free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinModule {
-    /// Account management (`/account`, `/accounts/{id}`).
+    /// Account management, including API tokens and notifications.
     Accounts,
-    /// API tokens.
-    Tokens,
     /// Workspaces.
     Workspaces,
-    /// Provider connections.
-    Connections,
-    /// Connection syncs (import/export runs).
-    ConnectionSyncs,
-    /// Workspace invitations.
-    Invites,
-    /// Workspace members.
+    /// Workspace members and invitations.
     Members,
+    /// Provider connections, including their sync runs.
+    Connections,
     /// Webhooks.
     Webhooks,
     /// Files.
     Files,
-    /// Pipelines.
+    /// Pipelines, including their runs.
     Pipelines,
-    /// Pipeline runs.
-    PipelineRuns,
     /// Redaction policies.
     Policies,
-    /// Account notifications.
-    Notifications,
     /// Authentication (`/auth/*`, public).
     Authentication,
 }

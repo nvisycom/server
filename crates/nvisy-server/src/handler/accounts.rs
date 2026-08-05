@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use axum::response::Response;
 use nvisy_postgres::model::Account as AccountModel;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
 use nvisy_postgres::{PgClient, PgConn};
@@ -17,7 +16,7 @@ use uuid::Uuid;
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse, PublicAccount};
 use crate::extract::{AuthState, Json, Multipart, Path, ValidateJson};
-use crate::handler::utility::{avatar_response, build_password_user_inputs, read_image_field};
+use crate::handler::utility::{build_password_user_inputs, read_image_field};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, PasswordService, ServiceState};
 
@@ -242,9 +241,9 @@ async fn upload_account_avatar(
     authorize_self(&account, &path_params.username)?;
 
     let bytes = read_image_field(multipart).await?;
-    let avatar_url = format!("/accounts/{}/avatar", account.username);
+    let base_url = format!("/avatars/accounts/{}/", account.id);
     let updated = avatar
-        .set_account_avatar(account.id, bytes, avatar_url)
+        .set_account_avatar(account.id, bytes, &base_url)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");
@@ -260,50 +259,6 @@ fn upload_account_avatar_docs(op: TransformOperation) -> TransformOperation {
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// Serves an account's avatar image.
-///
-/// Readable by any account that shares a workspace (same visibility as the
-/// public profile); a non-shared or missing avatar is reported as not found.
-#[tracing::instrument(skip_all, fields(requester_id = %auth_claims.account_id))]
-async fn get_account_avatar(
-    State(pg_client): State<PgClient>,
-    State(avatar): State<AvatarService>,
-    AuthState(auth_claims): AuthState,
-    Path(path_params): Path<AccountPathParams>,
-) -> Result<Response> {
-    tracing::debug!(target: TRACING_TARGET, "Serving account avatar");
-
-    let mut conn = pg_client.get_connection().await?;
-    let account = conn
-        .find_account_by_username(&path_params.username)
-        .await?
-        .ok_or_else(|| Error::not_found("account"))?;
-
-    // Same visibility as the public profile: a shared workspace, else not-found.
-    if account.id != auth_claims.account_id
-        && !conn
-            .accounts_share_workspace(auth_claims.account_id, account.id)
-            .await?
-    {
-        return Err(Error::not_found("account"));
-    }
-
-    let bytes = avatar
-        .account_avatar(account.id)
-        .await?
-        .ok_or_else(|| Error::not_found("avatar"))?;
-
-    Ok(avatar_response(bytes))
-}
-
-fn get_account_avatar_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get account avatar")
-        .description("Returns the account's avatar image (WebP). 404 when unset.")
-        .response::<200, ()>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
@@ -371,7 +326,6 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
             "/accounts/{username}/avatar/",
             put_with(upload_account_avatar, upload_account_avatar_docs)
                 .layer(DefaultBodyLimit::max(MAX_AVATAR_UPLOAD_BYTES))
-                .get_with(get_account_avatar, get_account_avatar_docs)
                 .delete_with(delete_account_avatar, delete_account_avatar_docs),
         )
         .with_path_items(|item| item.tag("Accounts"))

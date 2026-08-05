@@ -13,6 +13,7 @@ use nvisy_nats::object::{AccountKey, WorkspaceKey};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, UpdateAccount, UpdateWorkspace};
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
@@ -46,14 +47,21 @@ impl AvatarService {
     }
 
     /// Normalizes and stores an account avatar, then sets the account's
-    /// `avatar_url` to its serve path. Returns the updated account.
+    /// `avatar_url` to its content-versioned serve path. Returns the updated
+    /// account.
+    ///
+    /// `base_url` is the avatar's base serve path (e.g. `/accounts/{u}/avatar/`);
+    /// the stored URL appends a content hash segment so the URL changes whenever
+    /// the image does and can be cached immutably.
     pub async fn set_account_avatar(
         &self,
         account_id: Uuid,
         upload: Vec<u8>,
-        avatar_url: String,
+        base_url: &str,
     ) -> Result<Account> {
         let webp = process_avatar(upload).await?;
+        let avatar_url = versioned_url(base_url, &webp);
+
         let store = self.nats.avatar_store().await?;
         store
             .put(&AccountKey::new(account_id), Cursor::new(webp))
@@ -96,14 +104,21 @@ impl AvatarService {
     }
 
     /// Normalizes and stores a workspace avatar, then sets the workspace's
-    /// `avatar_url` to its serve path.
+    /// `avatar_url` to its content-versioned serve path.
+    ///
+    /// `base_url` is the avatar's base serve path (e.g.
+    /// `/workspaces/{slug}/avatar/`); the stored URL appends a content hash
+    /// segment so the URL changes whenever the image does and can be cached
+    /// immutably.
     pub async fn set_workspace_avatar(
         &self,
         workspace_id: Uuid,
         upload: Vec<u8>,
-        avatar_url: String,
+        base_url: &str,
     ) -> Result<()> {
         let webp = process_avatar(upload).await?;
+        let avatar_url = versioned_url(base_url, &webp);
+
         let store = self.nats.workspace_avatar_store().await?;
         store
             .put(&WorkspaceKey::new(workspace_id), Cursor::new(webp))
@@ -165,6 +180,18 @@ async fn read_object(result: Option<nvisy_nats::object::GetResult>) -> Result<Op
 
 /// Validates and normalizes a raw uploaded image into stored WebP bytes.
 ///
+/// Builds a content-versioned avatar URL by appending a short content hash of
+/// the stored bytes as a path segment to `base_url`.
+///
+/// The hash changes only when the image does, so the URL is stable across
+/// identical re-uploads (cache stays warm) and changes on a new image (cache is
+/// busted), letting the serve route mark the response immutable.
+fn versioned_url(base_url: &str, webp: &[u8]) -> String {
+    let digest = Sha256::digest(webp);
+    let version = hex::encode(&digest[..8]);
+    format!("{base_url}{version}/")
+}
+
 /// Rejects payloads that are too large, do not decode as an image, or exceed the
 /// source-dimension cap. The result is resized to fit within [`TARGET_DIMENSION`]
 /// on its longest side (never upscaled) and encoded as WebP. The CPU-bound

@@ -30,14 +30,18 @@ pub async fn read_image_field(mut multipart: Multipart) -> Result<Vec<u8>> {
     Err(ErrorKind::BadRequest.with_message("No image file in upload"))
 }
 
-/// Builds the serve response for stored avatar bytes: WebP content type plus
-/// cache headers so clients and CDNs can cache it until it is replaced.
+/// Builds the serve response for stored avatar bytes: WebP content type plus an
+/// immutable cache header.
+///
+/// The serve URL carries a content hash, so a given URL always maps to the same
+/// bytes and may be cached indefinitely; a new upload changes the URL rather
+/// than the contents at a URL.
 pub fn avatar_response(bytes: Vec<u8>) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, AVATAR_CONTENT_TYPE.parse().unwrap());
     headers.insert(
         header::CACHE_CONTROL,
-        "public, max-age=3600".parse().unwrap(),
+        "public, max-age=31536000, immutable".parse().unwrap(),
     );
     (StatusCode::OK, headers, Body::from(bytes)).into_response()
 }

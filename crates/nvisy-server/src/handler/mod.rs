@@ -5,6 +5,7 @@
 
 mod accounts;
 mod authentication;
+mod avatars;
 mod connection_syncs;
 mod connections;
 mod error;
@@ -72,25 +73,21 @@ fn private_routes(
     let is_included = |module| !excluded.contains(&module);
 
     if is_included(BuiltinModule::Accounts) {
-        router = router.merge(accounts::routes(service_state.clone()));
-    }
-    if is_included(BuiltinModule::Tokens) {
-        router = router.merge(tokens::routes());
+        router = router
+            .merge(accounts::routes(service_state.clone()))
+            .merge(tokens::routes())
+            .merge(notifications::routes());
     }
     if is_included(BuiltinModule::Workspaces) {
         router = router.merge(workspaces::routes());
     }
-    if is_included(BuiltinModule::Connections) {
-        router = router.merge(connections::routes());
-    }
-    if is_included(BuiltinModule::ConnectionSyncs) {
-        router = router.merge(connection_syncs::routes());
-    }
-    if is_included(BuiltinModule::Invites) {
-        router = router.merge(invites::routes());
-    }
     if is_included(BuiltinModule::Members) {
-        router = router.merge(members::routes());
+        router = router.merge(members::routes()).merge(invites::routes());
+    }
+    if is_included(BuiltinModule::Connections) {
+        router = router
+            .merge(connections::routes())
+            .merge(connection_syncs::routes());
     }
     if is_included(BuiltinModule::Webhooks) {
         router = router.merge(webhooks::routes());
@@ -99,16 +96,12 @@ fn private_routes(
         router = router.merge(files::routes());
     }
     if is_included(BuiltinModule::Pipelines) {
-        router = router.merge(pipelines::routes());
-    }
-    if is_included(BuiltinModule::PipelineRuns) {
-        router = router.merge(pipeline_runs::routes());
+        router = router
+            .merge(pipelines::routes())
+            .merge(pipeline_runs::routes());
     }
     if is_included(BuiltinModule::Policies) {
         router = router.merge(policies::routes());
-    }
-    if is_included(BuiltinModule::Notifications) {
-        router = router.merge(notifications::routes());
     }
 
     if let Some(additional) = additional_routes {
@@ -132,6 +125,10 @@ fn public_routes(
     }
 
     router = router.merge(monitors::routes());
+
+    // Avatar serving is public so images load directly in an `<img>` tag; it is
+    // infrastructure shared by accounts and workspaces, always mounted.
+    router = router.merge(avatars::routes());
 
     if let Some(additional) = additional_routes {
         router = router.merge(additional);
@@ -276,7 +273,7 @@ mod test {
         let server = create_test_server_with_router(move |state| {
             routes(
                 CustomRoutes::new()
-                    .exclude(BuiltinModule::Invites)
+                    .exclude(BuiltinModule::Members)
                     .add_private_routes(custom.clone()),
                 state,
             )
@@ -291,9 +288,9 @@ mod test {
     fn exclude_marks_only_the_named_module() {
         use crate::handler::BuiltinModule;
 
-        let routes = CustomRoutes::new().exclude(BuiltinModule::Invites);
-        assert!(routes.is_excluded(BuiltinModule::Invites));
-        assert!(!routes.is_excluded(BuiltinModule::Members));
+        let routes = CustomRoutes::new().exclude(BuiltinModule::Members);
+        assert!(routes.is_excluded(BuiltinModule::Members));
+        assert!(!routes.is_excluded(BuiltinModule::Workspaces));
         assert!(!routes.is_excluded(BuiltinModule::Files));
     }
 }
