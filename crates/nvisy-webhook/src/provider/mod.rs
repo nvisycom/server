@@ -20,5 +20,11 @@ pub trait WebhookProvider: Send + Sync {
     async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse>;
 
     /// Performs a health check on the webhook provider.
-    async fn health_check(&self) -> Result<ComponentHealth>;
+    ///
+    /// Defaults to healthy for providers that deliver directly and have no
+    /// backing service to probe; a provider fronting an external delivery
+    /// service (such as Svix) overrides this to report that service's health.
+    async fn health_check(&self) -> Result<ComponentHealth> {
+        Ok(ComponentHealth::healthy("webhook"))
+    }
 }

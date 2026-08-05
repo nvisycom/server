@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use hmac::{Hmac, KeyInit, Mac};
 use jiff::Timestamp;
-use nvisy_core::health::ComponentHealth;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
@@ -178,10 +177,6 @@ impl WebhookProvider for ReqwestClient {
         let response = WebhookResponse::new(request.request_id, status_code, started_at);
 
         Ok(response)
-    }
-
-    async fn health_check(&self) -> Result<ComponentHealth> {
-        Ok(ComponentHealth::healthy("webhook"))
     }
 }
 
