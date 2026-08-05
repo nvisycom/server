@@ -1,22 +1,24 @@
 //! Reqwest-based HTTP client for webhook delivery.
 
 use std::fmt;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use hmac::{Hmac, KeyInit, Mac};
 use jiff::Timestamp;
-use nvisy_core::health::ComponentHealth;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_tracing::TracingMiddleware;
 use sha2::Sha256;
+use url::Url;
 
-use super::error::Error;
+use super::error::Error as ReqwestError;
 use super::{ReqwestConfig, TRACING_TARGET};
-use crate::WebhookService;
+use crate::guard::UrlGuardExt;
 use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
+use crate::{Error, ErrorKind, Result, WebhookService};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -67,6 +69,10 @@ impl ReqwestClient {
         let base_client = Client::builder()
             .timeout(timeout)
             .user_agent(&user_agent)
+            // Never follow redirects: the SSRF guard validates the resolved
+            // address of the request URL, but a redirect target is unchecked and
+            // could point at an internal address (e.g. the metadata endpoint).
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to create HTTP client");
 
@@ -119,13 +125,20 @@ impl Default for ReqwestClient {
 
 #[async_trait::async_trait]
 impl WebhookProvider for ReqwestClient {
-    async fn deliver(&self, request: &WebhookRequest) -> crate::Result<WebhookResponse> {
+    async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse> {
         let started_at = Timestamp::now();
         let timestamp = started_at.as_second();
 
+        // SSRF guard: reject non-http(s) schemes, then reject the delivery if the
+        // host resolves to any non-routable address (loopback, private ranges,
+        // the cloud metadata endpoint, and so on).
+        request.url.check_scheme()?;
+        let addrs = resolve_host(&request.url).await?;
+        request.url.check_resolved_addrs(addrs)?;
+
         // Create the payload from the request
         let payload = request.to_payload();
-        let payload_bytes = serde_json::to_vec(&payload).map_err(Error::Serde)?;
+        let payload_bytes = serde_json::to_vec(&payload).map_err(ReqwestError::Serde)?;
 
         // Build the HTTP request
         let mut http_request = self
@@ -148,8 +161,12 @@ impl WebhookProvider for ReqwestClient {
                 http_request.header("X-Webhook-Signature", format!("sha256={signature}"));
         }
 
-        // Add custom headers
+        // Add custom headers, skipping any reserved name so a webhook cannot
+        // override or duplicate the signature and other server-set headers.
         for (name, value) in &request.headers {
+            if is_reserved_header(name) {
+                continue;
+            }
             http_request = http_request.header(name, value);
         }
 
@@ -158,17 +175,64 @@ impl WebhookProvider for ReqwestClient {
             .body(payload_bytes)
             .send()
             .await
-            .map_err(Error::from)?;
+            .map_err(ReqwestError::from)?;
 
         let status_code = http_response.status().as_u16();
         let response = WebhookResponse::new(request.request_id, status_code, started_at);
 
         Ok(response)
     }
+}
 
-    async fn health_check(&self) -> crate::Result<ComponentHealth> {
-        Ok(ComponentHealth::healthy("webhook"))
-    }
+/// Header names the delivery client sets itself, which a webhook's custom
+/// headers must never override.
+const RESERVED_HEADERS: [&str; 5] = [
+    "content-type",
+    "x-webhook-event",
+    "x-webhook-timestamp",
+    "x-webhook-request-id",
+    "x-webhook-signature",
+];
+
+/// Returns whether a header name is reserved for server-set values.
+///
+/// HTTP header names are case-insensitive, so the comparison is too.
+fn is_reserved_header(name: &str) -> bool {
+    RESERVED_HEADERS
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
+}
+
+/// Resolves a webhook URL's host to its socket addresses for the SSRF guard.
+///
+/// Uses the URL's explicit port, or the scheme default (443 for `https`, 80 for
+/// `http`), since the port does not affect address classification.
+///
+/// This resolves independently of the connection reqwest makes on send, leaving
+/// a narrow DNS-rebinding window where a hostname vetted here could resolve to a
+/// different address at connect time. Closing it fully requires pinning the
+/// vetted address into the connection via a custom resolver; redirects are
+/// already disabled, which removes the simpler post-connection bypass.
+async fn resolve_host(url: &Url) -> Result<Vec<IpAddr>> {
+    // Build a resolvable `host:port` authority. `host_str` yields the bare host;
+    // a literal IP resolves to itself.
+    let host = url.host_str().ok_or_else(|| {
+        Error::new(ErrorKind::InvalidEndpoint).with_message("webhook URL has no host")
+    })?;
+    let port = url.port_or_known_default().unwrap_or(443);
+    let authority = format!("{host}:{port}");
+
+    let addrs = tokio::net::lookup_host(authority)
+        .await
+        .map_err(|err| {
+            Error::new(ErrorKind::InvalidEndpoint)
+                .with_message("failed to resolve webhook host")
+                .with_source(err)
+        })?
+        .map(|socket_addr| socket_addr.ip())
+        .collect();
+
+    Ok(addrs)
 }
 
 #[cfg(test)]
@@ -197,6 +261,16 @@ mod tests {
         let sig1 = ReqwestClient::sign_payload(secret, timestamp, payload);
         let sig2 = ReqwestClient::sign_payload(secret, timestamp, payload);
         assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn reserved_headers_are_detected_case_insensitively() {
+        assert!(is_reserved_header("X-Webhook-Signature"));
+        assert!(is_reserved_header("x-webhook-signature"));
+        assert!(is_reserved_header("Content-Type"));
+        assert!(is_reserved_header("X-Webhook-Request-Id"));
+        assert!(!is_reserved_header("X-Custom-Header"));
+        assert!(!is_reserved_header("Authorization"));
     }
 
     #[test]

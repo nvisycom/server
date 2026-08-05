@@ -14,7 +14,8 @@ use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::{Handle, WebhookId};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
-use nvisy_webhook::provider::WebhookRequest;
+use nvisy_webhook::guard::UrlGuardExt;
+use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
 use url::Url;
 use uuid::Uuid;
 
@@ -59,6 +60,8 @@ async fn create_webhook(
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::CreateWebhooks)
         .await?;
+
+    check_webhook_url(&request.url)?;
 
     // Generate the signing secret here so it is returned once and stored only
     // encrypted; the server decrypts it to sign each delivery.
@@ -233,6 +236,10 @@ async fn update_webhook(
     let (existing, _) =
         find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
+    if let Some(url) = &request.url {
+        check_webhook_url(url)?;
+    }
+
     let update_data = request.into_model(existing.status);
     conn.update_workspace_webhook(existing.id, update_data)
         .await?;
@@ -320,11 +327,12 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn test_webhook(
     State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
     State(webhook_service): State<WebhookService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WebhookPathParams>,
-    ValidateJson(_request): ValidateJson<TestWebhook>,
+    ValidateJson(request): ValidateJson<TestWebhook>,
 ) -> Result<(StatusCode, Json<WebhookResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
 
@@ -344,17 +352,38 @@ async fn test_webhook(
             .with_resource("webhook")
     })?;
 
-    // Build the test webhook request
-    let webhook_request = WebhookRequest::test(url, webhook.id, webhook.workspace_id);
-    let response = webhook_service.deliver(&webhook_request).await?;
+    // Build a signed test request that mirrors a real delivery: decrypt the
+    // secret so the signature is present, carry the webhook's custom headers,
+    // and include the caller's payload so they can exercise their own body.
+    let secret = String::from_utf8(crypto.decrypt(workspace.id, &webhook.encrypted_secret)?)
+        .map_err(|_| {
+            ErrorKind::InternalServerError.with_message("webhook secret is not valid UTF-8")
+        })?;
 
-    // Update last_triggered_at timestamp
-    if response.is_success() {
-        conn.record_webhook_success(webhook.id).await?;
-    } else {
-        conn.record_webhook_failure(webhook.id).await?;
+    let mut context =
+        WebhookContext::test(webhook.id, webhook.workspace_id).with_account(auth_state.account_id);
+    if let Some(payload) = request.payload {
+        context = context.with_metadata(payload);
     }
 
+    let mut webhook_request = WebhookRequest::new(
+        url,
+        "webhook:test",
+        "This is a test webhook delivery",
+        context,
+    )
+    .with_secret(secret);
+    let headers = webhook.parsed_headers();
+    if !headers.is_empty() {
+        webhook_request = webhook_request.with_headers(headers);
+    }
+
+    let response = webhook_service.deliver(&webhook_request).await?;
+
+    // A manual test does not touch stored delivery health: its failures must not
+    // count toward the worker's auto-disable threshold, and its successes must
+    // not mask a genuinely failing endpoint. The result is returned to the
+    // caller directly.
     tracing::info!(
         target: TRACING_TARGET,
         success = response.is_success(),
@@ -372,6 +401,24 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+}
+
+/// Validates a webhook URL at write time: `http`/`https` scheme and, for a
+/// literal-IP host, a globally routable address.
+///
+/// This is fast feedback; the delivery worker additionally rejects hostnames
+/// that resolve to non-routable addresses (which cannot be checked here without
+/// DNS).
+fn check_webhook_url(url: &str) -> Result<()> {
+    let parsed: Url = url
+        .parse()
+        .map_err(|_| ErrorKind::BadRequest.with_message("invalid webhook URL"))?;
+    parsed
+        .check_scheme()
+        .map_err(|_| ErrorKind::BadRequest.with_message("webhook URL must use http or https"))?;
+    parsed.check_literal_host().map_err(|_| {
+        ErrorKind::BadRequest.with_message("webhook URL must not target an internal address")
+    })
 }
 
 /// Finds a webhook within a workspace by id, with its creator's handle, or

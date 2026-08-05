@@ -24,10 +24,7 @@ impl fmt::Debug for WebhookService {
 
 impl WebhookService {
     /// Create a new webhook service wrapper.
-    pub fn new<P>(provider: P) -> Self
-    where
-        P: WebhookProvider + 'static,
-    {
+    pub fn new(provider: impl WebhookProvider + 'static) -> Self {
         Self {
             inner: Arc::new(provider),
         }

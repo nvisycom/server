@@ -5,7 +5,9 @@
 //! ([`WebhookWorker`]).
 
 mod emitter;
+mod job;
 mod worker;
 
 pub use emitter::WebhookEmitter;
+pub use job::WebhookJob;
 pub use worker::WebhookWorker;

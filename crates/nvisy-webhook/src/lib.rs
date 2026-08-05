@@ -4,6 +4,7 @@
 
 mod client;
 mod error;
+pub mod guard;
 pub mod provider;
 
 #[cfg(feature = "reqwest")]

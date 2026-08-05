@@ -10,7 +10,7 @@ use std::process;
 use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::*;
-use nvisy_server::service::{ConnectionSyncWorker, ServiceState, WebhookWorker};
+use nvisy_server::service::ServiceState;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{Cli, MiddlewareConfig};
@@ -52,19 +52,14 @@ async fn run() -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
 
     // Spawn webhook worker (logs lifecycle events internally)
-    let webhook_worker = WebhookWorker::new(state.nats.clone(), state.webhook.clone());
+    let webhook_worker = state.webhook_worker();
     let webhook_cancel = cancel.clone();
     let webhook_handle = tokio::spawn(async move {
         let _ = webhook_worker.run(webhook_cancel).await;
     });
 
     // Spawn connection sync worker (scheduler + job consumer + reaper)
-    let sync_worker = ConnectionSyncWorker::new(
-        state.postgres.clone(),
-        state.nats.clone(),
-        state.crypto.clone(),
-        state.connection_sync.clone(),
-    );
+    let sync_worker = state.connection_sync_worker();
     let sync_cancel = cancel.clone();
     let sync_handle = tokio::spawn(async move {
         let _ = sync_worker.run(sync_cancel).await;

@@ -303,7 +303,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(last_triggered_at.eq(now))
+            .set((last_success_at.eq(now), consecutive_failures.eq(0)))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
@@ -318,7 +318,10 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(last_triggered_at.eq(now))
+            .set((
+                last_failure_at.eq(now),
+                consecutive_failures.eq(consecutive_failures + 1),
+            ))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
@@ -374,23 +377,18 @@ impl WorkspaceWebhookRepository for PgConnection {
         ws_id: Uuid,
         event: WebhookEvent,
     ) -> PgResult<Vec<WorkspaceWebhook>> {
-        use diesel::dsl::sql;
-        use diesel::sql_types::Bool;
         use schema::workspace_webhooks::dsl::*;
 
-        // Query webhooks where the events array contains the target event.
-        // Uses PostgreSQL's `@>` (array contains) operator via raw SQL.
-        // The events column is Array<Nullable<WebhookEvent>>, so we check if
-        // the array contains the event value.
-        let event_str = format!("'{}'", event.to_string().replace('\'', "''"));
-        let contains_event =
-            sql::<Bool>(&format!("events @> ARRAY[{}]::WEBHOOK_EVENT[]", event_str));
+        // Query webhooks whose events array contains the target event via the
+        // PostgreSQL `@>` operator. The events column is
+        // Array<Nullable<WebhookEvent>>, so the bound needle matches that shape.
+        let needle: Vec<Option<WebhookEvent>> = vec![Some(event)];
 
         let webhooks = workspace_webhooks
             .filter(workspace_id.eq(ws_id))
             .filter(status.eq(WebhookStatus::Active))
             .filter(deleted_at.is_null())
-            .filter(contains_event)
+            .filter(events.contains(needle))
             .select(WorkspaceWebhook::as_select())
             .load(self)
             .await
