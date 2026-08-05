@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineStatus,
-    WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, PipelineStatus, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -179,21 +178,18 @@ impl WorkspacePipelineRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspacePipeline::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
-            .first::<(WorkspacePipeline, Handle, Option<String>)>(self)
+            .first::<(WorkspacePipeline, AccountRefRow)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
-            item,
-            account: AccountRefRow {
-                username,
-                avatar_url,
-            },
-        }))
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
     async fn offset_list_workspace_pipelines(
@@ -272,49 +268,49 @@ impl WorkspacePipelineRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let rows: Vec<(WorkspacePipeline, Handle, Option<String>)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspacePipeline, AccountRefRow)> = if let Some(cursor) = &pagination.after
+        {
+            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-                query
-                    .filter(
-                        dsl::created_at
-                            .lt(&cursor_time)
-                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                    )
-                    .select((
-                        WorkspacePipeline::as_select(),
+            query
+                .filter(
+                    dsl::created_at
+                        .lt(&cursor_time)
+                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                )
+                .select((
+                    WorkspacePipeline::as_select(),
+                    (
                         accounts::username,
+                        accounts::display_name,
                         accounts::avatar_url,
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(PgError::from)?
-            } else {
-                query
-                    .select((
-                        WorkspacePipeline::as_select(),
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            query
+                .select((
+                    WorkspacePipeline::as_select(),
+                    (
                         accounts::username,
+                        accounts::display_name,
                         accounts::avatar_url,
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(PgError::from)?
-            };
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
 
         let items: Vec<WithAccountRef<WorkspacePipeline>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {

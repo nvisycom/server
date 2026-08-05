@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, SyncMode, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, SyncMode, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -177,21 +177,18 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspaceConnection::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
-            .first::<(WorkspaceConnection, Handle, Option<String>)>(self)
+            .first::<(WorkspaceConnection, AccountRefRow)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
-            item,
-            account: AccountRefRow {
-                username,
-                avatar_url,
-            },
-        }))
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
     async fn find_workspace_connections_by_provider(
@@ -296,7 +293,7 @@ impl WorkspaceConnectionRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let rows: Vec<(WorkspaceConnection, Handle, Option<String>)> =
+        let rows: Vec<(WorkspaceConnection, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -308,8 +305,11 @@ impl WorkspaceConnectionRepository for PgConnection {
                     )
                     .select((
                         WorkspaceConnection::as_select(),
-                        accounts::username,
-                        accounts::avatar_url,
+                        (
+                            accounts::username,
+                            accounts::display_name,
+                            accounts::avatar_url,
+                        ),
                     ))
                     .order((dsl::created_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -320,8 +320,11 @@ impl WorkspaceConnectionRepository for PgConnection {
                 query
                     .select((
                         WorkspaceConnection::as_select(),
-                        accounts::username,
-                        accounts::avatar_url,
+                        (
+                            accounts::username,
+                            accounts::display_name,
+                            accounts::avatar_url,
+                        ),
                     ))
                     .order((dsl::created_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -332,13 +335,7 @@ impl WorkspaceConnectionRepository for PgConnection {
 
         let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {

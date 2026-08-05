@@ -7,9 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, WithAccountRef,
-};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace policy database operations.
@@ -146,21 +144,18 @@ impl WorkspacePolicyRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspacePolicy::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
-            .first::<(WorkspacePolicy, Handle, Option<String>)>(self)
+            .first::<(WorkspacePolicy, AccountRefRow)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
-            item,
-            account: AccountRefRow {
-                username,
-                avatar_url,
-            },
-        }))
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
     async fn offset_list_workspace_policies(
@@ -214,49 +209,48 @@ impl WorkspacePolicyRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let rows: Vec<(WorkspacePolicy, Handle, Option<String>)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspacePolicy, AccountRefRow)> = if let Some(cursor) = &pagination.after {
+            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-                query
-                    .filter(
-                        dsl::created_at
-                            .lt(&cursor_time)
-                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                    )
-                    .select((
-                        WorkspacePolicy::as_select(),
+            query
+                .filter(
+                    dsl::created_at
+                        .lt(&cursor_time)
+                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                )
+                .select((
+                    WorkspacePolicy::as_select(),
+                    (
                         accounts::username,
+                        accounts::display_name,
                         accounts::avatar_url,
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(PgError::from)?
-            } else {
-                query
-                    .select((
-                        WorkspacePolicy::as_select(),
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            query
+                .select((
+                    WorkspacePolicy::as_select(),
+                    (
                         accounts::username,
+                        accounts::display_name,
                         accounts::avatar_url,
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(PgError::from)?
-            };
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
 
         let items: Vec<WithAccountRef<WorkspacePolicy>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {

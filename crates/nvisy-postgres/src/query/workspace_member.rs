@@ -10,7 +10,7 @@ use crate::model::{
     Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
 };
 use crate::types::{
-    CursorPage, CursorPagination, Handle, MemberFilter, MemberSortBy, MemberSortField,
+    AccountRefRow, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
     OffsetPagination, SortOrder, WorkspaceRole,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
@@ -90,7 +90,7 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(Workspace, WorkspaceMember, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>>> + Send;
 
     /// Gets a user's role in a workspace for permission checking.
     ///
@@ -388,7 +388,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(Workspace, WorkspaceMember, Handle)>> {
+    ) -> PgResult<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>> {
         use diesel::dsl::count_star;
         use schema::{accounts, workspace_members, workspaces};
 
@@ -442,7 +442,11 @@ impl WorkspaceMemberRepository for PgConnection {
             .select((
                 Workspace::as_select(),
                 WorkspaceMember::as_select(),
-                accounts::username,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
             .load(self)
             .await
@@ -452,7 +456,7 @@ impl WorkspaceMemberRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(_, m, _): &(Workspace, WorkspaceMember, Handle)| {
+            |(_, m, _): &(Workspace, WorkspaceMember, AccountRefRow)| {
                 (m.created_at.into(), m.workspace_id)
             },
         ))

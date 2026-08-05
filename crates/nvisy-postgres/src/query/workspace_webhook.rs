@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent,
-    WebhookStatus, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WebhookEvent, WebhookStatus,
+    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -186,21 +186,18 @@ impl WorkspaceWebhookRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspaceWebhook::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
-            .first::<(WorkspaceWebhook, Handle, Option<String>)>(self)
+            .first::<(WorkspaceWebhook, AccountRefRow)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
-            item,
-            account: AccountRefRow {
-                username,
-                avatar_url,
-            },
-        }))
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
     async fn offset_list_workspace_webhooks(
@@ -263,11 +260,14 @@ impl WorkspaceWebhookRepository for PgConnection {
             );
         }
 
-        let rows: Vec<(WorkspaceWebhook, Handle, Option<String>)> = query
+        let rows: Vec<(WorkspaceWebhook, AccountRefRow)> = query
             .select((
                 WorkspaceWebhook::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(pagination.fetch_limit())
@@ -277,13 +277,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let items: Vec<WithAccountRef<WorkspaceWebhook>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {

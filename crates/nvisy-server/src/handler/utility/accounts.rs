@@ -19,7 +19,7 @@ use crate::handler::{ErrorKind, Result};
 pub async fn resolve_account_ref(conn: &mut PgConn, account_id: Uuid) -> Result<AccountRef> {
     conn.find_account_by_id(account_id)
         .await?
-        .map(|account| AccountRef::new(account.username, account.avatar_url))
+        .map(|account| AccountRef::new(account.username, account.display_name, account.avatar_url))
         .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))
 }
 

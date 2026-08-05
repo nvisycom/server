@@ -10,8 +10,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
 use crate::types::{
-    AccountRefRow, ActivityType, CursorPage, CursorPagination, Handle, OffsetPagination,
-    WithAccountRef,
+    AccountRefRow, ActivityType, CursorPage, CursorPagination, OffsetPagination, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -206,11 +205,14 @@ impl WorkspaceActivityRepository for PgConnection {
             );
         }
 
-        let rows: Vec<(WorkspaceActivity, Handle, Option<String>)> = query
+        let rows: Vec<(WorkspaceActivity, AccountRefRow)> = query
             .select((
                 WorkspaceActivity::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(pagination.fetch_limit())
@@ -220,13 +222,7 @@ impl WorkspaceActivityRepository for PgConnection {
 
         let items: Vec<WithAccountRef<WorkspaceActivity>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
