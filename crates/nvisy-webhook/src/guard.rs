@@ -22,6 +22,13 @@ pub trait UrlGuardExt {
     /// `https` scheme.
     fn check_scheme(&self) -> Result<()>;
 
+    /// Returns an `InvalidEndpoint` error if the URL's host is an IP literal
+    /// that is not globally routable.
+    ///
+    /// This is a synchronous, no-DNS check for write-time validation; hostnames
+    /// pass here and are checked against their resolved addresses at delivery.
+    fn check_literal_host(&self) -> Result<()>;
+
     /// Returns an `InvalidEndpoint` error if any resolved address is not a
     /// globally routable unicast address.
     ///
@@ -36,6 +43,20 @@ impl UrlGuardExt for Url {
             "http" | "https" => Ok(()),
             other => Err(Error::new(ErrorKind::InvalidEndpoint)
                 .with_message(format!("unsupported webhook URL scheme: {other}"))),
+        }
+    }
+
+    fn check_literal_host(&self) -> Result<()> {
+        match self.host() {
+            Some(url::Host::Ipv4(ip)) if is_blocked(IpAddr::V4(ip)) => {
+                Err(Error::new(ErrorKind::InvalidEndpoint)
+                    .with_message(format!("webhook host is a non-routable address: {ip}")))
+            }
+            Some(url::Host::Ipv6(ip)) if is_blocked(IpAddr::V6(ip)) => {
+                Err(Error::new(ErrorKind::InvalidEndpoint)
+                    .with_message(format!("webhook host is a non-routable address: {ip}")))
+            }
+            _ => Ok(()),
         }
     }
 
@@ -64,17 +85,34 @@ impl UrlGuardExt for Url {
 /// Blocks everything that is not a globally routable unicast address:
 /// loopback, private ranges, link-local (which covers the `169.254.169.254`
 /// cloud metadata endpoint), the unspecified address, multicast, and IPv6
-/// unique-local addresses.
+/// unique-local addresses. IPv6 forms that embed an IPv4 address are classified
+/// by that embedded address so they cannot smuggle a blocked v4 target through.
 fn is_blocked(addr: IpAddr) -> bool {
     match addr {
-        // IPv4-mapped addresses (::ffff:a.b.c.d) must be classified by their
-        // embedded v4 address rather than treated as a global v6 address.
-        IpAddr::V6(ip) if ip.to_ipv4_mapped().is_some() => {
-            is_blocked_v4(ip.to_ipv4_mapped().unwrap())
-        }
         IpAddr::V4(ip) => is_blocked_v4(ip),
-        IpAddr::V6(ip) => is_blocked_v6(ip),
+        // Classify any embedded IPv4 (mapped ::ffff:0:0/96, NAT64 64:ff9b::/96,
+        // deprecated compatible ::/96) by its v4 address rather than treating it
+        // as a global v6 address.
+        IpAddr::V6(ip) => match embedded_ipv4(ip) {
+            Some(v4) => is_blocked_v4(v4),
+            None => is_blocked_v6(ip),
+        },
     }
+}
+
+/// Extracts an embedded IPv4 address from the IPv6 forms that carry one.
+fn embedded_ipv4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    let segments = ip.segments();
+    // NAT64 well-known prefix, 64:ff9b::/96.
+    if segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2..6] == [0, 0, 0, 0] {
+        let [.., a, b, c, d] = ip.octets();
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
+    // IPv4-mapped (::ffff:a.b.c.d) and deprecated IPv4-compatible (::a.b.c.d).
+    ip.to_ipv4_mapped().or_else(|| match ip.to_ipv4() {
+        Some(v4) if !ip.is_loopback() && !ip.is_unspecified() => Some(v4),
+        _ => None,
+    })
 }
 
 /// Returns whether an IPv6 address must not be reached by a webhook delivery.
@@ -87,6 +125,8 @@ fn is_blocked_v6(ip: Ipv6Addr) -> bool {
         || (first & 0xfe00) == 0xfc00
         // Link-local unicast, fe80::/10.
         || (first & 0xffc0) == 0xfe80
+        // Documentation range, 2001:db8::/32.
+        || (first == 0x2001 && ip.segments()[1] == 0x0db8)
 }
 
 /// Returns whether an IPv4 address must not be reached by a webhook delivery.
@@ -156,6 +196,31 @@ mod tests {
     fn allows_public_addresses() {
         assert!(!is_blocked(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))));
         assert!(!is_blocked(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+    }
+
+    #[test]
+    fn blocks_ipv6_embedded_ipv4_metadata() {
+        // IPv4-mapped ::ffff:169.254.169.254
+        assert!(is_blocked("::ffff:169.254.169.254".parse().unwrap()));
+        // NAT64 64:ff9b::169.254.169.254
+        assert!(is_blocked("64:ff9b::a9fe:a9fe".parse().unwrap()));
+        // IPv4-compatible ::10.0.0.1
+        assert!(is_blocked("::10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocks_ipv6_internal_ranges() {
+        assert!(is_blocked("::1".parse().unwrap()));
+        assert!(is_blocked("fc00::1".parse().unwrap()));
+        assert!(is_blocked("fe80::1".parse().unwrap()));
+        assert!(is_blocked("2001:db8::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn allows_public_ipv6() {
+        // NAT64-wrapped public address stays allowed.
+        assert!(!is_blocked("64:ff9b::5db8:d822".parse().unwrap()));
+        assert!(!is_blocked("2606:4700:4700::1111".parse().unwrap()));
     }
 
     #[test]

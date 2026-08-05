@@ -61,7 +61,7 @@ async fn create_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::CreateWebhooks)
         .await?;
 
-    check_url_scheme(&request.url)?;
+    check_webhook_url(&request.url)?;
 
     // Generate the signing secret here so it is returned once and stored only
     // encrypted; the server decrypts it to sign each delivery.
@@ -237,7 +237,7 @@ async fn update_webhook(
         find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
     if let Some(url) = &request.url {
-        check_url_scheme(url)?;
+        check_webhook_url(url)?;
     }
 
     let update_data = request.into_model(existing.status);
@@ -380,13 +380,10 @@ async fn test_webhook(
 
     let response = webhook_service.deliver(&webhook_request).await?;
 
-    // Record the outcome so the manual test also updates delivery health.
-    if response.is_success() {
-        conn.record_webhook_success(webhook.id).await?;
-    } else {
-        conn.record_webhook_failure(webhook.id).await?;
-    }
-
+    // A manual test does not touch stored delivery health: its failures must not
+    // count toward the worker's auto-disable threshold, and its successes must
+    // not mask a genuinely failing endpoint. The result is returned to the
+    // caller directly.
     tracing::info!(
         target: TRACING_TARGET,
         success = response.is_success(),
@@ -406,17 +403,22 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Rejects a webhook URL whose scheme is not `http`/`https` with a 400.
+/// Validates a webhook URL at write time: `http`/`https` scheme and, for a
+/// literal-IP host, a globally routable address.
 ///
-/// This is fast feedback at write time; the delivery worker additionally
-/// rejects hosts that resolve to non-routable addresses.
-fn check_url_scheme(url: &str) -> Result<()> {
+/// This is fast feedback; the delivery worker additionally rejects hostnames
+/// that resolve to non-routable addresses (which cannot be checked here without
+/// DNS).
+fn check_webhook_url(url: &str) -> Result<()> {
     let parsed: Url = url
         .parse()
         .map_err(|_| ErrorKind::BadRequest.with_message("invalid webhook URL"))?;
     parsed
         .check_scheme()
-        .map_err(|_| ErrorKind::BadRequest.with_message("webhook URL must use http or https"))
+        .map_err(|_| ErrorKind::BadRequest.with_message("webhook URL must use http or https"))?;
+    parsed.check_literal_host().map_err(|_| {
+        ErrorKind::BadRequest.with_message("webhook URL must not target an internal address")
+    })
 }
 
 /// Finds a webhook within a workspace by id, with its creator's handle, or

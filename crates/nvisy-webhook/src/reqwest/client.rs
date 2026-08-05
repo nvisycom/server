@@ -69,6 +69,10 @@ impl ReqwestClient {
         let base_client = Client::builder()
             .timeout(timeout)
             .user_agent(&user_agent)
+            // Never follow redirects: the SSRF guard validates the resolved
+            // address of the request URL, but a redirect target is unchecked and
+            // could point at an internal address (e.g. the metadata endpoint).
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to create HTTP client");
 
@@ -203,6 +207,12 @@ fn is_reserved_header(name: &str) -> bool {
 ///
 /// Uses the URL's explicit port, or the scheme default (443 for `https`, 80 for
 /// `http`), since the port does not affect address classification.
+///
+/// This resolves independently of the connection reqwest makes on send, leaving
+/// a narrow DNS-rebinding window where a hostname vetted here could resolve to a
+/// different address at connect time. Closing it fully requires pinning the
+/// vetted address into the connection via a custom resolver; redirects are
+/// already disabled, which removes the simpler post-connection bypass.
 async fn resolve_host(url: &Url) -> Result<Vec<IpAddr>> {
     // Build a resolvable `host:port` authority. `host_str` yields the bare host;
     // a literal IP resolves to itself.
