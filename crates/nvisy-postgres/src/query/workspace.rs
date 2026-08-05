@@ -9,7 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::types::{AccountRefRow, Handle, OffsetPagination, WithAccountRef};
+use crate::types::{AccountRefRow, OffsetPagination, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Maximum number of slug candidates tried before giving up when generating a
@@ -168,21 +168,18 @@ impl WorkspaceRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 Workspace::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
-            .first::<(Workspace, Handle, Option<String>)>(self)
+            .first::<(Workspace, AccountRefRow)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
-            item,
-            account: AccountRefRow {
-                username,
-                avatar_url,
-            },
-        }))
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
     async fn update_workspace(

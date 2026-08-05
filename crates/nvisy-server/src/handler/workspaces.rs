@@ -95,9 +95,8 @@ async fn list_workspaces(
         .cursor_list_account_workspaces_with_details(auth_state.account_id, pagination.into())
         .await?;
 
-    let response = Page::from_cursor_page(page, |(workspace, member, creator_username)| {
-        let creator = AccountRef::new(creator_username, None);
-        Workspace::from_model_with_membership(workspace, member, creator)
+    let response = Page::from_cursor_page(page, |(workspace, member, creator)| {
+        Workspace::from_model_with_membership(workspace, member, creator.into())
     });
 
     tracing::debug!(

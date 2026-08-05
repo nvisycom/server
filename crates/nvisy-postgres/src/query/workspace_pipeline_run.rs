@@ -254,7 +254,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let rows: Vec<(WorkspacePipelineRun, Handle, Option<String>)> =
+        let rows: Vec<(WorkspacePipelineRun, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -266,8 +266,11 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     )
                     .select((
                         WorkspacePipelineRun::as_select(),
-                        accounts::username,
-                        accounts::avatar_url,
+                        (
+                            accounts::username,
+                            accounts::display_name,
+                            accounts::avatar_url,
+                        ),
                     ))
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -278,8 +281,11 @@ impl WorkspacePipelineRunRepository for PgConnection {
                 query
                     .select((
                         WorkspacePipelineRun::as_select(),
-                        accounts::username,
-                        accounts::avatar_url,
+                        (
+                            accounts::username,
+                            accounts::display_name,
+                            accounts::avatar_url,
+                        ),
                     ))
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -290,13 +296,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let items: Vec<WithAccountRef<WorkspacePipelineRun>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
@@ -346,11 +346,14 @@ impl WorkspacePipelineRunRepository for PgConnection {
         let selection = (
             WorkspacePipelineRun::as_select(),
             pipelines::slug,
-            accounts::username,
-            accounts::avatar_url,
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
         );
 
-        let rows: Vec<(WorkspacePipelineRun, Handle, Handle, Option<String>)> =
+        let rows: Vec<(WorkspacePipelineRun, Handle, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -378,18 +381,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let items: Vec<(WithAccountRef<WorkspacePipelineRun>, Handle)> = rows
             .into_iter()
-            .map(|(item, slug, username, avatar_url)| {
-                (
-                    WithAccountRef {
-                        item,
-                        account: AccountRefRow {
-                            username,
-                            avatar_url,
-                        },
-                    },
-                    slug,
-                )
-            })
+            .map(|(item, slug, account)| (WithAccountRef { item, account }, slug))
             .collect();
 
         Ok(CursorPage::new(

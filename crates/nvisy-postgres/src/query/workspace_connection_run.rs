@@ -9,9 +9,7 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
 };
-use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, SyncStatus, WithAccountRef,
-};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, SyncStatus, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection run database operations.
@@ -248,7 +246,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let rows: Vec<(WorkspaceConnectionRun, Handle, Option<String>)> =
+        let rows: Vec<(WorkspaceConnectionRun, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -260,8 +258,11 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                     )
                     .select((
                         WorkspaceConnectionRun::as_select(),
-                        accounts::username,
-                        accounts::avatar_url,
+                        (
+                            accounts::username,
+                            accounts::display_name,
+                            accounts::avatar_url,
+                        ),
                     ))
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -272,8 +273,11 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                 query
                     .select((
                         WorkspaceConnectionRun::as_select(),
-                        accounts::username,
-                        accounts::avatar_url,
+                        (
+                            accounts::username,
+                            accounts::display_name,
+                            accounts::avatar_url,
+                        ),
                     ))
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -284,13 +288,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let items: Vec<WithAccountRef<WorkspaceConnectionRun>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
@@ -344,11 +342,14 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         let selection = (
             WorkspaceConnectionRun::as_select(),
             connections::id,
-            accounts::username,
-            accounts::avatar_url,
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
         );
 
-        let rows: Vec<(WorkspaceConnectionRun, Uuid, Handle, Option<String>)> =
+        let rows: Vec<(WorkspaceConnectionRun, Uuid, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -376,18 +377,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let items: Vec<(WithAccountRef<WorkspaceConnectionRun>, Uuid)> = rows
             .into_iter()
-            .map(|(item, connection_id, username, avatar_url)| {
-                (
-                    WithAccountRef {
-                        item,
-                        account: AccountRefRow {
-                            username,
-                            avatar_url,
-                        },
-                    },
-                    connection_id,
-                )
-            })
+            .map(|(item, connection_id, account)| (WithAccountRef { item, account }, connection_id))
             .collect();
 
         Ok(CursorPage::new(

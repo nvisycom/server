@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, Handle,
+    AccountRefRow, CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField,
     OffsetPagination, SortOrder, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
@@ -266,21 +266,18 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspaceFile::as_select(),
-                accounts::username,
-                accounts::avatar_url,
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
             ))
-            .first::<(WorkspaceFile, Handle, Option<String>)>(self)
+            .first::<(WorkspaceFile, AccountRefRow)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
-            item,
-            account: AccountRefRow {
-                username,
-                avatar_url,
-            },
-        }))
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
     async fn offset_list_account_files(
@@ -461,49 +458,48 @@ impl WorkspaceFileRepository for PgConnection {
         let limit = pagination.fetch_limit();
 
         // Apply cursor filter if present
-        let rows: Vec<(WorkspaceFile, Handle, Option<String>)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspaceFile, AccountRefRow)> = if let Some(cursor) = &pagination.after {
+            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-                query
-                    .filter(
-                        dsl::created_at
-                            .lt(&cursor_time)
-                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                    )
-                    .select((
-                        WorkspaceFile::as_select(),
+            query
+                .filter(
+                    dsl::created_at
+                        .lt(&cursor_time)
+                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                )
+                .select((
+                    WorkspaceFile::as_select(),
+                    (
                         accounts::username,
+                        accounts::display_name,
                         accounts::avatar_url,
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(PgError::from)?
-            } else {
-                query
-                    .select((
-                        WorkspaceFile::as_select(),
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        } else {
+            query
+                .select((
+                    WorkspaceFile::as_select(),
+                    (
                         accounts::username,
+                        accounts::display_name,
                         accounts::avatar_url,
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(PgError::from)?
-            };
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(PgError::from)?
+        };
 
         let items: Vec<WithAccountRef<WorkspaceFile>> = rows
             .into_iter()
-            .map(|(item, username, avatar_url)| WithAccountRef {
-                item,
-                account: AccountRefRow {
-                    username,
-                    avatar_url,
-                },
-            })
+            .map(|(item, account)| WithAccountRef { item, account })
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
