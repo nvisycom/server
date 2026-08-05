@@ -1,15 +1,17 @@
 //! Avatar service: stores, serves, and removes account and workspace avatars.
 //!
 //! Uploads are normalized to WebP (decoded, bounded, resized, re-encoded) and
-//! stored unencrypted in NATS object storage, one object per owner. Because the
-//! stored bytes are always WebP, the serve `Content-Type` is constant and no
-//! per-object mime is persisted; re-encoding also strips EXIF/metadata.
+//! stored unencrypted in NATS object storage, keyed by `(owner, content hash)`
+//! so each version is its own object and the serve URL can be cached immutably.
+//! Because the stored bytes are always WebP, the serve `Content-Type` is
+//! constant and no per-object mime is persisted; re-encoding also strips
+//! EXIF/metadata.
 
 use std::io::Cursor;
 
 use image::{ImageFormat, ImageReader};
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{AccountKey, WorkspaceKey};
+use nvisy_nats::object::{AccountAvatarKey, WorkspaceAvatarKey};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, UpdateAccount, UpdateWorkspace};
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
@@ -46,28 +48,31 @@ impl AvatarService {
         Self { nats, postgres }
     }
 
-    /// Normalizes and stores an account avatar, then sets the account's
-    /// `avatar_url` to its content-versioned serve path. Returns the updated
-    /// account.
+    /// Normalizes and stores an account avatar as a new content-versioned object,
+    /// deletes the previous version, and points the account's `avatar_url` at it.
+    /// Returns the updated account.
     ///
-    /// `base_url` is the avatar's base serve path (e.g. `/accounts/{u}/avatar/`);
-    /// the stored URL appends a content hash segment so the URL changes whenever
-    /// the image does and can be cached immutably.
-    pub async fn set_account_avatar(
-        &self,
-        account_id: Uuid,
-        upload: Vec<u8>,
-        base_url: &str,
-    ) -> Result<Account> {
+    /// The stored object is keyed by `(account_id, content hash)` and the URL
+    /// embeds the same hash, so a versioned URL maps to immutable bytes. The new
+    /// object is written and the URL updated before the previous version is
+    /// deleted, so a reader never sees a missing avatar; a crash between the
+    /// update and the delete can leave the previous object orphaned (see #192).
+    pub async fn set_account_avatar(&self, account_id: Uuid, upload: Vec<u8>) -> Result<Account> {
         let webp = process_avatar(upload).await?;
-        let avatar_url = versioned_url(base_url, &webp);
+        let version = content_version(&webp);
 
         let store = self.nats.avatar_store().await?;
         store
-            .put(&AccountKey::new(account_id), Cursor::new(webp))
+            .put(
+                &AccountAvatarKey::new(account_id, &version),
+                Cursor::new(webp),
+            )
             .await?;
 
         let mut conn = self.postgres.get_connection().await?;
+        let previous = conn.find_account_by_id(account_id).await?;
+
+        let avatar_url = format!("/avatars/accounts/{account_id}/{version}/");
         let account = conn
             .update_account(
                 account_id,
@@ -77,21 +82,41 @@ impl AvatarService {
                 },
             )
             .await?;
+
+        if let Some(old_version) = previous.and_then(|a| avatar_version(a.avatar_url.as_deref()))
+            && old_version != version
+        {
+            store
+                .delete(&AccountAvatarKey::new(account_id, old_version))
+                .await?;
+        }
+
         Ok(account)
     }
 
-    /// Streams an account's stored avatar bytes, or `None` if unset.
-    pub async fn account_avatar(&self, account_id: Uuid) -> Result<Option<Vec<u8>>> {
+    /// Streams the account avatar for a specific version, or `None` if absent.
+    pub async fn account_avatar(&self, account_id: Uuid, version: &str) -> Result<Option<Vec<u8>>> {
         let store = self.nats.avatar_store().await?;
-        read_object(store.get(&AccountKey::new(account_id)).await?).await
+        read_object(
+            store
+                .get(&AccountAvatarKey::new(account_id, version))
+                .await?,
+        )
+        .await
     }
 
-    /// Removes an account's avatar object and clears its `avatar_url`.
+    /// Removes an account's current avatar object and clears its `avatar_url`.
     pub async fn delete_account_avatar(&self, account_id: Uuid) -> Result<()> {
-        let store = self.nats.avatar_store().await?;
-        store.delete(&AccountKey::new(account_id)).await?;
-
         let mut conn = self.postgres.get_connection().await?;
+        let account = conn.find_account_by_id(account_id).await?;
+
+        if let Some(version) = account.and_then(|a| avatar_version(a.avatar_url.as_deref())) {
+            let store = self.nats.avatar_store().await?;
+            store
+                .delete(&AccountAvatarKey::new(account_id, version))
+                .await?;
+        }
+
         conn.update_account(
             account_id,
             UpdateAccount {
@@ -103,28 +128,31 @@ impl AvatarService {
         Ok(())
     }
 
-    /// Normalizes and stores a workspace avatar, then sets the workspace's
-    /// `avatar_url` to its content-versioned serve path.
+    /// Normalizes and stores a workspace avatar as a new content-versioned
+    /// object, deletes the previous version, and points the workspace's
+    /// `avatar_url` at it.
     ///
-    /// `base_url` is the avatar's base serve path (e.g.
-    /// `/workspaces/{slug}/avatar/`); the stored URL appends a content hash
-    /// segment so the URL changes whenever the image does and can be cached
-    /// immutably.
-    pub async fn set_workspace_avatar(
-        &self,
-        workspace_id: Uuid,
-        upload: Vec<u8>,
-        base_url: &str,
-    ) -> Result<()> {
+    /// The stored object is keyed by `(workspace_id, content hash)` and the URL
+    /// embeds the same hash, so a versioned URL maps to immutable bytes. The new
+    /// object is written and the URL updated before the previous version is
+    /// deleted, so a reader never sees a missing avatar; a crash between the
+    /// update and the delete can leave the previous object orphaned (see #192).
+    pub async fn set_workspace_avatar(&self, workspace_id: Uuid, upload: Vec<u8>) -> Result<()> {
         let webp = process_avatar(upload).await?;
-        let avatar_url = versioned_url(base_url, &webp);
+        let version = content_version(&webp);
 
         let store = self.nats.workspace_avatar_store().await?;
         store
-            .put(&WorkspaceKey::new(workspace_id), Cursor::new(webp))
+            .put(
+                &WorkspaceAvatarKey::new(workspace_id, &version),
+                Cursor::new(webp),
+            )
             .await?;
 
         let mut conn = self.postgres.get_connection().await?;
+        let previous = conn.find_workspace_by_id(workspace_id).await?;
+
+        let avatar_url = format!("/avatars/workspaces/{workspace_id}/{version}/");
         conn.update_workspace(
             workspace_id,
             UpdateWorkspace {
@@ -133,21 +161,45 @@ impl AvatarService {
             },
         )
         .await?;
+
+        if let Some(old_version) = previous.and_then(|w| avatar_version(w.avatar_url.as_deref()))
+            && old_version != version
+        {
+            store
+                .delete(&WorkspaceAvatarKey::new(workspace_id, old_version))
+                .await?;
+        }
+
         Ok(())
     }
 
-    /// Streams a workspace's stored avatar bytes, or `None` if unset.
-    pub async fn workspace_avatar(&self, workspace_id: Uuid) -> Result<Option<Vec<u8>>> {
+    /// Streams the workspace avatar for a specific version, or `None` if absent.
+    pub async fn workspace_avatar(
+        &self,
+        workspace_id: Uuid,
+        version: &str,
+    ) -> Result<Option<Vec<u8>>> {
         let store = self.nats.workspace_avatar_store().await?;
-        read_object(store.get(&WorkspaceKey::new(workspace_id)).await?).await
+        read_object(
+            store
+                .get(&WorkspaceAvatarKey::new(workspace_id, version))
+                .await?,
+        )
+        .await
     }
 
-    /// Removes a workspace's avatar object and clears its `avatar_url`.
+    /// Removes a workspace's current avatar object and clears its `avatar_url`.
     pub async fn delete_workspace_avatar(&self, workspace_id: Uuid) -> Result<()> {
-        let store = self.nats.workspace_avatar_store().await?;
-        store.delete(&WorkspaceKey::new(workspace_id)).await?;
-
         let mut conn = self.postgres.get_connection().await?;
+        let workspace = conn.find_workspace_by_id(workspace_id).await?;
+
+        if let Some(version) = workspace.and_then(|w| avatar_version(w.avatar_url.as_deref())) {
+            let store = self.nats.workspace_avatar_store().await?;
+            store
+                .delete(&WorkspaceAvatarKey::new(workspace_id, version))
+                .await?;
+        }
+
         conn.update_workspace(
             workspace_id,
             UpdateWorkspace {
@@ -178,18 +230,26 @@ async fn read_object(result: Option<nvisy_nats::object::GetResult>) -> Result<Op
     Ok(Some(buf))
 }
 
-/// Validates and normalizes a raw uploaded image into stored WebP bytes.
+/// Returns a short content hash of the stored bytes, used as the avatar's
+/// version segment.
 ///
-/// Builds a content-versioned avatar URL by appending a short content hash of
-/// the stored bytes as a path segment to `base_url`.
-///
-/// The hash changes only when the image does, so the URL is stable across
-/// identical re-uploads (cache stays warm) and changes on a new image (cache is
-/// busted), letting the serve route mark the response immutable.
-fn versioned_url(base_url: &str, webp: &[u8]) -> String {
+/// The hash changes only when the image does, so an identical re-upload keeps
+/// the same object key and URL (cache stays warm) while a new image produces a
+/// new one (cache is busted), letting the serve route mark the response
+/// immutable.
+fn content_version(webp: &[u8]) -> String {
     let digest = Sha256::digest(webp);
-    let version = hex::encode(&digest[..8]);
-    format!("{base_url}{version}/")
+    hex::encode(&digest[..8])
+}
+
+/// Extracts the version segment from a stored avatar URL of the form
+/// `/avatars/{kind}/{id}/{version}/`, if present.
+fn avatar_version(avatar_url: Option<&str>) -> Option<String> {
+    avatar_url?
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .map(str::to_owned)
 }
 
 /// Rejects payloads that are too large, do not decode as an image, or exceed the

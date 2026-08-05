@@ -408,10 +408,7 @@ async fn upload_workspace_avatar(
         .await?;
 
     let bytes = read_image_field(multipart).await?;
-    let base_url = format!("/avatars/workspaces/{}/", workspace.id);
-    avatar
-        .set_workspace_avatar(workspace.id, bytes, &base_url)
-        .await?;
+    avatar.set_workspace_avatar(workspace.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace avatar set");
     Ok(StatusCode::OK)

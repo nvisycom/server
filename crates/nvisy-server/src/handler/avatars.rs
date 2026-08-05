@@ -25,19 +25,22 @@ use crate::service::{AvatarService, ServiceState};
 /// Tracing target for public avatar serving.
 const TRACING_TARGET: &str = "nvisy_server::handler::avatars";
 
-/// Path parameters for a public avatar route: the owner id and a cache-busting
-/// content-hash segment (ignored when serving).
+/// Path parameters for a public avatar route: the owner id and the avatar's
+/// content-hash version.
+///
+/// Each version is a distinct stored object, so an unknown version simply does
+/// not resolve — the version needs no separate validation.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct AvatarPathParams {
     /// Opaque id of the avatar's owner.
     id: Uuid,
-    /// Content-hash cache-busting segment (ignored when serving).
+    /// Content-hash version segment identifying the exact stored object.
     version: String,
 }
 
-/// Serves an account's avatar image. Public; 404 when unset.
+/// Serves an account's avatar image. Public; 404 when the version is unknown.
 #[tracing::instrument(skip_all)]
 async fn get_account_avatar(
     State(avatar): State<AvatarService>,
@@ -46,14 +49,14 @@ async fn get_account_avatar(
     tracing::debug!(target: TRACING_TARGET, "Serving account avatar");
 
     let bytes = avatar
-        .account_avatar(params.id)
+        .account_avatar(params.id, &params.version)
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 
     Ok(avatar_response(bytes))
 }
 
-/// Serves a workspace's avatar image. Public; 404 when unset.
+/// Serves a workspace's avatar image. Public; 404 when the version is unknown.
 #[tracing::instrument(skip_all)]
 async fn get_workspace_avatar(
     State(avatar): State<AvatarService>,
@@ -62,7 +65,7 @@ async fn get_workspace_avatar(
     tracing::debug!(target: TRACING_TARGET, "Serving workspace avatar");
 
     let bytes = avatar
-        .workspace_avatar(params.id)
+        .workspace_avatar(params.id, &params.version)
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 

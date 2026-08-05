@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use super::object_key::{AccountKey, FileKey, IntermediateKey, ObjectKey, WorkspaceKey};
+use super::object_key::{
+    AccountAvatarKey, FileKey, IntermediateKey, ObjectKey, WorkspaceAvatarKey,
+};
 
 /// Marker trait for object storage buckets.
 ///
@@ -67,7 +69,7 @@ impl ObjectBucket for ThumbnailsBucket {
 pub struct AvatarsBucket;
 
 impl ObjectBucket for AvatarsBucket {
-    type Key = AccountKey;
+    type Key = AccountAvatarKey;
 
     const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "ACCOUNT_AVATARS";
@@ -80,7 +82,7 @@ impl ObjectBucket for AvatarsBucket {
 pub struct WorkspaceAvatarsBucket;
 
 impl ObjectBucket for WorkspaceAvatarsBucket {
-    type Key = WorkspaceKey;
+    type Key = WorkspaceAvatarKey;
 
     const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "WORKSPACE_AVATARS";

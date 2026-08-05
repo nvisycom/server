@@ -241,10 +241,7 @@ async fn upload_account_avatar(
     authorize_self(&account, &path_params.username)?;
 
     let bytes = read_image_field(multipart).await?;
-    let base_url = format!("/avatars/accounts/{}/", account.id);
-    let updated = avatar
-        .set_account_avatar(account.id, bytes, &base_url)
-        .await?;
+    let updated = avatar.set_account_avatar(account.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");
     Ok((StatusCode::OK, Json(Account::from_model(updated))))

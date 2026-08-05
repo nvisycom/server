@@ -11,7 +11,7 @@
 //!
 //! ## Key Types
 //! - [`FileKey`] - Unique key for files (workspace + object ID)
-//! - [`AccountKey`] - Key for account-scoped objects (account ID)
+//! - [`AccountAvatarKey`] - Key for account-scoped objects (account ID)
 //! - [`IntermediateKey`] - Key for intermediate pipeline artifacts
 //!
 //! ## Bucket Types
@@ -34,5 +34,5 @@ pub use object_bucket::{
     WorkspaceAvatarsBucket,
 };
 pub use object_data::{GetResult, PutResult};
-pub use object_key::{AccountKey, FileKey, IntermediateKey, ObjectKey, WorkspaceKey};
+pub use object_key::{AccountAvatarKey, FileKey, IntermediateKey, ObjectKey, WorkspaceAvatarKey};
 pub use object_store::ObjectStore;
