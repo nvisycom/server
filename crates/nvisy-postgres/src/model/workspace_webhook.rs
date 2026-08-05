@@ -41,8 +41,12 @@ pub struct WorkspaceWebhook {
     pub encrypted_secret: Vec<u8>,
     /// Current status of the webhook.
     pub status: WebhookStatus,
-    /// Timestamp of last webhook trigger.
-    pub last_triggered_at: Option<Timestamp>,
+    /// Timestamp of the last successful delivery.
+    pub last_success_at: Option<Timestamp>,
+    /// Timestamp of the last failed delivery.
+    pub last_failure_at: Option<Timestamp>,
+    /// Consecutive failed deliveries; reset on success, drives auto-disable.
+    pub consecutive_failures: i32,
     /// Account that created this webhook.
     pub created_by: Uuid,
     /// Timestamp when this webhook was created.
@@ -95,8 +99,6 @@ pub struct UpdateWorkspaceWebhook {
     pub headers: Option<serde_json::Value>,
     /// Updated status.
     pub status: Option<WebhookStatus>,
-    /// Updated last triggered timestamp.
-    pub last_triggered_at: Option<Option<Timestamp>>,
     /// Soft deletion timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
 }
@@ -139,7 +141,7 @@ impl WorkspaceWebhook {
 
     /// Returns whether the webhook has been triggered at least once.
     pub fn has_been_triggered(&self) -> bool {
-        self.last_triggered_at.is_some()
+        self.last_success_at.is_some() || self.last_failure_at.is_some()
     }
 
     /// Returns whether the webhook is in a healthy state.

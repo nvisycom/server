@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use nvisy_nats::NatsClient;
-use nvisy_nats::stream::{EventSubscriber, WebhookStream};
-use nvisy_postgres::PgClient;
+use nvisy_nats::stream::{EventStream, EventSubscriber, WebhookStream};
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
 use tokio_util::sync::CancellationToken;
@@ -29,6 +29,9 @@ const TRACING_TARGET: &str = "nvisy_server::worker::webhook";
 
 /// Default timeout for a single webhook delivery attempt.
 const DEFAULT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Consecutive failures after which a webhook is automatically disabled.
+const MAX_CONSECUTIVE_FAILURES: i32 = 10;
 
 /// Webhook delivery worker.
 ///
@@ -110,12 +113,28 @@ impl WebhookWorker {
                             let job = message.payload().clone();
 
                             if let Err(err) = self.deliver(&job).await {
-                                tracing::error!(
-                                    target: TRACING_TARGET,
-                                    error = %err,
-                                    webhook_id = %job.webhook_id,
-                                    "Failed to deliver webhook"
+                                // When this was the final delivery attempt, NATS
+                                // will not redeliver: surface the dropped event
+                                // explicitly rather than let it vanish silently.
+                                let exhausted = matches!(
+                                    (message.delivery_count(), WebhookStream::MAX_DELIVER),
+                                    (Ok(count), Some(max)) if count as i64 >= max
                                 );
+                                if exhausted {
+                                    tracing::error!(
+                                        target: TRACING_TARGET,
+                                        error = %err,
+                                        webhook_id = %job.webhook_id,
+                                        "Webhook delivery abandoned after exhausting retries"
+                                    );
+                                } else {
+                                    tracing::error!(
+                                        target: TRACING_TARGET,
+                                        error = %err,
+                                        webhook_id = %job.webhook_id,
+                                        "Failed to deliver webhook"
+                                    );
+                                }
                                 // Nack the message for redelivery
                                 if let Err(nack_err) = message.nack().await {
                                     tracing::error!(
@@ -191,19 +210,42 @@ impl WebhookWorker {
             "Delivering webhook"
         );
 
-        let response = self
-            .webhook_service
-            .deliver(&request)
-            .await
-            .map_err(|err| Error::external("webhook", format!("Delivery failed: {err}")))?;
+        // A transport error (connection refused, timeout, SSRF rejection) is a
+        // failure worth retrying.
+        let response = match self.webhook_service.deliver(&request).await {
+            Ok(response) => response,
+            Err(err) => {
+                self.record_failure(&mut conn, &webhook).await;
+                return Err(Error::external(
+                    "webhook",
+                    format!("Delivery failed: {err}"),
+                ));
+            }
+        };
 
         if response.is_success() {
+            conn.record_webhook_success(webhook.id).await?;
             tracing::debug!(
                 target: TRACING_TARGET,
                 request_id = %request.request_id,
                 webhook_id = %webhook.id,
                 status_code = response.status_code,
                 "Webhook delivered successfully"
+            );
+            return Ok(());
+        }
+
+        self.record_failure(&mut conn, &webhook).await;
+
+        // A 4xx other than 429 is a permanent rejection: retrying will not help,
+        // so ack the job instead of redelivering. Everything else is transient.
+        if is_permanent_failure(response.status_code) {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                request_id = %request.request_id,
+                webhook_id = %webhook.id,
+                status_code = response.status_code,
+                "Webhook delivery permanently rejected"
             );
             Ok(())
         } else {
@@ -218,6 +260,42 @@ impl WebhookWorker {
                 "webhook",
                 format!("Delivery returned status {}", response.status_code),
             ))
+        }
+    }
+
+    /// Records a failed delivery, auto-disabling the webhook once it has failed
+    /// too many times in a row. Recording is best-effort: a database error is
+    /// logged but does not mask the delivery outcome.
+    async fn record_failure(&self, conn: &mut PgConn, webhook: &WorkspaceWebhook) {
+        let updated = match conn.record_webhook_failure(webhook.id).await {
+            Ok(updated) => updated,
+            Err(err) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    webhook_id = %webhook.id,
+                    error = %err,
+                    "Failed to record webhook failure"
+                );
+                return;
+            }
+        };
+
+        if updated.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+            && let Err(err) = conn.disable_webhook(webhook.id).await
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                webhook_id = %webhook.id,
+                error = %err,
+                "Failed to auto-disable webhook after repeated failures"
+            );
+        } else if updated.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                webhook_id = %webhook.id,
+                consecutive_failures = updated.consecutive_failures,
+                "Auto-disabled webhook after repeated delivery failures"
+            );
         }
     }
 
@@ -264,6 +342,15 @@ impl WebhookWorker {
             Error::internal("webhook", "webhook secret is not UTF-8").with_source(err)
         })
     }
+}
+
+/// Returns whether a status code is a permanent rejection not worth retrying.
+///
+/// A 4xx means the receiver rejected the request itself, so redelivering the
+/// same payload will fail again. `429 Too Many Requests` is the exception: it
+/// asks the sender to back off and try later.
+fn is_permanent_failure(status_code: u16) -> bool {
+    (400..500).contains(&status_code) && status_code != 429
 }
 
 /// Extracts a webhook's custom headers from its stored JSON, keeping only

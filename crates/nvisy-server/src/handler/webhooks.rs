@@ -355,7 +355,7 @@ async fn test_webhook(
     let webhook_request = WebhookRequest::test(url, webhook.id, webhook.workspace_id);
     let response = webhook_service.deliver(&webhook_request).await?;
 
-    // Update last_triggered_at timestamp
+    // Record the outcome so the manual test also updates delivery health.
     if response.is_success() {
         conn.record_webhook_success(webhook.id).await?;
     } else {

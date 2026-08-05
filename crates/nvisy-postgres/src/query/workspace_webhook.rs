@@ -303,7 +303,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(last_triggered_at.eq(now))
+            .set((last_success_at.eq(now), consecutive_failures.eq(0)))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
@@ -318,7 +318,10 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(last_triggered_at.eq(now))
+            .set((
+                last_failure_at.eq(now),
+                consecutive_failures.eq(consecutive_failures + 1),
+            ))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await

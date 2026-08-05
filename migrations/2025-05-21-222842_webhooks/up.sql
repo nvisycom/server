@@ -69,7 +69,16 @@ CREATE TABLE workspace_webhooks (
 
     -- Webhook status
     status           WEBHOOK_STATUS   NOT NULL DEFAULT 'active',
-    last_triggered_at TIMESTAMPTZ     DEFAULT NULL,
+
+    -- Delivery outcome tracking.
+    last_success_at  TIMESTAMPTZ      DEFAULT NULL,
+    last_failure_at  TIMESTAMPTZ      DEFAULT NULL,
+
+    -- Consecutive failed deliveries; reset to 0 on success. Drives auto-disable
+    -- once it crosses the delivery-failure threshold.
+    consecutive_failures INTEGER      NOT NULL DEFAULT 0,
+
+    CONSTRAINT workspace_webhooks_consecutive_failures_non_negative CHECK (consecutive_failures >= 0),
 
     -- Audit tracking
     created_by       UUID             NOT NULL REFERENCES accounts (id),
@@ -107,7 +116,9 @@ COMMENT ON COLUMN workspace_webhooks.url IS 'Webhook endpoint URL (must be HTTP/
 COMMENT ON COLUMN workspace_webhooks.events IS 'Array of event types this webhook subscribes to';
 COMMENT ON COLUMN workspace_webhooks.headers IS 'Custom headers to include in webhook requests';
 COMMENT ON COLUMN workspace_webhooks.status IS 'Current webhook status (active, paused, disabled)';
-COMMENT ON COLUMN workspace_webhooks.last_triggered_at IS 'Timestamp of last webhook trigger';
+COMMENT ON COLUMN workspace_webhooks.last_success_at IS 'Timestamp of last successful delivery';
+COMMENT ON COLUMN workspace_webhooks.last_failure_at IS 'Timestamp of last failed delivery';
+COMMENT ON COLUMN workspace_webhooks.consecutive_failures IS 'Consecutive failed deliveries; reset on success, drives auto-disable';
 COMMENT ON COLUMN workspace_webhooks.created_by IS 'Account that created the webhook';
 COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was created';
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';

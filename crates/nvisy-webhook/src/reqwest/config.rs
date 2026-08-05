@@ -6,7 +6,10 @@ use std::time::Duration;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default maximum number of retry attempts.
-pub const DEFAULT_MAX_RETRIES: u32 = 3;
+///
+/// Kept low because NATS redelivery is the primary retry layer; this only
+/// absorbs an immediate transient blip within a single delivery attempt.
+pub const DEFAULT_MAX_RETRIES: u32 = 1;
 
 /// Default minimum retry interval.
 pub const DEFAULT_MIN_RETRY_INTERVAL: Duration = Duration::from_millis(500);
@@ -113,7 +116,7 @@ mod tests {
         assert_eq!(config.http_timeout, None);
         assert!(config.user_agent.is_none());
         assert_eq!(config.effective_timeout(), DEFAULT_TIMEOUT);
-        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
         assert_eq!(config.min_retry_interval, Duration::from_millis(500));
         assert_eq!(config.max_retry_interval, Duration::from_millis(30_000));
     }

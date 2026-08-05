@@ -31,9 +31,14 @@ pub struct Webhook {
     pub headers: HashMap<String, String>,
     /// Current status of the webhook.
     pub status: WebhookStatus,
-    /// Timestamp of the most recent webhook trigger.
+    /// Timestamp of the most recent successful delivery.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_triggered_at: Option<Timestamp>,
+    pub last_success_at: Option<Timestamp>,
+    /// Timestamp of the most recent failed delivery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_failure_at: Option<Timestamp>,
+    /// Consecutive failed deliveries since the last success.
+    pub consecutive_failures: i32,
     /// Handle of the account that created this webhook.
     pub creator_username: Handle,
     /// Timestamp when this webhook was first created.
@@ -60,7 +65,9 @@ impl Webhook {
             events,
             headers,
             status: webhook.status,
-            last_triggered_at: webhook.last_triggered_at.map(Into::into),
+            last_success_at: webhook.last_success_at.map(Into::into),
+            last_failure_at: webhook.last_failure_at.map(Into::into),
+            consecutive_failures: webhook.consecutive_failures,
             creator_username,
             created_at: webhook.created_at.into(),
             updated_at: webhook.updated_at.into(),

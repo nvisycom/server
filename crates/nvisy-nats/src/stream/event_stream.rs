@@ -34,14 +34,18 @@ pub trait EventStream: Clone + Send + Sync + 'static {
 
 /// Stream for webhook delivery.
 ///
-/// Messages expire after 1 day.
+/// Messages expire after 1 day. NATS redelivery is the primary retry layer for
+/// self-hosted delivery; `ACK_WAIT` exceeds the per-attempt delivery timeout so
+/// a slow-but-healthy endpoint is not redelivered while the first attempt is
+/// still in flight, and spaces the (at most `MAX_DELIVER`) attempts ~90s apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct WebhookStream;
 
 impl EventStream for WebhookStream {
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(90));
     const CONSUMER_NAME: &'static str = "webhook-worker";
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60));
-    const MAX_DELIVER: Option<i64> = Some(5);
+    const MAX_DELIVER: Option<i64> = Some(3);
     const NAME: &'static str = "WEBHOOKS";
     const SUBJECT: &'static str = "webhooks";
 }
