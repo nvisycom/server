@@ -28,6 +28,7 @@ use crate::handler::request::{
     WorkspaceSyncsQuery,
 };
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
+use crate::handler::utility::resolve_creator;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{ConnectionSyncService, CryptoService, ServiceState};
 
@@ -103,7 +104,7 @@ async fn sync_connection(
 
     let new_run = NewWorkspaceConnectionRun {
         connection_id: connection.id,
-        account_id: Some(auth_state.account_id),
+        account_id: auth_state.account_id,
         trigger_type: Some(SyncTriggerType::Manual),
         status: Some(SyncStatus::Running),
         records_synced: Some(0),
@@ -123,7 +124,12 @@ async fn sync_connection(
             .await;
     });
 
-    Ok((StatusCode::ACCEPTED, Json(ConnectionSync::from_model(run))))
+    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ConnectionSync::from_model(run, trigger)),
+    ))
 }
 
 fn sync_connection_docs(op: TransformOperation) -> TransformOperation {
@@ -166,7 +172,9 @@ async fn list_connection_syncs(
         .cursor_list_workspace_connection_runs(connection.id, pagination.into(), None)
         .await?;
 
-    let page = Page::from_cursor_page(page, |(run, _creator)| ConnectionSync::from_model(run));
+    let page = Page::from_cursor_page(page, |wc| {
+        ConnectionSync::from_model(wc.item, wc.creator.into())
+    });
 
     Ok((StatusCode::OK, Json(page)))
 }
@@ -216,8 +224,8 @@ async fn list_workspace_syncs(
         )
         .await?;
 
-    let page = Page::from_cursor_page(page, |(run, _connection_id, _creator)| {
-        ConnectionSync::from_model(run)
+    let page = Page::from_cursor_page(page, |(wc, _connection_id)| {
+        ConnectionSync::from_model(wc.item, wc.creator.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -268,7 +276,12 @@ async fn read_connection_sync(
         .filter(|run| run.connection_id == connection.id)
         .ok_or_else(|| Error::not_found("connection_sync"))?;
 
-    Ok((StatusCode::OK, Json(ConnectionSync::from_model(run))))
+    let trigger = resolve_creator(&mut conn, run.account_id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ConnectionSync::from_model(run, trigger)),
+    ))
 }
 
 fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
@@ -332,7 +345,12 @@ async fn cancel_connection_sync(
     // status-guarded finalizers.
     connection_sync.cancel_local(run.id);
 
-    Ok((StatusCode::OK, Json(ConnectionSync::from_model(cancelled))))
+    let trigger = resolve_creator(&mut conn, cancelled.account_id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ConnectionSync::from_model(cancelled, trigger)),
+    ))
 }
 
 fn cancel_connection_sync_docs(op: TransformOperation) -> TransformOperation {

@@ -7,7 +7,9 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination};
+use crate::types::{
+    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, WithCreator,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace policy database operations.
@@ -31,13 +33,13 @@ pub trait WorkspacePolicyRepository {
         policy_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePolicy>>> + Send;
 
-    /// Finds a policy by slug within a specific workspace, with the handle of
-    /// the account that created it.
+    /// Finds a policy by slug within a specific workspace, with the handle and
+    /// avatar of the account that created it.
     fn find_policy_in_workspace_by_slug(
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<(WorkspacePolicy, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspacePolicy>>>> + Send;
 
     /// Lists all policies in a workspace with offset pagination.
     fn offset_list_workspace_policies(
@@ -47,12 +49,12 @@ pub trait WorkspacePolicyRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspacePolicy>>> + Send;
 
     /// Lists all policies in a workspace with cursor pagination, each paired
-    /// with the handle of the account that created it.
+    /// with the handle and avatar of the account that created it.
     fn cursor_list_workspace_policies(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePolicy, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspacePolicy>>>> + Send;
 
     /// Updates a policy with new data.
     fn update_workspace_policy(
@@ -133,22 +135,32 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<(WorkspacePolicy, Handle)>> {
+    ) -> PgResult<Option<WithCreator<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
-        let policy = workspace_policies::table
+        let row = workspace_policies::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::slug.eq(slug))
             .filter(dsl::deleted_at.is_null())
-            .select((WorkspacePolicy::as_select(), accounts::username))
-            .first(self)
+            .select((
+                WorkspacePolicy::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
+            .first::<(WorkspacePolicy, Handle, Option<String>)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(policy)
+        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+            item,
+            creator: CreatorRow {
+                username,
+                avatar_url,
+            },
+        }))
     }
 
     async fn offset_list_workspace_policies(
@@ -176,7 +188,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspacePolicy, Handle)>> {
+    ) -> PgResult<CursorPage<WithCreator<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -202,37 +214,54 @@ impl WorkspacePolicyRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspacePolicy, Handle)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspacePolicy, Handle, Option<String>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select((WorkspacePolicy::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select((WorkspacePolicy::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::created_at
+                            .lt(&cursor_time)
+                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspacePolicy::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspacePolicy::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
-        Ok(CursorPage::new(
-            items,
-            total,
-            pagination.limit,
-            |(p, _): &(WorkspacePolicy, Handle)| (p.created_at.into(), p.id),
-        ))
+        let items: Vec<WithCreator<WorkspacePolicy>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithCreator {
+                item,
+                creator: CreatorRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.created_at.into(), wc.item.id)
+        }))
     }
 
     async fn update_workspace_policy(

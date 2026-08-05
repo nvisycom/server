@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::Page;
+use super::{Creator, Page};
 
 /// Response type for a pipeline run.
 ///
@@ -24,9 +24,8 @@ pub struct PipelineRun {
     pub workspace_slug: Handle,
     /// File this run analyzes / redacts.
     pub file_id: Uuid,
-    /// Handle of the account that triggered the run, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trigger_username: Option<Handle>,
+    /// Account that triggered the run.
+    pub trigger: Creator,
     /// How the run was triggered.
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
@@ -48,19 +47,19 @@ pub type PipelineRunsPage = Page<PipelineRun>;
 
 impl PipelineRun {
     /// Creates a pipeline run response from the database model, the slugs of its
-    /// owning pipeline and workspace, and the triggering account's handle.
+    /// owning pipeline and workspace, and the triggering account.
     pub fn from_model(
         run: PipelineRunModel,
         pipeline_slug: Handle,
         workspace_slug: Handle,
-        trigger_username: Option<Handle>,
+        trigger: Creator,
     ) -> Self {
         Self {
             id: RunId::from_uuid(run.id),
             pipeline_slug,
             workspace_slug,
             file_id: run.file_id,
-            trigger_username,
+            trigger,
             trigger_type: run.trigger_type,
             status: run.status,
             metadata: run.metadata,

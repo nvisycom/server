@@ -17,7 +17,7 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::WithCreator;
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::utility::resolve_creator_username;
+use crate::handler::utility::resolve_creator;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{CryptoService, EngineService, HashingReader, ServiceState, WebhookEmitter};
@@ -43,13 +43,13 @@ async fn find_file(conn: &mut PgConn, workspace_id: Uuid, file_id: Uuid) -> Resu
         .ok_or_else(|| Error::not_found("file"))
 }
 
-/// Finds a file within a workspace, with its uploader's handle, or returns a
+/// Finds a file within a workspace, with its uploader's identity, or returns a
 /// NotFound error.
 async fn find_file_with_creator(
     conn: &mut PgConn,
     workspace_id: Uuid,
     file_id: Uuid,
-) -> Result<(FileModel, Handle)> {
+) -> Result<WithCreator<FileModel>> {
     conn.find_file_in_workspace_with_creator(workspace_id, file_id)
         .await?
         .ok_or_else(|| Error::not_found("file"))
@@ -89,8 +89,8 @@ async fn list_files(
         .cursor_list_workspace_files(workspace.id, cursor_pagination.into(), filter)
         .await?;
 
-    let response = FilesPage::from_cursor_page(page, |(file, uploaded_by)| {
-        File::from_model(file, workspace.slug.clone(), uploaded_by)
+    let response = FilesPage::from_cursor_page(page, |wc| {
+        File::from_model(wc.item, workspace.slug.clone(), wc.creator.into())
     });
 
     tracing::debug!(
@@ -209,8 +209,8 @@ async fn upload_file(
 
     let file_store = nats_client.object_store::<FilesBucket>().await?;
 
-    // The uploader is the caller; resolve the handle once for every file below.
-    let uploaded_by = resolve_creator_username(&mut conn, auth_claims.account_id).await?;
+    // The uploader is the caller; resolve their identity once for every file below.
+    let uploaded_by = resolve_creator(&mut conn, auth_claims.account_id).await?;
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
@@ -312,14 +312,17 @@ async fn read_file(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
         .await?;
 
-    let (file, uploaded_by) =
-        find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
+    let found = find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "File metadata retrieved");
 
     Ok((
         StatusCode::OK,
-        Json(File::from_model(file, workspace.slug, uploaded_by)),
+        Json(File::from_model(
+            found.item,
+            workspace.slug,
+            found.creator.into(),
+        )),
     ))
 }
 
@@ -369,8 +372,9 @@ async fn update_file(
             ErrorKind::InternalServerError.with_message("Failed to update file")
         })?;
 
-    let (updated_file, uploaded_by) =
-        find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
+    let found = find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
+    let updated_file = found.item;
+    let uploaded_by = found.creator;
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({
@@ -400,7 +404,7 @@ async fn update_file(
         Json(response::File::from_model(
             updated_file,
             workspace.slug,
-            uploaded_by,
+            uploaded_by.into(),
         )),
     ))
 }

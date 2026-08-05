@@ -23,8 +23,9 @@ pub struct WorkspaceConnectionRun {
     pub id: Uuid,
     /// Connection the run synchronizes.
     pub connection_id: Uuid,
-    /// Account that triggered the run (optional).
-    pub account_id: Option<Uuid>,
+    /// Account the run is attributed to (the user who started it, or the
+    /// connection's creator for a scheduled run).
+    pub account_id: Uuid,
     /// How the run was initiated.
     pub trigger_type: SyncTriggerType,
     /// Current run status.
@@ -50,8 +51,8 @@ pub struct WorkspaceConnectionRun {
 pub struct NewWorkspaceConnectionRun {
     /// Connection ID (required).
     pub connection_id: Uuid,
-    /// Account ID (optional).
-    pub account_id: Option<Uuid>,
+    /// Account the run is attributed to (required).
+    pub account_id: Uuid,
     /// Trigger type.
     pub trigger_type: Option<SyncTriggerType>,
     /// Initial status.

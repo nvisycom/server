@@ -140,7 +140,7 @@ CREATE TABLE workspace_connection_runs (
 
     -- References
     connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
-    account_id      UUID                REFERENCES accounts (id) ON DELETE SET NULL,
+    account_id      UUID                NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Run attributes
     trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
@@ -181,8 +181,7 @@ CREATE INDEX workspace_connection_runs_connection_idx
     ON workspace_connection_runs (connection_id, started_at DESC);
 
 CREATE INDEX workspace_connection_runs_account_idx
-    ON workspace_connection_runs (account_id, started_at DESC)
-    WHERE account_id IS NOT NULL;
+    ON workspace_connection_runs (account_id, started_at DESC);
 
 CREATE INDEX workspace_connection_runs_status_idx
     ON workspace_connection_runs (status, started_at DESC)

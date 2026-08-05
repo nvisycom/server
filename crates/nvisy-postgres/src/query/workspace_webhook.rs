@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent, WebhookStatus,
+    CreatorRow, CursorPage, CursorPagination, Handle, OffsetPagination, WebhookEvent,
+    WebhookStatus, WithCreator,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -35,13 +36,13 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
 
-    /// Finds a webhook by id within a workspace, with the handle of the account
-    /// that created it, excluding soft-deleted rows.
+    /// Finds a webhook by id within a workspace, with the handle and avatar of
+    /// the account that created it, excluding soft-deleted rows.
     fn find_webhook_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceWebhook, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspaceWebhook>>>> + Send;
 
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
@@ -51,12 +52,12 @@ pub trait WorkspaceWebhookRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
 
     /// Lists all webhooks for a workspace with cursor pagination, each paired
-    /// with the handle of the account that created it.
+    /// with the handle and avatar of the account that created it.
     fn cursor_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceWebhook, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceWebhook>>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
@@ -174,22 +175,32 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceWebhook, Handle)>> {
+    ) -> PgResult<Option<WithCreator<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
-        let webhook = workspace_webhooks::table
+        let row = workspace_webhooks::table
             .inner_join(accounts::table)
             .filter(dsl::id.eq(webhook_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .select((WorkspaceWebhook::as_select(), accounts::username))
-            .first(self)
+            .select((
+                WorkspaceWebhook::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
+            .first::<(WorkspaceWebhook, Handle, Option<String>)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(webhook)
+        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+            item,
+            creator: CreatorRow {
+                username,
+                avatar_url,
+            },
+        }))
     }
 
     async fn offset_list_workspace_webhooks(
@@ -217,7 +228,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspaceWebhook, Handle)>> {
+    ) -> PgResult<CursorPage<WithCreator<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -252,16 +263,31 @@ impl WorkspaceWebhookRepository for PgConnection {
             );
         }
 
-        let items: Vec<(WorkspaceWebhook, Handle)> = query
-            .select((WorkspaceWebhook::as_select(), accounts::username))
+        let rows: Vec<(WorkspaceWebhook, Handle, Option<String>)> = query
+            .select((
+                WorkspaceWebhook::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(pagination.fetch_limit())
             .load(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(CursorPage::new(items, total, pagination.limit, |(w, _)| {
-            (w.created_at.into(), w.id)
+        let items: Vec<WithCreator<WorkspaceWebhook>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithCreator {
+                item,
+                creator: CreatorRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.created_at.into(), wc.item.id)
         }))
     }
 

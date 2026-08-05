@@ -25,9 +25,8 @@ COMMENT ON TYPE PIPELINE_RUN_STATUS IS
 
 -- Pipeline trigger type enum
 CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
-    'manual',       -- Manually triggered by user
-    'source',       -- Triggered by source connector (upload, webhook, etc.)
-    'scheduled'     -- Triggered by schedule (future)
+    'user',         -- Started directly by a user
+    'system'        -- Started automatically (e.g. a file upload auto-redacted)
 );
 
 COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS
@@ -138,10 +137,10 @@ CREATE TABLE workspace_pipeline_runs (
     -- References
     pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
     file_id         UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
-    account_id      UUID                    REFERENCES accounts (id) ON DELETE SET NULL,
+    account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Run attributes
-    trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
+    trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
     status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'running',
 
     -- Object-store key for the engine's AnalyzedDocument, encrypted and held in
@@ -174,8 +173,7 @@ CREATE INDEX workspace_pipeline_runs_pipeline_idx
     ON workspace_pipeline_runs (pipeline_id, started_at DESC);
 
 CREATE INDEX workspace_pipeline_runs_account_idx
-    ON workspace_pipeline_runs (account_id, started_at DESC)
-    WHERE account_id IS NOT NULL;
+    ON workspace_pipeline_runs (account_id, started_at DESC);
 
 CREATE INDEX workspace_pipeline_runs_status_idx
     ON workspace_pipeline_runs (status, started_at DESC)

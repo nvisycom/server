@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use nvisy_postgres::query::WorkspacePolicyRepository;
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::WithCreator;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
 use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
-use crate::handler::utility::resolve_creator_username;
+use crate::handler::utility::resolve_creator;
 use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -79,14 +79,14 @@ async fn create_policy(
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_creator(&mut conn, auth_state.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(Policy::from_model(
             policy,
             workspace.slug,
-            creator_username,
+            creator,
             &crypto,
         )?),
     ))
@@ -135,8 +135,8 @@ async fn list_policies(
 
     // The list carries only metadata; the encrypted definition is decrypted only
     // by the single-policy endpoint, so a page costs no per-item decryption.
-    let page = PoliciesPage::from_cursor_page(page, |(model, creator_username)| {
-        PolicySummary::from_model(model, workspace.slug.clone(), creator_username)
+    let page = PoliciesPage::from_cursor_page(page, |wc| {
+        PolicySummary::from_model(wc.item, workspace.slug.clone(), wc.creator.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -174,17 +174,16 @@ async fn read_policy(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPolicies)
         .await?;
 
-    let (policy, creator_username) =
-        find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
 
     Ok((
         StatusCode::OK,
         Json(Policy::from_model(
-            policy,
+            found.item,
             workspace.slug,
-            creator_username,
+            found.creator.into(),
             &crypto,
         )?),
     ))
@@ -228,7 +227,9 @@ async fn update_policy(
         .await?;
 
     // Confirm the policy exists in this workspace before mutating.
-    let (existing, _) = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug)
+        .await?
+        .item;
 
     let definition = match &request.definition {
         Some(definition) => Some(crypto.encrypt_json(workspace.id, definition)?),
@@ -244,17 +245,16 @@ async fn update_policy(
 
     conn.update_workspace_policy(existing.id, updates).await?;
 
-    let (policy, creator_username) =
-        find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
     Ok((
         StatusCode::OK,
         Json(Policy::from_model(
-            policy,
+            found.item,
             workspace.slug,
-            creator_username,
+            found.creator.into(),
             &crypto,
         )?),
     ))
@@ -294,7 +294,9 @@ async fn delete_policy(
         .await?;
 
     // Confirm the policy exists in this workspace before deleting.
-    let (existing, _) = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug)
+        .await?
+        .item;
 
     conn.delete_workspace_policy(existing.id).await?;
 
@@ -312,13 +314,13 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a policy within a workspace by slug, with its creator's handle, or
-/// returns a NotFound error.
+/// Finds a policy within a workspace by slug, with its creator, or returns a
+/// NotFound error.
 async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
     policy_slug: &str,
-) -> Result<(WorkspacePolicy, Handle)> {
+) -> Result<WithCreator<WorkspacePolicy>> {
     conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))

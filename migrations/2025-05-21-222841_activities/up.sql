@@ -52,7 +52,7 @@ CREATE TABLE workspace_activities (
 
     -- References
     workspace_id    UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id    UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
+    account_id    UUID        NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- Activity details
     activity_type ACTIVITY_TYPE NOT NULL,
@@ -75,8 +75,7 @@ CREATE INDEX workspace_activities_workspace_recent_idx
     ON workspace_activities (workspace_id, created_at DESC);
 
 CREATE INDEX workspace_activities_account_recent_idx
-    ON workspace_activities (account_id, created_at DESC)
-    WHERE account_id IS NOT NULL;
+    ON workspace_activities (account_id, created_at DESC);
 
 CREATE INDEX workspace_activities_activity_type_idx
     ON workspace_activities (activity_type, workspace_id, created_at DESC);
@@ -87,7 +86,7 @@ COMMENT ON TABLE workspace_activities IS
 
 COMMENT ON COLUMN workspace_activities.id IS 'Unique activity log entry identifier (UUID)';
 COMMENT ON COLUMN workspace_activities.workspace_id IS 'Reference to the workspace';
-COMMENT ON COLUMN workspace_activities.account_id IS 'Account that performed the activity (NULL for system)';
+COMMENT ON COLUMN workspace_activities.account_id IS 'Account that performed the activity';
 COMMENT ON COLUMN workspace_activities.activity_type IS 'Type of activity performed';
 COMMENT ON COLUMN workspace_activities.description IS 'Human-readable description of the activity';
 COMMENT ON COLUMN workspace_activities.metadata IS 'Additional activity context (JSON, 2B-4KB)';

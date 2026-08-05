@@ -12,7 +12,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::{Handle, WithCreator};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -23,8 +23,8 @@ use crate::handler::request::{
     CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
     UpdatePipeline,
 };
-use crate::handler::response::{ErrorResponse, Page, Pipeline, PipelineSummary};
-use crate::handler::utility::resolve_creator_username;
+use crate::handler::response::{Creator, ErrorResponse, Page, Pipeline, PipelineSummary};
+use crate::handler::utility::resolve_creator;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::ServiceState;
 
@@ -71,17 +71,12 @@ async fn create_pipeline(
         .await?;
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_creator(&mut conn, auth_state.account_id).await?;
 
     // The references were just written from the request, so build the response
     // from its slugs directly instead of reading the join table back.
-    let response = Pipeline::from_model(
-        pipeline,
-        workspace.slug,
-        creator_username,
-        references.policy_slugs,
-    )
-    .map_err(serialize_error)?;
+    let response = Pipeline::from_model(pipeline, workspace.slug, creator, references.policy_slugs)
+        .map_err(serialize_error)?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -136,9 +131,7 @@ async fn list_pipelines(
         )
         .await?;
 
-    let response = Page::from_cursor_page(page, |(pipeline, _creator_username)| {
-        PipelineSummary::from_model(pipeline)
-    });
+    let response = Page::from_cursor_page(page, |wc| PipelineSummary::from_model(wc.item));
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -182,8 +175,9 @@ async fn get_pipeline(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (pipeline, creator_username) =
-        find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let found = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let pipeline = found.item;
+    let creator: Creator = found.creator.into();
 
     let artifacts = conn.list_workspace_pipeline_artifacts(pipeline.id).await?;
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
@@ -191,7 +185,7 @@ async fn get_pipeline(
     let response = Pipeline::from_model_with_artifacts(
         pipeline,
         workspace.slug,
-        creator_username,
+        creator,
         artifacts,
         policy_slugs,
     )
@@ -238,8 +232,9 @@ async fn update_pipeline(
         .await?;
 
     // Confirm the pipeline exists in this workspace before mutating.
-    let (existing, creator_username) =
-        find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let found = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let existing = found.item;
+    let creator: Creator = found.creator.into();
 
     let (update_data, references) = request.into_parts().map_err(serialize_error)?;
     let pipeline_id = existing.id;
@@ -266,15 +261,12 @@ async fn update_pipeline(
 
     let response = match references {
         // A definition was supplied: the references we just wrote are current.
-        Some(references) => Pipeline::from_model(
-            pipeline,
-            workspace.slug,
-            creator_username,
-            references.policy_slugs,
-        )
-        .map_err(serialize_error)?,
+        Some(references) => {
+            Pipeline::from_model(pipeline, workspace.slug, creator, references.policy_slugs)
+                .map_err(serialize_error)?
+        }
         // Partial update left the references untouched: read them back.
-        None => build_response(&mut conn, pipeline, workspace.slug, creator_username).await?,
+        None => build_response(&mut conn, pipeline, workspace.slug, creator).await?,
     };
 
     tracing::info!(target: TRACING_TARGET, "Pipeline updated");
@@ -319,7 +311,9 @@ async fn delete_pipeline(
         .await?;
 
     // Confirm the pipeline exists in this workspace before deleting.
-    let (existing, _) = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
+    let existing = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug)
+        .await?
+        .item;
 
     conn.delete_workspace_pipeline(existing.id).await?;
 
@@ -337,13 +331,13 @@ fn delete_pipeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a pipeline within a workspace by slug, with its creator's handle, or
-/// returns a NotFound error.
+/// Finds a pipeline within a workspace by slug, with its creator, or returns a
+/// NotFound error.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
     pipeline_slug: &str,
-) -> Result<(WorkspacePipeline, Handle)> {
+) -> Result<WithCreator<WorkspacePipeline>> {
     conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
@@ -383,11 +377,10 @@ async fn build_response(
     conn: &mut PgConnection,
     pipeline: WorkspacePipeline,
     workspace_slug: Handle,
-    creator_username: Handle,
+    creator: Creator,
 ) -> Result<Pipeline> {
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
-    Pipeline::from_model(pipeline, workspace_slug, creator_username, policy_slugs)
-        .map_err(serialize_error)
+    Pipeline::from_model(pipeline, workspace_slug, creator, policy_slugs).map_err(serialize_error)
 }
 
 /// Maps a definition (de)serialization failure to an internal error.

@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 use crate::types::{
-    CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, Handle, OffsetPagination,
-    SortOrder,
+    CreatorRow, CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField, Handle,
+    OffsetPagination, SortOrder, WithCreator,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -41,15 +41,15 @@ pub trait WorkspaceFileRepository {
         file_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceFile>>> + Send;
 
-    /// Finds a file by id within a workspace, with the handle of the account
-    /// that uploaded it.
+    /// Finds a file by id within a workspace, with the handle and avatar of the
+    /// account that uploaded it.
     ///
     /// Provides workspace-scoped access control at the database level.
     fn find_file_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceFile, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithCreator<WorkspaceFile>>>> + Send;
 
     /// Returns the remote object keys already imported (live) from a connection.
     ///
@@ -108,13 +108,14 @@ pub trait WorkspaceFileRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
 
     /// Lists all files in a workspace with cursor pagination and optional
-    /// filtering, each paired with the handle of the account that uploaded it.
+    /// filtering, each paired with the handle and avatar of the account that
+    /// uploaded it.
     fn cursor_list_workspace_files(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceFile, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithCreator<WorkspaceFile>>>> + Send;
 
     /// Finds workspace files with a matching SHA-256 hash.
     fn find_workspace_files_by_hash(
@@ -254,22 +255,32 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceFile, Handle)>> {
+    ) -> PgResult<Option<WithCreator<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
-        let file = workspace_files::table
+        let row = workspace_files::table
             .inner_join(accounts::table)
             .filter(dsl::id.eq(file_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .select((WorkspaceFile::as_select(), accounts::username))
-            .first(self)
+            .select((
+                WorkspaceFile::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
+            .first::<(WorkspaceFile, Handle, Option<String>)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(file)
+        Ok(row.map(|(item, username, avatar_url)| WithCreator {
+            item,
+            creator: CreatorRow {
+                username,
+                avatar_url,
+            },
+        }))
     }
 
     async fn offset_list_account_files(
@@ -392,7 +403,7 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> PgResult<CursorPage<(WorkspaceFile, Handle)>> {
+    ) -> PgResult<CursorPage<WithCreator<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -450,37 +461,54 @@ impl WorkspaceFileRepository for PgConnection {
         let limit = pagination.fetch_limit();
 
         // Apply cursor filter if present
-        let items: Vec<(WorkspaceFile, Handle)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspaceFile, Handle, Option<String>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select((WorkspaceFile::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select((WorkspaceFile::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::created_at
+                            .lt(&cursor_time)
+                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspaceFile::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspaceFile::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
-        Ok(CursorPage::new(
-            items,
-            total,
-            pagination.limit,
-            |(f, _): &(WorkspaceFile, Handle)| (f.created_at.into(), f.id),
-        ))
+        let items: Vec<WithCreator<WorkspaceFile>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithCreator {
+                item,
+                creator: CreatorRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.created_at.into(), wc.item.id)
+        }))
     }
 
     async fn find_workspace_files_by_hash(

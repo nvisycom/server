@@ -22,7 +22,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
-use nvisy_postgres::types::{ConnectionId, Handle};
+use nvisy_postgres::types::{ConnectionId, WithCreator};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -35,7 +35,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
 };
-use crate::handler::utility::resolve_creator_username;
+use crate::handler::utility::resolve_creator;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, ObjectService, ServiceState, is_valid_cron};
 
@@ -110,14 +110,14 @@ async fn create_connection(
 
     // The creator is the authenticated caller, and a fresh connection has no
     // sync runs yet, so last-synced is `None`.
-    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_creator(&mut conn, auth_state.account_id).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(Connection::from_model(
             connection,
             workspace.slug,
-            creator_username,
+            creator,
             None,
         )),
     ))
@@ -167,7 +167,7 @@ async fn list_connections(
         .await?;
 
     // One grouped query resolves last-synced for the whole page (not per row).
-    let ids: Vec<Uuid> = page.items.iter().map(|(c, _)| c.id).collect();
+    let ids: Vec<Uuid> = page.items.iter().map(|wc| wc.item.id).collect();
     let last_synced: HashMap<Uuid, jiff::Timestamp> = conn
         .last_successful_sync_at(&ids)
         .await?
@@ -183,13 +183,10 @@ async fn list_connections(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionsPage::from_cursor_page(
-            page,
-            |(connection, creator_username)| {
-                let synced = last_synced.get(&connection.id).copied();
-                Connection::from_model(connection, workspace.slug.clone(), creator_username, synced)
-            },
-        )),
+        Json(ConnectionsPage::from_cursor_page(page, |wc| {
+            let synced = last_synced.get(&wc.item.id).copied();
+            Connection::from_model(wc.item, workspace.slug.clone(), wc.creator.into(), synced)
+        })),
     ))
 }
 
@@ -230,7 +227,7 @@ async fn read_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let (connection, creator_username, last_synced) =
+    let (found, last_synced) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
@@ -238,9 +235,9 @@ async fn read_connection(
     Ok((
         StatusCode::OK,
         Json(Connection::from_model(
-            connection,
+            found.item,
             workspace.slug,
-            creator_username,
+            found.creator.into(),
             last_synced,
         )),
     ))
@@ -282,8 +279,10 @@ async fn update_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let (existing, _, _) =
-        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
+        .await?
+        .0
+        .item;
 
     // Only a newly-set cron is validated; `Some(None)` clears it and `None`
     // leaves it unchanged.
@@ -317,7 +316,7 @@ async fn update_connection(
     conn.update_workspace_connection(existing.id, update_data)
         .await?;
 
-    let (connection, creator_username, last_synced) =
+    let (found, last_synced) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
@@ -325,9 +324,9 @@ async fn update_connection(
     Ok((
         StatusCode::OK,
         Json(Connection::from_model(
-            connection,
+            found.item,
             workspace.slug,
-            creator_username,
+            found.creator.into(),
             last_synced,
         )),
     ))
@@ -368,8 +367,10 @@ async fn delete_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    let (existing, _, _) =
-        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
+        .await?
+        .0
+        .item;
 
     conn.delete_workspace_connection(existing.id).await?;
 
@@ -418,8 +419,10 @@ async fn verify_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let (connection, _, _) =
-        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id)
+        .await?
+        .0
+        .item;
 
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
 
@@ -454,24 +457,24 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace by id, with its creator's handle, or
-/// returns a NotFound error.
+/// Finds a connection within a workspace by id, with its creator, or returns a
+/// NotFound error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
     connection_id: ConnectionId,
-) -> Result<(WorkspaceConnection, Handle, Option<jiff::Timestamp>)> {
-    let (connection, creator_username) = conn
+) -> Result<(WithCreator<WorkspaceConnection>, Option<jiff::Timestamp>)> {
+    let found = conn
         .find_connection_in_workspace_with_creator(workspace_id, connection_id.as_uuid())
         .await?
         .ok_or_else(|| Error::not_found("connection"))?;
     let last_synced = conn
-        .last_successful_sync_at(&[connection.id])
+        .last_successful_sync_at(&[found.item.id])
         .await?
         .into_iter()
         .next()
         .map(|(_, ts)| ts.into());
-    Ok((connection, creator_username, last_synced))
+    Ok((found, last_synced))
 }
 
 /// Returns routes for workspace connection management.

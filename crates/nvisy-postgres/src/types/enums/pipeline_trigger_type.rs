@@ -8,61 +8,37 @@ use strum::{Display, EnumIter, EnumString};
 
 /// Defines how a pipeline run was initiated.
 ///
-/// This enumeration corresponds to the `PIPELINE_TRIGGER_TYPE` PostgreSQL enum and is used
-/// to track whether a run was manually triggered, triggered by a source connector, or scheduled.
+/// This enumeration corresponds to the `PIPELINE_TRIGGER_TYPE` PostgreSQL enum:
+/// a run is either started directly by a user or automatically by the system
+/// (for example, a file upload that the pipeline auto-redacts).
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::PipelineTriggerType"]
 pub enum PipelineTriggerType {
-    /// Manually triggered by user
-    #[db_rename = "manual"]
-    #[serde(rename = "manual")]
+    /// Started directly by a user.
+    #[db_rename = "user"]
+    #[serde(rename = "user")]
     #[default]
-    Manual,
+    User,
 
-    /// Triggered by source connector (upload, webhook, etc.)
-    #[db_rename = "source"]
-    #[serde(rename = "source")]
-    Source,
-
-    /// Triggered by schedule
-    #[db_rename = "scheduled"]
-    #[serde(rename = "scheduled")]
-    Scheduled,
+    /// Started automatically by the system (e.g. a file upload auto-redacted by
+    /// the pipeline).
+    #[db_rename = "system"]
+    #[serde(rename = "system")]
+    System,
 }
 
 impl PipelineTriggerType {
-    /// Returns whether the run was manually triggered.
+    /// Returns whether the run was started directly by a user.
     #[inline]
-    pub fn is_manual(self) -> bool {
-        matches!(self, PipelineTriggerType::Manual)
+    pub fn is_user(self) -> bool {
+        matches!(self, PipelineTriggerType::User)
     }
 
-    /// Returns whether the run was triggered by a source connector.
+    /// Returns whether the run was started automatically by the system.
     #[inline]
-    pub fn is_source(self) -> bool {
-        matches!(self, PipelineTriggerType::Source)
-    }
-
-    /// Returns whether the run was scheduled.
-    #[inline]
-    pub fn is_scheduled(self) -> bool {
-        matches!(self, PipelineTriggerType::Scheduled)
-    }
-
-    /// Returns whether the run was triggered automatically (source or scheduled).
-    #[inline]
-    pub fn is_automatic(self) -> bool {
-        matches!(
-            self,
-            PipelineTriggerType::Source | PipelineTriggerType::Scheduled
-        )
-    }
-
-    /// Returns whether the run was triggered by user action.
-    #[inline]
-    pub fn is_user_initiated(self) -> bool {
-        matches!(self, PipelineTriggerType::Manual)
+    pub fn is_system(self) -> bool {
+        matches!(self, PipelineTriggerType::System)
     }
 }

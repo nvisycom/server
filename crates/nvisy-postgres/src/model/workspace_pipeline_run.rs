@@ -22,8 +22,9 @@ pub struct WorkspacePipelineRun {
     pub pipeline_id: Uuid,
     /// File the run analyzes / redacts.
     pub file_id: Uuid,
-    /// Account that triggered the run (optional).
-    pub account_id: Option<Uuid>,
+    /// Account the run is attributed to (the user who started it, or the
+    /// pipeline's creator for a system-initiated run).
+    pub account_id: Uuid,
     /// How the run was initiated.
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
@@ -50,8 +51,8 @@ pub struct NewWorkspacePipelineRun {
     pub pipeline_id: Uuid,
     /// File ID (required).
     pub file_id: Uuid,
-    /// Account ID (optional).
-    pub account_id: Option<Uuid>,
+    /// Account the run is attributed to (required).
+    pub account_id: Uuid,
     /// Trigger type.
     pub trigger_type: Option<PipelineTriggerType>,
     /// Initial status.
@@ -123,14 +124,14 @@ impl WorkspacePipelineRun {
         Some(completed_ts.duration_since(started_ts).as_secs_f64())
     }
 
-    /// Returns whether the run was manually triggered.
-    pub fn is_manual(&self) -> bool {
-        self.trigger_type.is_manual()
+    /// Returns whether the run was started directly by a user.
+    pub fn is_user(&self) -> bool {
+        self.trigger_type.is_user()
     }
 
-    /// Returns whether the run was triggered automatically.
-    pub fn is_automatic(&self) -> bool {
-        self.trigger_type.is_automatic()
+    /// Returns whether the run was started automatically by the system.
+    pub fn is_system(&self) -> bool {
+        self.trigger_type.is_system()
     }
 
     /// Returns whether the run can be retried.

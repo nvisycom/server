@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::Page;
+use super::{Creator, Page};
 
 /// Represents a file in responses.
 #[must_use]
@@ -33,8 +33,8 @@ pub struct File {
     pub tags: Vec<String>,
     /// How the file was created (uploaded, imported, generated).
     pub source: FileSource,
-    /// Handle of the account that uploaded/created the file.
-    pub uploaded_by: Handle,
+    /// Account that uploaded/created the file.
+    pub uploaded_by: Creator,
     /// Version number (1 for original, higher for newer versions).
     pub version_number: i32,
     /// Parent file ID if this is a newer version.
@@ -47,7 +47,7 @@ pub struct File {
 }
 
 impl File {
-    pub fn from_model(file: FileModel, workspace_slug: Handle, uploaded_by: Handle) -> Self {
+    pub fn from_model(file: FileModel, workspace_slug: Handle, uploaded_by: Creator) -> Self {
         Self {
             id: file.id,
             workspace_slug,
