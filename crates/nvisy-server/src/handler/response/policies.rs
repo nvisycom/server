@@ -7,7 +7,7 @@ use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::Page;
+use super::{AccountRef, Page};
 use crate::service::CryptoService;
 
 /// Response type for a workspace policy.
@@ -18,8 +18,8 @@ pub struct Policy {
     pub slug: Handle,
     /// Handle of the workspace this policy belongs to.
     pub workspace_slug: Handle,
-    /// Handle of the account that created this policy.
-    pub creator_username: Handle,
+    /// Account that created this policy.
+    pub created_by: AccountRef,
     /// Human-readable policy display name.
     pub display_name: String,
     /// Policy description.
@@ -45,8 +45,8 @@ pub struct PolicySummary {
     pub slug: Handle,
     /// Handle of the workspace this policy belongs to.
     pub workspace_slug: Handle,
-    /// Handle of the account that created this policy.
-    pub creator_username: Handle,
+    /// Account that created this policy.
+    pub created_by: AccountRef,
     /// Human-readable policy display name.
     pub display_name: String,
     /// Policy description.
@@ -59,17 +59,17 @@ pub struct PolicySummary {
 }
 
 impl PolicySummary {
-    /// Creates a summary from a database model and its creator's handle. Does not
-    /// touch the encrypted definition.
+    /// Creates a summary from a database model and its creator. Does not touch
+    /// the encrypted definition.
     pub fn from_model(
         policy: WorkspacePolicy,
         workspace_slug: Handle,
-        creator_username: Handle,
+        created_by: AccountRef,
     ) -> Self {
         Self {
             slug: policy.slug,
             workspace_slug,
-            creator_username,
+            created_by,
             display_name: policy.display_name,
             description: policy.description,
             created_at: policy.created_at.into(),
@@ -82,12 +82,12 @@ impl PolicySummary {
 pub type PoliciesPage = Page<PolicySummary>;
 
 impl Policy {
-    /// Creates a response from a database model and its creator's handle,
-    /// decrypting the definition.
+    /// Creates a response from a database model and its created_by, decrypting the
+    /// definition.
     pub fn from_model(
         policy: WorkspacePolicy,
         workspace_slug: Handle,
-        creator_username: Handle,
+        created_by: AccountRef,
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =
@@ -96,7 +96,7 @@ impl Policy {
         Ok(Self {
             slug: policy.slug,
             workspace_slug,
-            creator_username,
+            created_by,
             display_name: policy.display_name,
             description: policy.description,
             definition,

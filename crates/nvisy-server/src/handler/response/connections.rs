@@ -6,7 +6,7 @@ use nvisy_postgres::types::{ConnectionId, Handle, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::Page;
+use super::{AccountRef, Page};
 
 /// Response type for a workspace connection.
 ///
@@ -19,8 +19,8 @@ pub struct Connection {
     pub id: ConnectionId,
     /// Handle of the workspace this connection belongs to.
     pub workspace_slug: Handle,
-    /// Handle of the account that created this connection.
-    pub creator_username: Handle,
+    /// Account that created this connection.
+    pub created_by: AccountRef,
     /// Human-readable connection display name.
     pub display_name: String,
     /// Object store provider (`s3`, `azure`, `gcs`).
@@ -76,17 +76,17 @@ impl ConnectionVerification {
 }
 
 impl Connection {
-    /// Creates a response from a database model and its creator's handle.
+    /// Creates a response from a database model and its creator.
     pub fn from_model(
         connection: WorkspaceConnection,
         workspace_slug: Handle,
-        creator_username: Handle,
+        created_by: AccountRef,
         last_synced: Option<Timestamp>,
     ) -> Self {
         Self {
             id: ConnectionId::from_uuid(connection.id),
             workspace_slug,
-            creator_username,
+            created_by,
             display_name: connection.display_name,
             provider: connection.provider,
             sync_mode: connection.sync_mode,

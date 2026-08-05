@@ -9,7 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::types::{Handle, OffsetPagination};
+use crate::types::{AccountRefRow, Handle, OffsetPagination, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Maximum number of slug candidates tried before giving up when generating a
@@ -47,12 +47,12 @@ pub trait WorkspaceRepository {
         workspace_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
 
-    /// Finds a workspace by slug, with the handle of the account that created
-    /// it, excluding soft-deleted workspaces.
+    /// Finds a workspace by slug, with the handle and avatar of the account that
+    /// created it, excluding soft-deleted workspaces.
     fn find_workspace_by_slug(
         &mut self,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<(Workspace, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<Workspace>>>> + Send;
 
     /// Updates a workspace with partial changes.
     fn update_workspace(
@@ -158,21 +158,31 @@ impl WorkspaceRepository for PgConnection {
     async fn find_workspace_by_slug(
         &mut self,
         slug_value: &str,
-    ) -> PgResult<Option<(Workspace, Handle)>> {
+    ) -> PgResult<Option<WithAccountRef<Workspace>>> {
         use schema::workspaces::dsl;
         use schema::{accounts, workspaces};
 
-        let workspace = workspaces::table
+        let row = workspaces::table
             .inner_join(accounts::table)
             .filter(dsl::slug.eq(slug_value))
             .filter(dsl::deleted_at.is_null())
-            .select((Workspace::as_select(), accounts::username))
-            .first(self)
+            .select((
+                Workspace::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
+            .first::<(Workspace, Handle, Option<String>)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(workspace)
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
+            item,
+            account: AccountRefRow {
+                username,
+                avatar_url,
+            },
+        }))
     }
 
     async fn update_workspace(

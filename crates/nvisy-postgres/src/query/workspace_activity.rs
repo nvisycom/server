@@ -9,14 +9,17 @@ use jiff::{Span, Timestamp};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
-use crate::types::{ActivityType, CursorPage, CursorPagination, Handle, OffsetPagination};
+use crate::types::{
+    AccountRefRow, ActivityType, CursorPage, CursorPagination, Handle, OffsetPagination,
+    WithAccountRef,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
 pub struct LogEntityActivityParams {
     /// The account that performed the activity.
-    pub account_id: Option<Uuid>,
+    pub account_id: Uuid,
     /// The type of activity being logged.
     pub activity_type: ActivityType,
     /// Human-readable description.
@@ -47,12 +50,13 @@ pub trait WorkspaceActivityRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Lists activities for a specific workspace with cursor pagination, each
-    /// paired with the handle of the account that performed it, if any.
+    /// paired with the handle and avatar of the account that performed it, if
+    /// any.
     fn cursor_list_workspace_activity(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceActivity, Option<Handle>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
     /// Gets recent activities across all workspaces for a specific user.
     fn get_account_recent_activity(
@@ -103,7 +107,7 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         hours: Option<i64>,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<(Option<Uuid>, i64)>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<(Uuid, i64)>>> + Send;
 
     /// Gets a breakdown of activities by type for analytical reporting.
     fn get_activity_type_breakdown(
@@ -111,13 +115,6 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         hours: Option<i64>,
     ) -> impl Future<Output = PgResult<Vec<(ActivityType, i64)>>> + Send;
-
-    /// Gets system-generated activities that have no associated user account.
-    fn get_system_activities(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets activities originating from a specific IP address for security analysis.
     fn get_activities_by_ip(
@@ -175,7 +172,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(WorkspaceActivity, Option<Handle>)>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>> {
         use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
@@ -196,7 +193,7 @@ impl WorkspaceActivityRepository for PgConnection {
 
         // Build query with cursor
         let mut query = workspace_activities::table
-            .left_join(accounts::table)
+            .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .into_boxed();
 
@@ -209,10 +206,11 @@ impl WorkspaceActivityRepository for PgConnection {
             );
         }
 
-        let items: Vec<(WorkspaceActivity, Option<Handle>)> = query
+        let rows: Vec<(WorkspaceActivity, Handle, Option<String>)> = query
             .select((
                 WorkspaceActivity::as_select(),
-                accounts::username.nullable(),
+                accounts::username,
+                accounts::avatar_url,
             ))
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .limit(pagination.fetch_limit())
@@ -220,8 +218,19 @@ impl WorkspaceActivityRepository for PgConnection {
             .await
             .map_err(PgError::from)?;
 
-        Ok(CursorPage::new(items, total, pagination.limit, |(a, _)| {
-            (a.created_at.into(), a.id)
+        let items: Vec<WithAccountRef<WorkspaceActivity>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithAccountRef {
+                item,
+                account: AccountRefRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.created_at.into(), wc.item.id)
         }))
     }
 
@@ -348,7 +357,7 @@ impl WorkspaceActivityRepository for PgConnection {
         workspace_id: Uuid,
         hours: Option<i64>,
         limit: i64,
-    ) -> PgResult<Vec<(Option<Uuid>, i64)>> {
+    ) -> PgResult<Vec<(Uuid, i64)>> {
         use schema::workspace_activities::{self, dsl};
 
         let results = if let Some(time_window) = hours {
@@ -356,24 +365,22 @@ impl WorkspaceActivityRepository for PgConnection {
                 jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
             workspace_activities::table
                 .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::account_id.is_not_null())
                 .filter(dsl::created_at.gt(cutoff_time))
                 .group_by(dsl::account_id)
                 .select((dsl::account_id, diesel::dsl::count(dsl::id)))
                 .order(diesel::dsl::count(dsl::id).desc())
                 .limit(limit)
-                .load::<(Option<Uuid>, i64)>(self)
+                .load::<(Uuid, i64)>(self)
                 .await
                 .map_err(PgError::from)?
         } else {
             workspace_activities::table
                 .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::account_id.is_not_null())
                 .group_by(dsl::account_id)
                 .select((dsl::account_id, diesel::dsl::count(dsl::id)))
                 .order(diesel::dsl::count(dsl::id).desc())
                 .limit(limit)
-                .load::<(Option<Uuid>, i64)>(self)
+                .load::<(Uuid, i64)>(self)
                 .await
                 .map_err(PgError::from)?
         };
@@ -412,27 +419,6 @@ impl WorkspaceActivityRepository for PgConnection {
         };
 
         Ok(results)
-    }
-
-    async fn get_system_activities(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let activities = workspace_activities::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::account_id.is_null())
-            .select(WorkspaceActivity::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(activities)
     }
 
     async fn get_activities_by_ip(

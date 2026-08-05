@@ -8,7 +8,10 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
-use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination, PipelineStatus};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineStatus,
+    WithAccountRef,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for pipeline database operations.
@@ -37,15 +40,15 @@ pub trait WorkspacePipelineRepository {
         pipeline_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipeline>>> + Send;
 
-    /// Finds a pipeline by slug within a specific workspace, with the handle of
-    /// the account that created it.
+    /// Finds a pipeline by slug within a specific workspace, with the handle and
+    /// avatar of the account that created it.
     ///
     /// Excludes soft-deleted pipelines.
     fn find_pipeline_in_workspace_by_slug(
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<(WorkspacePipeline, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspacePipeline>>>> + Send;
 
     /// Lists all pipelines in a workspace with offset pagination.
     fn offset_list_workspace_pipelines(
@@ -55,14 +58,14 @@ pub trait WorkspacePipelineRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspacePipeline>>> + Send;
 
     /// Lists all pipelines in a workspace with cursor pagination, each paired
-    /// with the handle of the account that created it.
+    /// with the handle and avatar of the account that created it.
     fn cursor_list_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipeline, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePipeline>>>> + Send;
 
     /// Lists all pipelines created by an account with offset pagination.
     fn offset_list_account_pipelines(
@@ -165,22 +168,32 @@ impl WorkspacePipelineRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<(WorkspacePipeline, Handle)>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspacePipeline>>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
-        let pipeline = workspace_pipelines::table
+        let row = workspace_pipelines::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::slug.eq(slug))
             .filter(dsl::deleted_at.is_null())
-            .select((WorkspacePipeline::as_select(), accounts::username))
-            .first(self)
+            .select((
+                WorkspacePipeline::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
+            .first::<(WorkspacePipeline, Handle, Option<String>)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(pipeline)
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
+            item,
+            account: AccountRefRow {
+                username,
+                avatar_url,
+            },
+        }))
     }
 
     async fn offset_list_workspace_pipelines(
@@ -210,7 +223,7 @@ impl WorkspacePipelineRepository for PgConnection {
         pagination: CursorPagination,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
-    ) -> PgResult<CursorPage<(WorkspacePipeline, Handle)>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePipeline>>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
@@ -259,37 +272,54 @@ impl WorkspacePipelineRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspacePipeline, Handle)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspacePipeline, Handle, Option<String>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select((WorkspacePipeline::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select((WorkspacePipeline::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::created_at
+                            .lt(&cursor_time)
+                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspacePipeline::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspacePipeline::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
-        Ok(CursorPage::new(
-            items,
-            total,
-            pagination.limit,
-            |(p, _): &(WorkspacePipeline, Handle)| (p.created_at.into(), p.id),
-        ))
+        let items: Vec<WithAccountRef<WorkspacePipeline>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithAccountRef {
+                item,
+                account: AccountRefRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.created_at.into(), wc.item.id)
+        }))
     }
 
     async fn offset_list_account_pipelines(

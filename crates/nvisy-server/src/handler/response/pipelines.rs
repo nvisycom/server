@@ -6,7 +6,7 @@ use nvisy_postgres::types::{Handle, PipelineStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Artifact, Page};
+use super::{AccountRef, Artifact, Page};
 use crate::handler::request::PipelineDefinition;
 
 /// Pipeline response.
@@ -18,8 +18,8 @@ pub struct Pipeline {
     pub slug: Handle,
     /// Handle of the workspace this pipeline belongs to.
     pub workspace_slug: Handle,
-    /// Handle of the account that created this pipeline.
-    pub creator_username: Handle,
+    /// Account that created this pipeline.
+    pub created_by: AccountRef,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -47,13 +47,13 @@ impl Pipeline {
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Handle,
-        creator_username: Handle,
+        created_by: AccountRef,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
         Self::assemble(
             pipeline,
             workspace_slug,
-            creator_username,
+            created_by,
             Vec::new(),
             policy_slugs,
         )
@@ -63,7 +63,7 @@ impl Pipeline {
     pub fn from_model_with_artifacts(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Handle,
-        creator_username: Handle,
+        created_by: AccountRef,
         artifacts: Vec<model::WorkspacePipelineArtifact>,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
@@ -71,7 +71,7 @@ impl Pipeline {
         Self::assemble(
             pipeline,
             workspace_slug,
-            creator_username,
+            created_by,
             artifacts,
             policy_slugs,
         )
@@ -81,7 +81,7 @@ impl Pipeline {
     fn assemble(
         pipeline: model::WorkspacePipeline,
         workspace_slug: Handle,
-        creator_username: Handle,
+        created_by: AccountRef,
         artifacts: Vec<Artifact>,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
@@ -89,7 +89,7 @@ impl Pipeline {
         Ok(Self {
             slug: pipeline.slug,
             workspace_slug,
-            creator_username,
+            created_by,
             display_name: pipeline.display_name,
             description: pipeline.description,
             status: pipeline.status,

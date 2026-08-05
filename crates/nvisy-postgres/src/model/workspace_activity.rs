@@ -26,7 +26,7 @@ pub struct WorkspaceActivity {
     /// Reference to the workspace where activity occurred.
     pub workspace_id: Uuid,
     /// Reference to the account that performed the activity.
-    pub account_id: Option<Uuid>,
+    pub account_id: Uuid,
     /// Type of activity performed.
     pub activity_type: ActivityType,
     /// Human-readable description of the activity.
@@ -52,7 +52,7 @@ pub struct NewWorkspaceActivity {
     /// Reference to the workspace where the activity occurred.
     pub workspace_id: Uuid,
     /// Reference to the account that performed the activity.
-    pub account_id: Option<Uuid>,
+    pub account_id: Uuid,
     /// Type of activity being logged.
     pub activity_type: ActivityType,
     /// Human-readable description of what occurred.
@@ -66,16 +66,6 @@ pub struct NewWorkspaceActivity {
 }
 
 impl WorkspaceActivity {
-    /// Returns whether this activity was performed by a system process.
-    pub fn is_system_activity(&self) -> bool {
-        self.account_id.is_none()
-    }
-
-    /// Returns whether this activity was performed by a user.
-    pub fn is_user_activity(&self) -> bool {
-        self.account_id.is_some()
-    }
-
     /// Returns whether the activity has additional metadata.
     pub fn has_metadata(&self) -> bool {
         !self.metadata.as_object().is_none_or(|obj| obj.is_empty())

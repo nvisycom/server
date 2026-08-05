@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::Page;
+use super::{AccountRef, Page};
 
 /// A connection sync run (import or export).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -17,6 +17,8 @@ pub struct ConnectionSync {
     pub id: Uuid,
     /// The connection this sync belongs to.
     pub connection_id: ConnectionId,
+    /// Account that triggered the sync.
+    pub triggered_by: AccountRef,
     /// How the sync was triggered.
     pub trigger_type: SyncTriggerType,
     /// Current status of the sync.
@@ -36,11 +38,12 @@ pub struct ConnectionSync {
 }
 
 impl ConnectionSync {
-    /// Builds a response from the run model.
-    pub fn from_model(run: WorkspaceConnectionRun) -> Self {
+    /// Builds a response from the run model and the triggering account.
+    pub fn from_model(run: WorkspaceConnectionRun, triggered_by: AccountRef) -> Self {
         Self {
             id: run.id,
             connection_id: ConnectionId::from_uuid(run.connection_id),
+            triggered_by,
             trigger_type: run.trigger_type,
             status: run.status,
             records_synced: run.records_synced,

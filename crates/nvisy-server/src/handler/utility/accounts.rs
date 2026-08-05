@@ -6,37 +6,21 @@
 
 use nvisy_postgres::PgConn;
 use nvisy_postgres::query::AccountRepository;
-use nvisy_postgres::types::Handle;
 use uuid::Uuid;
 
+use crate::handler::response::AccountRef;
 use crate::handler::{ErrorKind, Result};
 
-/// Resolves the handle of a required account (e.g. a resource's creator).
+/// Resolves a public reference to a required account (e.g. a resource's
+/// creator, or whoever triggered an action).
 ///
 /// The account is expected to exist — typically the authenticated caller — so a
 /// missing row is a server-side inconsistency rather than a client error.
-pub async fn resolve_creator_username(conn: &mut PgConn, account_id: Uuid) -> Result<Handle> {
+pub async fn resolve_account_ref(conn: &mut PgConn, account_id: Uuid) -> Result<AccountRef> {
     conn.find_account_by_id(account_id)
         .await?
-        .map(|account| account.username)
-        .ok_or_else(|| ErrorKind::InternalServerError.with_message("Creator account not found"))
-}
-
-/// Resolves the handle of an optional account (e.g. whoever triggered a run).
-///
-/// Returns `None` when no account is recorded; a recorded-but-missing account
-/// also resolves to `None` rather than failing the request.
-pub async fn resolve_trigger_username(
-    conn: &mut PgConn,
-    account_id: Option<Uuid>,
-) -> Result<Option<Handle>> {
-    let Some(account_id) = account_id else {
-        return Ok(None);
-    };
-    Ok(conn
-        .find_account_by_id(account_id)
-        .await?
-        .map(|account| account.username))
+        .map(|account| AccountRef::new(account.username, account.avatar_url))
+        .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))
 }
 
 /// Builds the list of user-specific inputs a password is checked against for

@@ -7,7 +7,9 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
-use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination, SyncMode};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, SyncMode, WithAccountRef,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace connection database operations.
@@ -36,15 +38,15 @@ pub trait WorkspaceConnectionRepository {
         connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
 
-    /// Finds a connection by id within a specific workspace, with the handle of
-    /// the account that created it.
+    /// Finds a connection by id within a specific workspace, with the handle and
+    /// avatar of the account that created it.
     ///
     /// Excludes soft-deleted connections.
     fn find_connection_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceConnection, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceConnection>>>> + Send;
 
     /// Finds connections by provider type within a workspace.
     fn find_workspace_connections_by_provider(
@@ -67,7 +69,7 @@ pub trait WorkspaceConnectionRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
 
     /// Lists all connections in a workspace with cursor pagination, each paired
-    /// with the handle of the account that created it.
+    /// with the handle and avatar of the account that created it.
     ///
     /// An empty `providers` slice means no provider filter; otherwise a
     /// connection matches if its provider is any of the given ones.
@@ -76,7 +78,7 @@ pub trait WorkspaceConnectionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         providers: &[String],
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceConnection, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceConnection>>>> + Send;
 
     /// Updates a connection with new data.
     fn update_workspace_connection(
@@ -164,22 +166,32 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceConnection, Handle)>> {
+    ) -> PgResult<Option<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
-        let connection = workspace_connections::table
+        let row = workspace_connections::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::id.eq(connection_id))
             .filter(dsl::deleted_at.is_null())
-            .select((WorkspaceConnection::as_select(), accounts::username))
-            .first(self)
+            .select((
+                WorkspaceConnection::as_select(),
+                accounts::username,
+                accounts::avatar_url,
+            ))
+            .first::<(WorkspaceConnection, Handle, Option<String>)>(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(connection)
+        Ok(row.map(|(item, username, avatar_url)| WithAccountRef {
+            item,
+            account: AccountRefRow {
+                username,
+                avatar_url,
+            },
+        }))
     }
 
     async fn find_workspace_connections_by_provider(
@@ -244,7 +256,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         providers: &[String],
-    ) -> PgResult<CursorPage<(WorkspaceConnection, Handle)>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -284,37 +296,54 @@ impl WorkspaceConnectionRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspaceConnection, Handle)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+        let rows: Vec<(WorkspaceConnection, Handle, Option<String>)> =
+            if let Some(cursor) = &pagination.after {
+                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select((WorkspaceConnection::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        } else {
-            query
-                .select((WorkspaceConnection::as_select(), accounts::username))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(PgError::from)?
-        };
+                query
+                    .filter(
+                        dsl::created_at
+                            .lt(&cursor_time)
+                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                    )
+                    .select((
+                        WorkspaceConnection::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            } else {
+                query
+                    .select((
+                        WorkspaceConnection::as_select(),
+                        accounts::username,
+                        accounts::avatar_url,
+                    ))
+                    .order((dsl::created_at.desc(), dsl::id.desc()))
+                    .limit(limit)
+                    .load(self)
+                    .await
+                    .map_err(PgError::from)?
+            };
 
-        Ok(CursorPage::new(
-            items,
-            total,
-            pagination.limit,
-            |(c, _): &(WorkspaceConnection, Handle)| (c.created_at.into(), c.id),
-        ))
+        let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithAccountRef {
+                item,
+                account: AccountRefRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.created_at.into(), wc.item.id)
+        }))
     }
 
     async fn update_workspace_connection(

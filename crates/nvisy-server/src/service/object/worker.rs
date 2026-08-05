@@ -432,7 +432,8 @@ impl ConnectionSyncWorker {
         let mut conn = self.postgres.get_connection().await?;
         let new_run = NewWorkspaceConnectionRun {
             connection_id: connection.id,
-            account_id: None,
+            // A scheduled run is attributed to whoever created the connection.
+            account_id: connection.account_id,
             trigger_type: Some(SyncTriggerType::Scheduled),
             status: Some(SyncStatus::Running),
             records_synced: Some(0),

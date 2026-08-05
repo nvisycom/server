@@ -20,6 +20,9 @@ pub struct Member {
     /// Display name of the member, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Serve path of the member's avatar, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
     /// Whether the member has two-factor authentication enabled.
@@ -36,6 +39,7 @@ impl Member {
             username: account.username,
             email_address: account.email_address,
             display_name: account.display_name,
+            avatar_url: account.avatar_url,
             member_role: member.member_role,
             has_2fa: false,
             created_at: member.created_at.into(),

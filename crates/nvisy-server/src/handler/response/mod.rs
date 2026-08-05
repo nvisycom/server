@@ -4,6 +4,7 @@ use nvisy_postgres::types::CursorPage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+mod account_ref;
 mod accounts;
 mod activities;
 mod artifacts;
@@ -23,6 +24,7 @@ mod tokens;
 mod webhooks;
 mod workspaces;
 
+pub use account_ref::*;
 pub use accounts::*;
 pub use activities::*;
 pub use artifacts::*;

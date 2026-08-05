@@ -9,7 +9,10 @@ use uuid::Uuid;
 use crate::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
-use crate::types::{CursorPage, CursorPagination, Handle, OffsetPagination, PipelineRunStatus};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineRunStatus,
+    WithAccountRef,
+};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for workspace pipeline run database operations.
@@ -23,8 +26,8 @@ pub trait WorkspacePipelineRunRepository {
         new_run: NewWorkspacePipelineRun,
     ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
 
-    /// Finds a run by its opaque id, scoped to a workspace, returning the run,
-    /// its owning pipeline, and the triggering account's handle.
+    /// Finds a run by its opaque id, scoped to a workspace, returning the run
+    /// and its owning pipeline.
     ///
     /// The run is addressed by its own id (behind `/runs/{runId}`); scoping
     /// through the owning pipeline keeps it workspace-bounded and hides runs of
@@ -33,9 +36,7 @@ pub trait WorkspacePipelineRunRepository {
         &mut self,
         workspace_id: Uuid,
         run_id: Uuid,
-    ) -> impl Future<
-        Output = PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Handle>)>>,
-    > + Send;
+    ) -> impl Future<Output = PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline)>>> + Send;
 
     /// Finds a run by its `(pipeline, idempotency key)` pair, for detect replay.
     fn find_pipeline_run_by_idempotency_key(
@@ -52,13 +53,13 @@ pub trait WorkspacePipelineRunRepository {
     ) -> impl Future<Output = PgResult<Vec<WorkspacePipelineRun>>> + Send;
 
     /// Lists all runs for a specific pipeline with cursor pagination, each
-    /// paired with the handle of the account that triggered it, if any.
+    /// paired with the account that triggered it.
     fn cursor_list_workspace_pipeline_runs(
         &mut self,
         pipeline_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipelineRun, Option<Handle>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>>> + Send;
 
     /// Lists all runs across a workspace's pipelines with cursor pagination.
     ///
@@ -73,7 +74,7 @@ pub trait WorkspacePipelineRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspacePipelineRun, Handle, Option<Handle>)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>>> + Send;
 
     /// Lists active runs (queued or running) for a specific pipeline.
     fn list_active_workspace_pipeline_runs(
@@ -147,9 +148,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         run_id: Uuid,
-    ) -> PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline, Option<Handle>)>> {
+    ) -> PgResult<Option<(WorkspacePipelineRun, WorkspacePipeline)>> {
         use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::{accounts, workspace_pipeline_runs, workspace_pipelines};
+        use schema::{workspace_pipeline_runs, workspace_pipelines};
 
         // Runs carry no workspace column; scope through the owning pipeline so
         // the id resolves only within its workspace, and only while that
@@ -157,14 +158,12 @@ impl WorkspacePipelineRunRepository for PgConnection {
         // pipeline is returned alongside so callers need no second lookup.
         let run = workspace_pipeline_runs::table
             .inner_join(workspace_pipelines::table)
-            .left_join(accounts::table)
             .filter(runs::id.eq(run_id))
             .filter(workspace_pipelines::workspace_id.eq(workspace_id))
             .filter(workspace_pipelines::deleted_at.is_null())
             .select((
                 WorkspacePipelineRun::as_select(),
                 WorkspacePipeline::as_select(),
-                accounts::username.nullable(),
             ))
             .first(self)
             .await
@@ -218,7 +217,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> PgResult<CursorPage<(WorkspacePipelineRun, Option<Handle>)>> {
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>> {
         use schema::workspace_pipeline_runs::dsl;
         use schema::{accounts, workspace_pipeline_runs};
 
@@ -245,7 +244,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         // Rebuild query for fetching items
         let mut query = workspace_pipeline_runs::table
-            .left_join(accounts::table)
+            .inner_join(accounts::table)
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .into_boxed();
 
@@ -255,7 +254,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let items: Vec<(WorkspacePipelineRun, Option<Handle>)> =
+        let rows: Vec<(WorkspacePipelineRun, Handle, Option<String>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -267,7 +266,8 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     )
                     .select((
                         WorkspacePipelineRun::as_select(),
-                        accounts::username.nullable(),
+                        accounts::username,
+                        accounts::avatar_url,
                     ))
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -278,7 +278,8 @@ impl WorkspacePipelineRunRepository for PgConnection {
                 query
                     .select((
                         WorkspacePipelineRun::as_select(),
-                        accounts::username.nullable(),
+                        accounts::username,
+                        accounts::avatar_url,
                     ))
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
@@ -287,12 +288,20 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        Ok(CursorPage::new(
-            items,
-            total,
-            pagination.limit,
-            |(r, _): &(WorkspacePipelineRun, Option<Handle>)| (r.started_at.into(), r.id),
-        ))
+        let items: Vec<WithAccountRef<WorkspacePipelineRun>> = rows
+            .into_iter()
+            .map(|(item, username, avatar_url)| WithAccountRef {
+                item,
+                account: AccountRefRow {
+                    username,
+                    avatar_url,
+                },
+            })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
+            (wc.item.started_at.into(), wc.item.id)
+        }))
     }
 
     async fn cursor_list_workspace_runs(
@@ -300,19 +309,19 @@ impl WorkspacePipelineRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<PipelineRunStatus>,
-    ) -> PgResult<CursorPage<(WorkspacePipelineRun, Handle, Option<Handle>)>> {
+    ) -> PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::workspace_pipelines::dsl as pipelines;
 
         // Runs have no workspace column; scope them through the owning pipeline.
-        // The owning pipeline's slug and the triggering account's handle are
-        // selected alongside each run so the cross-pipeline response can name
-        // its pipeline and trigger (the run is addressed by its own id).
+        // The owning pipeline's slug and the triggering account are selected
+        // alongside each run so the cross-pipeline response can name its pipeline
+        // and trigger (the run is addressed by its own id).
         let scoped = || {
             let mut query = runs::workspace_pipeline_runs
                 .inner_join(pipelines::workspace_pipelines)
-                .left_join(accounts::accounts)
+                .inner_join(accounts::accounts)
                 .filter(pipelines::workspace_id.eq(workspace_id))
                 .into_boxed();
             if let Some(status) = status_filter {
@@ -337,10 +346,11 @@ impl WorkspacePipelineRunRepository for PgConnection {
         let selection = (
             WorkspacePipelineRun::as_select(),
             pipelines::slug,
-            accounts::username.nullable(),
+            accounts::username,
+            accounts::avatar_url,
         );
 
-        let items: Vec<(WorkspacePipelineRun, Handle, Option<Handle>)> =
+        let rows: Vec<(WorkspacePipelineRun, Handle, Handle, Option<String>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -366,12 +376,28 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
+        let items: Vec<(WithAccountRef<WorkspacePipelineRun>, Handle)> = rows
+            .into_iter()
+            .map(|(item, slug, username, avatar_url)| {
+                (
+                    WithAccountRef {
+                        item,
+                        account: AccountRefRow {
+                            username,
+                            avatar_url,
+                        },
+                    },
+                    slug,
+                )
+            })
+            .collect();
+
         Ok(CursorPage::new(
             items,
             total,
             pagination.limit,
-            |(run, _, _): &(WorkspacePipelineRun, Handle, Option<Handle>)| {
-                (run.started_at.into(), run.id)
+            |(wc, _): &(WithAccountRef<WorkspacePipelineRun>, Handle)| {
+                (wc.item.started_at.into(), wc.item.id)
             },
         ))
     }

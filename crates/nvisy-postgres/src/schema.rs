@@ -134,7 +134,7 @@ diesel::table! {
     workspace_activities (id) {
         id -> Uuid,
         workspace_id -> Uuid,
-        account_id -> Nullable<Uuid>,
+        account_id -> Uuid,
         activity_type -> ActivityType,
         description -> Text,
         metadata -> Jsonb,
@@ -152,7 +152,7 @@ diesel::table! {
     workspace_connection_runs (id) {
         id -> Uuid,
         connection_id -> Uuid,
-        account_id -> Nullable<Uuid>,
+        account_id -> Uuid,
         trigger_type -> SyncTriggerType,
         status -> SyncStatus,
         records_synced -> Int8,
@@ -289,7 +289,7 @@ diesel::table! {
         id -> Uuid,
         pipeline_id -> Uuid,
         file_id -> Uuid,
-        account_id -> Nullable<Uuid>,
+        account_id -> Uuid,
         trigger_type -> PipelineTriggerType,
         status -> PipelineRunStatus,
         analyzed_document_key -> Nullable<Text>,

@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_postgres::types::{Handle, WebhookId};
+use nvisy_postgres::types::{WebhookId, WithAccountRef};
 use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::guard::UrlGuardExt;
@@ -29,7 +29,7 @@ use crate::handler::request::{
 use crate::handler::response::{
     ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
 };
-use crate::handler::utility::resolve_creator_username;
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, ServiceState};
 
@@ -78,7 +78,7 @@ async fn create_webhook(
     );
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator_username = resolve_creator_username(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
 
     // WebhookCreated includes the secret, which is visible only once.
     Ok((
@@ -86,7 +86,7 @@ async fn create_webhook(
         Json(WebhookCreated::from_model(
             webhook,
             workspace.slug,
-            creator_username,
+            creator,
             secret,
         )),
     ))
@@ -141,12 +141,9 @@ async fn list_webhooks(
 
     Ok((
         StatusCode::OK,
-        Json(WebhooksPage::from_cursor_page(
-            page,
-            |(webhook, creator_username)| {
-                Webhook::from_model(webhook, workspace.slug.clone(), creator_username)
-            },
-        )),
+        Json(WebhooksPage::from_cursor_page(page, |wc| {
+            Webhook::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        })),
     ))
 }
 
@@ -183,17 +180,16 @@ async fn read_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWebhooks)
         .await?;
 
-    let (webhook, creator_username) =
-        find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
+    let found = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace webhook read");
 
     Ok((
         StatusCode::OK,
         Json(Webhook::from_model(
-            webhook,
+            found.item,
             workspace.slug,
-            creator_username,
+            found.account.into(),
         )),
     ))
 }
@@ -233,8 +229,9 @@ async fn update_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWebhooks)
         .await?;
 
-    let (existing, _) =
-        find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
+    let existing = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
+        .await?
+        .item;
 
     if let Some(url) = &request.url {
         check_webhook_url(url)?;
@@ -244,17 +241,16 @@ async fn update_webhook(
     conn.update_workspace_webhook(existing.id, update_data)
         .await?;
 
-    let (webhook, creator_username) =
-        find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
+    let found = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
     tracing::info!(target: TRACING_TARGET, "Webhook updated");
 
     Ok((
         StatusCode::OK,
         Json(Webhook::from_model(
-            webhook,
+            found.item,
             workspace.slug,
-            creator_username,
+            found.account.into(),
         )),
     ))
 }
@@ -294,8 +290,9 @@ async fn delete_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::DeleteWebhooks)
         .await?;
 
-    let (existing, _) =
-        find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
+    let existing = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
+        .await?
+        .item;
 
     conn.delete_workspace_webhook(existing.id).await?;
 
@@ -342,8 +339,9 @@ async fn test_webhook(
         .authorize_workspace(&mut conn, workspace.id, Permission::TestWebhooks)
         .await?;
 
-    let (webhook, _) =
-        find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
+    let webhook = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
+        .await?
+        .item;
 
     // Parse the webhook URL
     let url: Url = webhook.url.parse().map_err(|_| {
@@ -421,13 +419,13 @@ fn check_webhook_url(url: &str) -> Result<()> {
     })
 }
 
-/// Finds a webhook within a workspace by id, with its creator's handle, or
-/// returns a NotFound error.
+/// Finds a webhook within a workspace by id, with its creator, or returns a
+/// NotFound error.
 async fn find_webhook(
     conn: &mut PgConn,
     workspace_id: Uuid,
     webhook_id: Uuid,
-) -> Result<(WorkspaceWebhook, Handle)> {
+) -> Result<WithAccountRef<WorkspaceWebhook>> {
     conn.find_webhook_in_workspace_with_creator(workspace_id, webhook_id)
         .await?
         .ok_or_else(|| Error::not_found("webhook"))
