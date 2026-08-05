@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use axum::response::Response;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
 use nvisy_postgres::query::{
     WorkspaceActivityRepository, WorkspaceMemberRepository, WorkspaceRepository,
@@ -25,7 +24,7 @@ use crate::handler::response::{
     AccountRef, ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace,
     WorkspacesPage,
 };
-use crate::handler::utility::{avatar_response, read_image_field, resolve_account_ref};
+use crate::handler::utility::{read_image_field, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
@@ -409,10 +408,7 @@ async fn upload_workspace_avatar(
         .await?;
 
     let bytes = read_image_field(multipart).await?;
-    let avatar_url = format!("/workspaces/{}/avatar", workspace.slug);
-    avatar
-        .set_workspace_avatar(workspace.id, bytes, avatar_url)
-        .await?;
+    avatar.set_workspace_avatar(workspace.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace avatar set");
     Ok(StatusCode::OK)
@@ -423,38 +419,6 @@ fn upload_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
         .description("Uploads and normalizes the workspace's avatar. Requires UpdateWorkspace.")
         .response::<200, ()>()
         .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// Serves a workspace's avatar image. Requires `ViewWorkspace`.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
-async fn get_workspace_avatar(
-    State(pg_client): State<PgClient>,
-    State(avatar): State<AvatarService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
-) -> Result<Response> {
-    tracing::debug!(target: TRACING_TARGET, "Serving workspace avatar");
-
-    let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
-        .await?;
-
-    let bytes = avatar
-        .workspace_avatar(workspace.id)
-        .await?
-        .ok_or_else(|| Error::not_found("avatar"))?;
-
-    Ok(avatar_response(bytes))
-}
-
-fn get_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get workspace avatar")
-        .description("Returns the workspace's avatar image (WebP). 404 when unset.")
-        .response::<200, ()>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -508,7 +472,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceSlug}/avatar/",
             put_with(upload_workspace_avatar, upload_workspace_avatar_docs)
                 .layer(DefaultBodyLimit::max(MAX_AVATAR_UPLOAD_BYTES))
-                .get_with(get_workspace_avatar, get_workspace_avatar_docs)
                 .delete_with(delete_workspace_avatar, delete_workspace_avatar_docs),
         )
         .api_route(

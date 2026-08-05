@@ -118,31 +118,36 @@ impl FromStr for FileKey {
 
 /// A validated key for account-scoped objects in NATS object storage.
 ///
-/// The key format is `account_` prefix followed by the account ID,
-/// since these objects are uniquely identified by their owning account (e.g., avatars).
+/// The key format is `account_{account_id}_{version}`, where `version` is a
+/// content hash. Each avatar version is a distinct object, so a versioned URL
+/// maps to immutable bytes and a stale version simply does not exist.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AccountKey {
+pub struct AccountAvatarKey {
     pub account_id: Uuid,
+    pub version: String,
 }
 
-impl ObjectKey for AccountKey {
+impl ObjectKey for AccountAvatarKey {
     const PREFIX: &'static str = "account_";
 }
 
-impl AccountKey {
-    /// Creates a new account key.
-    pub fn new(account_id: Uuid) -> Self {
-        Self { account_id }
+impl AccountAvatarKey {
+    /// Creates a new account key for a specific avatar version.
+    pub fn new(account_id: Uuid, version: impl Into<String>) -> Self {
+        Self {
+            account_id,
+            version: version.into(),
+        }
     }
 }
 
-impl fmt::Display for AccountKey {
+impl fmt::Display for AccountAvatarKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", Self::PREFIX, self.account_id)
+        write!(f, "{}{}_{}", Self::PREFIX, self.account_id, self.version)
     }
 }
 
-impl FromStr for AccountKey {
+impl FromStr for AccountAvatarKey {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -152,46 +157,47 @@ impl FromStr for AccountKey {
                 format!("Invalid key prefix: expected '{}'", Self::PREFIX),
             )
         })?;
-        let account_id = Uuid::parse_str(payload)
+        let (id, version) = payload
+            .split_once('_')
+            .ok_or_else(|| Error::operation("parse_key", "Expected 'account_{id}_{version}'"))?;
+        let account_id = Uuid::parse_str(id)
             .map_err(|e| Error::operation("parse_key", format!("Invalid account UUID: {}", e)))?;
-        Ok(Self::new(account_id))
-    }
-}
-
-impl From<Uuid> for AccountKey {
-    fn from(account_id: Uuid) -> Self {
-        Self::new(account_id)
+        Ok(Self::new(account_id, version))
     }
 }
 
 /// A validated key for workspace-scoped objects in NATS object storage.
 ///
-/// The key format is `workspace_` prefix followed by the workspace ID, since
-/// these objects are uniquely identified by their owning workspace (e.g. the
-/// workspace avatar/logo).
+/// The key format is `workspace_{workspace_id}_{version}`, where `version` is a
+/// content hash. Each avatar version is a distinct object, so a versioned URL
+/// maps to immutable bytes and a stale version simply does not exist.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WorkspaceKey {
+pub struct WorkspaceAvatarKey {
     pub workspace_id: Uuid,
+    pub version: String,
 }
 
-impl ObjectKey for WorkspaceKey {
+impl ObjectKey for WorkspaceAvatarKey {
     const PREFIX: &'static str = "workspace_";
 }
 
-impl WorkspaceKey {
-    /// Creates a new workspace key.
-    pub fn new(workspace_id: Uuid) -> Self {
-        Self { workspace_id }
+impl WorkspaceAvatarKey {
+    /// Creates a new workspace key for a specific avatar version.
+    pub fn new(workspace_id: Uuid, version: impl Into<String>) -> Self {
+        Self {
+            workspace_id,
+            version: version.into(),
+        }
     }
 }
 
-impl fmt::Display for WorkspaceKey {
+impl fmt::Display for WorkspaceAvatarKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", Self::PREFIX, self.workspace_id)
+        write!(f, "{}{}_{}", Self::PREFIX, self.workspace_id, self.version)
     }
 }
 
-impl FromStr for WorkspaceKey {
+impl FromStr for WorkspaceAvatarKey {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -201,15 +207,12 @@ impl FromStr for WorkspaceKey {
                 format!("Invalid key prefix: expected '{}'", Self::PREFIX),
             )
         })?;
-        let workspace_id = Uuid::parse_str(payload)
+        let (id, version) = payload
+            .split_once('_')
+            .ok_or_else(|| Error::operation("parse_key", "Expected 'workspace_{id}_{version}'"))?;
+        let workspace_id = Uuid::parse_str(id)
             .map_err(|e| Error::operation("parse_key", format!("Invalid workspace UUID: {}", e)))?;
-        Ok(Self::new(workspace_id))
-    }
-}
-
-impl From<Uuid> for WorkspaceKey {
-    fn from(workspace_id: Uuid) -> Self {
-        Self::new(workspace_id)
+        Ok(Self::new(workspace_id, version))
     }
 }
 
@@ -365,51 +368,46 @@ mod tests {
 
         #[test]
         fn test_prefix() {
-            assert_eq!(AccountKey::PREFIX, "account_");
+            assert_eq!(AccountAvatarKey::PREFIX, "account_");
         }
 
         #[test]
         fn test_new() {
             let account_id = Uuid::new_v4();
-            let key = AccountKey::new(account_id);
+            let key = AccountAvatarKey::new(account_id, "abc123");
             assert_eq!(key.account_id, account_id);
+            assert_eq!(key.version, "abc123");
         }
 
         #[test]
         fn test_display_has_prefix() {
             let account_id = Uuid::new_v4();
-            let key = AccountKey::new(account_id);
+            let key = AccountAvatarKey::new(account_id, "abc123");
             let encoded = key.to_string();
 
             assert!(encoded.starts_with("account_"));
-            assert_eq!(encoded, format!("account_{}", account_id));
+            assert_eq!(encoded, format!("account_{account_id}_abc123"));
         }
 
         #[test]
         fn test_roundtrip() {
             let account_id = Uuid::new_v4();
-            let key = AccountKey::new(account_id);
+            let key = AccountAvatarKey::new(account_id, "abc123");
             let encoded = key.to_string();
-            let decoded: AccountKey = encoded.parse().unwrap();
+            let decoded: AccountAvatarKey = encoded.parse().unwrap();
             assert_eq!(decoded.account_id, account_id);
-        }
-
-        #[test]
-        fn test_from_uuid() {
-            let account_id = Uuid::new_v4();
-            let key: AccountKey = account_id.into();
-            assert_eq!(key.account_id, account_id);
+            assert_eq!(decoded.version, "abc123");
         }
 
         #[test]
         fn test_from_str_invalid_prefix() {
-            assert!(AccountKey::from_str("file_abc").is_err());
-            assert!(AccountKey::from_str("abc").is_err());
+            assert!(AccountAvatarKey::from_str("file_abc").is_err());
+            assert!(AccountAvatarKey::from_str("abc").is_err());
         }
 
         #[test]
-        fn test_from_str_invalid_uuid() {
-            assert!(AccountKey::from_str("account_not-a-uuid").is_err());
+        fn test_from_str_missing_version() {
+            assert!(AccountAvatarKey::from_str("account_not-a-uuid").is_err());
         }
     }
 }
