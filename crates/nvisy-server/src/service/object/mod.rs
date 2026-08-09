@@ -42,7 +42,7 @@ impl ObjectService {
     pub async fn connect(
         &self,
         config: &StorageConfig,
-    ) -> Result<ObjectStoreClient, nvisy_object::error::Error> {
+    ) -> Result<ObjectStoreClient, nvisy_object::Error> {
         tracing::debug!(target: TRACING_TARGET, "Connecting to object store");
         providers::connect(config).await
     }

@@ -3,7 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod client;
-/// Error and error-kind types for object-store operations.
-pub mod error;
-/// Client trait and object storage providers.
+mod error;
 pub mod providers;
+
+pub use error::{Error, ErrorKind};

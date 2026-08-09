@@ -14,4 +14,8 @@ pub enum Error {
     /// The provider rejected the credentials or was unreachable.
     #[error("inference provider verification failed: {0}")]
     Verify(String),
+
+    /// A completion request against the provider failed at runtime.
+    #[error("inference request failed: {0}")]
+    Prompt(String),
 }

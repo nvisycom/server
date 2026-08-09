@@ -1,9 +1,9 @@
 //! Object-store error to HTTP error conversion.
 //!
-//! Maps [`nvisy_object::error::Error`] onto HTTP errors so object-storage
-//! failures surface with appropriate status codes.
+//! Maps `nvisy_object::Error` onto HTTP errors so object-storage failures
+//! surface with appropriate status codes.
 
-use nvisy_object::error::{Error as ObjectError, ErrorKind as ObjectErrorKind};
+use nvisy_object::{Error as ObjectError, ErrorKind as ObjectErrorKind};
 
 use super::http_error::{Error as HttpError, ErrorKind};
 

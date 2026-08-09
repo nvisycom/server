@@ -35,7 +35,7 @@ pub use workspace_connection::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 pub use workspace_connection_schedule::{
-    NewWorkspaceConnectionSchedule, UpdateWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
+    NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
 };
 pub use workspace_connection_sync::{
     NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,

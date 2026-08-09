@@ -9,7 +9,7 @@ use std::io;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use nvisy_object::error::Error as ObjectError;
+use nvisy_object::Error as ObjectError;
 use tokio::io::AsyncRead;
 use tokio_util::io::{ReaderStream, StreamReader};
 

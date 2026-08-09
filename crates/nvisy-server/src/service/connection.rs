@@ -6,15 +6,16 @@
 //! (`{ "provider": "s3", ... }`, `{ "provider": "openai", ... }`). Capability
 //! crates own their provider configs; this type only composes them.
 
-use nvisy_inference::LlmConfig;
+use nvisy_inference::providers::LlmConfig;
 use nvisy_object::providers::StorageConfig;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A fully-typed connection configuration for any capability.
 ///
 /// Untagged: the two inner enums have disjoint `provider` values, so serde
 /// resolves the variant from the flat payload without an outer discriminator.
-#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ConnectionConfig {
     /// An object-storage connection (s3, azure, gcs) — sync-capable.

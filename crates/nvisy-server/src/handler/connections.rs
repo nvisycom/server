@@ -7,9 +7,11 @@
 //!
 //! # Encryption
 //!
-//! Connection data (credentials plus sync state) is encrypted using
-//! workspace-derived keys (HKDF-SHA256 with XChaCha20-Poly1305). The encrypted
-//! data is stored in the database and never exposed through the API.
+//! A connection's provider config (credentials plus provider-specific settings)
+//! is encrypted using workspace-derived keys (HKDF-SHA256 with
+//! XChaCha20-Poly1305). The encrypted data is stored in the database and never
+//! exposed through the API. Sync state lives in separate tables, not the
+//! encrypted blob.
 
 use std::collections::HashMap;
 
@@ -17,16 +19,17 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, NewWorkspaceConnectionSchedule, UpdateWorkspaceConnection,
-    WorkspaceConnection,
+    WorkspaceConnection, WorkspaceConnectionSchedule,
 };
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
 };
 use nvisy_postgres::types::{ConnectionId, WithAccountRef};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
 use crate::extract::{
@@ -98,24 +101,30 @@ async fn create_connection(
         metadata: None,
     };
 
-    let connection = conn.create_workspace_connection(new_connection).await?;
-
-    // A sync-capable connection gets a schedule row (its presence marks the
-    // capability); use the supplied config or defaults.
-    let schedule = if supports_sync {
-        let sync = request.sync.unwrap_or_default();
-        Some(
-            conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
-                connection_id: connection.id,
-                sync_mode: Some(sync.sync_mode),
-                schedule_cron: sync.schedule_cron,
-                deletion_policy: Some(sync.deletion_policy),
-            })
-            .await?,
-        )
-    } else {
-        None
-    };
+    // Insert the connection and (if sync-capable) its schedule atomically, so a
+    // partial write can never leave a sync-capable connection without a schedule.
+    let sync = request.sync.unwrap_or_default();
+    let (connection, schedule) = conn
+        .transaction(async |conn| {
+            let connection = conn.create_workspace_connection(new_connection).await?;
+            // A sync-capable connection gets a schedule row (its presence marks
+            // the capability).
+            let schedule = if supports_sync {
+                Some(
+                    conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
+                        connection_id: connection.id,
+                        sync_mode: Some(sync.sync_mode),
+                        schedule_cron: sync.schedule_cron,
+                        deletion_policy: Some(sync.deletion_policy),
+                    })
+                    .await?,
+                )
+            } else {
+                None
+            };
+            Ok::<_, PgError>((connection, schedule))
+        })
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -192,14 +201,15 @@ async fn list_connections(
         .map(|(id, ts)| (id, ts.into()))
         .collect();
 
-    // Resolve each connection's sync schedule (present only for sync-capable
-    // connections) so the list carries the same sync info as the detail view.
-    let mut schedules = HashMap::new();
-    for id in &ids {
-        if let Some(schedule) = conn.find_connection_schedule(*id).await? {
-            schedules.insert(*id, schedule);
-        }
-    }
+    // One query resolves the sync schedules for the whole page (present only for
+    // sync-capable connections), so the list carries the same sync info as the
+    // detail view without a per-row round-trip.
+    let mut schedules: HashMap<Uuid, _> = conn
+        .find_schedules(&ids)
+        .await?
+        .into_iter()
+        .map(|schedule| (schedule.connection_id, schedule))
+        .collect();
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -351,21 +361,25 @@ async fn update_connection(
         ..Default::default()
     };
 
-    conn.update_workspace_connection(existing.id, update_data)
-        .await?;
-
-    // Apply sync-config changes to the schedule satellite.
-    if let Some(sync) = request.sync {
-        conn.update_connection_schedule(
-            existing.id,
-            nvisy_postgres::model::UpdateWorkspaceConnectionSchedule {
+    // Update the connection and its schedule atomically so a partial write can
+    // never leave a sync-capable connection without its schedule.
+    let connection_id = existing.id;
+    let sync = request.sync;
+    conn.transaction(async |conn| {
+        conn.update_workspace_connection(connection_id, update_data)
+            .await?;
+        if let Some(sync) = sync {
+            conn.upsert_connection_schedule(NewWorkspaceConnectionSchedule {
+                connection_id,
                 sync_mode: Some(sync.sync_mode),
-                schedule_cron: Some(sync.schedule_cron),
+                schedule_cron: sync.schedule_cron,
                 deletion_policy: Some(sync.deletion_policy),
-            },
-        )
-        .await?;
-    }
+            })
+            .await?;
+        }
+        Ok::<(), PgError>(())
+    })
+    .await?;
 
     let (found, schedule, last_synced) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
@@ -499,14 +513,20 @@ async fn verify_connection(
                 ConnectionVerification::unreachable(err.kind().reason())
             }
         },
-        ConnectionConfig::Inference(config) => match nvisy_inference::validate(&config).await {
+        ConnectionConfig::Inference(config) => match config.validate().await {
             Ok(()) => {
                 tracing::info!(target: TRACING_TARGET, "Connection verified");
                 ConnectionVerification::reachable()
             }
             Err(err) => {
+                // Log the full error, but return only a safe, kind-based reason
+                // so provider endpoints/keys are not echoed to the client.
                 tracing::warn!(target: TRACING_TARGET, error = %err, "Connection verification failed");
-                ConnectionVerification::unreachable("verification failed")
+                let reason = match err {
+                    InferenceError::Build(_) => "invalid configuration",
+                    _ => "credentials rejected or provider unreachable",
+                };
+                ConnectionVerification::unreachable(reason)
             }
         },
     };
@@ -543,7 +563,7 @@ fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
 /// NotFound error.
 type FoundConnection = (
     WithAccountRef<WorkspaceConnection>,
-    Option<nvisy_postgres::model::WorkspaceConnectionSchedule>,
+    Option<WorkspaceConnectionSchedule>,
     Option<jiff::Timestamp>,
 );
 

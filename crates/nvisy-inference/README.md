@@ -6,12 +6,12 @@ LLM inference provider configuration and clients for the Nvisy platform.
 
 ## Overview
 
-A provider-agnostic inference layer over [`rig`](https://crates.io/crates/rig),
-supporting OpenAI, Ollama, and Anthropic behind a single provider-tagged
-`LlmConfig`. The config carries each provider's credentials and is stored
-encrypted at rest by a workspace connection; `validate` proves those credentials
-work by verifying them against the provider, backing the connection test
-endpoint.
+A provider-agnostic inference layer over
+[`rig`](https://crates.io/crates/rig), supporting OpenAI, Ollama, and
+Anthropic behind a single provider-tagged `LlmConfig`. The config carries each
+provider's credentials and is stored encrypted at rest by a workspace
+connection; `validate` proves those credentials work by verifying them against
+the provider, backing the connection test endpoint.
 
 ## Documentation
 

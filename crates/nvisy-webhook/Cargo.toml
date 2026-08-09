@@ -46,15 +46,15 @@ reqwest-retry = { workspace = true, optional = true }
 reqwest-tracing = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net"], optional = true }
 
-# Observability
-tracing = { workspace = true }
-
 # Encryption & Cryptography
 hmac = { workspace = true, optional = true, features = [] }
 sha2 = { workspace = true, optional = true, features = [] }
 
 # Encoding
 hex = { workspace = true, optional = true, features = [] }
+
+# Observability
+tracing = { workspace = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }

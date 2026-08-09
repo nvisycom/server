@@ -24,18 +24,23 @@ rustdoc-args = ["--cfg", "docsrs"]
 schema = ["dep:schemars"]
 
 [dependencies]
+# Async runtime
+futures = { workspace = true, features = [] }
+
+# LLM framework: provider clients + the classic Agent runtime
+rig = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = [] }
-
-# LLM provider clients
-rig-core = { workspace = true, features = [] }
-
-# JSON Schema (optional)
 schemars = { workspace = true, features = [], optional = true }
 
-# Error handling
+# Derive macros & utilities
 thiserror = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["deref"] }
 
 [dev-dependencies]
+serde_json = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -31,6 +31,9 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true }
 
+# Encoding
+base64 = { workspace = true, features = [] }
+
 # Messaging and object storage (NATS)
 async-nats = { workspace = true }
 
@@ -44,9 +47,6 @@ serde_json = { workspace = true, features = [] }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["deref", "deref_mut", "from", "into", "display"] }
-
-# Encoding
-base64 = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }

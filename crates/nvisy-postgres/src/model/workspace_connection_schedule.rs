@@ -39,16 +39,3 @@ pub struct NewWorkspaceConnectionSchedule {
     /// Deletion reconciliation policy (defaults to ignore).
     pub deletion_policy: Option<SyncDeletionPolicy>,
 }
-
-/// Data for updating a connection's sync schedule.
-#[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = workspace_connection_schedule)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct UpdateWorkspaceConnectionSchedule {
-    /// Sync direction.
-    pub sync_mode: Option<SyncMode>,
-    /// Cron expression for scheduled imports (`Some(None)` clears it).
-    pub schedule_cron: Option<Option<String>>,
-    /// Deletion reconciliation policy.
-    pub deletion_policy: Option<SyncDeletionPolicy>,
-}
