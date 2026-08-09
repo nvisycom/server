@@ -29,6 +29,8 @@ pub enum WorkspaceConstraints {
     // Workspace uniqueness constraints
     #[strum(serialize = "workspaces_slug_key")]
     SlugUnique,
+    #[strum(serialize = "workspaces_display_name_owner_unique_idx")]
+    NameUnique,
 
     // Workspace chronological constraints
     #[strum(serialize = "workspaces_updated_after_created")]
@@ -56,7 +58,9 @@ impl WorkspaceConstraints {
             | WorkspaceConstraints::MetadataSize
             | WorkspaceConstraints::SettingsSize => ConstraintCategory::Validation,
 
-            WorkspaceConstraints::SlugUnique => ConstraintCategory::Uniqueness,
+            WorkspaceConstraints::SlugUnique | WorkspaceConstraints::NameUnique => {
+                ConstraintCategory::Uniqueness
+            }
 
             WorkspaceConstraints::UpdatedAfterCreated
             | WorkspaceConstraints::DeletedAfterCreated

@@ -316,7 +316,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            ConstraintViolation::new("workspace_pipelines_name_length"),
+            ConstraintViolation::new("workspace_pipelines_display_name_length"),
             Some(ConstraintViolation::WorkspacePipeline(
                 WorkspacePipelineConstraints::NameLength
             ))

@@ -10,6 +10,10 @@ use super::ConstraintCategory;
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceMemberConstraints {
+    // Member uniqueness constraints
+    #[strum(serialize = "workspace_members_pkey")]
+    MembershipUnique,
+
     // Member chronological constraints
     #[strum(serialize = "workspace_members_updated_after_created")]
     UpdatedAfterCreated,
@@ -24,6 +28,7 @@ impl WorkspaceMemberConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
+            WorkspaceMemberConstraints::MembershipUnique => ConstraintCategory::Uniqueness,
             WorkspaceMemberConstraints::UpdatedAfterCreated => ConstraintCategory::Chronological,
         }
     }

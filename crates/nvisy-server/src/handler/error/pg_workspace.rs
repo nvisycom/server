@@ -17,6 +17,9 @@ impl From<WorkspaceConstraints> for Error<'static> {
             WorkspaceConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
                 "Workspace slug must be lowercase alphanumeric with single internal dashes",
             ),
+            WorkspaceConstraints::NameUnique => {
+                ErrorKind::Conflict.with_message("A workspace with this name already exists")
+            }
             WorkspaceConstraints::SlugUnique => {
                 ErrorKind::Conflict.with_message("A workspace with this slug already exists")
             }
@@ -46,6 +49,8 @@ impl From<WorkspaceConstraints> for Error<'static> {
 impl From<WorkspaceMemberConstraints> for Error<'static> {
     fn from(c: WorkspaceMemberConstraints) -> Self {
         let error = match c {
+            WorkspaceMemberConstraints::MembershipUnique => ErrorKind::Conflict
+                .with_message("This account is already a member of the workspace"),
             WorkspaceMemberConstraints::UpdatedAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
             }

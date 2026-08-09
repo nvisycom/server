@@ -43,6 +43,8 @@ pub enum WorkspaceFileConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_files_workspace_id_id_key")]
     WorkspaceIdIdUnique,
+    #[strum(serialize = "workspace_files_source_object_unique_idx")]
+    SourceObjectUnique,
 
     // File chronological constraints
     #[strum(serialize = "workspace_files_updated_after_created")]
@@ -74,7 +76,8 @@ impl WorkspaceFileConstraints {
             | WorkspaceFileConstraints::MetadataSize
             | WorkspaceFileConstraints::VersionNumberMin => ConstraintCategory::Validation,
 
-            WorkspaceFileConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
+            WorkspaceFileConstraints::WorkspaceIdIdUnique
+            | WorkspaceFileConstraints::SourceObjectUnique => ConstraintCategory::Uniqueness,
 
             WorkspaceFileConstraints::UpdatedAfterCreated
             | WorkspaceFileConstraints::DeletedAfterCreated

@@ -50,19 +50,21 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
 
 impl From<WorkspacePipelineRunConstraints> for Error<'static> {
     fn from(c: WorkspacePipelineRunConstraints) -> Self {
-        let error = match c {
-            WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            WorkspacePipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
-                .with_message("Pipeline run metadata size exceeds maximum limit"),
-            WorkspacePipelineRunConstraints::IdempotencyKeyLength => {
-                ErrorKind::BadRequest.with_message("Idempotency key must be 1 to 255 characters")
-            }
-            WorkspacePipelineRunConstraints::CompletedAfterStarted => {
-                ErrorKind::InternalServerError.into_error()
-            }
-        };
+        let error =
+            match c {
+                WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength => {
+                    ErrorKind::InternalServerError.into_error()
+                }
+                WorkspacePipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
+                    .with_message("Pipeline run metadata size exceeds maximum limit"),
+                WorkspacePipelineRunConstraints::IdempotencyKeyLength => ErrorKind::BadRequest
+                    .with_message("Idempotency key must be 1 to 255 characters"),
+                WorkspacePipelineRunConstraints::IdempotencyUnique => ErrorKind::Conflict
+                    .with_message("A run with this idempotency key already exists"),
+                WorkspacePipelineRunConstraints::CompletedAfterStarted => {
+                    ErrorKind::InternalServerError.into_error()
+                }
+            };
 
         error.with_resource("pipeline_run")
     }
@@ -162,8 +164,6 @@ impl From<WorkspacePolicyConstraints> for Error<'static> {
                 .with_message("Policy name must be between 1 and 255 characters"),
             WorkspacePolicyConstraints::DescriptionLength => ErrorKind::BadRequest
                 .with_message("Policy description must be at most 4096 characters"),
-            WorkspacePolicyConstraints::VersionLength => ErrorKind::BadRequest
-                .with_message("Policy version must be between 1 and 64 characters"),
             WorkspacePolicyConstraints::DefinitionSize => {
                 ErrorKind::BadRequest.with_message("Policy definition size exceeds maximum limit")
             }
@@ -177,6 +177,9 @@ impl From<WorkspacePolicyConstraints> for Error<'static> {
             ),
             WorkspacePolicyConstraints::SlugUnique => {
                 ErrorKind::Conflict.with_message("A policy with this slug already exists")
+            }
+            WorkspacePolicyConstraints::NameUnique => {
+                ErrorKind::Conflict.with_message("A policy with this name already exists")
             }
             WorkspacePolicyConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A policy with this identifier already exists")
