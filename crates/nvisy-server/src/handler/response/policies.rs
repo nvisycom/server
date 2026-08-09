@@ -1,7 +1,7 @@
 //! Policy response types.
 
 use jiff::Timestamp;
-use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
+use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::model::WorkspacePolicy;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
@@ -26,7 +26,7 @@ pub struct Policy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// The structured policy body consumed by the engine.
-    pub definition: SchemaPolicy,
+    pub definition: PolicyDefinition,
     /// When the policy was created.
     pub created_at: Timestamp,
     /// When the policy was last updated.
@@ -91,7 +91,7 @@ impl Policy {
         crypto: &CryptoService,
     ) -> crate::handler::Result<Self> {
         let definition =
-            crypto.decrypt_json::<SchemaPolicy>(policy.workspace_id, &policy.definition)?;
+            crypto.decrypt_json::<PolicyDefinition>(policy.workspace_id, &policy.definition)?;
 
         Ok(Self {
             slug: policy.slug,

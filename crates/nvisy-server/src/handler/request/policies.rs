@@ -1,6 +1,6 @@
 //! Policy request types.
 
-use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
+use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,11 +20,46 @@ pub struct PolicyPathParams {
     pub policy_slug: String,
 }
 
+/// Path parameters for a single policy template in the deployment catalog.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyTemplatePathParams {
+    /// Slug of the built-in policy template.
+    pub template_slug: String,
+}
+
+/// Where a new policy's body comes from: exactly one source, enforced by the
+/// type so neither-nor-both is unrepresentable.
+///
+/// Tagged by `source`: `{ "source": "template", "template": "hipaa_safe_harbor" }`
+/// or `{ "source": "inline", "definition": { ... } }`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "source", rename_all = "camelCase")]
+pub enum PolicyBody {
+    /// Seed the body from a built-in catalog template, by id.
+    ///
+    /// The template is resolved from the deployment catalog at creation time and
+    /// copied into a normal, independently-editable policy.
+    Template {
+        /// Id of the built-in policy template to seed from.
+        template: Handle,
+    },
+    /// An inline structured policy body consumed by the engine.
+    Inline {
+        /// The structured policy body.
+        ///
+        /// Boxed to keep the enum small: an inline body is much larger than a
+        /// template id, and most requests use a template.
+        definition: Box<PolicyDefinition>,
+    },
+}
+
 /// Request payload for creating a new workspace policy.
 ///
-/// The `definition` is a structured policy the redaction engine consumes;
-/// its `name` and `description` drive the stored columns unless overridden
-/// here.
+/// The body comes from a template or an inline definition (see [`PolicyBody`]).
+/// The body's `name` and `description` drive the stored columns unless
+/// overridden here.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePolicy {
@@ -36,8 +71,9 @@ pub struct CreatePolicy {
     /// Optional description override. Defaults to the policy's own description.
     #[validate(length(max = 4096))]
     pub description: Option<String>,
-    /// The structured policy body consumed by the engine.
-    pub definition: SchemaPolicy,
+    /// The source of the policy body.
+    #[serde(flatten)]
+    pub body: PolicyBody,
 }
 
 /// Request payload for updating an existing workspace policy.
@@ -53,5 +89,5 @@ pub struct UpdatePolicy {
     #[validate(length(max = 4096))]
     pub description: Option<Option<String>>,
     /// New policy body (replaces the stored definition).
-    pub definition: Option<SchemaPolicy>,
+    pub definition: Option<PolicyDefinition>,
 }
