@@ -13,10 +13,10 @@ use std::sync::{Arc, Mutex};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket};
 use nvisy_object::client::ObjectStoreClient;
-use nvisy_object::providers::ConnectionConfig;
+use nvisy_object::providers::StorageConfig;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
-use nvisy_postgres::query::{WorkspaceConnectionRunRepository, WorkspaceFileRepository};
+use nvisy_postgres::query::{WorkspaceConnectionSyncRepository, WorkspaceFileRepository};
 use nvisy_postgres::types::{FileSource, SyncDeletionPolicy};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -104,7 +104,8 @@ impl ConnectionSyncService {
     pub async fn import_new(
         &self,
         connection: &WorkspaceConnection,
-        config: &ConnectionConfig,
+        config: &StorageConfig,
+        deletion_policy: SyncDeletionPolicy,
         account_id: Uuid,
     ) -> Result<u64> {
         tracing::debug!(target: TRACING_TARGET, "Importing new objects from connection");
@@ -146,7 +147,8 @@ impl ConnectionSyncService {
             }
         }
 
-        self.reconcile_deletions(connection, &remote_keys).await;
+        self.reconcile_deletions(connection, deletion_policy, &remote_keys)
+            .await;
 
         tracing::debug!(target: TRACING_TARGET, imported, "Import sync complete");
         Ok(imported)
@@ -161,9 +163,10 @@ impl ConnectionSyncService {
     async fn reconcile_deletions(
         &self,
         connection: &WorkspaceConnection,
+        deletion_policy: SyncDeletionPolicy,
         remote_keys: &HashSet<String>,
     ) {
-        if connection.deletion_policy == SyncDeletionPolicy::Ignore {
+        if deletion_policy == SyncDeletionPolicy::Ignore {
             return;
         }
 
@@ -317,7 +320,7 @@ impl ConnectionSyncService {
     pub async fn export_file(
         &self,
         connection: &WorkspaceConnection,
-        config: &ConnectionConfig,
+        config: &StorageConfig,
         file: &WorkspaceFile,
         remote_key: &str,
     ) -> Result<()> {
@@ -364,7 +367,8 @@ impl ConnectionSyncService {
         &self,
         run_id: Uuid,
         connection: WorkspaceConnection,
-        config: ConnectionConfig,
+        config: StorageConfig,
+        deletion_policy: SyncDeletionPolicy,
         account_id: Uuid,
         export: Option<(WorkspaceFile, String)>,
     ) {
@@ -390,7 +394,11 @@ impl ConnectionSyncService {
         let transfer = self.clone();
         let mut work = tokio::spawn(async move {
             match export {
-                None => transfer.import_new(&connection, &config, account_id).await,
+                None => {
+                    transfer
+                        .import_new(&connection, &config, deletion_policy, account_id)
+                        .await
+                }
                 Some((file, key)) => transfer
                     .export_file(&connection, &config, &file, &key)
                     .await
@@ -489,7 +497,7 @@ impl ConnectionSyncService {
 
         let outcome = match result {
             Ok(records_synced) => {
-                conn.complete_workspace_connection_run(run_id, records_synced as i64)
+                conn.complete_workspace_connection_sync(run_id, records_synced as i64)
                     .await
             }
             Err(err) => {
@@ -498,7 +506,7 @@ impl ConnectionSyncService {
                 // to clients via the sync's `error_message`.
                 tracing::warn!(target: TRACING_TARGET, %run_id, error = %err, "Sync failed");
                 let safe_message = err.message().unwrap_or("Sync failed").to_owned();
-                conn.fail_workspace_connection_run(run_id, &safe_message)
+                conn.fail_workspace_connection_sync(run_id, &safe_message)
                     .await
             }
         };
@@ -523,7 +531,7 @@ impl ConnectionSyncService {
                 return;
             }
         };
-        if let Err(err) = conn.cancel_workspace_connection_run(run_id).await {
+        if let Err(err) = conn.cancel_workspace_connection_sync(run_id).await {
             tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record sync cancellation");
         }
     }

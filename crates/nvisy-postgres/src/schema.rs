@@ -146,10 +146,23 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::SyncMode;
+    use super::sql_types::SyncDeletionPolicy;
+
+    workspace_connection_schedule (connection_id) {
+        connection_id -> Uuid,
+        sync_mode -> SyncMode,
+        schedule_cron -> Nullable<Text>,
+        deletion_policy -> SyncDeletionPolicy,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::SyncTriggerType;
     use super::sql_types::SyncStatus;
 
-    workspace_connection_runs (id) {
+    workspace_connection_syncs (id) {
         id -> Uuid,
         connection_id -> Uuid,
         account_id -> Uuid,
@@ -166,8 +179,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::SyncMode;
-    use super::sql_types::SyncDeletionPolicy;
 
     workspace_connections (id) {
         id -> Uuid,
@@ -175,9 +186,6 @@ diesel::table! {
         account_id -> Uuid,
         display_name -> Text,
         provider -> Text,
-        sync_mode -> SyncMode,
-        schedule_cron -> Nullable<Text>,
-        deletion_policy -> SyncDeletionPolicy,
         encrypted_data -> Bytea,
         is_active -> Bool,
         metadata -> Jsonb,
@@ -390,8 +398,9 @@ diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
-diesel::joinable!(workspace_connection_runs -> accounts (account_id));
-diesel::joinable!(workspace_connection_runs -> workspace_connections (connection_id));
+diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
+diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
+diesel::joinable!(workspace_connection_syncs -> workspace_connection_schedule (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_files -> accounts (account_id));
@@ -417,7 +426,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_notifications,
     accounts,
     workspace_activities,
-    workspace_connection_runs,
+    workspace_connection_schedule,
+    workspace_connection_syncs,
     workspace_connections,
     workspace_files,
     workspace_invites,

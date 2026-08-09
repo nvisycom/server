@@ -2,19 +2,20 @@
 //!
 //! A sync moves a single object between a workspace's external object-store
 //! connection and the internal file store. Triggering a sync opens a
-//! [`WorkspaceConnectionRun`] and performs the transfer in the background;
+//! [`WorkspaceConnectionSync`] and performs the transfer in the background;
 //! clients poll the sync detail endpoint for completion.
 //!
-//! [`WorkspaceConnectionRun`]: nvisy_postgres::model::WorkspaceConnectionRun
+//! [`WorkspaceConnectionSync`]: nvisy_postgres::model::WorkspaceConnectionSync
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_object::providers::ConnectionConfig;
-use nvisy_postgres::model::{NewWorkspaceConnectionRun, WorkspaceConnection};
+use nvisy_object::providers::StorageConfig;
+use nvisy_postgres::model::{NewWorkspaceConnectionSync, WorkspaceConnection};
 use nvisy_postgres::query::{
-    WorkspaceConnectionRepository, WorkspaceConnectionRunRepository, WorkspaceFileRepository,
+    WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
+    WorkspaceConnectionSyncRepository, WorkspaceFileRepository,
 };
 use nvisy_postgres::types::{ConnectionId, SyncMode, SyncStatus, SyncTriggerType};
 use nvisy_postgres::{PgClient, PgConn};
@@ -30,7 +31,7 @@ use crate::handler::request::{
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{ConnectionSyncService, CryptoService, ServiceState};
+use crate::service::{ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connection_syncs";
@@ -74,16 +75,23 @@ async fn sync_connection(
 
     // Reject a new sync while one is already running for this connection.
     if let Some(latest) = conn
-        .find_latest_workspace_connection_run(connection.id)
+        .find_latest_workspace_connection_sync(connection.id)
         .await?
         && latest.is_in_progress()
     {
         return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
     }
 
+    // Only sync-capable connections have a schedule; its presence gates syncing
+    // and carries the sync direction.
+    let schedule = conn
+        .find_connection_schedule(connection.id)
+        .await?
+        .ok_or_else(|| ErrorKind::BadRequest.with_message("Connection does not support syncing"))?;
+
     // For export, resolve the target file + destination key up front so a bad
     // request fails fast (400/404) rather than as a failed run.
-    let export = match connection.sync_mode {
+    let export = match schedule.sync_mode {
         SyncMode::Export => {
             let file_id = request.file_id.ok_or_else(|| {
                 ErrorKind::BadRequest.with_message("fileId is required to export")
@@ -100,9 +108,16 @@ async fn sync_connection(
         SyncMode::Import => None,
     };
 
-    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+    // The stored config is a storage config for any sync-capable connection.
+    let config = match crypto.decrypt_json(workspace.id, &connection.encrypted_data)? {
+        ConnectionConfig::ObjectStore(config) => config,
+        ConnectionConfig::Inference(_) => {
+            return Err(ErrorKind::BadRequest.with_message("Connection does not support syncing"));
+        }
+    };
+    let config: StorageConfig = config;
 
-    let new_run = NewWorkspaceConnectionRun {
+    let new_run = NewWorkspaceConnectionSync {
         connection_id: connection.id,
         account_id: auth_state.account_id,
         trigger_type: Some(SyncTriggerType::Manual),
@@ -111,16 +126,24 @@ async fn sync_connection(
         attempt: Some(1),
         metadata: None,
     };
-    let run = conn.create_workspace_connection_run(new_run).await?;
+    let run = conn.create_workspace_connection_sync(new_run).await?;
 
-    // Perform the transfer in the background; the run tracks its outcome. The
+    // Perform the transfer in the background; the sync tracks its outcome. The
     // transfer runs in an inner task so that a panic is caught (via the join
-    // error) and recorded as a failed run rather than left stuck in `Running`.
+    // error) and recorded as a failed sync rather than left stuck in `Running`.
     let run_id = run.id;
     let account_id = auth_state.account_id;
+    let deletion_policy = schedule.deletion_policy;
     tokio::spawn(async move {
         connection_sync
-            .run_transfer(run_id, connection, config, account_id, export)
+            .run_transfer(
+                run_id,
+                connection,
+                config,
+                deletion_policy,
+                account_id,
+                export,
+            )
             .await;
     });
 
@@ -169,7 +192,7 @@ async fn list_connection_syncs(
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     let page = conn
-        .cursor_list_workspace_connection_runs(connection.id, pagination.into(), None)
+        .cursor_list_workspace_connection_syncs(connection.id, pagination.into(), None)
         .await?;
 
     let page = Page::from_cursor_page(page, |wc| {
@@ -216,7 +239,7 @@ async fn list_workspace_syncs(
         .await?;
 
     let page = conn
-        .cursor_list_workspace_connection_runs_all(
+        .cursor_list_workspace_connection_syncs_all(
             workspace.id,
             pagination.into(),
             query.status,
@@ -271,7 +294,7 @@ async fn read_connection_sync(
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     let run = conn
-        .find_connection_run_in_workspace(workspace.id, path_params.sync_id)
+        .find_connection_sync_in_workspace(workspace.id, path_params.sync_id)
         .await?
         .filter(|run| run.connection_id == connection.id)
         .ok_or_else(|| Error::not_found("connection_sync"))?;
@@ -328,13 +351,13 @@ async fn cancel_connection_sync(
 
     // Resolve the run within the workspace + connection before mutating it.
     let run = conn
-        .find_connection_run_in_workspace(workspace.id, path_params.sync_id)
+        .find_connection_sync_in_workspace(workspace.id, path_params.sync_id)
         .await?
         .filter(|run| run.connection_id == connection.id)
         .ok_or_else(|| Error::not_found("connection_sync"))?;
 
     let cancelled = conn
-        .cancel_workspace_connection_run(run.id)
+        .cancel_workspace_connection_sync(run.id)
         .await?
         .ok_or_else(|| {
             ErrorKind::Conflict.with_message("Sync is not in progress and cannot be cancelled")

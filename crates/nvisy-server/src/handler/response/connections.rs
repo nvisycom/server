@@ -1,12 +1,28 @@
 //! Connection response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::WorkspaceConnection;
+use nvisy_postgres::model::{WorkspaceConnection, WorkspaceConnectionSchedule};
 use nvisy_postgres::types::{ConnectionId, Handle, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{AccountRef, Page};
+
+/// A connection's sync configuration, present only for sync-capable connections.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSchedule {
+    /// Whether the connection imports data in or exports data out.
+    pub sync_mode: SyncMode,
+    /// Cron expression for scheduled imports, if configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_cron: Option<String>,
+    /// How an import reconciles files whose source object was deleted.
+    pub deletion_policy: SyncDeletionPolicy,
+    /// When the connection last synced successfully, if ever.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced: Option<Timestamp>,
+}
 
 /// Response type for a workspace connection.
 ///
@@ -23,20 +39,13 @@ pub struct Connection {
     pub created_by: AccountRef,
     /// Human-readable connection display name.
     pub display_name: String,
-    /// Object store provider (`s3`, `azure`, `gcs`).
+    /// Provider identifier (`s3`, `azure`, `gcs`, `openai`, `ollama`, ...).
     pub provider: String,
-    /// Whether the connection imports data in or exports data out.
-    pub sync_mode: SyncMode,
-    /// Cron expression for scheduled imports, if configured.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub schedule_cron: Option<String>,
-    /// How an import reconciles files whose source object was deleted.
-    pub deletion_policy: SyncDeletionPolicy,
-    /// Whether the connection is enabled for syncing.
+    /// Whether the connection is enabled.
     pub is_active: bool,
-    /// When the connection last synced successfully, if ever.
+    /// Sync configuration; present only for sync-capable connections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_synced: Option<Timestamp>,
+    pub sync: Option<SyncSchedule>,
     /// When the connection was created.
     pub created_at: Timestamp,
     /// When the connection was last updated.
@@ -81,19 +90,23 @@ impl Connection {
         connection: WorkspaceConnection,
         workspace_slug: Handle,
         created_by: AccountRef,
+        schedule: Option<WorkspaceConnectionSchedule>,
         last_synced: Option<Timestamp>,
     ) -> Self {
+        let sync = schedule.map(|schedule| SyncSchedule {
+            sync_mode: schedule.sync_mode,
+            schedule_cron: schedule.schedule_cron,
+            deletion_policy: schedule.deletion_policy,
+            last_synced,
+        });
         Self {
             id: ConnectionId::from_uuid(connection.id),
             workspace_slug,
             created_by,
             display_name: connection.display_name,
             provider: connection.provider,
-            sync_mode: connection.sync_mode,
-            schedule_cron: connection.schedule_cron,
-            deletion_policy: connection.deletion_policy,
             is_active: connection.is_active,
-            last_synced,
+            sync,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),
         }

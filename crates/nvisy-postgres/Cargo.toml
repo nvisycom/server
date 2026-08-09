@@ -40,6 +40,9 @@ tokio = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true }
 
+# Encoding
+base64 = { workspace = true, features = [] }
+
 # Relational database (Postgres)
 diesel = { workspace = true, features = ["postgres", "uuid", "ipnet-address", "serde_json", "numeric", "64-column-tables"] }
 diesel_migrations = { workspace = true, features = ["postgres"] }
@@ -56,16 +59,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 schemars = { workspace = true, features = [], optional = true }
 
+# Text processing
+slug = { workspace = true, features = [] }
+
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 derive_more = { workspace = true, features = ["deref", "deref_mut", "display", "as_ref", "into"] }
-
-# Encoding
-base64 = { workspace = true, features = [] }
-
-# Text processing
-slug = { workspace = true, features = [] }
 
 # Primitive datatypes
 jiff = { workspace = true, features = ["serde"] }

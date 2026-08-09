@@ -1,4 +1,4 @@
-//! Workspace connection runs repository for managing sync execution instances.
+//! Workspace connection syncs repository for managing sync execution instances.
 
 use std::future::Future;
 
@@ -7,44 +7,44 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{
-    NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
+    NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,
 };
 use crate::types::{AccountRefRow, CursorPage, CursorPagination, SyncStatus, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
-/// Repository for workspace connection run database operations.
+/// Repository for workspace connection sync database operations.
 ///
-/// Handles sync run lifecycle management including creation, status updates,
+/// Handles sync lifecycle management including creation, status updates,
 /// completion tracking, and queries.
-pub trait WorkspaceConnectionRunRepository {
-    /// Creates a new workspace connection run record.
-    fn create_workspace_connection_run(
+pub trait WorkspaceConnectionSyncRepository {
+    /// Creates a new workspace connection sync record.
+    fn create_workspace_connection_sync(
         &mut self,
-        new_run: NewWorkspaceConnectionRun,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
+        new_sync: NewWorkspaceConnectionSync,
+    ) -> impl Future<Output = PgResult<WorkspaceConnectionSync>> + Send;
 
-    /// Finds a workspace connection run by its unique identifier.
-    fn find_workspace_connection_run_by_id(
+    /// Finds a workspace connection sync by its unique identifier.
+    fn find_workspace_connection_sync_by_id(
         &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+        sync_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
-    /// Finds a run by ID, scoped to a workspace via its owning connection.
+    /// Finds a sync by ID, scoped to a workspace via its owning connection.
     ///
     /// Runs carry no workspace column, so this joins through the connection and
-    /// filters on its workspace. A run whose connection is in another workspace
+    /// filters on its workspace. A sync whose connection is in another workspace
     /// is not found.
-    fn find_connection_run_in_workspace(
+    fn find_connection_sync_in_workspace(
         &mut self,
         workspace_id: Uuid,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+        sync_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
     /// Returns the most recent successful sync completion time for each of the
     /// given connections.
     ///
     /// A connection's "last synced" instant is the `completed_at` of its latest
-    /// run with status `Completed`; connections that have never synced
+    /// sync with status `Completed`; connections that have never synced
     /// successfully are absent from the result. This is a single grouped query
     /// so a page of connections costs one round-trip, not one per connection.
     fn last_successful_sync_at(
@@ -54,132 +54,134 @@ pub trait WorkspaceConnectionRunRepository {
 
     /// Lists runs for a specific connection with cursor pagination, each paired
     /// with the account that triggered it.
-    fn cursor_list_workspace_connection_runs(
+    fn cursor_list_workspace_connection_syncs(
         &mut self,
         connection_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceConnectionRun>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceConnectionSync>>>> + Send;
 
     /// Lists all runs across a workspace's connections with cursor pagination.
     ///
     /// Runs carry no workspace reference of their own, so this joins through the
     /// owning connection and filters on its workspace. An optional status filter
     /// and a set of providers narrow the result; an empty `providers` slice means
-    /// no provider filter. Use [`cursor_list_workspace_connection_runs`] for a
+    /// no provider filter. Use [`cursor_list_workspace_connection_syncs`] for a
     /// single connection.
     ///
-    /// [`cursor_list_workspace_connection_runs`]: Self::cursor_list_workspace_connection_runs
-    fn cursor_list_workspace_connection_runs_all(
+    /// [`cursor_list_workspace_connection_syncs`]: Self::cursor_list_workspace_connection_syncs
+    fn cursor_list_workspace_connection_syncs_all(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
         providers: &[String],
-    ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspaceConnectionRun>, Uuid)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspaceConnectionSync>, Uuid)>>> + Send;
 
-    /// Gets the most recent run for a connection (its current sync state).
-    fn find_latest_workspace_connection_run(
+    /// Gets the most recent sync for a connection (its current sync state).
+    fn find_latest_workspace_connection_sync(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
-    /// Updates a workspace connection run with new data.
-    fn update_workspace_connection_run(
+    /// Updates a workspace connection sync with new data.
+    fn update_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
-        updates: UpdateWorkspaceConnectionRun,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionRun>> + Send;
+        sync_id: Uuid,
+        updates: UpdateWorkspaceConnectionSync,
+    ) -> impl Future<Output = PgResult<WorkspaceConnectionSync>> + Send;
 
-    /// Marks a run as completed successfully with its final record count, only if
+    /// Marks a sync as completed successfully with its final record count, only if
     /// it is still active.
     ///
-    /// Returns the updated run, or `None` if the run was already in a terminal
+    /// Returns the updated sync, or `None` if the sync was already in a terminal
     /// state (e.g. cancelled or reaped) and was therefore left unchanged. The
-    /// count is written under the same status guard so a terminal run's fields
+    /// count is written under the same status guard so a terminal sync's fields
     /// are never mutated after the fact.
-    fn complete_workspace_connection_run(
+    fn complete_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
+        sync_id: Uuid,
         records_synced: i64,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
-    /// Marks a run as failed, recording the error detail, only if it is still
-    /// active. Returns `None` if the run was already terminal.
-    fn fail_workspace_connection_run(
+    /// Marks a sync as failed, recording the error detail, only if it is still
+    /// active. Returns `None` if the sync was already terminal.
+    fn fail_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
+        sync_id: Uuid,
         error_message: &str,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
-    /// Marks a run as cancelled, only if it is still active. Returns `None` if
-    /// the run was already terminal and was therefore left unchanged.
-    fn cancel_workspace_connection_run(
+    /// Marks a sync as cancelled, only if it is still active. Returns `None` if
+    /// the sync was already terminal and was therefore left unchanged.
+    fn cancel_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionRun>>> + Send;
+        sync_id: Uuid,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
     /// Fails all `Running` runs that started before `cutoff`, returning the
     /// number reaped. Recovers runs orphaned by a crash mid-sync.
-    fn fail_stale_running_runs(
+    fn fail_stale_running_syncs(
         &mut self,
         cutoff: jiff_diesel::Timestamp,
     ) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
-impl WorkspaceConnectionRunRepository for PgConnection {
-    async fn create_workspace_connection_run(
+impl WorkspaceConnectionSyncRepository for PgConnection {
+    async fn create_workspace_connection_sync(
         &mut self,
-        new_run: NewWorkspaceConnectionRun,
-    ) -> PgResult<WorkspaceConnectionRun> {
-        use schema::workspace_connection_runs;
+        new_sync: NewWorkspaceConnectionSync,
+    ) -> PgResult<WorkspaceConnectionSync> {
+        use schema::workspace_connection_syncs;
 
-        let run = diesel::insert_into(workspace_connection_runs::table)
-            .values(&new_run)
-            .returning(WorkspaceConnectionRun::as_returning())
+        let sync = diesel::insert_into(workspace_connection_syncs::table)
+            .values(&new_sync)
+            .returning(WorkspaceConnectionSync::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn find_workspace_connection_run_by_id(
+    async fn find_workspace_connection_sync_by_id(
         &mut self,
-        run_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
-        use schema::workspace_connection_runs::{self, dsl};
+        sync_id: Uuid,
+    ) -> PgResult<Option<WorkspaceConnectionSync>> {
+        use schema::workspace_connection_syncs::{self, dsl};
 
-        let run = workspace_connection_runs::table
-            .filter(dsl::id.eq(run_id))
-            .select(WorkspaceConnectionRun::as_select())
+        let sync = workspace_connection_syncs::table
+            .filter(dsl::id.eq(sync_id))
+            .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn find_connection_run_in_workspace(
+    async fn find_connection_sync_in_workspace(
         &mut self,
         workspace_id: Uuid,
-        run_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
-        use schema::workspace_connection_runs::dsl as runs;
+        sync_id: Uuid,
+    ) -> PgResult<Option<WorkspaceConnectionSync>> {
+        use schema::workspace_connection_syncs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
 
-        let run = runs::workspace_connection_runs
-            .inner_join(connections::workspace_connections)
-            .filter(runs::id.eq(run_id))
+        let sync = runs::workspace_connection_syncs
+            .inner_join(
+                connections::workspace_connections.on(connections::id.eq(runs::connection_id)),
+            )
+            .filter(runs::id.eq(sync_id))
             .filter(connections::workspace_id.eq(workspace_id))
-            .select(WorkspaceConnectionRun::as_select())
+            .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
     async fn last_successful_sync_at(
@@ -187,16 +189,16 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         connection_ids: &[Uuid],
     ) -> PgResult<Vec<(Uuid, jiff_diesel::Timestamp)>> {
         use diesel::dsl::max;
-        use schema::workspace_connection_runs::{self, dsl};
+        use schema::workspace_connection_syncs::{self, dsl};
 
         if connection_ids.is_empty() {
             return Ok(Vec::new());
         }
 
         // Only successful runs count toward "last synced"; a failed or cancelled
-        // run does not move the timestamp. completed_at is non-null for any run
+        // sync does not move the timestamp. completed_at is non-null for any sync
         // in a terminal state, so the grouped MAX is present for every group.
-        workspace_connection_runs::table
+        workspace_connection_syncs::table
             .filter(dsl::connection_id.eq_any(connection_ids))
             .filter(dsl::status.eq(SyncStatus::Completed))
             .group_by(dsl::connection_id)
@@ -206,16 +208,16 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn cursor_list_workspace_connection_runs(
+    async fn cursor_list_workspace_connection_syncs(
         &mut self,
         connection_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceConnectionRun>>> {
-        use schema::workspace_connection_runs::dsl;
-        use schema::{accounts, workspace_connection_runs};
+    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceConnectionSync>>> {
+        use schema::workspace_connection_syncs::dsl;
+        use schema::{accounts, workspace_connection_syncs};
 
-        let mut base_query = workspace_connection_runs::table
+        let mut base_query = workspace_connection_syncs::table
             .filter(dsl::connection_id.eq(connection_id))
             .into_boxed();
 
@@ -235,7 +237,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             None
         };
 
-        let mut query = workspace_connection_runs::table
+        let mut query = workspace_connection_syncs::table
             .inner_join(accounts::table)
             .filter(dsl::connection_id.eq(connection_id))
             .into_boxed();
@@ -246,7 +248,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
 
-        let rows: Vec<(WorkspaceConnectionRun, AccountRefRow)> =
+        let rows: Vec<(WorkspaceConnectionSync, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -257,7 +259,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                             .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
                     )
                     .select((
-                        WorkspaceConnectionRun::as_select(),
+                        WorkspaceConnectionSync::as_select(),
                         (
                             accounts::username,
                             accounts::display_name,
@@ -272,7 +274,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             } else {
                 query
                     .select((
-                        WorkspaceConnectionRun::as_select(),
+                        WorkspaceConnectionSync::as_select(),
                         (
                             accounts::username,
                             accounts::display_name,
@@ -286,7 +288,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithAccountRef<WorkspaceConnectionRun>> = rows
+        let items: Vec<WithAccountRef<WorkspaceConnectionSync>> = rows
             .into_iter()
             .map(|(item, account)| WithAccountRef { item, account })
             .collect();
@@ -296,24 +298,26 @@ impl WorkspaceConnectionRunRepository for PgConnection {
         }))
     }
 
-    async fn cursor_list_workspace_connection_runs_all(
+    async fn cursor_list_workspace_connection_syncs_all(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
         status_filter: Option<SyncStatus>,
         providers: &[String],
-    ) -> PgResult<CursorPage<(WithAccountRef<WorkspaceConnectionRun>, Uuid)>> {
+    ) -> PgResult<CursorPage<(WithAccountRef<WorkspaceConnectionSync>, Uuid)>> {
         use schema::accounts::dsl as accounts;
-        use schema::workspace_connection_runs::dsl as runs;
+        use schema::workspace_connection_syncs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
 
         // Runs have no workspace column; scope them through the owning
         // connection. The owning connection's id and the triggering account are
-        // selected alongside each run so the cross-connection response can name
-        // its connection and trigger (the run is addressed by its own id).
+        // selected alongside each sync so the cross-connection response can name
+        // its connection and trigger (the sync is addressed by its own id).
         let scoped = || {
-            let mut query = runs::workspace_connection_runs
-                .inner_join(connections::workspace_connections)
+            let mut query = runs::workspace_connection_syncs
+                .inner_join(
+                    connections::workspace_connections.on(connections::id.eq(runs::connection_id)),
+                )
                 .inner_join(accounts::accounts)
                 .filter(connections::workspace_id.eq(workspace_id))
                 .into_boxed();
@@ -340,7 +344,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
 
         let limit = pagination.fetch_limit();
         let selection = (
-            WorkspaceConnectionRun::as_select(),
+            WorkspaceConnectionSync::as_select(),
             connections::id,
             (
                 accounts::username,
@@ -349,7 +353,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             ),
         );
 
-        let rows: Vec<(WorkspaceConnectionRun, Uuid, AccountRefRow)> =
+        let rows: Vec<(WorkspaceConnectionSync, Uuid, AccountRefRow)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -375,7 +379,7 @@ impl WorkspaceConnectionRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<(WithAccountRef<WorkspaceConnectionRun>, Uuid)> = rows
+        let items: Vec<(WithAccountRef<WorkspaceConnectionSync>, Uuid)> = rows
             .into_iter()
             .map(|(item, connection_id, account)| (WithAccountRef { item, account }, connection_id))
             .collect();
@@ -384,60 +388,60 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(wc, _): &(WithAccountRef<WorkspaceConnectionRun>, Uuid)| {
+            |(wc, _): &(WithAccountRef<WorkspaceConnectionSync>, Uuid)| {
                 (wc.item.started_at.into(), wc.item.id)
             },
         ))
     }
 
-    async fn find_latest_workspace_connection_run(
+    async fn find_latest_workspace_connection_sync(
         &mut self,
         connection_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
-        use schema::workspace_connection_runs::{self, dsl};
+    ) -> PgResult<Option<WorkspaceConnectionSync>> {
+        use schema::workspace_connection_syncs::{self, dsl};
 
-        let run = workspace_connection_runs::table
+        let sync = workspace_connection_syncs::table
             .filter(dsl::connection_id.eq(connection_id))
             .order(dsl::started_at.desc())
-            .select(WorkspaceConnectionRun::as_select())
+            .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await
             .optional()
             .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn update_workspace_connection_run(
+    async fn update_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
-        updates: UpdateWorkspaceConnectionRun,
-    ) -> PgResult<WorkspaceConnectionRun> {
-        use schema::workspace_connection_runs::{self, dsl};
+        sync_id: Uuid,
+        updates: UpdateWorkspaceConnectionSync,
+    ) -> PgResult<WorkspaceConnectionSync> {
+        use schema::workspace_connection_syncs::{self, dsl};
 
-        let run = diesel::update(workspace_connection_runs::table.filter(dsl::id.eq(run_id)))
+        let sync = diesel::update(workspace_connection_syncs::table.filter(dsl::id.eq(sync_id)))
             .set(&updates)
-            .returning(WorkspaceConnectionRun::as_returning())
+            .returning(WorkspaceConnectionSync::as_returning())
             .get_result(self)
             .await
             .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn complete_workspace_connection_run(
+    async fn complete_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
+        sync_id: Uuid,
         records_synced: i64,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
+    ) -> PgResult<Option<WorkspaceConnectionSync>> {
         use diesel::dsl::now;
-        use schema::workspace_connection_runs::{self, dsl};
+        use schema::workspace_connection_syncs::{self, dsl};
 
-        // Only transition from an active state, so a run already cancelled/reaped
+        // Only transition from an active state, so a sync already cancelled/reaped
         // is not resurrected as completed and its record count is not rewritten.
-        let run = diesel::update(
-            workspace_connection_runs::table
-                .filter(dsl::id.eq(run_id))
+        let sync = diesel::update(
+            workspace_connection_syncs::table
+                .filter(dsl::id.eq(sync_id))
                 .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
         )
         .set((
@@ -445,28 +449,28 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             dsl::records_synced.eq(records_synced),
             dsl::completed_at.eq(now),
         ))
-        .returning(WorkspaceConnectionRun::as_returning())
+        .returning(WorkspaceConnectionSync::as_returning())
         .get_result(self)
         .await
         .optional()
         .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn fail_workspace_connection_run(
+    async fn fail_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
+        sync_id: Uuid,
         error_message: &str,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
+    ) -> PgResult<Option<WorkspaceConnectionSync>> {
         use diesel::dsl::now;
-        use schema::workspace_connection_runs::{self, dsl};
+        use schema::workspace_connection_syncs::{self, dsl};
 
-        // Only transition from an active state, so a terminal run is not
+        // Only transition from an active state, so a terminal sync is not
         // overwritten.
-        let run = diesel::update(
-            workspace_connection_runs::table
-                .filter(dsl::id.eq(run_id))
+        let sync = diesel::update(
+            workspace_connection_syncs::table
+                .filter(dsl::id.eq(sync_id))
                 .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
         )
         .set((
@@ -474,48 +478,51 @@ impl WorkspaceConnectionRunRepository for PgConnection {
             dsl::error_message.eq(error_message),
             dsl::completed_at.eq(now),
         ))
-        .returning(WorkspaceConnectionRun::as_returning())
+        .returning(WorkspaceConnectionSync::as_returning())
         .get_result(self)
         .await
         .optional()
         .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn cancel_workspace_connection_run(
+    async fn cancel_workspace_connection_sync(
         &mut self,
-        run_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnectionRun>> {
+        sync_id: Uuid,
+    ) -> PgResult<Option<WorkspaceConnectionSync>> {
         use diesel::dsl::now;
-        use schema::workspace_connection_runs::{self, dsl};
+        use schema::workspace_connection_syncs::{self, dsl};
 
-        // Only transition from an active state, so a run that already completed,
+        // Only transition from an active state, so a sync that already completed,
         // failed, or was reaped is not overwritten as cancelled.
-        let run = diesel::update(
-            workspace_connection_runs::table
-                .filter(dsl::id.eq(run_id))
+        let sync = diesel::update(
+            workspace_connection_syncs::table
+                .filter(dsl::id.eq(sync_id))
                 .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
         )
         .set((
             dsl::status.eq(SyncStatus::Cancelled),
             dsl::completed_at.eq(now),
         ))
-        .returning(WorkspaceConnectionRun::as_returning())
+        .returning(WorkspaceConnectionSync::as_returning())
         .get_result(self)
         .await
         .optional()
         .map_err(PgError::from)?;
 
-        Ok(run)
+        Ok(sync)
     }
 
-    async fn fail_stale_running_runs(&mut self, cutoff: jiff_diesel::Timestamp) -> PgResult<usize> {
+    async fn fail_stale_running_syncs(
+        &mut self,
+        cutoff: jiff_diesel::Timestamp,
+    ) -> PgResult<usize> {
         use diesel::dsl::now;
-        use schema::workspace_connection_runs::{self, dsl};
+        use schema::workspace_connection_syncs::{self, dsl};
 
         let reaped = diesel::update(
-            workspace_connection_runs::table
+            workspace_connection_syncs::table
                 .filter(dsl::status.eq(SyncStatus::Running))
                 .filter(dsl::started_at.lt(cutoff)),
         )

@@ -7,9 +7,11 @@
 //!
 //! # Encryption
 //!
-//! Connection data (credentials plus sync state) is encrypted using
-//! workspace-derived keys (HKDF-SHA256 with XChaCha20-Poly1305). The encrypted
-//! data is stored in the database and never exposed through the API.
+//! A connection's provider config (credentials plus provider-specific settings)
+//! is encrypted using workspace-derived keys (HKDF-SHA256 with
+//! XChaCha20-Poly1305). The encrypted data is stored in the database and never
+//! exposed through the API. Sync state lives in separate tables, not the
+//! encrypted blob.
 
 use std::collections::HashMap;
 
@@ -17,27 +19,32 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_object::providers::ConnectionConfig;
+use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
-    NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
+    NewWorkspaceConnection, NewWorkspaceConnectionSchedule, UpdateWorkspaceConnection,
+    WorkspaceConnection, WorkspaceConnectionSchedule,
 };
-use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
+use nvisy_postgres::query::{
+    WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
+    WorkspaceConnectionSyncRepository,
+};
 use nvisy_postgres::types::{ConnectionId, WithAccountRef};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{
-    ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, UpdateConnection,
+    ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, SyncScheduleInput,
+    UpdateConnection,
 };
 use crate::handler::response::{
     Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{CryptoService, ObjectService, ServiceState, is_valid_cron};
+use crate::service::{ConnectionConfig, CryptoService, ObjectService, ServiceState, is_valid_cron};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -68,17 +75,15 @@ async fn create_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    if let Some(cron) = &request.schedule_cron {
-        if !is_valid_cron(cron) {
-            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+    // Sync config applies only to sync-capable providers. Validate the pairing
+    // before any write so a mismatch fails fast.
+    let supports_sync = request.config.supports_sync();
+    if let Some(sync) = &request.sync {
+        if !supports_sync {
+            return Err(ErrorKind::BadRequest
+                .with_message("This provider does not support sync configuration"));
         }
-        // Scheduling is import-only; reject an export connection with a cron up
-        // front rather than surfacing the DB CHECK as a generic error.
-        if request.sync_mode.is_export() {
-            return Err(
-                ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
-            );
-        }
+        validate_sync_input(sync)?;
     }
 
     // The provider column is derived from the typed config so the two can never
@@ -91,15 +96,35 @@ async fn create_connection(
         account_id: auth_state.account_id,
         display_name: request.display_name,
         provider,
-        sync_mode: Some(request.sync_mode),
-        schedule_cron: request.schedule_cron,
-        deletion_policy: Some(request.deletion_policy),
         encrypted_data,
         is_active: request.is_active,
         metadata: None,
     };
 
-    let connection = conn.create_workspace_connection(new_connection).await?;
+    // Insert the connection and (if sync-capable) its schedule atomically, so a
+    // partial write can never leave a sync-capable connection without a schedule.
+    let sync = request.sync.unwrap_or_default();
+    let (connection, schedule) = conn
+        .transaction(async |conn| {
+            let connection = conn.create_workspace_connection(new_connection).await?;
+            // A sync-capable connection gets a schedule row (its presence marks
+            // the capability).
+            let schedule = if supports_sync {
+                Some(
+                    conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
+                        connection_id: connection.id,
+                        sync_mode: Some(sync.sync_mode),
+                        schedule_cron: sync.schedule_cron,
+                        deletion_policy: Some(sync.deletion_policy),
+                    })
+                    .await?,
+                )
+            } else {
+                None
+            };
+            Ok::<_, PgError>((connection, schedule))
+        })
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -118,6 +143,7 @@ async fn create_connection(
             connection,
             workspace.slug,
             creator,
+            schedule,
             None,
         )),
     ))
@@ -175,6 +201,16 @@ async fn list_connections(
         .map(|(id, ts)| (id, ts.into()))
         .collect();
 
+    // One query resolves the sync schedules for the whole page (present only for
+    // sync-capable connections), so the list carries the same sync info as the
+    // detail view without a per-row round-trip.
+    let mut schedules: HashMap<Uuid, _> = conn
+        .find_schedules(&ids)
+        .await?
+        .into_iter()
+        .map(|schedule| (schedule.connection_id, schedule))
+        .collect();
+
     tracing::debug!(
         target: TRACING_TARGET,
         connection_count = page.items.len(),
@@ -185,7 +221,14 @@ async fn list_connections(
         StatusCode::OK,
         Json(ConnectionsPage::from_cursor_page(page, |wc| {
             let synced = last_synced.get(&wc.item.id).copied();
-            Connection::from_model(wc.item, workspace.slug.clone(), wc.account.into(), synced)
+            let schedule = schedules.remove(&wc.item.id);
+            Connection::from_model(
+                wc.item,
+                workspace.slug.clone(),
+                wc.account.into(),
+                schedule,
+                synced,
+            )
         })),
     ))
 }
@@ -227,7 +270,7 @@ async fn read_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
         .await?;
 
-    let (found, last_synced) =
+    let (found, schedule, last_synced) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
@@ -238,6 +281,7 @@ async fn read_connection(
             found.item,
             workspace.slug,
             found.account.into(),
+            schedule,
             last_synced,
         )),
     ))
@@ -284,12 +328,19 @@ async fn update_connection(
         .0
         .item;
 
-    // Only a newly-set cron is validated; `Some(None)` clears it and `None`
-    // leaves it unchanged.
-    if let Some(Some(cron)) = &request.schedule_cron
-        && !is_valid_cron(cron)
-    {
-        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+    // Sync config only applies to sync-capable connections. A connection's
+    // capability is fixed by its provider, which the config replacement (if any)
+    // must preserve.
+    let supports_sync = match &request.config {
+        Some(config) => config.supports_sync(),
+        None => conn.find_connection_schedule(existing.id).await?.is_some(),
+    };
+    if let Some(sync) = &request.sync {
+        if !supports_sync {
+            return Err(ErrorKind::BadRequest
+                .with_message("This provider does not support sync configuration"));
+        }
+        validate_sync_input(sync)?;
     }
 
     // Replacing the config re-derives the provider column and re-encrypts the
@@ -305,18 +356,32 @@ async fn update_connection(
     let update_data = UpdateWorkspaceConnection {
         display_name: request.display_name,
         provider,
-        sync_mode: request.sync_mode,
-        schedule_cron: request.schedule_cron,
-        deletion_policy: request.deletion_policy,
         is_active: request.is_active,
         encrypted_data,
         ..Default::default()
     };
 
-    conn.update_workspace_connection(existing.id, update_data)
-        .await?;
+    // Update the connection and its schedule atomically so a partial write can
+    // never leave a sync-capable connection without its schedule.
+    let connection_id = existing.id;
+    let sync = request.sync;
+    conn.transaction(async |conn| {
+        conn.update_workspace_connection(connection_id, update_data)
+            .await?;
+        if let Some(sync) = sync {
+            conn.upsert_connection_schedule(NewWorkspaceConnectionSchedule {
+                connection_id,
+                sync_mode: Some(sync.sync_mode),
+                schedule_cron: sync.schedule_cron,
+                deletion_policy: Some(sync.deletion_policy),
+            })
+            .await?;
+        }
+        Ok::<(), PgError>(())
+    })
+    .await?;
 
-    let (found, last_synced) =
+    let (found, schedule, last_synced) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
@@ -327,6 +392,7 @@ async fn update_connection(
             found.item,
             workspace.slug,
             found.account.into(),
+            schedule,
             last_synced,
         )),
     ))
@@ -426,23 +492,43 @@ async fn verify_connection(
 
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
 
-    let verification = match object.connect(&config).await {
-        Ok(client) => match client.verify_reachable().await {
+    // Verification is capability-specific: object stores check reachability;
+    // inference providers verify their credentials.
+    let verification = match config {
+        ConnectionConfig::ObjectStore(config) => match object.connect(&config).await {
+            Ok(client) => match client.verify_reachable().await {
+                Ok(()) => {
+                    tracing::info!(target: TRACING_TARGET, "Connection verified");
+                    ConnectionVerification::reachable()
+                }
+                Err(err) => {
+                    // Log the full error, but return only a safe kind-based reason
+                    // so backend URLs/bucket names are not exposed to the client.
+                    tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
+                    ConnectionVerification::unreachable(err.kind().reason())
+                }
+            },
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
+                ConnectionVerification::unreachable(err.kind().reason())
+            }
+        },
+        ConnectionConfig::Inference(config) => match config.validate().await {
             Ok(()) => {
                 tracing::info!(target: TRACING_TARGET, "Connection verified");
                 ConnectionVerification::reachable()
             }
             Err(err) => {
-                // Log the full error, but return only a safe kind-based reason so
-                // backend URLs/bucket names are not exposed to the client.
-                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
-                ConnectionVerification::unreachable(err.kind().reason())
+                // Log the full error, but return only a safe, kind-based reason
+                // so provider endpoints/keys are not echoed to the client.
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection verification failed");
+                let reason = match err {
+                    InferenceError::Build(_) => "invalid configuration",
+                    _ => "credentials rejected or provider unreachable",
+                };
+                ConnectionVerification::unreachable(reason)
             }
         },
-        Err(err) => {
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
-            ConnectionVerification::unreachable(err.kind().reason())
-        }
     };
 
     Ok((StatusCode::OK, Json(verification)))
@@ -457,24 +543,47 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Validates a sync-schedule input: a valid cron and, since scheduling is
+/// import-only, no cron on an export connection.
+fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
+    if let Some(cron) = &sync.schedule_cron {
+        if !is_valid_cron(cron) {
+            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+        }
+        if sync.sync_mode.is_export() {
+            return Err(
+                ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Finds a connection within a workspace by id, with its creator, or returns a
 /// NotFound error.
+type FoundConnection = (
+    WithAccountRef<WorkspaceConnection>,
+    Option<WorkspaceConnectionSchedule>,
+    Option<jiff::Timestamp>,
+);
+
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
     connection_id: ConnectionId,
-) -> Result<(WithAccountRef<WorkspaceConnection>, Option<jiff::Timestamp>)> {
+) -> Result<FoundConnection> {
     let found = conn
         .find_connection_in_workspace_with_creator(workspace_id, connection_id.as_uuid())
         .await?
         .ok_or_else(|| Error::not_found("connection"))?;
+    let schedule = conn.find_connection_schedule(found.item.id).await?;
     let last_synced = conn
         .last_successful_sync_at(&[found.item.id])
         .await?
         .into_iter()
         .next()
         .map(|(_, ts)| ts.into());
-    Ok((found, last_synced))
+    Ok((found, schedule, last_synced))
 }
 
 /// Returns routes for workspace connection management.

@@ -6,4 +6,4 @@ pub mod client;
 mod error;
 pub mod providers;
 
-pub use error::{Error, ErrorKind};
+pub use error::Error;

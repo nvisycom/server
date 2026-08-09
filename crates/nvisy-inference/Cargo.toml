@@ -1,9 +1,9 @@
 [package]
-name = "nvisy-object"
-description = "Object store providers and streams (S3, Azure, GCS) for Nvisy"
+name = "nvisy-inference"
+description = "LLM inference providers (OpenAI, Ollama, Anthropic) for Nvisy"
 readme = "./README.md"
-keywords = ["nvisy", "object-store", "s3", "storage"]
-categories = ["filesystem"]
+keywords = ["nvisy", "llm", "openai", "ollama", "anthropic"]
+categories = ["api-bindings"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -25,25 +25,22 @@ schema = ["dep:schemars"]
 
 [dependencies]
 # Async runtime
-tokio = { workspace = true, features = ["sync"] }
 futures = { workspace = true, features = [] }
 
-# Cloud object storage
-object_store = { workspace = true, features = ["aws", "azure", "gcp"] }
+# LLM framework: provider clients + the classic Agent runtime
+rig = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = [] }
 schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & utilities
+thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["deref"] }
 
-# Primitive datatypes
-bytes = { workspace = true, features = [] }
-
 [dev-dependencies]
+serde_json = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }

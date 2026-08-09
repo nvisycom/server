@@ -1,10 +1,11 @@
 //! Connection request types.
 
-use nvisy_object::providers::ConnectionConfig;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+
+use crate::service::ConnectionConfig;
 
 /// Path parameters for connection operations.
 ///
@@ -20,13 +21,13 @@ pub struct ConnectionPathParams {
     pub connection_id: ConnectionId,
 }
 
-/// Request payload for creating a new workspace connection.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+/// Sync configuration for a sync-capable connection (object stores).
+///
+/// Only meaningful for connections whose provider supports syncing; omitted for
+/// connections that do not (e.g. LLM inference).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateConnection {
-    /// Human-readable connection display name.
-    #[validate(length(min = 1, max = 255))]
-    pub display_name: String,
+pub struct SyncScheduleInput {
     /// Whether the connection imports data in or exports data out.
     #[serde(default)]
     pub sync_mode: SyncMode,
@@ -36,13 +37,27 @@ pub struct CreateConnection {
     /// How an import reconciles files whose source object was deleted.
     #[serde(default)]
     pub deletion_policy: SyncDeletionPolicy,
-    /// Whether the connection is enabled for syncing. Omit to default to active;
-    /// set `false` to create it disabled.
+}
+
+/// Request payload for creating a new workspace connection.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateConnection {
+    /// Human-readable connection display name.
+    #[validate(length(min = 1, max = 255))]
+    pub display_name: String,
+    /// Whether the connection is enabled. Omit to default to active; set `false`
+    /// to create it disabled.
     pub is_active: Option<bool>,
-    /// Typed provider configuration (provider tag + its credentials + optional
-    /// root path), encrypted at rest. The `provider` tag selects which
-    /// credential shape is required.
+    /// Typed provider configuration (provider tag + its credentials), encrypted
+    /// at rest. The `provider` tag selects which credential shape is required and
+    /// which capability the connection has.
     pub config: ConnectionConfig,
+    /// Sync configuration. Applies only to sync-capable providers (object
+    /// stores); rejected for others. Omit for manual-only defaults.
+    #[validate(nested)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<SyncScheduleInput>,
 }
 
 /// Request payload for updating an existing workspace connection.
@@ -52,21 +67,17 @@ pub struct UpdateConnection {
     /// Human-readable connection display name.
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
-    /// Whether the connection imports data in or exports data out.
-    pub sync_mode: Option<SyncMode>,
-    /// Cron expression for scheduled imports. Omit to leave unchanged; send
-    /// `null` to clear it (make the connection manual-only).
-    #[validate(length(min = 9, max = 100))]
-    pub schedule_cron: Option<Option<String>>,
-    /// How an import reconciles files whose source object was deleted.
-    pub deletion_policy: Option<SyncDeletionPolicy>,
-    /// Whether the connection is enabled for syncing. `false` disables it
-    /// (pausing scheduled syncs and rejecting manual ones); omit to leave
-    /// unchanged.
+    /// Whether the connection is enabled. `false` disables it (pausing scheduled
+    /// syncs and rejecting manual ones); omit to leave unchanged.
     pub is_active: Option<bool>,
     /// Typed provider configuration. If provided, fully replaces the stored
     /// config (and, with it, the provider). Omit to leave it unchanged.
     pub config: Option<ConnectionConfig>,
+    /// Sync configuration. Applies only to sync-capable providers. Omit to leave
+    /// unchanged.
+    #[validate(nested)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<SyncScheduleInput>,
 }
 
 /// Query parameters for listing connections.

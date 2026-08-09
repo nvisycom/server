@@ -5,7 +5,7 @@
 //! service turns into a connected [`ObjectStoreClient`] at runtime.
 
 use nvisy_object::client::ObjectStoreClient;
-use nvisy_object::providers::{self, ConnectionConfig};
+use nvisy_object::providers::{self, StorageConfig};
 
 mod bridge;
 mod schedule;
@@ -33,7 +33,7 @@ impl ObjectService {
         Self
     }
 
-    /// Connects to the object store described by the typed [`ConnectionConfig`].
+    /// Connects to the object store described by the typed `StorageConfig`.
     ///
     /// # Errors
     ///
@@ -41,8 +41,8 @@ impl ObjectService {
     #[tracing::instrument(name = "object.connect", skip_all, fields(provider = %config.provider_id()))]
     pub async fn connect(
         &self,
-        config: &ConnectionConfig,
-    ) -> Result<ObjectStoreClient, nvisy_object::error::Error> {
+        config: &StorageConfig,
+    ) -> Result<ObjectStoreClient, nvisy_object::Error> {
         tracing::debug!(target: TRACING_TARGET, "Connecting to object store");
         providers::connect(config).await
     }
