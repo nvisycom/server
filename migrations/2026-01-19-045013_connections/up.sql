@@ -1,6 +1,13 @@
 -- Connections: encrypted provider connections scoped to workspaces.
+--
+-- A connection is a generic, capability-agnostic credential holder: any
+-- external provider (object store, LLM, ...) is a row here, distinguished only
+-- by its `provider` and the shape of its encrypted config. Capabilities are
+-- normalized into satellite tables — a connection that can sync has a
+-- `workspace_connection_schedule` row and accrues `workspace_connection_syncs`
+-- executions; a connection without those is just stored credentials.
 
--- Sync status enum for connection sync runs
+-- Sync status enum for connection sync executions
 CREATE TYPE SYNC_STATUS AS ENUM (
     'pending',      -- Sync is queued
     'running',      -- Sync is in progress
@@ -10,9 +17,9 @@ CREATE TYPE SYNC_STATUS AS ENUM (
 );
 
 COMMENT ON TYPE SYNC_STATUS IS
-    'Execution status for connection sync runs.';
+    'Execution status for connection syncs.';
 
--- How a connection sync run was initiated
+-- How a connection sync was initiated
 CREATE TYPE SYNC_TRIGGER_TYPE AS ENUM (
     'manual',       -- Manually triggered by user
     'scheduled',    -- Triggered by schedule
@@ -20,7 +27,7 @@ CREATE TYPE SYNC_TRIGGER_TYPE AS ENUM (
 );
 
 COMMENT ON TYPE SYNC_TRIGGER_TYPE IS
-    'How a connection sync run was initiated.';
+    'How a connection sync was initiated.';
 
 -- Whether a connection imports data in or exports data out
 CREATE TYPE SYNC_MODE AS ENUM (
@@ -40,7 +47,7 @@ CREATE TYPE SYNC_DELETION_POLICY AS ENUM (
 COMMENT ON TYPE SYNC_DELETION_POLICY IS
     'How an import reconciles files whose source object has been deleted.';
 
--- Workspace connections table (encrypted provider credentials)
+-- Workspace connections table (generic encrypted provider credentials)
 CREATE TABLE workspace_connections (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -56,28 +63,17 @@ CREATE TABLE workspace_connections (
     display_name    TEXT            NOT NULL,
     provider        TEXT            NOT NULL,
 
-    -- Sync configuration
-    sync_mode       SYNC_MODE               NOT NULL DEFAULT 'import',
-    -- Cron expression for scheduled syncs; NULL means manual-only.
-    schedule_cron   TEXT                    DEFAULT NULL,
-    -- What an import does when a source object it previously imported is gone.
-    deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore',
-
     CONSTRAINT workspace_connections_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
-    CONSTRAINT workspace_connections_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
-    -- Scheduled syncs are import-only for now; export is manual.
-    CONSTRAINT workspace_connections_schedule_import_only CHECK (schedule_cron IS NULL OR sync_mode = 'import'),
 
-    -- Encrypted connection credentials (XChaCha20-Poly1305 encrypted JSON)
-    -- Contains the provider type, credentials, and optional root path.
+    -- Encrypted connection config (XChaCha20-Poly1305 encrypted JSON): the
+    -- provider tag, credentials, and any provider-specific settings.
     encrypted_data  BYTEA           NOT NULL,
 
     CONSTRAINT workspace_connections_data_size CHECK (length(encrypted_data) BETWEEN 1 AND 65536),
 
-    -- Whether the connection is enabled for syncing. Current sync state and
-    -- last-sync time are not stored here; they derive from the connection's
-    -- sync runs (see workspace_connection_runs and the sync-state view).
+    -- Whether the connection is enabled. For sync-capable connections this gates
+    -- scheduled and manual syncs.
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
 
     -- Metadata (non-encrypted, for filtering/display)
@@ -116,115 +112,124 @@ CREATE INDEX workspace_connections_active_idx
 
 -- Comments
 COMMENT ON TABLE workspace_connections IS
-    'Encrypted provider connections (credentials) scoped to workspaces.';
+    'Generic encrypted provider connections scoped to workspaces. Capabilities live in satellite tables.';
 
 COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
 COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
-COMMENT ON COLUMN workspace_connections.provider IS 'Object store provider (s3, azure, gcs)';
-COMMENT ON COLUMN workspace_connections.sync_mode IS 'Whether the connection imports data in or exports data out';
-COMMENT ON COLUMN workspace_connections.schedule_cron IS 'Cron expression for scheduled imports; NULL means manual-only';
-COMMENT ON COLUMN workspace_connections.deletion_policy IS 'How an import reconciles files whose source object was deleted';
-COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON with provider credentials';
-COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled for syncing';
+COMMENT ON COLUMN workspace_connections.provider IS 'Provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic)';
+COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON: provider config + credentials';
+COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_connections.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft deletion timestamp';
 
--- Connection sync runs table (one row per sync execution)
-CREATE TABLE workspace_connection_runs (
+-- Sync schedule (satellite): the sync capability's configuration. Present only
+-- for connections that synchronize (e.g. object stores); its presence is what
+-- makes a connection sync-capable.
+CREATE TABLE workspace_connection_schedule (
+    -- One schedule per connection; the connection id is the primary key.
+    connection_id   UUID PRIMARY KEY REFERENCES workspace_connections (id) ON DELETE CASCADE,
+
+    -- Whether the connection imports data in or exports data out.
+    sync_mode       SYNC_MODE               NOT NULL DEFAULT 'import',
+
+    -- Cron expression for scheduled syncs; NULL means manual-only.
+    schedule_cron   TEXT                    DEFAULT NULL,
+
+    -- What an import does when a source object it previously imported is gone.
+    deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore',
+
+    CONSTRAINT workspace_connection_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
+    -- Scheduled syncs are import-only for now; export is manual.
+    CONSTRAINT workspace_connection_schedule_import_only CHECK (schedule_cron IS NULL OR sync_mode = 'import')
+);
+
+COMMENT ON TABLE workspace_connection_schedule IS
+    'Sync configuration for sync-capable connections. Its presence marks a connection as sync-capable.';
+
+COMMENT ON COLUMN workspace_connection_schedule.connection_id IS 'The connection this schedule configures';
+COMMENT ON COLUMN workspace_connection_schedule.sync_mode IS 'Whether the connection imports data in or exports data out';
+COMMENT ON COLUMN workspace_connection_schedule.schedule_cron IS 'Cron expression for scheduled imports; NULL means manual-only';
+COMMENT ON COLUMN workspace_connection_schedule.deletion_policy IS 'How an import reconciles files whose source object was deleted';
+
+-- Connection syncs: one synchronization execution of a sync-capable connection.
+-- References the schedule (not the bare connection), so a sync can only exist
+-- for a connection that is sync-capable.
+CREATE TABLE workspace_connection_syncs (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
+    connection_id   UUID                NOT NULL REFERENCES workspace_connection_schedule (connection_id) ON DELETE CASCADE,
     account_id      UUID                NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
-    -- Run attributes
+    -- Sync attributes
     trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
     status          SYNC_STATUS         NOT NULL DEFAULT 'running',
 
-    -- Number of records processed by this run. Each run lists the source and
-    -- imports only objects not already imported, so runs are incremental across
+    -- Number of records processed by this sync. Each sync lists the source and
+    -- imports only objects not already imported, so syncs are incremental across
     -- invocations without any stored cursor.
     records_synced  BIGINT              NOT NULL DEFAULT 0,
 
-    CONSTRAINT workspace_connection_runs_records_synced_non_negative CHECK (records_synced >= 0),
+    CONSTRAINT workspace_connection_syncs_records_synced_non_negative CHECK (records_synced >= 0),
 
-    -- 1-based attempt number for scheduled runs; a failed scheduled run may be
-    -- re-enqueued up to a bounded number of attempts. Manual runs are always 1.
+    -- 1-based attempt number for scheduled syncs; a failed scheduled sync may be
+    -- re-enqueued up to a bounded number of attempts. Manual syncs are always 1.
     attempt         INTEGER             NOT NULL DEFAULT 1,
 
-    CONSTRAINT workspace_connection_runs_attempt_positive CHECK (attempt >= 1),
+    CONSTRAINT workspace_connection_syncs_attempt_positive CHECK (attempt >= 1),
 
     -- Failure detail, populated when status is 'failed'.
     error_message   TEXT                DEFAULT NULL,
 
-    CONSTRAINT workspace_connection_runs_error_message_length CHECK (error_message IS NULL OR length(error_message) BETWEEN 1 AND 4096),
+    CONSTRAINT workspace_connection_syncs_error_message_length CHECK (error_message IS NULL OR length(error_message) BETWEEN 1 AND 4096),
 
     -- Metadata (non-encrypted, for filtering/display)
     metadata        JSONB               NOT NULL DEFAULT '{}',
 
-    CONSTRAINT workspace_connection_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+    CONSTRAINT workspace_connection_syncs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Timing
     started_at      TIMESTAMPTZ         NOT NULL DEFAULT current_timestamp,
     completed_at    TIMESTAMPTZ         DEFAULT NULL,
 
-    CONSTRAINT workspace_connection_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
+    CONSTRAINT workspace_connection_syncs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
 
 -- Indexes
-CREATE INDEX workspace_connection_runs_connection_idx
-    ON workspace_connection_runs (connection_id, started_at DESC);
+CREATE INDEX workspace_connection_syncs_connection_idx
+    ON workspace_connection_syncs (connection_id, started_at DESC);
 
-CREATE INDEX workspace_connection_runs_account_idx
-    ON workspace_connection_runs (account_id, started_at DESC);
+CREATE INDEX workspace_connection_syncs_account_idx
+    ON workspace_connection_syncs (account_id, started_at DESC);
 
-CREATE INDEX workspace_connection_runs_status_idx
-    ON workspace_connection_runs (status, started_at DESC)
+CREATE INDEX workspace_connection_syncs_status_idx
+    ON workspace_connection_syncs (status, started_at DESC)
     WHERE status IN ('pending', 'running');
 
--- At most one active (pending/running) run per connection. Enforces the
+-- At most one active (pending/running) sync per connection. Enforces the
 -- one-in-flight-sync invariant at the database level, closing the race between
--- checking for an in-flight run and inserting a new one.
-CREATE UNIQUE INDEX workspace_connection_runs_one_active_idx
-    ON workspace_connection_runs (connection_id)
+-- checking for an in-flight sync and inserting a new one.
+CREATE UNIQUE INDEX workspace_connection_syncs_one_active_idx
+    ON workspace_connection_syncs (connection_id)
     WHERE status IN ('pending', 'running');
 
 -- Comments
-COMMENT ON TABLE workspace_connection_runs IS
-    'Sync runs: one synchronization execution of a connection, with progress and outcome.';
+COMMENT ON TABLE workspace_connection_syncs IS
+    'Connection syncs: one synchronization execution of a connection, with progress and outcome.';
 
-COMMENT ON COLUMN workspace_connection_runs.id IS 'Unique sync run identifier';
-COMMENT ON COLUMN workspace_connection_runs.connection_id IS 'Connection the run synchronizes';
-COMMENT ON COLUMN workspace_connection_runs.account_id IS 'Account that triggered the run (optional)';
-COMMENT ON COLUMN workspace_connection_runs.trigger_type IS 'How the run was initiated';
-COMMENT ON COLUMN workspace_connection_runs.status IS 'Current run status';
-COMMENT ON COLUMN workspace_connection_runs.records_synced IS 'Number of records processed';
-COMMENT ON COLUMN workspace_connection_runs.attempt IS '1-based attempt number; scheduled runs may be retried up to a bounded limit';
-COMMENT ON COLUMN workspace_connection_runs.error_message IS 'Failure detail when status is failed';
-COMMENT ON COLUMN workspace_connection_runs.metadata IS 'Non-encrypted metadata for filtering/display';
-COMMENT ON COLUMN workspace_connection_runs.started_at IS 'When the run started';
-COMMENT ON COLUMN workspace_connection_runs.completed_at IS 'When the run finished';
-
--- Current sync state per connection, derived from its most recent run.
--- Replaces denormalized status/timestamp columns on workspace_connections.
-CREATE VIEW workspace_connection_sync_state AS
-SELECT DISTINCT ON (cr.connection_id)
-    cr.connection_id,
-    c.workspace_id,
-    cr.id                AS latest_run_id,
-    cr.status,
-    cr.trigger_type,
-    cr.records_synced,
-    cr.started_at        AS latest_started_at,
-    cr.completed_at      AS latest_completed_at
-FROM workspace_connection_runs cr
-    JOIN workspace_connections c ON cr.connection_id = c.id
-ORDER BY cr.connection_id, cr.started_at DESC;
-
-COMMENT ON VIEW workspace_connection_sync_state IS
-    'Latest sync run per connection, used as the connection''s current sync state.';
+COMMENT ON COLUMN workspace_connection_syncs.id IS 'Unique sync identifier';
+COMMENT ON COLUMN workspace_connection_syncs.connection_id IS 'Connection the sync synchronizes';
+COMMENT ON COLUMN workspace_connection_syncs.account_id IS 'Account that triggered the sync (optional)';
+COMMENT ON COLUMN workspace_connection_syncs.trigger_type IS 'How the sync was initiated';
+COMMENT ON COLUMN workspace_connection_syncs.status IS 'Current sync status';
+COMMENT ON COLUMN workspace_connection_syncs.records_synced IS 'Number of records processed';
+COMMENT ON COLUMN workspace_connection_syncs.attempt IS '1-based attempt number; scheduled syncs may be retried up to a bounded limit';
+COMMENT ON COLUMN workspace_connection_syncs.error_message IS 'Failure detail when status is failed';
+COMMENT ON COLUMN workspace_connection_syncs.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN workspace_connection_syncs.started_at IS 'When the sync started';
+COMMENT ON COLUMN workspace_connection_syncs.completed_at IS 'When the sync finished';

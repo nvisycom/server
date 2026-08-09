@@ -1,8 +1,8 @@
 -- Revert connections
 
-DROP VIEW IF EXISTS workspace_connection_sync_state;
+DROP TABLE IF EXISTS workspace_connection_syncs;
 
-DROP TABLE IF EXISTS workspace_connection_runs;
+DROP TABLE IF EXISTS workspace_connection_schedule;
 
 DROP TABLE IF EXISTS workspace_connections;
 

@@ -17,7 +17,7 @@ pub use constants::{
 pub use constraint::{
     AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
     ConstraintCategory, ConstraintViolation, WorkspaceActivitiesConstraints,
-    WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints, WorkspaceConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints, WorkspaceConstraints,
     WorkspaceFileConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
     WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
     WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,

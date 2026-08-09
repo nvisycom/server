@@ -1,7 +1,7 @@
 //! Pipeline-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceConnectionConstraints, WorkspaceConnectionRunConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints,
     WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
     WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
     WorkspacePolicyConstraints,
@@ -133,25 +133,25 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspaceConnectionRunConstraints> for Error<'static> {
-    fn from(c: WorkspaceConnectionRunConstraints) -> Self {
+impl From<WorkspaceConnectionSyncConstraints> for Error<'static> {
+    fn from(c: WorkspaceConnectionSyncConstraints) -> Self {
         let error = match c {
-            WorkspaceConnectionRunConstraints::ErrorMessageLength => ErrorKind::BadRequest
+            WorkspaceConnectionSyncConstraints::ErrorMessageLength => ErrorKind::BadRequest
                 .with_message("Sync error message must be between 1 and 4096 characters"),
-            WorkspaceConnectionRunConstraints::MetadataSize => {
+            WorkspaceConnectionSyncConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Sync run metadata size exceeds maximum limit")
             }
-            WorkspaceConnectionRunConstraints::OneActivePerConnection => {
+            WorkspaceConnectionSyncConstraints::OneActivePerConnection => {
                 ErrorKind::Conflict.with_message("A sync is already in progress")
             }
-            WorkspaceConnectionRunConstraints::RecordsSyncedNonNegative
-            | WorkspaceConnectionRunConstraints::AttemptPositive
-            | WorkspaceConnectionRunConstraints::CompletedAfterStarted => {
+            WorkspaceConnectionSyncConstraints::RecordsSyncedNonNegative
+            | WorkspaceConnectionSyncConstraints::AttemptPositive
+            | WorkspaceConnectionSyncConstraints::CompletedAfterStarted => {
                 ErrorKind::InternalServerError.into_error()
             }
         };
 
-        error.with_resource("workspace_connection_run")
+        error.with_resource("workspace_connection_sync")
     }
 }
 

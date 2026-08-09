@@ -1,6 +1,7 @@
 //! Application state and dependency injection.
 
 mod avatar;
+mod connection;
 pub mod crypto;
 pub mod engine;
 mod health;
@@ -16,6 +17,7 @@ use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
+pub use crate::service::connection::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};

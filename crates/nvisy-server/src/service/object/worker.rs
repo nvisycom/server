@@ -18,20 +18,23 @@ use jiff::{Span, Timestamp};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{LockKey, SchedulerLocksBucket};
 use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
-use nvisy_object::providers::ConnectionConfig;
+use nvisy_object::providers::StorageConfig;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{
-    NewWorkspaceConnectionRun, WorkspaceConnection, WorkspaceConnectionRun,
+    NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
 };
-use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionRunRepository};
-use nvisy_postgres::types::{SyncStatus, SyncTriggerType};
+use nvisy_postgres::query::{
+    WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
+    WorkspaceConnectionSyncRepository,
+};
+use nvisy_postgres::types::{SyncDeletionPolicy, SyncStatus, SyncTriggerType};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{ConnectionSyncService, is_cron_due};
 use crate::handler::Result;
-use crate::service::CryptoService;
+use crate::service::{ConnectionConfig, CryptoService};
 
 /// Tracing target for the connection sync worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::connection_sync";
@@ -133,7 +136,7 @@ impl ConnectionSyncWorker {
     async fn reap_stale_runs(&self) -> Result<()> {
         let cutoff = Timestamp::now() - Span::new().hours(STALE_RUN_AGE_HOURS);
         let mut conn = self.postgres.get_connection().await?;
-        let reaped = conn.fail_stale_running_runs(cutoff.into()).await?;
+        let reaped = conn.fail_stale_running_syncs(cutoff.into()).await?;
         if reaped > 0 {
             tracing::warn!(target: TRACING_TARGET, reaped, "Reaped stale sync runs");
         }
@@ -189,11 +192,16 @@ impl ConnectionSyncWorker {
             let mut conn = self.postgres.get_connection().await?;
             let mut due = Vec::new();
             for connection in connections {
-                let Some(cron) = &connection.schedule_cron else {
+                // Only sync-capable connections are listed, but re-read the
+                // schedule to get the cron; skip any without one.
+                let Some(schedule) = conn.find_connection_schedule(connection.id).await? else {
+                    continue;
+                };
+                let Some(cron) = &schedule.schedule_cron else {
                     continue;
                 };
                 let latest = conn
-                    .find_latest_workspace_connection_run(connection.id)
+                    .find_latest_workspace_connection_sync(connection.id)
                     .await?;
                 // A run already in progress means this connection is busy; skip it.
                 if latest.as_ref().is_some_and(|run| run.is_in_progress()) {
@@ -301,7 +309,8 @@ impl ConnectionSyncWorker {
             }
         }
 
-        let (config, run_id) = match self.begin_run(&connection, job.attempt).await {
+        let (config, deletion_policy, run_id) = match self.begin_run(&connection, job.attempt).await
+        {
             Ok(started) => started,
             Err(err) => {
                 // A concurrent run beat us to the unique index; treat as benign.
@@ -316,7 +325,14 @@ impl ConnectionSyncWorker {
         let connection_id = connection.id;
         let workspace_id = connection.workspace_id;
         self.sync
-            .run_transfer(run_id, connection, config, account_id, None)
+            .run_transfer(
+                run_id,
+                connection,
+                config,
+                deletion_policy,
+                account_id,
+                None,
+            )
             .await;
 
         self.maybe_retry(workspace_id, connection_id, run_id, job.attempt, cancel)
@@ -351,7 +367,7 @@ impl ConnectionSyncWorker {
                     return;
                 }
             };
-            match conn.find_workspace_connection_run_by_id(run_id).await {
+            match conn.find_workspace_connection_sync_by_id(run_id).await {
                 Ok(Some(run)) => run.is_failed(),
                 Ok(None) => false,
                 Err(err) => {
@@ -411,10 +427,10 @@ impl ConnectionSyncWorker {
     async fn load_latest_run(
         &self,
         connection: &WorkspaceConnection,
-    ) -> Result<Option<WorkspaceConnectionRun>> {
+    ) -> Result<Option<WorkspaceConnectionSync>> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn
-            .find_latest_workspace_connection_run(connection.id)
+            .find_latest_workspace_connection_sync(connection.id)
             .await?)
     }
 
@@ -424,13 +440,27 @@ impl ConnectionSyncWorker {
         &self,
         connection: &WorkspaceConnection,
         attempt: i32,
-    ) -> Result<(ConnectionConfig, Uuid)> {
-        let config = self
+    ) -> Result<(StorageConfig, SyncDeletionPolicy, Uuid)> {
+        // Scheduled syncs are object-store imports; a non-storage config here
+        // would be a scheduling bug (only sync-capable connections are enqueued).
+        let config = match self
             .crypto
-            .decrypt_json(connection.workspace_id, &connection.encrypted_data)?;
+            .decrypt_json::<ConnectionConfig>(connection.workspace_id, &connection.encrypted_data)?
+        {
+            ConnectionConfig::ObjectStore(config) => config,
+            ConnectionConfig::Inference(_) => {
+                return Err(crate::handler::ErrorKind::InternalServerError
+                    .with_message("scheduled sync for a non-sync connection"));
+            }
+        };
 
         let mut conn = self.postgres.get_connection().await?;
-        let new_run = NewWorkspaceConnectionRun {
+        let deletion_policy = conn
+            .find_connection_schedule(connection.id)
+            .await?
+            .map(|schedule| schedule.deletion_policy)
+            .unwrap_or_default();
+        let new_run = NewWorkspaceConnectionSync {
             connection_id: connection.id,
             // A scheduled run is attributed to whoever created the connection.
             account_id: connection.account_id,
@@ -440,7 +470,7 @@ impl ConnectionSyncWorker {
             attempt: Some(attempt),
             metadata: None,
         };
-        let run = conn.create_workspace_connection_run(new_run).await?;
-        Ok((config, run.id))
+        let run = conn.create_workspace_connection_sync(new_run).await?;
+        Ok((config, deletion_policy, run.id))
     }
 }

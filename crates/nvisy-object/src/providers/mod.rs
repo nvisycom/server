@@ -34,7 +34,7 @@ use crate::error::Error;
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-pub enum ConnectionConfig {
+pub enum StorageConfig {
     /// S3-compatible provider (AWS S3, MinIO, and so on).
     S3 {
         /// Optional root prefix within the bucket; keys resolve relative to it.
@@ -61,7 +61,7 @@ pub enum ConnectionConfig {
     },
 }
 
-impl ConnectionConfig {
+impl StorageConfig {
     /// The provider identifier for this config (`s3`, `azure`, `gcs`), used for
     /// the stored `provider` column and for filtering.
     #[must_use]
@@ -111,20 +111,18 @@ pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
         Self: Sized;
 }
 
-/// Connects to an object store from a typed [`ConnectionConfig`], returning the
+/// Connects to an object store from a typed [`StorageConfig`], returning the
 /// shared [`ObjectStoreClient`] regardless of which provider backs it.
 ///
 /// The config's variant selects the provider, so there is no runtime provider
 /// string to validate; the client is scoped under the config's root path.
-pub async fn connect(config: &ConnectionConfig) -> Result<ObjectStoreClient, Error> {
+pub async fn connect(config: &StorageConfig) -> Result<ObjectStoreClient, Error> {
     let client = match config {
-        ConnectionConfig::S3 { credentials, .. } => connect_client::<S3Provider>(credentials).await,
-        ConnectionConfig::Azure { credentials, .. } => {
+        StorageConfig::S3 { credentials, .. } => connect_client::<S3Provider>(credentials).await,
+        StorageConfig::Azure { credentials, .. } => {
             connect_client::<AzureProvider>(credentials).await
         }
-        ConnectionConfig::Gcs { credentials, .. } => {
-            connect_client::<GcsProvider>(credentials).await
-        }
+        StorageConfig::Gcs { credentials, .. } => connect_client::<GcsProvider>(credentials).await,
     }?;
     Ok(with_root_path(client, config.root_path()))
 }
@@ -149,22 +147,22 @@ fn redact(value: Option<&str>) -> &'static str {
 mod tests {
     use serde_json::json;
 
-    use super::{ConnectionConfig, connect};
+    use super::{StorageConfig, connect};
 
     #[tokio::test]
     async fn deserializes_provider_tagged_config() {
-        let config: ConnectionConfig = serde_json::from_value(json!({
+        let config: StorageConfig = serde_json::from_value(json!({
             "provider": "s3",
             "credentials": { "bucket": "test-bucket", "region": "us-east-1" },
         }))
         .unwrap();
         assert_eq!(config.provider_id(), "s3");
-        assert!(matches!(config, ConnectionConfig::S3 { .. }));
+        assert!(matches!(config, StorageConfig::S3 { .. }));
     }
 
     #[tokio::test]
     async fn rejects_unknown_provider_tag() {
-        let result: Result<ConnectionConfig, _> =
+        let result: Result<StorageConfig, _> =
             serde_json::from_value(json!({ "provider": "nope", "credentials": { "bucket": "b" } }));
         assert!(result.is_err());
     }
@@ -172,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_missing_required_field_for_provider() {
         // S3 without the required `bucket` field.
-        let result: Result<ConnectionConfig, _> = serde_json::from_value(
+        let result: Result<StorageConfig, _> = serde_json::from_value(
             json!({ "provider": "s3", "credentials": { "region": "us-east-1" } }),
         );
         assert!(result.is_err());
@@ -181,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn connect_s3_builds_from_typed_config() {
         // `build()` is lazy (no network), so valid config yields a client.
-        let config = ConnectionConfig::S3 {
+        let config = StorageConfig::S3 {
             root_path: None,
             credentials: serde_json::from_value(
                 json!({ "bucket": "test-bucket", "region": "us-east-1" }),
@@ -193,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn parses_root_path() {
-        let config: ConnectionConfig = serde_json::from_value(json!({
+        let config: StorageConfig = serde_json::from_value(json!({
             "provider": "s3",
             "rootPath": "incoming/documents",
             "credentials": { "bucket": "test-bucket", "region": "us-east-1" },

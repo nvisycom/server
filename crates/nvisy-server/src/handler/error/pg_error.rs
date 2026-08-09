@@ -31,7 +31,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspacePipelineArtifact(c) => c.into(),
             ConstraintViolation::WorkspacePipelineReference(c) => c.into(),
             ConstraintViolation::WorkspaceConnection(c) => c.into(),
-            ConstraintViolation::WorkspaceConnectionRun(c) => c.into(),
+            ConstraintViolation::WorkspaceConnectionSync(c) => c.into(),
             ConstraintViolation::WorkspacePolicy(c) => c.into(),
         }
     }

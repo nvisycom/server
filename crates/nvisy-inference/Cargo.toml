@@ -1,0 +1,41 @@
+[package]
+name = "nvisy-inference"
+description = "LLM inference providers (OpenAI, Ollama, Anthropic) for Nvisy"
+readme = "./README.md"
+keywords = ["nvisy", "llm", "openai", "ollama", "anthropic"]
+categories = ["api-bindings"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+schema = ["dep:schemars"]
+
+[dependencies]
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# LLM provider clients
+rig-core = { workspace = true, features = [] }
+
+# JSON Schema (optional)
+schemars = { workspace = true, features = [], optional = true }
+
+# Error handling
+thiserror = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

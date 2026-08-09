@@ -6,12 +6,14 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_connections;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, SyncDeletionPolicy, SyncMode};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
-/// Workspace connection model representing encrypted provider connections.
+/// Workspace connection model: a generic encrypted provider connection.
 ///
-/// Connections store encrypted credentials for an external object store
-/// provider (s3, azure, gcs).
+/// A connection stores encrypted credentials for an external provider (object
+/// store, LLM, ...); the provider and the shape of the encrypted config
+/// distinguish them. Capabilities such as syncing live in satellite tables (see
+/// `WorkspaceConnectionSchedule`).
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -24,18 +26,12 @@ pub struct WorkspaceConnection {
     pub account_id: Uuid,
     /// Human-readable connection display name.
     pub display_name: String,
-    /// Object store provider (`s3`, `azure`, `gcs`).
+    /// Provider identifier (`s3`, `azure`, `gcs`, `openai`, `ollama`, ...).
     pub provider: String,
-    /// Whether the connection imports data in or exports data out.
-    pub sync_mode: SyncMode,
-    /// Cron expression for scheduled imports; `None` means manual-only.
-    pub schedule_cron: Option<String>,
-    /// How an import reconciles files whose source object was deleted.
-    pub deletion_policy: SyncDeletionPolicy,
-    /// Encrypted connection data (XChaCha20-Poly1305 encrypted JSON).
-    /// Contains the provider credentials and optional root path.
+    /// Encrypted connection config (XChaCha20-Poly1305 encrypted JSON):
+    /// provider tag, credentials, and any provider-specific settings.
     pub encrypted_data: Vec<u8>,
-    /// Whether the connection is enabled for syncing.
+    /// Whether the connection is enabled.
     pub is_active: bool,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: JsonValue,
@@ -58,17 +54,11 @@ pub struct NewWorkspaceConnection {
     pub account_id: Uuid,
     /// Connection display name.
     pub display_name: String,
-    /// Provider type for indexing.
+    /// Provider identifier, for indexing and filtering.
     pub provider: String,
-    /// Sync direction (defaults to import).
-    pub sync_mode: Option<SyncMode>,
-    /// Cron expression for scheduled imports.
-    pub schedule_cron: Option<String>,
-    /// Deletion reconciliation policy (defaults to ignore).
-    pub deletion_policy: Option<SyncDeletionPolicy>,
-    /// Encrypted connection data.
+    /// Encrypted connection config.
     pub encrypted_data: Vec<u8>,
-    /// Whether the connection is enabled for syncing.
+    /// Whether the connection is enabled.
     pub is_active: Option<bool>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<JsonValue>,
@@ -81,17 +71,11 @@ pub struct NewWorkspaceConnection {
 pub struct UpdateWorkspaceConnection {
     /// Connection display name.
     pub display_name: Option<String>,
-    /// Provider type.
+    /// Provider identifier.
     pub provider: Option<String>,
-    /// Sync direction.
-    pub sync_mode: Option<SyncMode>,
-    /// Cron expression for scheduled imports (`Some(None)` clears it).
-    pub schedule_cron: Option<Option<String>>,
-    /// Deletion reconciliation policy.
-    pub deletion_policy: Option<SyncDeletionPolicy>,
-    /// Encrypted connection data.
+    /// Encrypted connection config.
     pub encrypted_data: Option<Vec<u8>>,
-    /// Whether the connection is enabled for syncing.
+    /// Whether the connection is enabled.
     pub is_active: Option<bool>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<JsonValue>,

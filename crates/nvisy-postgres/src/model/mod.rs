@@ -10,7 +10,8 @@ mod pipeline_reference;
 mod workspace;
 mod workspace_activity;
 mod workspace_connection;
-mod workspace_connection_run;
+mod workspace_connection_schedule;
+mod workspace_connection_sync;
 mod workspace_file;
 mod workspace_invite;
 mod workspace_member;
@@ -33,8 +34,11 @@ pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_connection::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
-pub use workspace_connection_run::{
-    NewWorkspaceConnectionRun, UpdateWorkspaceConnectionRun, WorkspaceConnectionRun,
+pub use workspace_connection_schedule::{
+    NewWorkspaceConnectionSchedule, UpdateWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
+};
+pub use workspace_connection_sync::{
+    NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,
 };
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};

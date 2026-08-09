@@ -6,6 +6,7 @@ members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
+    "./crates/nvisy-inference",
     "./crates/nvisy-object",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
@@ -37,6 +38,7 @@ nvisy-template = { git = "https://github.com/nvisycom/runtime", branch = "main" 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
+nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
 nvisy-object = { path = "./crates/nvisy-object", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
@@ -55,6 +57,11 @@ futures = { version = "0.3", features = [] }
 futures-util = { version = "0.3", features = [] }
 async-stream = { version = "0.3", features = [] }
 async-trait = { version = "0.1", features = [] }
+
+# LLM inference provider clients. rig-core (not the rig facade): the facade
+# pulls rig-lancedb, a vector-store integration we do not use that currently
+# requires an unbuildable arrow-array version. rig-core has the provider clients.
+rig-core = { version = "0.41", features = [] }
 
 # HTTP client & middleware
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }

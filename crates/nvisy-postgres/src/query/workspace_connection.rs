@@ -212,11 +212,15 @@ impl WorkspaceConnectionRepository for PgConnection {
     }
 
     async fn list_scheduled_connections(&mut self) -> PgResult<Vec<WorkspaceConnection>> {
+        use schema::workspace_connection_schedule as sched;
         use schema::workspace_connections::{self, dsl};
 
+        // Sync config lives in the schedule satellite; join it to find active,
+        // import-mode connections with a cron schedule.
         let connections = workspace_connections::table
-            .filter(dsl::schedule_cron.is_not_null())
-            .filter(dsl::sync_mode.eq(SyncMode::Import))
+            .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
+            .filter(sched::schedule_cron.is_not_null())
+            .filter(sched::sync_mode.eq(SyncMode::Import))
             .filter(dsl::is_active.eq(true))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceConnection::as_select())

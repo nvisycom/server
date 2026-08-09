@@ -34,6 +34,7 @@ nvisy-template = { workspace = true }
 # Internal crates
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
+nvisy-inference = { workspace = true, features = ["schema"] }
 nvisy-object = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
