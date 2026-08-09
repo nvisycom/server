@@ -13,7 +13,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use bytes::Bytes;
 use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
-use nvisy_engine::{AnalyzedDocument, Document};
+use nvisy_engine::{Audit, Document};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, IntermediateKey, IntermediatesBucket};
 use nvisy_postgres::model::{
@@ -157,7 +157,25 @@ async fn create_pipeline_run(
 
     let document = build_document(&nats, &crypto, &file, run.id).await?;
 
-    let analyzed = match engine.analyze_document(document, &params).await {
+    // The pipeline's policies own the label vocabulary: detection derives its
+    // catalog from them, so the analysis emits exactly what the policies can act
+    // on. Resolved before analyze and reused verbatim at redact.
+    let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
+    if policies.is_empty() {
+        fail_run(
+            &mut conn,
+            &webhook_emitter,
+            workspace.id,
+            run.id,
+            auth_state.account_id,
+        )
+        .await;
+        return Err(ErrorKind::BadRequest
+            .with_message("Pipeline has no policies; attach at least one before running")
+            .with_resource("pipeline"));
+    }
+
+    let analyzed = match engine.analyze(document, &policies, &params).await {
         Ok(analyzed) => analyzed,
         Err(err) => {
             fail_run(
@@ -386,10 +404,10 @@ fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Returns the run's analyzed document (the detected findings) for review.
+/// Returns the run's analysis (the detected findings) for review.
 ///
-/// Fetches and decrypts the engine's `AnalyzedDocument` from the intermediates
-/// bucket. Available once the run is analyzed. Requires `ViewPipelines`.
+/// Fetches and decrypts the engine's `Audit` from the intermediates bucket.
+/// Available once the run is analyzed. Requires `ViewPipelines`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -405,7 +423,7 @@ async fn get_pipeline_run_analysis(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
-) -> Result<(StatusCode, Json<AnalyzedDocument>)> {
+) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting pipeline run analysis");
 
     let mut conn = pg_client.get_connection().await?;
@@ -427,7 +445,7 @@ async fn get_pipeline_run_analysis(
 fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get run detections")
         .description("Returns the run's detected findings (the analyzed document) for review.")
-        .response::<200, Json<AnalyzedDocument>>()
+        .response::<200, Json<Audit>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -480,13 +498,15 @@ async fn redact_pipeline_run(
         .await?
         .ok_or_else(|| Error::not_found("file"))?;
 
-    // The stored analysis is the source of truth for what gets redacted.
-    let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
+    // The stored analysis is the source of truth for what gets redacted. It
+    // carries the scope (label catalog) analyze resolved, so redaction compiles
+    // against the same vocabulary without re-deriving it.
+    let mut analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
     let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
     let document = build_document(&nats, &crypto, &file, run.id).await?;
 
-    let anonymized = engine
-        .anonymize_document(document, &policies, &analyzed)
+    let redacted = engine
+        .anonymize(document, &policies, &mut analyzed)
         .await
         .map_err(analysis_error)?;
 
@@ -497,7 +517,7 @@ async fn redact_pipeline_run(
         &crypto,
         &file,
         auth_state.account_id,
-        anonymized.bytes,
+        redacted.bytes,
     )
     .await?;
     record_artifact(&mut conn, run.id, artifact_file.id).await?;
@@ -770,8 +790,8 @@ async fn store_redacted_file(
     Ok(conn.create_workspace_file(new_file).await?)
 }
 
-/// Encrypts an [`AnalyzedDocument`] and stores it in the intermediates bucket,
-/// returning its object-store key.
+/// Encrypts an [`Audit`] and stores it in the intermediates bucket, returning
+/// its object-store key.
 ///
 /// The analysis is the map of detected PII, so it is encrypted with the
 /// workspace key before it leaves the process.
@@ -779,7 +799,7 @@ async fn store_analyzed_document(
     nats: &NatsClient,
     crypto: &CryptoService,
     workspace_id: Uuid,
-    analyzed: &AnalyzedDocument,
+    analyzed: &Audit,
 ) -> Result<String> {
     let plaintext = serde_json::to_vec(analyzed).map_err(analysis_serde_error)?;
     let ciphertext = crypto.encrypt(workspace_id, &plaintext).map_err(|err| {
@@ -795,7 +815,7 @@ async fn store_analyzed_document(
     Ok(key.to_string())
 }
 
-/// Fetches and decrypts a run's stored [`AnalyzedDocument`].
+/// Fetches and decrypts a run's stored [`Audit`].
 ///
 /// Errors if the run has not been analyzed yet or the stored object is missing.
 async fn load_analyzed_document(
@@ -803,7 +823,7 @@ async fn load_analyzed_document(
     crypto: &CryptoService,
     workspace_id: Uuid,
     run: &WorkspacePipelineRun,
-) -> Result<AnalyzedDocument> {
+) -> Result<Audit> {
     let stored_key = run.analyzed_document_key.as_deref().ok_or_else(|| {
         ErrorKind::Conflict
             .with_message("Run has no analysis yet")

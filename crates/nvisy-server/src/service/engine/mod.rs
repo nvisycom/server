@@ -80,10 +80,11 @@ impl EngineService {
     /// Builds the [`AnalyzerParams`] for one detect run by merging a pipeline's
     /// intent with the deployment defaults.
     ///
-    /// Recognizers, deduplication behavior, and label catalog come from the
-    /// pipeline; enrichment and deduplication calibration come from the
-    /// server-wide defaults. Scope is the request's own (falling back to the
-    /// pipeline default), with the pipeline's label catalog folded in.
+    /// Recognizers and deduplication behavior come from the pipeline; enrichment
+    /// and deduplication calibration come from the server-wide defaults. Scope is
+    /// the request's own, falling back to the pipeline default. The label catalog
+    /// is not set here: the engine derives it from the run's policies at detect
+    /// time.
     ///
     /// Rejects a pipeline that explicitly enables NER or LLM recognizers this
     /// deployment has no lineup for, rather than silently running without them.
@@ -104,10 +105,9 @@ impl EngineService {
                 .with_resource("pipeline"));
         }
 
-        let mut scope = request_scope
+        let scope = request_scope
             .or_else(|| definition.default_scope.clone())
             .unwrap_or_default();
-        scope.label_catalog = definition.label_catalog.clone();
 
         // Deduplication: a pipeline field wins; otherwise the deployment default;
         // otherwise the engine baseline. Calibration is operator-only.
