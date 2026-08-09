@@ -19,12 +19,10 @@ use uuid::Uuid;
 use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
-use crate::handler::request::{
-    CreatePolicy, CursorPagination, PolicyBody, PolicyPathParams, UpdatePolicy,
-};
+use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
 use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, Result, catalog};
+use crate::handler::{Error, Result};
 use crate::service::{CryptoService, ServiceState, WebhookEmitter};
 
 /// Tracing target for workspace policy operations.
@@ -58,17 +56,9 @@ async fn create_policy(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManagePolicies)
         .await?;
 
-    // The body comes from an inline definition or a built-in template. A
-    // templated body is copied and given a fresh id so policies from one template
-    // stay independent.
-    let mut definition = match request.body {
-        PolicyBody::Inline { definition } => *definition,
-        PolicyBody::Template { template } => {
-            let template = catalog::find_template(template.as_str())
-                .ok_or_else(|| Error::not_found("policy_template"))?;
-            template.policy
-        }
-    };
+    // Resolve the body (inline or a built-in template) and give it a fresh id so
+    // policies from one template stay independent.
+    let mut definition = request.body.into_definition();
     definition.id = Uuid::now_v7();
 
     let display_name = request
