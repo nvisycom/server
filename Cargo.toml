@@ -32,6 +32,7 @@ documentation = "https://docs.rs/nvisy-server"
 
 # Runtime crates
 nvisy-engine = { git = "https://github.com/nvisycom/runtime", branch = "main" }
+nvisy-template = { git = "https://github.com/nvisycom/runtime", branch = "main" }
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }

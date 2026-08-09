@@ -29,6 +29,7 @@ default = []
 [dependencies]
 # Runtime crates
 nvisy-engine = { workspace = true }
+nvisy-template = { workspace = true }
 
 # Internal crates
 nvisy-core = { workspace = true, features = ["schema"] }

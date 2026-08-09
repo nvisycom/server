@@ -6,6 +6,7 @@
 mod accounts;
 mod authentication;
 mod avatars;
+mod catalog;
 mod connection_syncs;
 mod connections;
 mod error;
@@ -102,6 +103,9 @@ fn private_routes(
     }
     if is_included(BuiltinModule::Policies) {
         router = router.merge(policies::routes());
+    }
+    if is_included(BuiltinModule::Catalog) {
+        router = router.merge(catalog::routes());
     }
 
     if let Some(additional) = additional_routes {

@@ -32,6 +32,8 @@ pub enum BuiltinModule {
     Pipelines,
     /// Redaction policies.
     Policies,
+    /// Deployment catalog (`/catalog/*`): read-only reference data.
+    Catalog,
     /// Authentication (`/auth/*`, public).
     Authentication,
 }

@@ -1742,7 +1742,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#69a7deac0f3e7e9a928f02a58b751a214125f28f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
 dependencies = [
  "async-trait",
  "base64 0.23.0",
@@ -3800,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "nvisy-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#69a7deac0f3e7e9a928f02a58b751a214125f28f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
 dependencies = [
  "bytes",
  "elide",
@@ -3849,7 +3849,7 @@ dependencies = [
 [[package]]
 name = "nvisy-policy"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#69a7deac0f3e7e9a928f02a58b751a214125f28f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
 dependencies = [
  "elide-core",
  "elide-operator",
@@ -3893,7 +3893,7 @@ dependencies = [
 [[package]]
 name = "nvisy-schema"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#69a7deac0f3e7e9a928f02a58b751a214125f28f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
 dependencies = [
  "bytes",
  "elide-core",
@@ -3936,6 +3936,7 @@ dependencies = [
  "nvisy-nats",
  "nvisy-object",
  "nvisy-postgres",
+ "nvisy-template",
  "nvisy-webhook",
  "pin-project-lite",
  "rand 0.10.2",
@@ -3957,6 +3958,21 @@ dependencies = [
  "validator",
  "woothee",
  "zxcvbn",
+]
+
+[[package]]
+name = "nvisy-template"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
+dependencies = [
+ "elide-core",
+ "hipstr",
+ "jiff",
+ "nvisy-policy",
+ "schemars",
+ "semver",
+ "serde",
+ "uuid",
 ]
 
 [[package]]
@@ -5343,6 +5359,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "send_wrapper"
