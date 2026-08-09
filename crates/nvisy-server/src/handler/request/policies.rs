@@ -1,6 +1,6 @@
 //! Policy request types.
 
-use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
+use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ pub enum PolicyBody {
         ///
         /// Boxed to keep the enum small: an inline body is much larger than a
         /// template id, and most requests use a template.
-        definition: Box<SchemaPolicy>,
+        definition: Box<PolicyDefinition>,
     },
 }
 
@@ -89,5 +89,5 @@ pub struct UpdatePolicy {
     #[validate(length(max = 4096))]
     pub description: Option<Option<String>>,
     /// New policy body (replaces the stored definition).
-    pub definition: Option<SchemaPolicy>,
+    pub definition: Option<PolicyDefinition>,
 }

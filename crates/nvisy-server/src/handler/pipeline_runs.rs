@@ -12,7 +12,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use bytes::Bytes;
-use nvisy_engine::policy::PolicyDefinition as SchemaPolicy;
+use nvisy_engine::policy::PolicyDefinition;
 use nvisy_engine::{Audit, Document};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, IntermediateKey, IntermediatesBucket};
@@ -734,12 +734,13 @@ async fn resolve_policies(
     crypto: &CryptoService,
     workspace_id: Uuid,
     pipeline_id: Uuid,
-) -> Result<Vec<SchemaPolicy>> {
+) -> Result<Vec<PolicyDefinition>> {
     let ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
     let mut policies = Vec::with_capacity(ids.len());
     for id in ids {
         if let Some(model) = conn.find_policy_in_workspace(workspace_id, id).await? {
-            policies.push(crypto.decrypt_json::<SchemaPolicy>(workspace_id, &model.definition)?);
+            policies
+                .push(crypto.decrypt_json::<PolicyDefinition>(workspace_id, &model.definition)?);
         }
     }
     Ok(policies)
