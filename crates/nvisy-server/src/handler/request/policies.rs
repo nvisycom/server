@@ -2,6 +2,7 @@
 
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::types::Handle;
+use nvisy_template::PolicyTemplate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -20,15 +21,6 @@ pub struct PolicyPathParams {
     pub policy_slug: String,
 }
 
-/// Path parameters for a single policy template in the deployment catalog.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PolicyTemplatePathParams {
-    /// Slug of the built-in policy template.
-    pub template_slug: String,
-}
-
 /// Where a new policy's body comes from: exactly one source, enforced by the
 /// type so neither-nor-both is unrepresentable.
 ///
@@ -37,13 +29,13 @@ pub struct PolicyTemplatePathParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum PolicyBody {
-    /// Seed the body from a built-in catalog template, by id.
+    /// Seed the body from a built-in policy template.
     ///
-    /// The template is resolved from the deployment catalog at creation time and
-    /// copied into a normal, independently-editable policy.
+    /// The template's body is copied into a normal, independently-editable
+    /// policy at creation time.
     Template {
-        /// Id of the built-in policy template to seed from.
-        template: Handle,
+        /// The built-in policy template to seed from.
+        template: PolicyTemplate,
     },
     /// An inline structured policy body consumed by the engine.
     Inline {
@@ -53,6 +45,17 @@ pub enum PolicyBody {
         /// template id, and most requests use a template.
         definition: Box<PolicyDefinition>,
     },
+}
+
+impl PolicyBody {
+    /// Resolves the body source into a concrete policy definition: the inline
+    /// body as-is, or the template's body materialized from the runtime.
+    pub fn into_definition(self) -> PolicyDefinition {
+        match self {
+            PolicyBody::Inline { definition } => *definition,
+            PolicyBody::Template { template } => template.build().policy,
+        }
+    }
 }
 
 /// Request payload for creating a new workspace policy.

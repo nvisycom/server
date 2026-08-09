@@ -1742,7 +1742,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#5d726e308ae033f6040e301df7a0467e153568db"
 dependencies = [
  "async-trait",
  "base64 0.23.0",
@@ -3800,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "nvisy-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#5d726e308ae033f6040e301df7a0467e153568db"
 dependencies = [
  "bytes",
  "elide",
@@ -3849,7 +3849,7 @@ dependencies = [
 [[package]]
 name = "nvisy-policy"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#5d726e308ae033f6040e301df7a0467e153568db"
 dependencies = [
  "elide-core",
  "elide-operator",
@@ -3893,7 +3893,7 @@ dependencies = [
 [[package]]
 name = "nvisy-schema"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#5d726e308ae033f6040e301df7a0467e153568db"
 dependencies = [
  "bytes",
  "elide-core",
@@ -3963,7 +3963,7 @@ dependencies = [
 [[package]]
 name = "nvisy-template"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#0a28596b0cacccaa86b165c2f65fd95ccd47be7f"
+source = "git+https://github.com/nvisycom/runtime?branch=main#5d726e308ae033f6040e301df7a0467e153568db"
 dependencies = [
  "elide-core",
  "hipstr",
@@ -3972,6 +3972,7 @@ dependencies = [
  "schemars",
  "semver",
  "serde",
+ "strum 0.28.0",
  "uuid",
 ]
 
