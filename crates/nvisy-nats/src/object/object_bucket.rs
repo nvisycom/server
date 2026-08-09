@@ -36,16 +36,19 @@ impl ObjectBucket for FilesBucket {
     const NAME: &'static str = "DOCUMENT_FILES";
 }
 
-/// Temporary storage for intermediate processing artifacts.
+/// Storage for intermediate processing artifacts.
 ///
-/// Files expire after 7 days.
+/// Holds a run's analyzed document between the detect and redact calls, plus
+/// any other between-phase artifacts. Retained for the life of the run that
+/// owns it: no expiration, since the run row references the object indefinitely
+/// and redaction may happen long after detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct IntermediatesBucket;
 
 impl ObjectBucket for IntermediatesBucket {
     type Key = IntermediateKey;
 
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(7 * 24 * 60 * 60));
+    const MAX_AGE: Option<Duration> = None;
     const NAME: &'static str = "DOCUMENT_INTERMEDIATES";
 }
 
@@ -103,10 +106,7 @@ mod tests {
     #[test]
     fn test_bucket_max_age() {
         assert_eq!(FilesBucket::MAX_AGE, None);
-        assert_eq!(
-            IntermediatesBucket::MAX_AGE,
-            Some(Duration::from_secs(7 * 24 * 60 * 60))
-        );
+        assert_eq!(IntermediatesBucket::MAX_AGE, None);
         assert_eq!(ThumbnailsBucket::MAX_AGE, None);
         assert_eq!(AvatarsBucket::MAX_AGE, None);
     }

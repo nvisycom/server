@@ -16,7 +16,7 @@
 //!
 //! ## Bucket Types
 //! - [`FilesBucket`] - Primary file storage (no expiration)
-//! - [`IntermediatesBucket`] - Temporary processing artifacts (7 day TTL)
+//! - [`IntermediatesBucket`] - Between-phase processing artifacts (no expiry)
 //! - [`ThumbnailsBucket`] - Document thumbnails (no expiration)
 //! - [`AvatarsBucket`] - Account avatars (no expiration)
 //!

@@ -30,6 +30,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUST_TOOLCHAIN: "1.95.0"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,25 +53,47 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
   check:
-    name: Check & Clippy
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
-          components: clippy
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Cache dependencies
+      - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
       - name: Check
-        run: cargo check --all-features --workspace
+        run: cargo check --workspace
+
+      - name: Check (all features)
+        run: cargo check --workspace --all-features
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Clippy (all features)
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   test:
     name: Test
@@ -83,10 +106,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Cache dependencies
+      - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
       - name: Install tools
@@ -118,13 +143,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Cache dependencies
+      - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
       - name: Build docs
         run: cargo doc --no-deps --all-features --workspace
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  machete:
+    name: Machete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-machete
+        run: cargo binstall cargo-machete --no-confirm --no-symlinks
+
+      - name: Run machete
+        run: cargo machete

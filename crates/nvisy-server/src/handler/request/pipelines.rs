@@ -4,9 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_engine::plan::{
-    LabelCatalogParams, MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams,
-};
+use nvisy_engine::plan::{MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams};
 use nvisy_engine::primitive::ConfidenceThreshold;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, PipelineStatus};
@@ -17,16 +15,19 @@ use validator::Validate;
 
 /// A pipeline's detection + governance intent.
 ///
-/// Holds what a pipeline author decides — which recognizers to run, the entity
-/// labels, the default scope, and the policies to apply. Infrastructure config
-/// (enrichment backends, deduplication calibration) is server-wide and lives in
-/// the engine config, not here. Stored as JSON in the pipeline's `definition`
-/// column but validated against this schema at the API boundary.
+/// Holds what a pipeline author decides — which recognizers to run, the default
+/// scope, and the policies to apply. Infrastructure config (enrichment backends,
+/// deduplication calibration) is server-wide and lives in the engine config, not
+/// here. Stored as JSON in the pipeline's `definition` column but validated
+/// against this schema at the API boundary.
+///
+/// The label catalog is not part of this: the policies own the label vocabulary,
+/// and the engine derives the detection catalog from them at run time.
 ///
 /// The split:
 ///
-/// - `recognizers` / `deduplication` / `label_catalog` — the detection intent,
-///   merged with the server-wide engine defaults into an `AnalyzerParams`.
+/// - `recognizers` / `deduplication` — the detection intent, merged with the
+///   server-wide engine defaults into an `AnalyzerParams`.
 /// - `default_scope` — optional pipeline-wide scope a document may override.
 /// - `policy_slugs` — references to the workspace's policies, resolved at run
 ///   time.
@@ -41,12 +42,6 @@ pub struct PipelineDefinition {
     /// Post-recognition deduplication behavior.
     #[serde(default)]
     pub deduplication: PipelineDeduplication,
-    /// Entity-label catalog: which entity types the recognizers emit.
-    ///
-    /// Reusable across the pipeline's documents, so it lives here rather than in
-    /// per-document scope.
-    #[serde(default)]
-    pub label_catalog: LabelCatalogParams,
     /// Optional pipeline-wide scope (languages, jurisdictions, document labels).
     ///
     /// A document's own scope overrides this at detect time; absent here means
