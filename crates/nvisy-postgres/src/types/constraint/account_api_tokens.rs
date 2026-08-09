@@ -11,9 +11,9 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum AccountApiTokenConstraints {
     // Token validation constraints
-    #[strum(serialize = "account_api_tokens_name_not_empty")]
+    #[strum(serialize = "account_api_tokens_display_name_not_empty")]
     NameNotEmpty,
-    #[strum(serialize = "account_api_tokens_name_length")]
+    #[strum(serialize = "account_api_tokens_display_name_length")]
     NameLength,
 
     // Token chronological constraints

@@ -18,6 +18,10 @@ pub enum WorkspacePipelineRunConstraints {
     #[strum(serialize = "workspace_pipeline_runs_idempotency_key_length")]
     IdempotencyKeyLength,
 
+    // Uniqueness constraints
+    #[strum(serialize = "workspace_pipeline_runs_idempotency_idx")]
+    IdempotencyUnique,
+
     // Chronological constraints
     #[strum(serialize = "workspace_pipeline_runs_completed_after_started")]
     CompletedAfterStarted,
@@ -37,6 +41,8 @@ impl WorkspacePipelineRunConstraints {
             | WorkspacePipelineRunConstraints::IdempotencyKeyLength => {
                 ConstraintCategory::Validation
             }
+
+            WorkspacePipelineRunConstraints::IdempotencyUnique => ConstraintCategory::Uniqueness,
 
             WorkspacePipelineRunConstraints::CompletedAfterStarted => {
                 ConstraintCategory::Chronological

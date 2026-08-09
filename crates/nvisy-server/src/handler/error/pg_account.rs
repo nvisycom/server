@@ -13,6 +13,9 @@ impl From<AccountConstraints> for Error<'static> {
                 .with_message("Handle must be between 3 and 32 characters long"),
             AccountConstraints::UsernameFormat => ErrorKind::BadRequest
                 .with_message("Handle must be lowercase alphanumeric with single internal dashes"),
+            AccountConstraints::EmailUnique => {
+                ErrorKind::Conflict.with_message("An account with this email already exists")
+            }
             AccountConstraints::UsernameUnique => {
                 ErrorKind::Conflict.with_message("Handle is already taken")
             }

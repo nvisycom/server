@@ -38,6 +38,9 @@ impl From<WorkspaceFileConstraints> for Error<'static> {
             WorkspaceFileConstraints::VersionNumberMin => {
                 ErrorKind::BadRequest.with_message("Version number must be at least 1")
             }
+            WorkspaceFileConstraints::SourceObjectUnique => {
+                ErrorKind::Conflict.with_message("This source object has already been imported")
+            }
             WorkspaceFileConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A file with this identifier already exists")
             }

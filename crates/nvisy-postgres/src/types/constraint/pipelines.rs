@@ -17,7 +17,7 @@ pub enum WorkspacePipelineConstraints {
     SlugFormat,
 
     // Pipeline name validation constraints
-    #[strum(serialize = "workspace_pipelines_name_length")]
+    #[strum(serialize = "workspace_pipelines_display_name_length")]
     NameLength,
 
     // Pipeline description validation constraints

@@ -15,12 +15,10 @@ pub enum WorkspacePolicyConstraints {
     SlugLength,
     #[strum(serialize = "workspace_policies_slug_format")]
     SlugFormat,
-    #[strum(serialize = "workspace_policies_name_length")]
+    #[strum(serialize = "workspace_policies_display_name_length")]
     NameLength,
     #[strum(serialize = "workspace_policies_description_length")]
     DescriptionLength,
-    #[strum(serialize = "workspace_policies_version_length")]
-    VersionLength,
     #[strum(serialize = "workspace_policies_definition_size")]
     DefinitionSize,
     #[strum(serialize = "workspace_policies_metadata_size")]
@@ -31,6 +29,8 @@ pub enum WorkspacePolicyConstraints {
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_policies_workspace_id_slug_key")]
     SlugUnique,
+    #[strum(serialize = "workspace_policies_display_name_unique_idx")]
+    NameUnique,
 
     // Chronological constraints
     #[strum(serialize = "workspace_policies_updated_after_created")]
@@ -52,12 +52,12 @@ impl WorkspacePolicyConstraints {
             | WorkspacePolicyConstraints::SlugFormat
             | WorkspacePolicyConstraints::NameLength
             | WorkspacePolicyConstraints::DescriptionLength
-            | WorkspacePolicyConstraints::VersionLength
             | WorkspacePolicyConstraints::DefinitionSize
             | WorkspacePolicyConstraints::MetadataSize => ConstraintCategory::Validation,
 
             WorkspacePolicyConstraints::WorkspaceIdIdUnique
-            | WorkspacePolicyConstraints::SlugUnique => ConstraintCategory::Uniqueness,
+            | WorkspacePolicyConstraints::SlugUnique
+            | WorkspacePolicyConstraints::NameUnique => ConstraintCategory::Uniqueness,
 
             WorkspacePolicyConstraints::UpdatedAfterCreated
             | WorkspacePolicyConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,

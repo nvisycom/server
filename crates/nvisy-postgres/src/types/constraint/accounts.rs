@@ -37,6 +37,8 @@ pub enum AccountConstraints {
     // Account uniqueness constraints
     #[strum(serialize = "accounts_username_unique_idx")]
     UsernameUnique,
+    #[strum(serialize = "accounts_email_address_unique_idx")]
+    EmailUnique,
 
     // Account chronological constraints
     #[strum(serialize = "accounts_updated_after_created")]
@@ -70,7 +72,9 @@ impl AccountConstraints {
             | AccountConstraints::LocaleFormat
             | AccountConstraints::SuspendedNotAdmin => ConstraintCategory::Validation,
 
-            AccountConstraints::UsernameUnique => ConstraintCategory::Uniqueness,
+            AccountConstraints::UsernameUnique | AccountConstraints::EmailUnique => {
+                ConstraintCategory::Uniqueness
+            }
 
             AccountConstraints::UpdatedAfterCreated
             | AccountConstraints::DeletedAfterCreated
