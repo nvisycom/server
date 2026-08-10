@@ -43,7 +43,7 @@ pub enum WorkspacePipelineConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_pipelines_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-    #[strum(serialize = "workspace_pipelines_workspace_id_slug_key")]
+    #[strum(serialize = "workspace_pipelines_slug_unique_idx")]
     SlugUnique,
 
     // Pipeline chronological constraints

@@ -14,10 +14,10 @@ CREATE TABLE workspace_policies (
     -- Composite key target for workspace-scoped foreign keys (join tables).
     CONSTRAINT workspace_policies_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- URL identity, unique within the workspace: lowercase alphanumeric with
-    -- single internal dashes, 3-32 characters.
+    -- URL identity, unique within the workspace (among live policies; enforced by
+    -- a partial index below so a slug frees up after soft deletion): lowercase
+    -- alphanumeric with single internal dashes, 3-32 characters.
     slug            TEXT            NOT NULL,
-    CONSTRAINT workspace_policies_workspace_id_slug_key UNIQUE (workspace_id, slug),
     CONSTRAINT workspace_policies_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
     CONSTRAINT workspace_policies_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
@@ -59,6 +59,10 @@ CREATE INDEX workspace_policies_workspace_idx
 
 CREATE INDEX workspace_policies_account_idx
     ON workspace_policies (account_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX workspace_policies_slug_unique_idx
+    ON workspace_policies (workspace_id, slug)
     WHERE deleted_at IS NULL;
 
 CREATE UNIQUE INDEX workspace_policies_display_name_unique_idx

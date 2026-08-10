@@ -14,9 +14,10 @@ CREATE TABLE workspaces (
     CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 32),
     CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 500),
 
-    -- Human-readable URL identity. Mirrors the WorkspaceSlug newtype: lowercase
-    -- alphanumeric with single internal dashes, 3-32 characters.
-    CONSTRAINT workspaces_slug_key UNIQUE (slug),
+    -- Human-readable URL identity, unique among live workspaces (enforced by a
+    -- partial index below so a slug frees up after soft deletion). Mirrors the
+    -- WorkspaceSlug newtype: lowercase alphanumeric with single internal dashes,
+    -- 3-32 characters.
     CONSTRAINT workspaces_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
     CONSTRAINT workspaces_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
@@ -46,6 +47,10 @@ CREATE TABLE workspaces (
 SELECT setup_updated_at('workspaces');
 
 -- Indexes for workspaces table
+CREATE UNIQUE INDEX workspaces_slug_unique_idx
+    ON workspaces (slug)
+    WHERE deleted_at IS NULL;
+
 CREATE UNIQUE INDEX workspaces_display_name_owner_unique_idx
     ON workspaces (lower(display_name), created_by)
     WHERE deleted_at IS NULL;

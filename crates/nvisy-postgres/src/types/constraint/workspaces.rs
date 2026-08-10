@@ -27,7 +27,7 @@ pub enum WorkspaceConstraints {
     SettingsSize,
 
     // Workspace uniqueness constraints
-    #[strum(serialize = "workspaces_slug_key")]
+    #[strum(serialize = "workspaces_slug_unique_idx")]
     SlugUnique,
     #[strum(serialize = "workspaces_display_name_owner_unique_idx")]
     NameUnique,

@@ -75,9 +75,7 @@ async fn create_workspace(
 
     let (workspace, membership) = conn
         .transaction(async |conn| {
-            let workspace = conn
-                .create_workspace_with_unique_slug(new_workspace)
-                .await?;
+            let workspace = conn.create_workspace(new_workspace).await?;
             let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
             let member = conn.add_workspace_member(new_member).await?;
             Ok::<(WorkspaceModel, WorkspaceMember), nvisy_postgres::PgError>((workspace, member))
