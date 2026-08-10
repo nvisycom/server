@@ -130,7 +130,7 @@ CREATE TABLE workspace_members (
 );
 
 -- Triggers for workspace_members table
-SELECT setup_updated_at('workspace_members');
+SELECT setup_updated_at_no_soft_delete('workspace_members');
 
 -- Indexes for workspace_members table
 CREATE INDEX workspace_members_account_workspaces_idx
@@ -208,7 +208,7 @@ CREATE TABLE workspace_invites (
 );
 
 -- Triggers for workspace_invites table
-SELECT setup_updated_at('workspace_invites');
+SELECT setup_updated_at_no_soft_delete('workspace_invites');
 
 -- Indexes for workspace_invites table
 CREATE INDEX workspace_invites_token_lookup_idx
