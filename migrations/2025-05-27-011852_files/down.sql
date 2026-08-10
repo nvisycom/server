@@ -12,4 +12,4 @@ DROP FUNCTION IF EXISTS find_duplicate_workspace_files(UUID);
 DROP FUNCTION IF EXISTS set_workspace_file_version_number();
 
 -- Drop enum types
-DROP TYPE IF EXISTS FILE_SOURCE;
+DROP TYPE IF EXISTS FILE_KIND;

@@ -21,20 +21,55 @@ pub const DEFAULT_MAX_RETRY_INTERVAL: Duration = Duration::from_millis(30_000);
 ///
 /// This configuration is used for webhook delivery and other HTTP operations.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct ReqwestConfig {
-    /// HTTP request timeout (falls back to the default when unset).
+    /// HTTP request timeout (e.g. `30s`); falls back to the default when unset.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "http-timeout", env = "HTTP_TIMEOUT", value_parser = humantime::parse_duration)
+    )]
     pub http_timeout: Option<Duration>,
 
     /// User-Agent header to send with requests.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "http-user-agent", env = "HTTP_USER_AGENT")
+    )]
     pub user_agent: Option<String>,
 
     /// Maximum number of retry attempts for transient failures.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "http-max-retries",
+            env = "HTTP_MAX_RETRIES",
+            default_value_t = DEFAULT_MAX_RETRIES
+        )
+    )]
     pub max_retries: u32,
 
-    /// Minimum retry interval.
+    /// Minimum retry interval (e.g. `500ms`).
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "http-min-retry-interval",
+            env = "HTTP_MIN_RETRY_INTERVAL",
+            default_value = "500ms",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub min_retry_interval: Duration,
 
-    /// Maximum retry interval.
+    /// Maximum retry interval (e.g. `30s`).
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "http-max-retry-interval",
+            env = "HTTP_MAX_RETRY_INTERVAL",
+            default_value = "30s",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub max_retry_interval: Duration,
 }
 

@@ -6,23 +6,50 @@ use crate::Error;
 
 /// Configuration for NATS connections with sensible defaults.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct NatsConfig {
     /// NATS server URL (comma-separated for clustering)
+    #[cfg_attr(feature = "cli", arg(long = "nats-url", env = "NATS_URL"))]
     pub nats_url: String,
 
     /// Authentication token
+    #[cfg_attr(feature = "cli", arg(long = "nats-token", env = "NATS_TOKEN"))]
     pub nats_token: String,
 
     /// Client connection name for debugging and monitoring
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "nats-client-name", env = "NATS_CLIENT_NAME")
+    )]
     pub nats_client_name: Option<String>,
 
     /// Connection timeout (optional).
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "nats-connect-timeout",
+            env = "NATS_CONNECT_TIMEOUT",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub nats_connect_timeout: Option<Duration>,
 
     /// Request timeout (optional).
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "nats-request-timeout",
+            env = "NATS_REQUEST_TIMEOUT",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub nats_request_timeout: Option<Duration>,
 
     /// Maximum number of reconnection attempts (0 = unlimited)
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "nats-max-reconnects", env = "NATS_MAX_RECONNECTS")
+    )]
     pub nats_max_reconnects: Option<usize>,
 }
 

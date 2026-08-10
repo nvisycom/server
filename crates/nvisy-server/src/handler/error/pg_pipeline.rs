@@ -2,9 +2,8 @@
 
 use nvisy_postgres::types::{
     WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints,
-    WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
-    WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
-    WorkspacePolicyConstraints,
+    WorkspacePipelineConstraints, WorkspacePipelineReferenceConstraints,
+    WorkspacePipelineRunConstraints, WorkspacePolicyConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -52,9 +51,6 @@ impl From<WorkspacePipelineRunConstraints> for Error<'static> {
     fn from(c: WorkspacePipelineRunConstraints) -> Self {
         let error =
             match c {
-                WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength => {
-                    ErrorKind::InternalServerError.into_error()
-                }
                 WorkspacePipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Pipeline run metadata size exceeds maximum limit"),
                 WorkspacePipelineRunConstraints::IdempotencyKeyLength => ErrorKind::BadRequest
@@ -67,18 +63,6 @@ impl From<WorkspacePipelineRunConstraints> for Error<'static> {
             };
 
         error.with_resource("pipeline_run")
-    }
-}
-
-impl From<WorkspacePipelineArtifactConstraints> for Error<'static> {
-    fn from(c: WorkspacePipelineArtifactConstraints) -> Self {
-        let error = match c {
-            WorkspacePipelineArtifactConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Artifact metadata size exceeds maximum limit")
-            }
-        };
-
-        error.with_resource("pipeline_artifact")
     }
 }
 

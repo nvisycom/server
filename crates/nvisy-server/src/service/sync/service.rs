@@ -10,24 +10,27 @@ use std::path::Path as StdPath;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use futures::stream::{self, StreamExt};
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{FileKey, FilesBucket};
+use nvisy_nats::object::{FileKey, FilesBucket, ObjectBucket};
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::StorageConfig;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
-use nvisy_postgres::query::{WorkspaceConnectionSyncRepository, WorkspaceFileRepository};
-use nvisy_postgres::types::{FileSource, SyncDeletionPolicy};
+use nvisy_postgres::query::{
+    WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
+};
+use nvisy_postgres::types::{FileKind, SyncDeletionPolicy, WorkspaceSettings};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::ObjectService;
+use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{CryptoService, HashingReader, Measurements, WebhookEmitter};
+use crate::service::{CryptoService, HashingReader, Measurements, ObjectService, WebhookEmitter};
 
 /// Tracing target for connection sync operations.
-const TRACING_TARGET: &str = "nvisy_server::service::object::sync";
+const TRACING_TARGET: &str = "nvisy_server::service::sync";
 
 /// Maximum wall-clock time for a single sync transfer before it is failed.
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
@@ -47,6 +50,8 @@ pub struct ConnectionSyncService {
     crypto: CryptoService,
     object: ObjectService,
     webhook: WebhookEmitter,
+    /// Maximum objects imported concurrently within a single sync.
+    import_concurrency: usize,
     // Cancellation tokens for transfers running in this process, keyed by run id.
     // Cancellation is best-effort and process-local: it aborts a transfer only on
     // the instance running it. Cross-instance runs are stopped by the DB status
@@ -62,6 +67,7 @@ impl ConnectionSyncService {
         crypto: CryptoService,
         object: ObjectService,
         webhook: WebhookEmitter,
+        config: SyncConfig,
     ) -> Self {
         Self {
             postgres,
@@ -69,6 +75,7 @@ impl ConnectionSyncService {
             crypto,
             object,
             webhook,
+            import_concurrency: config.import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -127,25 +134,57 @@ impl ConnectionSyncService {
             .await?
             .into_iter()
             .collect();
+        // Imported files are original documents; the retention expiry is the same
+        // for every object in this sync, so resolve it once here rather than
+        // re-querying the workspace per file.
+        let expires_at = conn
+            .find_workspace_by_id(connection.workspace_id)
+            .await?
+            .and_then(|workspace| {
+                WorkspaceSettings::from_value(&workspace.settings)
+                    .retention
+                    .original_documents
+                    .expires_at(jiff::Timestamp::now())
+            });
         drop(conn);
 
-        let mut imported = 0u64;
-        for key in &remote_keys {
-            if already_imported.contains(key) {
-                continue;
-            }
-            match self.import_one(&client, connection, account_id, key).await {
-                Ok(_) => imported += 1,
-                Err(err) => {
-                    // Tolerate a single bad object; the rest of the sync proceeds.
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        key = %key, error = %err,
-                        "Skipping object that failed to import",
-                    );
+        // Import the not-yet-imported objects with bounded concurrency: up to
+        // `import_concurrency` fetch/decrypt/store pipelines run at once. A single
+        // bad object is logged and skipped rather than aborting the whole sync.
+        // `client` and `self` are borrowed by every task, so the async blocks
+        // capture shared references (only `key` is per-task).
+        // Collect the keys to import into owned values first, so each task's
+        // future captures no borrow of `remote_keys`.
+        let to_import: Vec<String> = remote_keys
+            .iter()
+            .filter(|key| !already_imported.contains(*key))
+            .cloned()
+            .collect();
+        let imported = stream::iter(to_import)
+            .map(|key| {
+                // `ObjectStoreClient` is an `Arc` handle, so cloning per task is
+                // cheap and keeps each future free of borrowed locals.
+                let client = client.clone();
+                async move {
+                    match self
+                        .import_one(&client, connection, account_id, &key, expires_at)
+                        .await
+                    {
+                        Ok(_) => 1u64,
+                        Err(err) => {
+                            tracing::warn!(
+                                target: TRACING_TARGET,
+                                key = %key, error = %err,
+                                "Skipping object that failed to import",
+                            );
+                            0
+                        }
+                    }
                 }
-            }
-        }
+            })
+            .buffer_unordered(self.import_concurrency)
+            .fold(0u64, |total, imported| std::future::ready(total + imported))
+            .await;
 
         self.reconcile_deletions(connection, deletion_policy, &remote_keys)
             .await;
@@ -234,15 +273,17 @@ impl ConnectionSyncService {
     /// Imports one object at `remote_key` using an already-connected `client`.
     ///
     /// Streams the object's bytes from the external store, encrypts them with
-    /// the workspace key, writes them to the NATS files bucket, and records a
-    /// [`WorkspaceFile`] with [`FileSource::Imported`] and its source origin. If
-    /// recording fails, the just-written object is deleted so none is orphaned.
+    /// the workspace key, writes them to the NATS files bucket, and records an
+    /// original-kind file along with its import origin (connection and remote
+    /// key). If recording fails, the just-written object is deleted so none is
+    /// orphaned.
     async fn import_one(
         &self,
         client: &ObjectStoreClient,
         connection: &WorkspaceConnection,
         account_id: Uuid,
         remote_key: &str,
+        expires_at: Option<jiff::Timestamp>,
     ) -> Result<WorkspaceFile> {
         // Stream external bytes -> hash+measure -> encrypt -> NATS files bucket.
         let source = client.get_stream(remote_key).await?;
@@ -259,7 +300,14 @@ impl ConnectionSyncService {
         // The object now exists in storage; if recording it in the database
         // fails, delete it so no orphaned object is left behind.
         match self
-            .record_imported_file(connection, account_id, remote_key, &file_key, &measurements)
+            .record_imported_file(
+                connection,
+                account_id,
+                remote_key,
+                &file_key,
+                &measurements,
+                expires_at,
+            )
             .await
         {
             Ok(file) => Ok(file),
@@ -276,7 +324,9 @@ impl ConnectionSyncService {
         }
     }
 
-    /// Inserts the [`WorkspaceFile`] row for a freshly imported object.
+    /// Inserts the [`WorkspaceFile`] row for a freshly imported object. The
+    /// retention `expires_at` is resolved once per sync by the caller and passed
+    /// in, so this only holds a pooled connection for the insert itself.
     async fn record_imported_file(
         &self,
         connection: &WorkspaceConnection,
@@ -284,27 +334,29 @@ impl ConnectionSyncService {
         remote_key: &str,
         file_key: &FileKey,
         measurements: &Measurements,
+        expires_at: Option<jiff::Timestamp>,
     ) -> Result<WorkspaceFile> {
-        let store = self.nats.object_store::<FilesBucket>().await?;
         let mut conn = self.postgres.get_connection().await?;
         let filename = object_basename(remote_key);
         let extension = object_extension(remote_key);
+
         let new_file = NewWorkspaceFile {
             workspace_id: connection.workspace_id,
             account_id,
             display_name: Some(filename.clone()),
             original_filename: Some(filename),
             file_extension: extension,
-            source: Some(FileSource::Imported),
-            source_connection_id: Some(connection.id),
-            source_key: Some(remote_key.to_owned()),
+            file_kind: Some(FileKind::Original),
             file_size_bytes: measurements.bytes() as i64,
             file_hash_sha256: measurements.sha256().to_vec(),
             storage_path: file_key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
+            storage_bucket: FilesBucket::NAME.to_owned(),
+            expires_at: expires_at.map(Into::into),
             ..Default::default()
         };
-        Ok(conn.create_workspace_file(new_file).await?)
+        Ok(conn
+            .record_imported_file(new_file, connection.id, remote_key.to_owned())
+            .await?)
     }
 
     /// Exports a stored workspace file back out to the connection at `remote_key`.
@@ -344,8 +396,9 @@ impl ConnectionSyncService {
                 .decrypt_reader(connection.workspace_id, stored.into_reader()),
         );
         let body = reader_to_stream(plaintext);
+        let content_type = mime_from_extension(&file.file_extension);
         client
-            .put_multipart(remote_key, file.mime_type.as_deref(), body)
+            .put_multipart(remote_key, Some(content_type.as_str()), body)
             .await?;
 
         tracing::debug!(target: TRACING_TARGET, "File exported");
@@ -553,6 +606,16 @@ fn object_extension(key: &str) -> Option<String> {
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
+}
+
+/// Guesses the MIME type for a file extension, falling back to
+/// `application/octet-stream` when unknown. Used to set the export
+/// Content-Type, since files store only their extension, not a MIME type.
+fn mime_from_extension(extension: &str) -> String {
+    mime_guess::from_ext(extension.trim_start_matches('.'))
+        .first_or_octet_stream()
+        .essence_str()
+        .to_owned()
 }
 
 #[cfg(test)]

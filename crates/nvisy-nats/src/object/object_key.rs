@@ -216,24 +216,24 @@ impl FromStr for WorkspaceAvatarKey {
     }
 }
 
-/// A validated key for intermediate pipeline objects in NATS object storage.
+/// A validated key for redaction audit objects in NATS object storage.
 ///
-/// Addresses a run's analyzed document — the engine's detection result held
-/// between the detect and redact calls. Encoded as an `intermediate_` prefix
+/// Addresses a run's analyzed document — the engine's detection result (the
+/// audit of what was found and redacted). Encoded as an `audit_` prefix
 /// followed by URL-safe base64 of the concatenated workspace ID and object ID
 /// (32 bytes -> base64), like [`FileKey`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct IntermediateKey {
+pub struct AuditKey {
     pub workspace_id: Uuid,
     pub object_id: Uuid,
 }
 
-impl ObjectKey for IntermediateKey {
-    const PREFIX: &'static str = "intermediate_";
+impl ObjectKey for AuditKey {
+    const PREFIX: &'static str = "audit_";
 }
 
-impl IntermediateKey {
-    /// Generates a new intermediate key with a fresh UUID v7 object ID.
+impl AuditKey {
+    /// Generates a new audit key with a fresh UUID v7 object ID.
     pub fn generate(workspace_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -241,7 +241,7 @@ impl IntermediateKey {
         }
     }
 
-    /// Creates an intermediate key from existing IDs (for parsing stored keys).
+    /// Creates an audit key from existing IDs (for parsing stored keys).
     pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -280,13 +280,13 @@ impl IntermediateKey {
     }
 }
 
-impl fmt::Display for IntermediateKey {
+impl fmt::Display for AuditKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", Self::PREFIX, self.encode_payload())
     }
 }
 
-impl FromStr for IntermediateKey {
+impl FromStr for AuditKey {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {

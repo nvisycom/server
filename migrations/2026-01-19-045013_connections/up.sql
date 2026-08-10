@@ -233,3 +233,32 @@ COMMENT ON COLUMN workspace_connection_syncs.error_message IS 'Failure detail wh
 COMMENT ON COLUMN workspace_connection_syncs.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_connection_syncs.started_at IS 'When the sync started';
 COMMENT ON COLUMN workspace_connection_syncs.completed_at IS 'When the sync finished';
+
+-- File import origin (satellite): for a file that was imported from a
+-- connection, the connection and remote object key it came from. Present only
+-- for imported files; uploaded/generated files have no row here. Lives here
+-- rather than on `workspace_files` because the FK target (`workspace_connections`)
+-- is created by this migration, which runs after the files migration.
+CREATE TABLE workspace_file_imports (
+    -- One import origin per file; the file id is the primary key.
+    file_id         UUID PRIMARY KEY REFERENCES workspace_files (id) ON DELETE CASCADE,
+
+    -- The connection and remote object key the file was imported from. Deleting
+    -- the connection drops the import origin rows (the files themselves remain).
+    connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
+    source_key      TEXT                NOT NULL,
+
+    CONSTRAINT workspace_file_imports_source_key_length CHECK (length(source_key) BETWEEN 1 AND 1024)
+);
+
+-- One imported file per (connection, remote key): makes re-imports idempotent
+-- and backs the "already imported" lookup during sync.
+CREATE UNIQUE INDEX workspace_file_imports_source_object_unique_idx
+    ON workspace_file_imports (connection_id, source_key);
+
+COMMENT ON TABLE workspace_file_imports IS
+    'Import origin for imported files: the connection and remote object key each came from.';
+
+COMMENT ON COLUMN workspace_file_imports.file_id IS 'The imported file this origin describes';
+COMMENT ON COLUMN workspace_file_imports.connection_id IS 'Connection the file was imported from';
+COMMENT ON COLUMN workspace_file_imports.source_key IS 'Remote object key the file was imported from';

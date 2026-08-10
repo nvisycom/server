@@ -19,9 +19,19 @@ pub const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(30);
 
 /// Health monitoring configuration.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct HealthConfig {
     /// How long cached health results remain valid before a fresh check.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "health-cache-duration",
+            env = "HEALTH_CACHE_DURATION",
+            default_value = "30s",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub cache_duration: Duration,
 }
 

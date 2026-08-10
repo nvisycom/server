@@ -1,9 +1,5 @@
 -- Revert pipeline tables
 
--- Artifacts
-DROP TABLE IF EXISTS workspace_pipeline_artifacts;
-DROP TYPE IF EXISTS ARTIFACT_TYPE;
-
 -- Views
 DROP VIEW IF EXISTS workspace_pipeline_run_history;
 DROP VIEW IF EXISTS active_workspace_pipeline_runs;

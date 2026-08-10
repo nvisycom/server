@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceFile as FileModel;
-use nvisy_postgres::types::{FileSource, Handle};
+use nvisy_postgres::types::{FileKind, Handle};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,15 +24,10 @@ pub struct File {
     pub original_filename: String,
     /// File extension (without dot).
     pub file_extension: String,
-    /// MIME type.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
     /// File size in bytes.
     pub file_size: i64,
-    /// Classification tags.
-    pub tags: Vec<String>,
-    /// How the file was created (uploaded, imported, generated).
-    pub source: FileSource,
+    /// The file's role (original, redacted, audit).
+    pub file_kind: FileKind,
     /// Account that uploaded/created the file.
     pub uploaded_by: AccountRef,
     /// Version number (1 for original, higher for newer versions).
@@ -54,10 +49,8 @@ impl File {
             display_name: file.display_name,
             original_filename: file.original_filename,
             file_extension: file.file_extension,
-            mime_type: file.mime_type,
             file_size: file.file_size_bytes,
-            tags: file.tags.into_iter().flatten().collect(),
-            source: file.source,
+            file_kind: file.file_kind,
             uploaded_by,
             version_number: file.version_number,
             parent_id: file.parent_id,

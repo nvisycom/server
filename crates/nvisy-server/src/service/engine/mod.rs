@@ -29,6 +29,7 @@ pub use error::UnknownFormatToken;
 /// Deployment configuration for the redaction engine.
 #[must_use]
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct EngineConfig {
     /// Optional path to a TOML file with the deployment engine configuration.
     ///
@@ -36,6 +37,7 @@ pub struct EngineConfig {
     /// and deduplication-calibration defaults. Absent means no NER/LLM
     /// recognizers, no enrichment, and no calibration (pattern recognizers
     /// still run).
+    #[cfg_attr(feature = "cli", arg(long, env = "ENGINE_CONFIG_FILEPATH"))]
     pub config_path: Option<PathBuf>,
 }
 

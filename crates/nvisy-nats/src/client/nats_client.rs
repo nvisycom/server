@@ -43,7 +43,7 @@ use crate::kv::{
     ApiToken, ApiTokensBucket, ChatHistoryBucket, KvBucket, KvKey, KvStore, SessionKey, TokenKey,
 };
 use crate::object::{
-    AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
+    AuditBucket, AvatarsBucket, FilesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
     WorkspaceAvatarsBucket,
 };
 use crate::stream::{EventPublisher, EventStream, EventSubscriber, WebhookStream};
@@ -237,9 +237,9 @@ impl NatsClient {
         self.object_store().await
     }
 
-    /// Get or create an intermediates store for temporary processing artifacts.
+    /// Get or create the redaction audit store.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn intermediates_store(&self) -> Result<ObjectStore<IntermediatesBucket>> {
+    pub async fn audit_store(&self) -> Result<ObjectStore<AuditBucket>> {
         self.object_store().await
     }
 

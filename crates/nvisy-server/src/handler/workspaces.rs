@@ -10,9 +10,12 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
 use nvisy_postgres::query::{
-    WorkspaceActivityRepository, WorkspaceMemberRepository, WorkspaceRepository,
+    WorkspaceActivityRepository, WorkspaceFileRepository, WorkspaceMemberRepository,
+    WorkspaceRepository,
 };
+use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use uuid::Uuid;
 
 use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Permission, Query, ValidateJson, WorkspaceContext,
@@ -30,6 +33,29 @@ use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
+
+/// Recomputes each document scope's `expires_at` on a workspace's existing live
+/// files after its retention settings change, so a change takes effect on data
+/// already stored (not just future writes). This applies the workspace baseline
+/// across all files of each kind; a pipeline's own override backfill is handled
+/// separately when that pipeline is updated (see `update_pipeline`).
+async fn backfill_retention(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    retention: &RetentionSettings,
+) -> Result<()> {
+    let now = jiff::Timestamp::now();
+    for (scope, kind) in [
+        (RetentionScope::OriginalDocuments, FileKind::Original),
+        (RetentionScope::RedactedDocuments, FileKind::Redacted),
+        (RetentionScope::AuditLogs, FileKind::Audit),
+    ] {
+        let expires_at = retention.get(scope).expires_at(now);
+        conn.backfill_files_expiry(workspace_id, kind, expires_at)
+            .await?;
+    }
+    Ok(())
+}
 
 /// Creates a new workspace with the authenticated user as owner.
 ///
@@ -177,8 +203,25 @@ async fn update_workspace(
         .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
         .await?;
 
-    let update_data = request.into_model();
-    let updated = conn.update_workspace(workspace.id, update_data).await?;
+    // Capture the new retention so, if settings changed, we can backfill the
+    // precomputed `expires_at` on existing files for this workspace.
+    let new_retention = request.settings.map(|settings| settings.retention);
+
+    let update_data = request.into_model()?;
+
+    // The settings write and the retention backfill must be atomic: otherwise a
+    // mid-operation failure could persist the new settings while existing files
+    // keep stale `expires_at`, or update only some file kinds.
+    let workspace_id = workspace.id;
+    let updated = conn
+        .transaction(async |conn| {
+            let updated = conn.update_workspace(workspace_id, update_data).await?;
+            if let Some(retention) = new_retention {
+                backfill_retention(conn, workspace_id, &retention).await?;
+            }
+            Ok::<_, Error>(updated)
+        })
+        .await?;
 
     let creator = find_workspace_creator(&mut conn, updated.slug.as_str()).await?;
 

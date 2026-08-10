@@ -20,9 +20,6 @@ CREATE TABLE workspaces (
     CONSTRAINT workspaces_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
     CONSTRAINT workspaces_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
-    -- Workspace settings
-    require_approval BOOLEAN            NOT NULL DEFAULT TRUE,
-
     -- Tags and extended metadata
     tags             TEXT[]             NOT NULL DEFAULT '{}',
     metadata         JSONB              NOT NULL DEFAULT '{}',
@@ -81,10 +78,9 @@ COMMENT ON COLUMN workspaces.id IS 'Unique workspace identifier (UUID)';
 COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (2-32 characters)';
 COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 500 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
-COMMENT ON COLUMN workspaces.require_approval IS 'Require approval before processed files become visible';
 COMMENT ON COLUMN workspaces.tags IS 'Array of tags for workspace classification and search';
 COMMENT ON COLUMN workspaces.metadata IS 'Extended workspace metadata (JSON, 2B-8KB)';
-COMMENT ON COLUMN workspaces.settings IS 'Workspace-specific settings and preferences (JSON, 2B-8KB)';
+COMMENT ON COLUMN workspaces.settings IS 'Typed workspace settings (JSON, 2B-8KB): approval requirement, data-retention rules';
 COMMENT ON COLUMN workspaces.created_by IS 'Account that created this workspace (becomes first owner)';
 COMMENT ON COLUMN workspaces.created_at IS 'Timestamp when the workspace was created';
 COMMENT ON COLUMN workspaces.updated_at IS 'Timestamp when the workspace was last modified (auto-updated)';

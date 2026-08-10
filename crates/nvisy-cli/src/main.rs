@@ -65,6 +65,13 @@ async fn run() -> anyhow::Result<()> {
         let _ = sync_worker.run(sync_cancel).await;
     });
 
+    // Spawn data-retention worker (expires stored data per workspace policy)
+    let retention_worker = state.retention_worker();
+    let retention_cancel = cancel.clone();
+    let retention_handle = tokio::spawn(async move {
+        let _ = retention_worker.run(retention_cancel).await;
+    });
+
     // Run the HTTP server
     let server_result = server::serve(router, cli.server).await;
 
@@ -86,6 +93,13 @@ async fn run() -> anyhow::Result<()> {
             "Connection sync worker task panicked"
         );
     }
+    if let Err(err) = retention_handle.await {
+        tracing::error!(
+            target: TRACING_TARGET_SHUTDOWN,
+            error = %err,
+            "Retention worker task panicked"
+        );
+    }
 
     server_result?;
     Ok(())
@@ -96,9 +110,9 @@ fn create_router(state: ServiceState, middleware: &MiddlewareConfig) -> Router {
     let api_routes = routes(CustomRoutes::new(), state.clone()).with_state(state);
 
     api_routes
-        .with_open_api(&middleware.openapi())
+        .with_open_api(&middleware.openapi)
         .with_metrics()
-        .with_security(&middleware.cors(), &Default::default())
+        .with_security(&middleware.cors, &Default::default())
         .with_observability()
-        .with_recovery(&middleware.recovery())
+        .with_recovery(&middleware.recovery)
 }

@@ -24,18 +24,44 @@ use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "database configurations must be used to create connection pools"]
 pub struct PgConfig {
     /// PostgreSQL connection URL
+    #[cfg_attr(feature = "cli", arg(long = "postgres-url", env = "POSTGRES_URL"))]
     pub postgres_url: String,
 
     /// Maximum number of connections in the pool (2-16)
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "postgres-max-connections",
+            env = "POSTGRES_MAX_CONNECTIONS",
+            default_value = "10"
+        )
+    )]
     pub postgres_max_connections: u32,
 
     /// Connection timeout (optional).
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "postgres-connection-timeout",
+            env = "POSTGRES_CONNECTION_TIMEOUT",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub postgres_connection_timeout: Option<Duration>,
 
     /// Idle connection timeout (optional).
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "postgres-idle-timeout",
+            env = "POSTGRES_IDLE_TIMEOUT",
+            value_parser = humantime::parse_duration,
+        )
+    )]
     pub postgres_idle_timeout: Option<Duration>,
 }
 

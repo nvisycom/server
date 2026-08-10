@@ -7,6 +7,7 @@ mod filtering;
 mod handle;
 mod pagination;
 mod prefixed_id;
+mod settings;
 mod sorting;
 mod utilities;
 
@@ -19,19 +20,22 @@ pub use constraint::{
     ConstraintCategory, ConstraintViolation, WorkspaceActivitiesConstraints,
     WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints, WorkspaceConstraints,
     WorkspaceFileConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
-    WorkspacePipelineArtifactConstraints, WorkspacePipelineConstraints,
-    WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
-    WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
+    WorkspacePipelineConstraints, WorkspacePipelineReferenceConstraints,
+    WorkspacePipelineRunConstraints, WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActivityCategory, ActivityType, ApiTokenType, ArtifactType, FileSource, InviteStatus,
-    NotificationEvent, PipelineRunStatus, PipelineStatus, PipelineTriggerType, SyncDeletionPolicy,
-    SyncMode, SyncStatus, SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
+    ActivityCategory, ActivityType, ApiTokenType, FileKind, InviteStatus, NotificationEvent,
+    PipelineRunStatus, PipelineStatus, PipelineTriggerType, SyncDeletionPolicy, SyncMode,
+    SyncStatus, SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{FileFilter, InviteFilter, MemberFilter};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
 pub use prefixed_id::{ConnectionId, PrefixedIdError, RunId, WebhookId};
+pub use settings::{
+    PIPELINE_RETENTION_KEY, Retention, RetentionOverride, RetentionScope, RetentionSettings,
+    WorkspaceSettings,
+};
 pub use sorting::{
     FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,
     SortBy, SortOrder,

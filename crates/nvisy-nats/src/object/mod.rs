@@ -12,11 +12,11 @@
 //! ## Key Types
 //! - [`FileKey`] - Unique key for files (workspace + object ID)
 //! - [`AccountAvatarKey`] - Key for account-scoped objects (account ID)
-//! - [`IntermediateKey`] - Key for intermediate pipeline artifacts
+//! - [`AuditKey`] - Key for redaction audit objects
 //!
 //! ## Bucket Types
 //! - [`FilesBucket`] - Primary file storage (no expiration)
-//! - [`IntermediatesBucket`] - Between-phase processing artifacts (no expiry)
+//! - [`AuditBucket`] - Redaction audits (per-workspace retention)
 //! - [`ThumbnailsBucket`] - Document thumbnails (no expiration)
 //! - [`AvatarsBucket`] - Account avatars (no expiration)
 //!
@@ -30,9 +30,8 @@ mod object_key;
 mod object_store;
 
 pub use object_bucket::{
-    AvatarsBucket, FilesBucket, IntermediatesBucket, ObjectBucket, ThumbnailsBucket,
-    WorkspaceAvatarsBucket,
+    AuditBucket, AvatarsBucket, FilesBucket, ObjectBucket, ThumbnailsBucket, WorkspaceAvatarsBucket,
 };
 pub use object_data::{GetResult, PutResult};
-pub use object_key::{AccountAvatarKey, FileKey, IntermediateKey, ObjectKey, WorkspaceAvatarKey};
+pub use object_key::{AccountAvatarKey, AuditKey, FileKey, ObjectKey, WorkspaceAvatarKey};
 pub use object_store::ObjectStore;

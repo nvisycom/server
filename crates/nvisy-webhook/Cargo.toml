@@ -32,6 +32,10 @@ reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:re
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
+# CLI support: derives clap::Args on config structs so the binary can parse them
+# from flags/env directly, keeping the dependency optional for library users.
+cli = ["dep:clap", "dep:humantime"]
+
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true }
@@ -52,6 +56,10 @@ sha2 = { workspace = true, optional = true, features = [] }
 
 # Encoding
 hex = { workspace = true, optional = true, features = [] }
+
+# CLI
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+humantime = { workspace = true, features = [], optional = true }
 
 # Observability
 tracing = { workspace = true }

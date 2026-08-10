@@ -32,11 +32,16 @@ type Panic = Box<dyn Any + Send + 'static>;
 /// This struct controls how the recovery middleware handles various
 /// error conditions including timeouts and panic recovery.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct RecoveryConfig {
-    /// Maximum duration to wait for a request to complete before timing out.
-    /// Requests exceeding this duration receive a 500 response with a timeout
-    /// message.
+    /// Maximum duration to wait for a request to complete before timing out
+    /// (e.g. `30s`). Requests exceeding this duration receive a 500 response
+    /// with a timeout message.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "REQUEST_TIMEOUT", default_value = "30s", value_parser = humantime::parse_duration)
+    )]
     pub request_timeout: Duration,
 }
 

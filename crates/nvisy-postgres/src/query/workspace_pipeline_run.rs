@@ -10,8 +10,7 @@ use crate::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, OffsetPagination, PipelineRunStatus,
-    WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, Handle, PipelineRunStatus, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -45,13 +44,6 @@ pub trait WorkspacePipelineRunRepository {
         idempotency_key: &str,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
 
-    /// Lists all runs for a specific pipeline with offset pagination.
-    fn offset_list_workspace_pipeline_runs(
-        &mut self,
-        pipeline_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspacePipelineRun>>> + Send;
-
     /// Lists all runs for a specific pipeline with cursor pagination, each
     /// paired with the account that triggered it.
     fn cursor_list_workspace_pipeline_runs(
@@ -76,12 +68,6 @@ pub trait WorkspacePipelineRunRepository {
         status_filter: Option<PipelineRunStatus>,
     ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>>> + Send;
 
-    /// Lists active runs (queued or running) for a specific pipeline.
-    fn list_active_workspace_pipeline_runs(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<WorkspacePipelineRun>>> + Send;
-
     /// Updates a workspace pipeline run with new data.
     fn update_workspace_pipeline_run(
         &mut self,
@@ -89,42 +75,15 @@ pub trait WorkspacePipelineRunRepository {
         updates: UpdateWorkspacePipelineRun,
     ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
 
-    /// Marks a run as started.
-    fn start_workspace_pipeline_run(
+    /// Clears any run references to `file_id`, nulling `audit_file_id` and
+    /// `output_file_id` wherever they point at it. Used when a file is
+    /// soft-deleted (e.g. by retention): the `ON DELETE SET NULL` FKs fire only
+    /// on a hard delete, so runs would otherwise keep pointing at a tombstoned
+    /// file. Returns the number of runs updated.
+    fn clear_run_file_references(
         &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
-
-    /// Marks a run as completed successfully.
-    fn complete_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
-
-    /// Marks a run as failed.
-    fn fail_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
-
-    /// Marks a run as cancelled.
-    fn cancel_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
-
-    /// Counts runs for a pipeline by status.
-    fn count_workspace_pipeline_runs_by_status(
-        &mut self,
-        pipeline_id: Uuid,
-        status: PipelineRunStatus,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
-
-    /// Gets the most recent run for a pipeline.
-    fn find_latest_workspace_pipeline_run(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
+        file_id: Uuid,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
 impl WorkspacePipelineRunRepository for PgConnection {
@@ -190,26 +149,6 @@ impl WorkspacePipelineRunRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(run)
-    }
-
-    async fn offset_list_workspace_pipeline_runs(
-        &mut self,
-        pipeline_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspacePipelineRun>> {
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let runs = workspace_pipeline_runs::table
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .order(dsl::started_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(WorkspacePipelineRun::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(runs)
     }
 
     async fn cursor_list_workspace_pipeline_runs(
@@ -394,28 +333,6 @@ impl WorkspacePipelineRunRepository for PgConnection {
         ))
     }
 
-    async fn list_active_workspace_pipeline_runs(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> PgResult<Vec<WorkspacePipelineRun>> {
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let runs = workspace_pipeline_runs::table
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .filter(
-                dsl::status
-                    .eq(PipelineRunStatus::Running)
-                    .or(dsl::status.eq(PipelineRunStatus::Analyzed)),
-            )
-            .order(dsl::started_at.desc())
-            .select(WorkspacePipelineRun::as_select())
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(runs)
-    }
-
     async fn update_workspace_pipeline_run(
         &mut self,
         run_id: Uuid,
@@ -433,119 +350,23 @@ impl WorkspacePipelineRunRepository for PgConnection {
         Ok(run)
     }
 
-    async fn start_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> PgResult<WorkspacePipelineRun> {
-        use diesel::dsl::now;
+    async fn clear_run_file_references(&mut self, file_id: Uuid) -> PgResult<usize> {
         use schema::workspace_pipeline_runs::{self, dsl};
 
-        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(PipelineRunStatus::Running),
-                dsl::started_at.eq(now),
-            ))
-            .returning(WorkspacePipelineRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
+        let audit_cleared =
+            diesel::update(workspace_pipeline_runs::table.filter(dsl::audit_file_id.eq(file_id)))
+                .set(dsl::audit_file_id.eq(None::<Uuid>))
+                .execute(self)
+                .await
+                .map_err(PgError::from)?;
 
-        Ok(run)
-    }
+        let output_cleared =
+            diesel::update(workspace_pipeline_runs::table.filter(dsl::output_file_id.eq(file_id)))
+                .set(dsl::output_file_id.eq(None::<Uuid>))
+                .execute(self)
+                .await
+                .map_err(PgError::from)?;
 
-    async fn complete_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> PgResult<WorkspacePipelineRun> {
-        use diesel::dsl::now;
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(PipelineRunStatus::Completed),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspacePipelineRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(run)
-    }
-
-    async fn fail_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> PgResult<WorkspacePipelineRun> {
-        use diesel::dsl::now;
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(PipelineRunStatus::Failed),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspacePipelineRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(run)
-    }
-
-    async fn cancel_workspace_pipeline_run(
-        &mut self,
-        run_id: Uuid,
-    ) -> PgResult<WorkspacePipelineRun> {
-        use diesel::dsl::now;
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let run = diesel::update(workspace_pipeline_runs::table.filter(dsl::id.eq(run_id)))
-            .set((
-                dsl::status.eq(PipelineRunStatus::Cancelled),
-                dsl::completed_at.eq(now),
-            ))
-            .returning(WorkspacePipelineRun::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(run)
-    }
-
-    async fn count_workspace_pipeline_runs_by_status(
-        &mut self,
-        pipeline_id: Uuid,
-        status: PipelineRunStatus,
-    ) -> PgResult<i64> {
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let count = workspace_pipeline_runs::table
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .filter(dsl::status.eq(status))
-            .count()
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(count)
-    }
-
-    async fn find_latest_workspace_pipeline_run(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> PgResult<Option<WorkspacePipelineRun>> {
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let run = workspace_pipeline_runs::table
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .order(dsl::started_at.desc())
-            .select(WorkspacePipelineRun::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(PgError::from)?;
-
-        Ok(run)
+        Ok(audit_cleared + output_cleared)
     }
 }

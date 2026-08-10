@@ -2,9 +2,7 @@
 
 use std::time::Duration;
 
-use super::object_key::{
-    AccountAvatarKey, FileKey, IntermediateKey, ObjectKey, WorkspaceAvatarKey,
-};
+use super::object_key::{AccountAvatarKey, AuditKey, FileKey, ObjectKey, WorkspaceAvatarKey};
 
 /// Marker trait for object storage buckets.
 ///
@@ -36,20 +34,20 @@ impl ObjectBucket for FilesBucket {
     const NAME: &'static str = "DOCUMENT_FILES";
 }
 
-/// Storage for intermediate processing artifacts.
+/// Storage for redaction audits.
 ///
-/// Holds a run's analyzed document between the detect and redact calls, plus
-/// any other between-phase artifacts. Retained for the life of the run that
-/// owns it: no expiration, since the run row references the object indefinitely
-/// and redaction may happen long after detection.
+/// Holds a run's analyzed document — the engine's detection result (the audit
+/// of what was found and redacted), consumed between the detect and redact
+/// calls and retained afterward. No expiration by default; data-retention
+/// expires audits per workspace policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct IntermediatesBucket;
+pub struct AuditBucket;
 
-impl ObjectBucket for IntermediatesBucket {
-    type Key = IntermediateKey;
+impl ObjectBucket for AuditBucket {
+    type Key = AuditKey;
 
     const MAX_AGE: Option<Duration> = None;
-    const NAME: &'static str = "DOCUMENT_INTERMEDIATES";
+    const NAME: &'static str = "DOCUMENT_AUDITS";
 }
 
 /// Storage for document thumbnails.
@@ -98,7 +96,7 @@ mod tests {
     #[test]
     fn test_bucket_names() {
         assert_eq!(FilesBucket::NAME, "DOCUMENT_FILES");
-        assert_eq!(IntermediatesBucket::NAME, "DOCUMENT_INTERMEDIATES");
+        assert_eq!(AuditBucket::NAME, "DOCUMENT_AUDITS");
         assert_eq!(ThumbnailsBucket::NAME, "DOCUMENT_THUMBNAILS");
         assert_eq!(AvatarsBucket::NAME, "ACCOUNT_AVATARS");
     }
@@ -106,7 +104,7 @@ mod tests {
     #[test]
     fn test_bucket_max_age() {
         assert_eq!(FilesBucket::MAX_AGE, None);
-        assert_eq!(IntermediatesBucket::MAX_AGE, None);
+        assert_eq!(AuditBucket::MAX_AGE, None);
         assert_eq!(ThumbnailsBucket::MAX_AGE, None);
         assert_eq!(AvatarsBucket::MAX_AGE, None);
     }

@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{ConnectionSyncService, is_cron_due};
+use super::{ConnectionSyncService, StandardCronSchedule};
 use crate::handler::Result;
 use crate::service::{ConnectionConfig, CryptoService};
 
@@ -211,7 +211,7 @@ impl ConnectionSyncWorker {
                 // not the last success, so a persistently failing connection is not
                 // re-enqueued every tick; retries are owned by maybe_retry.
                 let last_attempt = latest.map(|run| run.started_at.into());
-                if is_cron_due(cron, last_attempt, now) {
+                if StandardCronSchedule.is_due(cron, last_attempt, now) {
                     due.push((connection.workspace_id, connection.id));
                 }
             }

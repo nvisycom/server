@@ -31,6 +31,10 @@ default = []
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
+# CLI support: derives clap::Args on config structs so the binary can parse them
+# from flags/env directly, keeping the dependency optional for library users.
+cli = ["dep:clap", "dep:humantime"]
+
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true }
@@ -58,6 +62,8 @@ tracing = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 schemars = { workspace = true, features = [], optional = true }
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+humantime = { workspace = true, features = [], optional = true }
 
 # Text processing
 slug = { workspace = true, features = [] }

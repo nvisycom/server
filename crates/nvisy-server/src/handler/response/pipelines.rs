@@ -2,11 +2,11 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Handle, PipelineStatus};
+use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{AccountRef, Artifact, Page};
+use super::{AccountRef, Page};
 use crate::handler::request::PipelineDefinition;
 
 /// Pipeline response.
@@ -29,9 +29,9 @@ pub struct Pipeline {
     pub status: PipelineStatus,
     /// Detection + redaction configuration.
     pub definition: PipelineDefinition,
-    /// Artifacts produced by pipeline runs.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub artifacts: Vec<Artifact>,
+    /// Per-scope data-retention override, when the pipeline sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention: Option<RetentionOverride>,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
@@ -50,41 +50,7 @@ impl Pipeline {
         created_by: AccountRef,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
-        Self::assemble(
-            pipeline,
-            workspace_slug,
-            created_by,
-            Vec::new(),
-            policy_slugs,
-        )
-    }
-
-    /// Creates a pipeline response with artifacts and reference slugs.
-    pub fn from_model_with_artifacts(
-        pipeline: model::WorkspacePipeline,
-        workspace_slug: Handle,
-        created_by: AccountRef,
-        artifacts: Vec<model::WorkspacePipelineArtifact>,
-        policy_slugs: Vec<Handle>,
-    ) -> serde_json::Result<Self> {
-        let artifacts = artifacts.into_iter().map(Artifact::from_model).collect();
-        Self::assemble(
-            pipeline,
-            workspace_slug,
-            created_by,
-            artifacts,
-            policy_slugs,
-        )
-    }
-
-    /// Shared assembly: decodes the stored config and merges the references.
-    fn assemble(
-        pipeline: model::WorkspacePipeline,
-        workspace_slug: Handle,
-        created_by: AccountRef,
-        artifacts: Vec<Artifact>,
-        policy_slugs: Vec<Handle>,
-    ) -> serde_json::Result<Self> {
+        let retention = RetentionOverride::from_pipeline_metadata(&pipeline.metadata);
         let definition = PipelineDefinition::from_parts(pipeline.definition, policy_slugs)?;
         Ok(Self {
             slug: pipeline.slug,
@@ -94,7 +60,7 @@ impl Pipeline {
             description: pipeline.description,
             status: pipeline.status,
             definition,
-            artifacts,
+            retention,
             created_at: pipeline.created_at.into(),
             updated_at: pipeline.updated_at.into(),
         })

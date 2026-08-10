@@ -20,18 +20,21 @@ pub struct WorkspacePipelineRun {
     pub id: Uuid,
     /// Pipeline whose config drove the run.
     pub pipeline_id: Uuid,
-    /// File the run analyzes / redacts.
-    pub file_id: Uuid,
     /// Account the run is attributed to (the user who started it, or the
     /// pipeline's creator for a system-initiated run).
     pub account_id: Uuid,
+    /// Source document the run analyzes / redacts.
+    pub input_file_id: Uuid,
+    /// Audit file (`file_kind = audit`) holding the encrypted analysis between
+    /// detect and redact. `None` until analysis writes it.
+    pub audit_file_id: Option<Uuid>,
+    /// Redacted document (`file_kind = redacted`) produced by redact. `None`
+    /// until the run completes.
+    pub output_file_id: Option<Uuid>,
     /// How the run was initiated.
     pub trigger_type: PipelineTriggerType,
     /// Current run status.
     pub status: PipelineRunStatus,
-    /// Object-store key for the encrypted `AnalyzedDocument` held between detect
-    /// and redact. `None` until analysis writes it.
-    pub analyzed_document_key: Option<String>,
     /// Detect idempotency key (dedupes retries).
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
@@ -49,16 +52,18 @@ pub struct WorkspacePipelineRun {
 pub struct NewWorkspacePipelineRun {
     /// Pipeline ID (required).
     pub pipeline_id: Uuid,
-    /// File ID (required).
-    pub file_id: Uuid,
     /// Account the run is attributed to (required).
     pub account_id: Uuid,
+    /// Source document ID (required).
+    pub input_file_id: Uuid,
+    /// Audit file holding the encrypted analysis (set once analyzed).
+    pub audit_file_id: Option<Uuid>,
+    /// Redacted output file (set once completed).
+    pub output_file_id: Option<Uuid>,
     /// Trigger type.
     pub trigger_type: Option<PipelineTriggerType>,
     /// Initial status.
     pub status: Option<PipelineRunStatus>,
-    /// Object-store key for the encrypted analysis result (set once analyzed).
-    pub analyzed_document_key: Option<String>,
     /// Detect idempotency key.
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
@@ -72,8 +77,10 @@ pub struct NewWorkspacePipelineRun {
 pub struct UpdateWorkspacePipelineRun {
     /// Run status.
     pub status: Option<PipelineRunStatus>,
-    /// Object-store key for the encrypted analysis result.
-    pub analyzed_document_key: Option<Option<String>>,
+    /// Audit file holding the encrypted analysis.
+    pub audit_file_id: Option<Option<Uuid>>,
+    /// Redacted output file produced by redact.
+    pub output_file_id: Option<Option<Uuid>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<serde_json::Value>,
     /// When the run completed.

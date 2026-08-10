@@ -17,10 +17,6 @@ pub enum WorkspaceFileConstraints {
     OriginalFilenameLength,
     #[strum(serialize = "workspace_files_file_extension_format")]
     FileExtensionFormat,
-    #[strum(serialize = "workspace_files_mime_type_format")]
-    MimeTypeFormat,
-    #[strum(serialize = "workspace_files_tags_count_max")]
-    TagsCountMax,
 
     // File storage constraints
     #[strum(serialize = "workspace_files_file_size_min")]
@@ -53,6 +49,8 @@ pub enum WorkspaceFileConstraints {
     DeletedAfterCreated,
     #[strum(serialize = "workspace_files_deleted_after_updated")]
     DeletedAfterUpdated,
+    #[strum(serialize = "workspace_files_expires_after_created")]
+    ExpiresAfterCreated,
 }
 
 impl WorkspaceFileConstraints {
@@ -67,8 +65,6 @@ impl WorkspaceFileConstraints {
             WorkspaceFileConstraints::DisplayNameLength
             | WorkspaceFileConstraints::OriginalFilenameLength
             | WorkspaceFileConstraints::FileExtensionFormat
-            | WorkspaceFileConstraints::MimeTypeFormat
-            | WorkspaceFileConstraints::TagsCountMax
             | WorkspaceFileConstraints::FileSizeMin
             | WorkspaceFileConstraints::StoragePathNotEmpty
             | WorkspaceFileConstraints::StorageBucketNotEmpty
@@ -81,7 +77,8 @@ impl WorkspaceFileConstraints {
 
             WorkspaceFileConstraints::UpdatedAfterCreated
             | WorkspaceFileConstraints::DeletedAfterCreated
-            | WorkspaceFileConstraints::DeletedAfterUpdated => ConstraintCategory::Chronological,
+            | WorkspaceFileConstraints::DeletedAfterUpdated
+            | WorkspaceFileConstraints::ExpiresAfterCreated => ConstraintCategory::Chronological,
         }
     }
 }

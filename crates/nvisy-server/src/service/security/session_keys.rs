@@ -16,11 +16,24 @@ const TRACING_TARGET: &str = "nvisy_server::session_keys";
 
 /// Authentication key file paths configuration.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct SessionKeysConfig {
     /// File path to the JWT decoding (public) key used for sessions.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "AUTH_PUBLIC_PEM_FILEPATH", default_value = "./public.pem")
+    )]
     pub decoding_key: PathBuf,
 
     /// File path to the JWT encoding (private) key used for sessions.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long,
+            env = "AUTH_PRIVATE_PEM_FILEPATH",
+            default_value = "./private.pem"
+        )
+    )]
     pub encoding_key: PathBuf,
 }
 

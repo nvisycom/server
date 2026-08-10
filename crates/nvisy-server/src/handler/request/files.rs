@@ -21,8 +21,6 @@ pub struct UpdateFile {
     /// New display name for the file.
     #[validate(length(min = 1, max = 255))]
     pub display_name: Option<String>,
-    /// Updated tags.
-    pub tags: Option<Vec<String>>,
     /// Updated metadata.
     pub metadata: Option<serde_json::Value>,
 }
@@ -31,7 +29,6 @@ impl UpdateFile {
     pub fn into_model(self) -> UpdateFileModel {
         UpdateFileModel {
             display_name: self.display_name,
-            tags: self.tags.map(|t| t.into_iter().map(Some).collect()),
             metadata: self.metadata,
             ..Default::default()
         }

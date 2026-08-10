@@ -17,7 +17,7 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_postgres::types::WithAccountRef;
+use nvisy_postgres::types::{FileKind, WithAccountRef, WorkspaceSettings};
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
@@ -120,6 +120,8 @@ struct FileUploadContext {
     account_id: Uuid,
     file_store: ObjectStore<FilesBucket>,
     crypto: CryptoService,
+    /// Retention expiry for uploaded originals (`None` = keep indefinitely).
+    expires_at: Option<jiff::Timestamp>,
 }
 
 /// Processes a single file from a multipart upload using streaming.
@@ -170,10 +172,12 @@ async fn process_single_file(
         display_name: Some(filename.clone()),
         original_filename: Some(filename),
         file_extension: Some(file_extension),
+        file_kind: Some(FileKind::Original),
         file_size_bytes: measurements.bytes() as i64,
         file_hash_sha256: measurements.sha256().to_vec(),
         storage_path: file_key.to_string(),
         storage_bucket: ctx.file_store.bucket().to_owned(),
+        expires_at: ctx.expires_at.map(Into::into),
         ..Default::default()
     };
 
@@ -212,11 +216,19 @@ async fn upload_file(
     // The uploader is the caller; resolve their identity once for every file below.
     let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
 
+    // Precompute the retention expiry for uploaded originals from workspace
+    // settings, so every file in this batch carries the same expiry.
+    let expires_at = WorkspaceSettings::from_value(&workspace.settings)
+        .retention
+        .original_documents
+        .expires_at(jiff::Timestamp::now());
+
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
         account_id: auth_claims.account_id,
         file_store,
         crypto,
+        expires_at,
     };
 
     let mut uploaded_files = Vec::new();
