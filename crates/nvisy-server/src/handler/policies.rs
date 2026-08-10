@@ -66,7 +66,7 @@ async fn create_policy(
         .unwrap_or_else(|| definition.name.to_string());
     let description = request
         .description
-        .or_else(|| definition.description.clone());
+        .or_else(|| definition.description.clone().map(Into::into));
     let encrypted = crypto.encrypt_json(workspace.id, &definition)?;
 
     let new_policy = NewWorkspacePolicy {
