@@ -31,11 +31,8 @@ default = []
 cli = ["dep:clap", "dep:humantime"]
 
 [dependencies]
-# Runtime crates
-nvisy-engine = { workspace = true }
-nvisy-template = { workspace = true }
-
 # Internal crates
+nvisy-engine = { workspace = true, features = [] }
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-inference = { workspace = true, features = ["schema"] }

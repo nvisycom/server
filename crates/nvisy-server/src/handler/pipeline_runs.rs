@@ -13,7 +13,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use bytes::Bytes;
 use nvisy_engine::policy::PolicyDefinition;
-use nvisy_engine::{Audit, Document};
+use nvisy_engine::{Audit, Document, OcrMode};
 use nvisy_nats::NatsClient;
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket};
 use nvisy_postgres::model::{
@@ -25,7 +25,7 @@ use nvisy_postgres::query::{
     WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
 use nvisy_postgres::types::{
-    FileKind, PipelineRunStatus, RetentionOverride, RetentionScope, RetentionSettings,
+    FileKind, OcrPolicy, PipelineRunStatus, RetentionOverride, RetentionScope, RetentionSettings,
     WorkspaceSettings,
 };
 use nvisy_postgres::{PgClient, PgConn};
@@ -140,9 +140,17 @@ async fn create_pipeline_run(
         );
     }
 
+    // Map the workspace's OCR policy to the engine's per-run mode. `Force` renders
+    // every page at the engine's default DPI (no workspace DPI knob).
+    let ocr_mode = match WorkspaceSettings::from_value(&workspace.settings).ocr {
+        OcrPolicy::Auto => OcrMode::Auto,
+        OcrPolicy::Force => OcrMode::force(),
+        OcrPolicy::Never => OcrMode::Never,
+    };
+
     // Merge the pipeline's intent with the deployment defaults; rejects a
     // pipeline that enables recognizers this deployment lacks.
-    let params = match engine.analyzer_params(&definition, request.scope) {
+    let params = match engine.analyzer_params(&definition, request.scope, ocr_mode) {
         Ok(params) => params,
         Err(err) => {
             fail_run(
