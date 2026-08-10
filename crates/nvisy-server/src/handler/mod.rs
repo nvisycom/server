@@ -6,6 +6,7 @@
 mod accounts;
 mod authentication;
 mod avatars;
+mod catalog;
 mod connection_syncs;
 mod connections;
 mod error;
@@ -67,41 +68,36 @@ fn private_routes(
 ) -> ApiRouter<ServiceState> {
     let mut router = ApiRouter::new();
 
-    // Each built-in module is mounted unless it has been excluded, letting a
-    // wrapping binary replace an endpoint via `CustomRoutes` without a route
-    // collision.
+    // Only a few modules are toggleable, letting a wrapping binary replace them
+    // via `CustomRoutes` without a route collision. The rest are core to the
+    // platform and always mounted.
     let is_included = |module| !excluded.contains(&module);
 
-    if is_included(BuiltinModule::Accounts) {
-        router = router
-            .merge(accounts::routes(service_state.clone()))
-            .merge(tokens::routes())
-            .merge(notifications::routes());
+    // Always-wired core modules.
+    router = router
+        .merge(accounts::routes(service_state.clone()))
+        .merge(workspaces::routes())
+        .merge(members::routes())
+        .merge(connections::routes())
+        .merge(connection_syncs::routes())
+        .merge(files::routes())
+        .merge(pipelines::routes())
+        .merge(pipeline_runs::routes())
+        .merge(policies::routes())
+        .merge(catalog::routes());
+
+    // Toggleable modules.
+    if is_included(BuiltinModule::Tokens) {
+        router = router.merge(tokens::routes());
     }
-    if is_included(BuiltinModule::Workspaces) {
-        router = router.merge(workspaces::routes());
+    if is_included(BuiltinModule::Notifications) {
+        router = router.merge(notifications::routes());
     }
-    if is_included(BuiltinModule::Members) {
-        router = router.merge(members::routes()).merge(invites::routes());
-    }
-    if is_included(BuiltinModule::Connections) {
-        router = router
-            .merge(connections::routes())
-            .merge(connection_syncs::routes());
+    if is_included(BuiltinModule::Invites) {
+        router = router.merge(invites::routes());
     }
     if is_included(BuiltinModule::Webhooks) {
         router = router.merge(webhooks::routes());
-    }
-    if is_included(BuiltinModule::Files) {
-        router = router.merge(files::routes());
-    }
-    if is_included(BuiltinModule::Pipelines) {
-        router = router
-            .merge(pipelines::routes())
-            .merge(pipeline_runs::routes());
-    }
-    if is_included(BuiltinModule::Policies) {
-        router = router.merge(policies::routes());
     }
 
     if let Some(additional) = additional_routes {
@@ -273,7 +269,7 @@ mod test {
         let server = create_test_server_with_router(move |state| {
             routes(
                 CustomRoutes::new()
-                    .exclude(BuiltinModule::Members)
+                    .exclude(BuiltinModule::Invites)
                     .add_private_routes(custom.clone()),
                 state,
             )
@@ -288,9 +284,9 @@ mod test {
     fn exclude_marks_only_the_named_module() {
         use crate::handler::BuiltinModule;
 
-        let routes = CustomRoutes::new().exclude(BuiltinModule::Members);
-        assert!(routes.is_excluded(BuiltinModule::Members));
-        assert!(!routes.is_excluded(BuiltinModule::Workspaces));
-        assert!(!routes.is_excluded(BuiltinModule::Files));
+        let routes = CustomRoutes::new().exclude(BuiltinModule::Invites);
+        assert!(routes.is_excluded(BuiltinModule::Invites));
+        assert!(!routes.is_excluded(BuiltinModule::Tokens));
+        assert!(!routes.is_excluded(BuiltinModule::Webhooks));
     }
 }
