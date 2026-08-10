@@ -27,7 +27,7 @@ pub enum WorkspacePolicyConstraints {
     // Uniqueness constraints
     #[strum(serialize = "workspace_policies_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-    #[strum(serialize = "workspace_policies_workspace_id_slug_key")]
+    #[strum(serialize = "workspace_policies_slug_unique_idx")]
     SlugUnique,
     #[strum(serialize = "workspace_policies_display_name_unique_idx")]
     NameUnique,

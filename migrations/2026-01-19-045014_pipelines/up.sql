@@ -44,10 +44,10 @@ CREATE TABLE workspace_pipelines (
     -- Composite key target for workspace-scoped foreign keys (join tables).
     CONSTRAINT workspace_pipelines_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- URL identity, unique within the workspace: lowercase alphanumeric with
-    -- single internal dashes, 3-32 characters.
+    -- URL identity, unique within the workspace (among live pipelines; enforced
+    -- by a partial index below so a slug frees up after soft deletion): lowercase
+    -- alphanumeric with single internal dashes, 3-32 characters.
     slug            TEXT             NOT NULL,
-    CONSTRAINT workspace_pipelines_workspace_id_slug_key UNIQUE (workspace_id, slug),
     CONSTRAINT workspace_pipelines_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
     CONSTRAINT workspace_pipelines_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
@@ -94,6 +94,10 @@ CREATE TABLE workspace_pipelines (
 SELECT setup_updated_at('workspace_pipelines');
 
 -- Indexes
+CREATE UNIQUE INDEX workspace_pipelines_slug_unique_idx
+    ON workspace_pipelines (workspace_id, slug)
+    WHERE deleted_at IS NULL;
+
 CREATE INDEX workspace_pipelines_workspace_idx
     ON workspace_pipelines (workspace_id, created_at DESC)
     WHERE deleted_at IS NULL;

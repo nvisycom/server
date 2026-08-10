@@ -69,24 +69,6 @@ impl Handle {
         Self::parse(trimmed).ok()
     }
 
-    /// Returns a variant of this handle disambiguated by a numeric suffix, e.g.
-    /// `acme` with `n = 2` becomes `acme-2`.
-    ///
-    /// The base is truncated if necessary so the suffixed handle still fits
-    /// within [`HANDLE_MAX_LENGTH`]. Used to resolve collisions during
-    /// generation. Returns `None` only if `n` is so large the suffix alone cannot
-    /// fit.
-    pub fn with_numeric_suffix(&self, n: u32) -> Option<Self> {
-        let suffix = format!("-{n}");
-        let budget = HANDLE_MAX_LENGTH.checked_sub(suffix.len())?;
-        if budget < HANDLE_MIN_LENGTH {
-            return None;
-        }
-
-        let base = truncate_on_dash(&self.0, budget);
-        Self::parse(format!("{base}{suffix}")).ok()
-    }
-
     /// Returns the handle as a string slice.
     #[inline]
     #[must_use]
@@ -249,22 +231,5 @@ mod tests {
         let handle = Handle::parse("acme-corp").unwrap();
         let string: String = handle.clone().into();
         assert_eq!(Handle::try_from(string).unwrap(), handle);
-    }
-
-    #[test]
-    fn numeric_suffix_appends_and_stays_valid() {
-        let handle = Handle::parse("acme").unwrap();
-        assert_eq!(handle.with_numeric_suffix(2).unwrap().as_str(), "acme-2");
-        assert_eq!(handle.with_numeric_suffix(17).unwrap().as_str(), "acme-17");
-    }
-
-    #[test]
-    fn numeric_suffix_truncates_long_base_to_fit() {
-        // 32-char base leaves no room for "-2" without truncation.
-        let handle = Handle::parse("a".repeat(HANDLE_MAX_LENGTH)).unwrap();
-        let suffixed = handle.with_numeric_suffix(2).unwrap();
-        assert!(suffixed.as_str().len() <= HANDLE_MAX_LENGTH);
-        assert!(suffixed.as_str().ends_with("-2"));
-        assert!(!suffixed.as_str().contains("--"));
     }
 }
