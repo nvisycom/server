@@ -136,19 +136,25 @@ CREATE TABLE workspace_pipeline_runs (
 
     -- References
     pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
-    file_id         UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
     account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- The three files a run relates to, each a distinct role. The input is the
+    -- source document (required); the audit blob and redacted output are produced
+    -- by the run, so they are null until their phase completes.
+    --   input:  the original document being analyzed/redacted.
+    --   audit:  the engine's analysis (Audit), a `file_kind = audit` file held
+    --           between detect and redact; redact reads it as the source of truth.
+    --   output: the redacted document produced by redact.
+    -- Produced files use ON DELETE SET NULL so deleting them (e.g. via retention)
+    -- leaves the run history intact; the input cascades since a run is meaningless
+    -- without its source document.
+    input_file_id   UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
+    audit_file_id   UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
+    output_file_id  UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
 
     -- Run attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
     status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'running',
-
-    -- Object-store key for the engine's AnalyzedDocument, encrypted and held in
-    -- the intermediates bucket between the detect and redact calls. Null until
-    -- analysis writes it; redact reads it back as the source of truth.
-    analyzed_document_key TEXT             DEFAULT NULL,
-
-    CONSTRAINT workspace_pipeline_runs_analyzed_document_key_length CHECK (analyzed_document_key IS NULL OR length(analyzed_document_key) BETWEEN 1 AND 255),
 
     -- Idempotency key from the initiating detect request; a repeat replays the
     -- existing run instead of analyzing twice.
@@ -179,8 +185,8 @@ CREATE INDEX workspace_pipeline_runs_status_idx
     ON workspace_pipeline_runs (status, started_at DESC)
     WHERE status IN ('running', 'analyzed');
 
-CREATE INDEX workspace_pipeline_runs_file_idx
-    ON workspace_pipeline_runs (file_id, started_at DESC);
+CREATE INDEX workspace_pipeline_runs_input_file_idx
+    ON workspace_pipeline_runs (input_file_id, started_at DESC);
 
 -- Idempotent detect: at most one run per (pipeline, idempotency key).
 CREATE UNIQUE INDEX workspace_pipeline_runs_idempotency_idx
@@ -193,11 +199,12 @@ COMMENT ON TABLE workspace_pipeline_runs IS
 
 COMMENT ON COLUMN workspace_pipeline_runs.id IS 'Unique run identifier';
 COMMENT ON COLUMN workspace_pipeline_runs.pipeline_id IS 'Pipeline whose config drove the run';
-COMMENT ON COLUMN workspace_pipeline_runs.file_id IS 'File the run analyzes / redacts';
 COMMENT ON COLUMN workspace_pipeline_runs.account_id IS 'Account that triggered the run (optional)';
+COMMENT ON COLUMN workspace_pipeline_runs.input_file_id IS 'Source document the run analyzes / redacts';
+COMMENT ON COLUMN workspace_pipeline_runs.audit_file_id IS 'Audit file (file_kind=audit) holding the encrypted analysis between detect and redact';
+COMMENT ON COLUMN workspace_pipeline_runs.output_file_id IS 'Redacted document produced by redact (file_kind=redacted); null until completed';
 COMMENT ON COLUMN workspace_pipeline_runs.trigger_type IS 'How the run was initiated';
 COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current run status';
-COMMENT ON COLUMN workspace_pipeline_runs.analyzed_document_key IS 'Object-store key for the encrypted AnalyzedDocument held between detect and redact';
 COMMENT ON COLUMN workspace_pipeline_runs.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When the run started';
@@ -242,52 +249,3 @@ ORDER BY pr.completed_at DESC;
 
 COMMENT ON VIEW workspace_pipeline_run_history IS
     'Completed pipeline runs for history and analytics.';
-
--- Artifact type enum
-CREATE TYPE ARTIFACT_TYPE AS ENUM (
-    'input',        -- Input data for the run
-    'output',       -- Final output data
-    'intermediate'  -- Intermediate data between nodes
-);
-
-COMMENT ON TYPE ARTIFACT_TYPE IS
-    'Classification of pipeline run artifacts.';
-
--- Pipeline artifacts table
-CREATE TABLE workspace_pipeline_artifacts (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    run_id          UUID            NOT NULL REFERENCES workspace_pipeline_runs (id) ON DELETE CASCADE,
-    file_id         UUID            NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
-
-    -- Artifact attributes
-    artifact_type   ARTIFACT_TYPE   NOT NULL,
-
-    -- Metadata
-    metadata        JSONB           NOT NULL DEFAULT '{}',
-
-    CONSTRAINT workspace_pipeline_artifacts_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Timestamps
-    created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp
-);
-
--- Indexes
-CREATE INDEX workspace_pipeline_artifacts_run_idx
-    ON workspace_pipeline_artifacts (run_id, artifact_type);
-
-CREATE INDEX workspace_pipeline_artifacts_file_idx
-    ON workspace_pipeline_artifacts (file_id);
-
--- Comments
-COMMENT ON TABLE workspace_pipeline_artifacts IS
-    'Artifacts produced during pipeline runs (inputs, outputs, intermediates).';
-
-COMMENT ON COLUMN workspace_pipeline_artifacts.id IS 'Unique artifact identifier';
-COMMENT ON COLUMN workspace_pipeline_artifacts.run_id IS 'Reference to pipeline run';
-COMMENT ON COLUMN workspace_pipeline_artifacts.file_id IS 'Reference to file storing the artifact data';
-COMMENT ON COLUMN workspace_pipeline_artifacts.artifact_type IS 'Type of artifact (input, output, intermediate)';
-COMMENT ON COLUMN workspace_pipeline_artifacts.metadata IS 'Extended metadata (checksums, counts, etc.)';
-COMMENT ON COLUMN workspace_pipeline_artifacts.created_at IS 'Creation timestamp';

@@ -13,10 +13,10 @@ mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
 mod workspace_file;
+mod workspace_file_imports;
 mod workspace_invite;
 mod workspace_member;
 mod workspace_pipeline;
-mod workspace_pipeline_artifact;
 mod workspace_pipeline_run;
 mod workspace_policy;
 mod workspace_webhook;
@@ -41,11 +41,11 @@ pub use workspace_connection_sync::{
     NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,
 };
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
+pub use workspace_file_imports::{NewWorkspaceFileImport, WorkspaceFileImport};
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 // Pipeline models
-pub use workspace_pipeline_artifact::{NewWorkspacePipelineArtifact, WorkspacePipelineArtifact};
 pub use workspace_pipeline_run::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipelineRun,
 };

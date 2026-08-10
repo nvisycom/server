@@ -1,5 +1,7 @@
 -- Revert connections
 
+DROP TABLE IF EXISTS workspace_file_imports;
+
 DROP TABLE IF EXISTS workspace_connection_syncs;
 
 DROP TABLE IF EXISTS workspace_connection_schedule;

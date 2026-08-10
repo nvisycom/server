@@ -8,10 +8,10 @@ use diesel_async::RunQueryDsl;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
-use crate::model::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
+use crate::model::{NewWorkspaceFile, NewWorkspaceFileImport, UpdateWorkspaceFile, WorkspaceFile};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, FileFilter, FileSortBy, FileSortField,
-    OffsetPagination, SortOrder, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, FileFilter, FileKind, FileSortBy, FileSortField,
+    OffsetPagination, PipelineRunStatus, SortOrder, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -24,6 +24,15 @@ pub trait WorkspaceFileRepository {
     fn create_workspace_file(
         &mut self,
         new_file: NewWorkspaceFile,
+    ) -> impl Future<Output = PgResult<WorkspaceFile>> + Send;
+
+    /// Creates a workspace file and records its import origin (the connection and
+    /// remote object key it came from) in a single transaction.
+    fn record_imported_file(
+        &mut self,
+        new_file: NewWorkspaceFile,
+        connection_id: Uuid,
+        source_key: String,
     ) -> impl Future<Output = PgResult<WorkspaceFile>> + Send;
 
     /// Finds a workspace file by its unique identifier.
@@ -68,6 +77,37 @@ pub trait WorkspaceFileRepository {
         &mut self,
         connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Vec<(String, Uuid, String)>>> + Send;
+
+    /// Returns up to `limit` live files whose retention window has elapsed
+    /// (`expires_at < now`), as `(id, storage_path, storage_bucket)`. The
+    /// data-retention worker sweeps these, purges their objects, and soft-deletes
+    /// the rows.
+    fn files_due_for_expiry(
+        &mut self,
+        limit: i64,
+    ) -> impl Future<Output = PgResult<Vec<(Uuid, String, String)>>> + Send;
+
+    /// Recomputes `expires_at` for live files of `kind` in `workspace_id`,
+    /// returning the number updated. Used to backfill when retention settings
+    /// change. `None` clears the expiry (retention became `Forever`).
+    fn backfill_files_expiry(
+        &mut self,
+        workspace_id: Uuid,
+        kind: FileKind,
+        expires_at: Option<jiff::Timestamp>,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
+
+    /// Recomputes `expires_at` for live files of `kind` produced by a specific
+    /// pipeline's runs (redacted outputs via `output_file_id`, audit blobs via
+    /// `audit_file_id`), returning the number updated. Used to backfill when a
+    /// pipeline's own retention override changes, without touching other
+    /// pipelines' files. `None` clears the expiry.
+    fn backfill_pipeline_files_expiry(
+        &mut self,
+        pipeline_id: Uuid,
+        kind: FileKind,
+        expires_at: Option<jiff::Timestamp>,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Lists all files uploaded by a specific account with offset pagination.
     fn offset_list_account_files(
@@ -176,6 +216,38 @@ impl WorkspaceFileRepository for PgConnection {
         Ok(file)
     }
 
+    async fn record_imported_file(
+        &mut self,
+        new_file: NewWorkspaceFile,
+        connection_id: Uuid,
+        source_key: String,
+    ) -> PgResult<WorkspaceFile> {
+        use diesel_async::AsyncConnection;
+        use schema::{workspace_file_imports, workspace_files};
+
+        self.transaction(async |conn| {
+            let file = diesel::insert_into(workspace_files::table)
+                .values(&new_file)
+                .returning(WorkspaceFile::as_returning())
+                .get_result(conn)
+                .await
+                .map_err(PgError::from)?;
+
+            diesel::insert_into(workspace_file_imports::table)
+                .values(NewWorkspaceFileImport {
+                    file_id: file.id,
+                    connection_id,
+                    source_key,
+                })
+                .execute(conn)
+                .await
+                .map_err(PgError::from)?;
+
+            Ok::<_, PgError>(file)
+        })
+        .await
+    }
+
     async fn find_workspace_file_by_id(
         &mut self,
         file_id: Uuid,
@@ -215,13 +287,13 @@ impl WorkspaceFileRepository for PgConnection {
     }
 
     async fn imported_keys_for_connection(&mut self, connection_id: Uuid) -> PgResult<Vec<String>> {
-        use schema::workspace_files::{self, dsl};
+        use schema::{workspace_file_imports, workspace_files};
 
-        let keys = workspace_files::table
-            .filter(dsl::source_connection_id.eq(connection_id))
-            .filter(dsl::source_key.is_not_null())
-            .filter(dsl::deleted_at.is_null())
-            .select(dsl::source_key.assume_not_null())
+        let keys = workspace_file_imports::table
+            .inner_join(workspace_files::table)
+            .filter(workspace_file_imports::connection_id.eq(connection_id))
+            .filter(workspace_files::deleted_at.is_null())
+            .select(workspace_file_imports::source_key)
             .load::<String>(self)
             .await
             .map_err(PgError::from)?;
@@ -233,22 +305,132 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         connection_id: Uuid,
     ) -> PgResult<Vec<(String, Uuid, String)>> {
-        use schema::workspace_files::{self, dsl};
+        use schema::{workspace_file_imports, workspace_files};
 
-        let files = workspace_files::table
-            .filter(dsl::source_connection_id.eq(connection_id))
-            .filter(dsl::source_key.is_not_null())
-            .filter(dsl::deleted_at.is_null())
+        let files = workspace_file_imports::table
+            .inner_join(workspace_files::table)
+            .filter(workspace_file_imports::connection_id.eq(connection_id))
+            .filter(workspace_files::deleted_at.is_null())
             .select((
-                dsl::source_key.assume_not_null(),
-                dsl::id,
-                dsl::storage_path,
+                workspace_file_imports::source_key,
+                workspace_files::id,
+                workspace_files::storage_path,
             ))
             .load::<(String, Uuid, String)>(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(files)
+    }
+
+    async fn files_due_for_expiry(&mut self, limit: i64) -> PgResult<Vec<(Uuid, String, String)>> {
+        use diesel::dsl::{exists, not, now};
+        use schema::workspace_pipeline_runs::dsl as runs;
+        use schema::{workspace_files, workspace_pipeline_runs};
+
+        // A run that has not finished (running or awaiting redaction) still needs
+        // its input document and audit blob, so those files are held back from
+        // expiry until the run reaches a terminal state. Otherwise an in-flight
+        // detect/redact could lose its source or analysis mid-flight and get
+        // stuck. Produced outputs are not protected — they only exist once a run
+        // has completed.
+        let active_run_holds_file = exists(
+            workspace_pipeline_runs::table.filter(
+                runs::status
+                    .eq_any([PipelineRunStatus::Running, PipelineRunStatus::Analyzed])
+                    .and(
+                        runs::input_file_id
+                            .eq(workspace_files::id)
+                            .or(runs::audit_file_id.eq(workspace_files::id.nullable())),
+                    ),
+            ),
+        );
+
+        let files = workspace_files::table
+            .filter(workspace_files::expires_at.is_not_null())
+            .filter(workspace_files::expires_at.lt(now))
+            .filter(workspace_files::deleted_at.is_null())
+            .filter(not(active_run_holds_file))
+            .select((
+                workspace_files::id,
+                workspace_files::storage_path,
+                workspace_files::storage_bucket,
+            ))
+            .limit(limit)
+            .load::<(Uuid, String, String)>(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(files)
+    }
+
+    async fn backfill_files_expiry(
+        &mut self,
+        workspace_id: Uuid,
+        kind: FileKind,
+        expires_at: Option<jiff::Timestamp>,
+    ) -> PgResult<usize> {
+        use schema::workspace_files::{self, dsl};
+
+        let expires_at = expires_at.map(jiff_diesel::Timestamp::from);
+
+        let count = diesel::update(workspace_files::table)
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::file_kind.eq(kind))
+            .filter(dsl::deleted_at.is_null())
+            .set(dsl::expires_at.eq(expires_at))
+            .execute(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(count)
+    }
+
+    async fn backfill_pipeline_files_expiry(
+        &mut self,
+        pipeline_id: Uuid,
+        kind: FileKind,
+        expires_at: Option<jiff::Timestamp>,
+    ) -> PgResult<usize> {
+        use schema::workspace_pipeline_runs::dsl as runs;
+        use schema::{workspace_files, workspace_pipeline_runs};
+
+        let expires_at = expires_at.map(jiff_diesel::Timestamp::from);
+
+        // Collect the ids of files this pipeline's runs produced for `kind`:
+        // redacted files are the runs' outputs, audit files their audit blobs.
+        // Any other kind is not pipeline-produced, so there is nothing to do.
+        let file_ids: Vec<Uuid> = match kind {
+            FileKind::Redacted => workspace_pipeline_runs::table
+                .filter(runs::pipeline_id.eq(pipeline_id))
+                .filter(runs::output_file_id.is_not_null())
+                .select(runs::output_file_id.assume_not_null())
+                .load(self)
+                .await
+                .map_err(PgError::from)?,
+            FileKind::Audit => workspace_pipeline_runs::table
+                .filter(runs::pipeline_id.eq(pipeline_id))
+                .filter(runs::audit_file_id.is_not_null())
+                .select(runs::audit_file_id.assume_not_null())
+                .load(self)
+                .await
+                .map_err(PgError::from)?,
+            _ => return Ok(0),
+        };
+
+        if file_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let count = diesel::update(workspace_files::table)
+            .filter(workspace_files::deleted_at.is_null())
+            .filter(workspace_files::id.eq_any(file_ids))
+            .set(workspace_files::expires_at.eq(expires_at))
+            .execute(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(count)
     }
 
     async fn find_file_in_workspace_with_creator(
@@ -319,16 +501,30 @@ impl WorkspaceFileRepository for PgConnection {
     }
 
     async fn delete_workspace_file(&mut self, file_id: Uuid) -> PgResult<()> {
-        use diesel::dsl::now;
-        use schema::workspace_files::{self, dsl};
+        use diesel_async::AsyncConnection;
+        use schema::{workspace_file_imports, workspace_files};
 
-        diesel::update(workspace_files::table.filter(dsl::id.eq(file_id)))
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
+        // Soft-delete the file and drop its import-origin row (if any) atomically.
+        // The origin's `(connection_id, source_key)` uniqueness would otherwise
+        // block ever re-importing that source object, since the soft delete keeps
+        // the file row and its `ON DELETE CASCADE` never fires.
+        self.transaction(async |conn| {
+            diesel::update(workspace_files::table.filter(workspace_files::id.eq(file_id)))
+                .set(workspace_files::deleted_at.eq(diesel::dsl::now))
+                .execute(conn)
+                .await
+                .map_err(PgError::from)?;
+
+            diesel::delete(
+                workspace_file_imports::table.filter(workspace_file_imports::file_id.eq(file_id)),
+            )
+            .execute(conn)
             .await
             .map_err(PgError::from)?;
 
-        Ok(())
+            Ok::<_, PgError>(())
+        })
+        .await
     }
 
     async fn delete_workspace_files(
@@ -336,21 +532,34 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         file_ids: &[Uuid],
     ) -> PgResult<usize> {
-        use diesel::dsl::now;
-        use schema::workspace_files::{self, dsl};
+        use diesel_async::AsyncConnection;
+        use schema::{workspace_file_imports, workspace_files};
 
-        let count = diesel::update(
-            workspace_files::table
-                .filter(dsl::id.eq_any(file_ids))
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::deleted_at.is_null()),
-        )
-        .set(dsl::deleted_at.eq(now))
-        .execute(self)
+        let ids = file_ids.to_vec();
+        self.transaction(async |conn| {
+            let count = diesel::update(
+                workspace_files::table
+                    .filter(workspace_files::id.eq_any(&ids))
+                    .filter(workspace_files::workspace_id.eq(workspace_id))
+                    .filter(workspace_files::deleted_at.is_null()),
+            )
+            .set(workspace_files::deleted_at.eq(diesel::dsl::now))
+            .execute(conn)
+            .await
+            .map_err(PgError::from)?;
+
+            // Drop import-origin rows so re-import is never blocked (see
+            // `delete_workspace_file`).
+            diesel::delete(
+                workspace_file_imports::table.filter(workspace_file_imports::file_id.eq_any(&ids)),
+            )
+            .execute(conn)
+            .await
+            .map_err(PgError::from)?;
+
+            Ok::<_, PgError>(count)
+        })
         .await
-        .map_err(PgError::from)?;
-
-        Ok(count)
     }
 
     async fn offset_list_workspace_files(
@@ -366,6 +575,7 @@ impl WorkspaceFileRepository for PgConnection {
         let mut query = workspace_files::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
+            .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
             .into_boxed();
 
         // Apply the extension constraint. A present-but-empty set matches
@@ -412,6 +622,7 @@ impl WorkspaceFileRepository for PgConnection {
         let mut base_query = workspace_files::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
+            .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
             .into_boxed();
 
         // Apply trigram search filter (pg_trgm)

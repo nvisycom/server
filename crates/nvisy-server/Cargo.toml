@@ -26,6 +26,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default feature set (none for minimal dependencies)
 default = []
 
+# CLI support: derives clap::Args on config structs so the binary can parse them
+# from flags/env directly, keeping the dependency optional for library users.
+cli = ["dep:clap", "dep:humantime"]
+
 [dependencies]
 # Runtime crates
 nvisy-engine = { workspace = true }
@@ -71,12 +75,17 @@ hkdf = { workspace = true, features = [] }
 
 # Encoding
 hex = { workspace = true, features = [] }
+mime_guess = { workspace = true }
 
 # Randomness
 rand = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
+
+# CLI
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+humantime = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }

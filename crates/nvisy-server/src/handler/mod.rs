@@ -175,7 +175,7 @@ mod test {
 
     use crate::handler::{CustomRoutes, routes};
     use crate::service::{
-        CryptoConfig, EngineConfig, HealthConfig, ServiceState, SessionKeysConfig,
+        CryptoConfig, EngineConfig, HealthConfig, ServiceState, SessionKeysConfig, SyncConfig,
     };
 
     /// Builds the service sub-configs from the environment for integration tests.
@@ -216,6 +216,7 @@ mod test {
             crypto,
             EngineConfig::default(),
             HealthConfig::default(),
+            SyncConfig::default(),
             webhook_service,
         )
         .await?;

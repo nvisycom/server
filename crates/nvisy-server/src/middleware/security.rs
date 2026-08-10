@@ -98,17 +98,30 @@ where
 /// Controls which origins can access your API and what HTTP methods
 /// and headers are allowed in cross-origin requests.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct CorsConfig {
-    /// List of allowed CORS origins.
+    /// List of allowed CORS origins (comma-separated).
     ///
     /// If empty, defaults to localhost origins for development.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "CORS_ORIGINS", value_delimiter = ',')
+    )]
     pub allowed_origins: Vec<String>,
 
-    /// Maximum age for CORS preflight caching.
+    /// Maximum age for CORS preflight caching (e.g. `1h`).
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "CORS_MAX_AGE", default_value = "1h", value_parser = humantime::parse_duration)
+    )]
     pub max_age: Duration,
 
     /// Whether to allow credentials in CORS requests.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "CORS_ALLOW_CREDENTIALS", default_value = "true")
+    )]
     pub allow_credentials: bool,
 }
 

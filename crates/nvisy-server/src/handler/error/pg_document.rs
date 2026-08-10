@@ -14,9 +14,6 @@ impl From<WorkspaceFileConstraints> for Error<'static> {
             WorkspaceFileConstraints::FileExtensionFormat => {
                 ErrorKind::BadRequest.with_message("Invalid file extension format")
             }
-            WorkspaceFileConstraints::MimeTypeFormat => {
-                ErrorKind::BadRequest.with_message("Invalid MIME type format")
-            }
             WorkspaceFileConstraints::FileSizeMin => {
                 ErrorKind::BadRequest.with_message("File size must be greater than or equal to 0")
             }
@@ -32,9 +29,6 @@ impl From<WorkspaceFileConstraints> for Error<'static> {
             WorkspaceFileConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("File metadata size is invalid")
             }
-            WorkspaceFileConstraints::TagsCountMax => {
-                ErrorKind::BadRequest.with_message("Maximum number of tags exceeded")
-            }
             WorkspaceFileConstraints::VersionNumberMin => {
                 ErrorKind::BadRequest.with_message("Version number must be at least 1")
             }
@@ -46,7 +40,8 @@ impl From<WorkspaceFileConstraints> for Error<'static> {
             }
             WorkspaceFileConstraints::UpdatedAfterCreated
             | WorkspaceFileConstraints::DeletedAfterCreated
-            | WorkspaceFileConstraints::DeletedAfterUpdated => {
+            | WorkspaceFileConstraints::DeletedAfterUpdated
+            | WorkspaceFileConstraints::ExpiresAfterCreated => {
                 ErrorKind::InternalServerError.into_error()
             }
         };

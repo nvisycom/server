@@ -44,7 +44,9 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{ConnectionConfig, CryptoService, ObjectService, ServiceState, is_valid_cron};
+use crate::service::{
+    ConnectionConfig, CryptoService, ObjectService, ServiceState, StandardCronSchedule,
+};
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connections";
@@ -547,7 +549,7 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
 /// import-only, no cron on an export connection.
 fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
     if let Some(cron) = &sync.schedule_cron {
-        if !is_valid_cron(cron) {
+        if !StandardCronSchedule.is_valid(cron) {
             return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
         }
         if sync.sync_mode.is_export() {

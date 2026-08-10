@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole};
+use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -25,8 +25,8 @@ pub struct Workspace {
     pub avatar_url: Option<String>,
     /// Tags associated with the workspace.
     pub tags: Vec<String>,
-    /// Whether approval is required to processed files to be visible.
-    pub require_approval: bool,
+    /// Workspace settings (approval requirement, data-retention rules).
+    pub settings: WorkspaceSettings,
     /// Account that created this workspace.
     pub created_by: AccountRef,
     /// Role of the member in the workspace.
@@ -41,13 +41,14 @@ impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
     pub fn from_model(workspace: model::Workspace, created_by: AccountRef) -> Self {
         let tags = workspace.get_tags();
+        let settings = WorkspaceSettings::from_value(&workspace.settings);
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
             tags,
-            require_approval: workspace.require_approval,
+            settings,
             created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
@@ -62,13 +63,14 @@ impl Workspace {
         created_by: AccountRef,
     ) -> Self {
         let tags = workspace.get_tags();
+        let settings = WorkspaceSettings::from_value(&workspace.settings);
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
             tags,
-            require_approval: workspace.require_approval,
+            settings,
             created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),

@@ -7,12 +7,12 @@
 //! ├── server: ServerConfig         # Host, port, TLS, shutdown
 //! ├── middleware: MiddlewareConfig  # CORS, OpenAPI, recovery/timeouts
 //! ├── service: ServiceArgs          # Database, NATS, auth keys
-//! └── reqwest: ReqwestArgs          # HTTP client for webhooks
+//! └── reqwest: ReqwestConfig        # HTTP client for webhooks
 //! ```
 //!
-//! The `*Args` structs carry the clap/env wiring and convert into the plain
-//! config types owned by the library crates. All configuration can be provided
-//! via CLI arguments or environment variables.
+//! The library config types derive their clap/env wiring directly behind a
+//! `cli` feature, so they are flattened straight into the argument tree. All
+//! configuration can be provided via CLI arguments or environment variables.
 //! Use `--help` to see all available options.
 //!
 //! # Example
@@ -28,14 +28,13 @@
 mod middleware;
 mod server;
 mod service;
-mod webhook;
 
 use std::process;
 
 use clap::Parser;
 use nvisy_server::service::ServiceState;
 use nvisy_webhook::WebhookService;
-use nvisy_webhook::reqwest::ReqwestClient;
+use nvisy_webhook::reqwest::{ReqwestClient, ReqwestConfig};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -43,7 +42,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub use self::middleware::MiddlewareConfig;
 pub use self::server::ServerConfig;
 pub use self::service::ServiceArgs;
-pub use self::webhook::ReqwestArgs;
 use crate::server::TRACING_TARGET_STARTUP;
 
 /// Tracing target for configuration events.
@@ -55,7 +53,7 @@ pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 /// - [`ServerConfig`]: Network binding and TLS
 /// - [`MiddlewareConfig`]: HTTP middleware (CORS, OpenAPI, recovery)
 /// - [`ServiceArgs`]: External service connections (Postgres, NATS, auth keys)
-/// - [`ReqwestArgs`]: HTTP client configuration for webhooks
+/// - [`ReqwestConfig`]: HTTP client configuration for webhooks
 #[derive(Debug, Clone, Parser)]
 #[command(name = "nvisy")]
 #[command(about = "Nvisy document processing server")]
@@ -75,7 +73,7 @@ pub struct Cli {
 
     /// HTTP client configuration for webhook delivery.
     #[clap(flatten)]
-    pub reqwest: ReqwestArgs,
+    pub reqwest: ReqwestConfig,
 }
 
 impl Cli {
@@ -158,7 +156,7 @@ impl Cli {
 
     /// Creates webhook service from CLI configuration.
     pub fn webhook_service(&self) -> WebhookService {
-        ReqwestClient::new(self.reqwest.clone().into()).into_service()
+        ReqwestClient::new(self.reqwest.clone()).into_service()
     }
 
     /// Initializes application state from CLI configuration.
@@ -166,12 +164,13 @@ impl Cli {
         let webhook = self.webhook_service();
         let service = self.service.clone();
         Ok(ServiceState::from_config(
-            service.postgres.into(),
-            service.nats.into(),
-            service.session_keys.into(),
-            service.crypto.into(),
-            service.engine.into(),
-            service.health.into(),
+            service.postgres,
+            service.nats,
+            service.session_keys,
+            service.crypto,
+            service.engine,
+            service.health,
+            service.sync,
             webhook,
         )
         .await?)

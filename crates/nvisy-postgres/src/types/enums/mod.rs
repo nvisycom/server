@@ -20,18 +20,16 @@ pub mod webhook_status;
 pub mod workspace_role;
 
 // File-related enumerations
-pub mod file_source;
+pub mod file_kind;
 
 // Pipeline-related enumerations
-pub mod artifact_type;
 pub mod pipeline_run_status;
 pub mod pipeline_status;
 pub mod pipeline_trigger_type;
 
 pub use activity_type::{ActivityCategory, ActivityType};
 pub use api_token_type::ApiTokenType;
-pub use artifact_type::ArtifactType;
-pub use file_source::FileSource;
+pub use file_kind::FileKind;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
 pub use pipeline_run_status::PipelineRunStatus;

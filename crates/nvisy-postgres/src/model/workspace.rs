@@ -22,8 +22,6 @@ pub struct Workspace {
     pub description: Option<String>,
     /// URL to workspace avatar/logo image.
     pub avatar_url: Option<String>,
-    /// Whether approval is required.
-    pub require_approval: bool,
     /// Workspace tags.
     pub tags: Vec<Option<String>>,
     /// Additional workspace metadata.
@@ -53,8 +51,6 @@ pub struct NewWorkspace {
     pub description: Option<String>,
     /// Optional avatar URL.
     pub avatar_url: Option<String>,
-    /// Require approval.
-    pub require_approval: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
@@ -76,8 +72,6 @@ pub struct UpdateWorkspace {
     pub description: Option<Option<String>>,
     /// Avatar URL.
     pub avatar_url: Option<Option<String>>,
-    /// Require approval.
-    pub require_approval: Option<bool>,
     /// Tags.
     pub tags: Option<Vec<Option<String>>>,
     /// Metadata.

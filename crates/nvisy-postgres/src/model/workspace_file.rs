@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_files;
-use crate::types::{FileSource, HasCreatedAt, HasDeletedAt, HasUpdatedAt, RECENTLY_UPLOADED_HOURS};
+use crate::types::{FileKind, HasCreatedAt, HasDeletedAt, HasUpdatedAt, RECENTLY_UPLOADED_HOURS};
 
 /// Workspace file model representing a file stored in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -26,18 +26,10 @@ pub struct WorkspaceFile {
     pub display_name: String,
     /// Original filename when uploaded.
     pub original_filename: String,
-    /// File extension (without the dot).
+    /// File extension (without the dot); Content-Type is derived from it.
     pub file_extension: String,
-    /// MIME type of the file.
-    pub mime_type: Option<String>,
-    /// Classification tags.
-    pub tags: Vec<Option<String>>,
-    /// How the file was created (uploaded, imported, generated).
-    pub source: FileSource,
-    /// Connection an imported file came from (`None` for uploads).
-    pub source_connection_id: Option<Uuid>,
-    /// Remote object key an imported file came from (`None` for uploads).
-    pub source_key: Option<String>,
+    /// The file's role (original, redacted, artifact, audit).
+    pub file_kind: FileKind,
     /// File size in bytes.
     pub file_size_bytes: i64,
     /// SHA-256 hash of the file.
@@ -54,6 +46,8 @@ pub struct WorkspaceFile {
     pub updated_at: Timestamp,
     /// Timestamp when the file was soft-deleted.
     pub deleted_at: Option<Timestamp>,
+    /// Data-retention expiry (`None` = keep indefinitely).
+    pub expires_at: Option<Timestamp>,
 }
 
 /// Data for creating a new workspace file.
@@ -73,16 +67,8 @@ pub struct NewWorkspaceFile {
     pub original_filename: Option<String>,
     /// File extension.
     pub file_extension: Option<String>,
-    /// MIME type.
-    pub mime_type: Option<String>,
-    /// Tags.
-    pub tags: Option<Vec<Option<String>>>,
-    /// How the file was created.
-    pub source: Option<FileSource>,
-    /// Connection an imported file came from.
-    pub source_connection_id: Option<Uuid>,
-    /// Remote object key an imported file came from.
-    pub source_key: Option<String>,
+    /// The file's role.
+    pub file_kind: Option<FileKind>,
     /// File size in bytes.
     pub file_size_bytes: i64,
     /// SHA-256 hash.
@@ -93,6 +79,8 @@ pub struct NewWorkspaceFile {
     pub storage_bucket: String,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
+    /// Data-retention expiry (`None` = keep indefinitely).
+    pub expires_at: Option<Timestamp>,
 }
 
 /// Data for updating a workspace file.
@@ -104,16 +92,14 @@ pub struct UpdateWorkspaceFile {
     pub display_name: Option<String>,
     /// Parent file ID.
     pub parent_id: Option<Option<Uuid>>,
-    /// Tags.
-    pub tags: Option<Vec<Option<String>>>,
-    /// How the file was created.
-    pub source: Option<FileSource>,
-    /// MIME type.
-    pub mime_type: Option<Option<String>>,
+    /// The file's role.
+    pub file_kind: Option<FileKind>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
     /// Soft delete timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
+    /// Data-retention expiry.
+    pub expires_at: Option<Option<Timestamp>>,
 }
 
 impl WorkspaceFile {

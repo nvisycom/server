@@ -15,17 +15,19 @@ use bytes::Bytes;
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_engine::{Audit, Document};
 use nvisy_nats::NatsClient;
-use nvisy_nats::object::{FileKey, FilesBucket, IntermediateKey, IntermediatesBucket};
+use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket};
 use nvisy_postgres::model::{
-    NewWorkspaceFile, NewWorkspacePipelineArtifact, NewWorkspacePipelineRun,
-    UpdateWorkspacePipelineRun, WorkspaceFile, WorkspacePipeline, WorkspacePipelineArtifact,
-    WorkspacePipelineRun,
+    NewWorkspaceFile, NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspaceFile,
+    WorkspacePipeline, WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineArtifactRepository,
-    WorkspacePipelineRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
+    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
+    WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{ArtifactType, PipelineRunStatus};
+use nvisy_postgres::types::{
+    FileKind, PipelineRunStatus, RetentionOverride, RetentionScope, RetentionSettings,
+    WorkspaceSettings,
+};
 use nvisy_postgres::{PgClient, PgConn};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -107,13 +109,13 @@ async fn create_pipeline_run(
         .await?
         .ok_or_else(|| Error::not_found("file"))?;
 
-    let definition =
-        PipelineDefinition::from_parts(pipeline.definition, Vec::new()).map_err(serialize_error)?;
+    let definition = PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
+        .map_err(serialize_error)?;
 
     // Create the run first so its id is the engine correlation id.
     let new_run = NewWorkspacePipelineRun {
         pipeline_id: pipeline.id,
-        file_id: file.id,
+        input_file_id: file.id,
         account_id: auth_state.account_id,
         status: Some(PipelineRunStatus::Running),
         idempotency_key: idempotency_key.clone(),
@@ -190,16 +192,25 @@ async fn create_pipeline_run(
         }
     };
 
-    // The analysis is a map of detected PII; encrypt it and hold it in the
-    // intermediates bucket, keeping only its key on the run.
-    let analyzed_key =
-        store_analyzed_document(&nats, &crypto, pipeline.workspace_id, &analyzed).await?;
+    // The analysis is a map of detected PII; encrypt it and record it as an
+    // audit-kind file, keeping only its id on the run.
+    let workspace_settings = WorkspaceSettings::from_value(&workspace.settings).retention;
+    let audit_file_id = store_analyzed_document(
+        &mut conn,
+        &nats,
+        &crypto,
+        &pipeline,
+        &workspace_settings,
+        auth_state.account_id,
+        &analyzed,
+    )
+    .await?;
     let run = conn
         .update_workspace_pipeline_run(
             run.id,
             UpdateWorkspacePipelineRun {
                 status: Some(PipelineRunStatus::Analyzed),
-                analyzed_document_key: Some(Some(analyzed_key)),
+                audit_file_id: Some(Some(audit_file_id)),
                 ..Default::default()
             },
         )
@@ -435,7 +446,7 @@ async fn get_pipeline_run_analysis(
     let (run, _pipeline) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
-    let analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
+    let analyzed = load_analyzed_document(&mut conn, &nats, &crypto, workspace.id, &run).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run analysis retrieved");
 
@@ -493,15 +504,23 @@ async fn redact_pipeline_run(
             .with_resource("pipeline_run"));
     }
 
+    // The source document is normally held back from retention while the run is
+    // unfinished (see files_due_for_expiry), so this is reachable only if the
+    // input was explicitly deleted; surface a message that names the cause.
     let file = conn
-        .find_file_in_workspace(workspace.id, run.file_id)
+        .find_file_in_workspace(workspace.id, run.input_file_id)
         .await?
-        .ok_or_else(|| Error::not_found("file"))?;
+        .ok_or_else(|| {
+            ErrorKind::Conflict
+                .with_message("The run's source document is no longer available")
+                .with_resource("pipeline_run")
+        })?;
 
     // The stored analysis is the source of truth for what gets redacted. It
     // carries the scope (label catalog) analyze resolved, so redaction compiles
     // against the same vocabulary without re-deriving it.
-    let mut analyzed = load_analyzed_document(&nats, &crypto, workspace.id, &run).await?;
+    let mut analyzed =
+        load_analyzed_document(&mut conn, &nats, &crypto, workspace.id, &run).await?;
     let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
     let document = build_document(&nats, &crypto, &file, run.id).await?;
 
@@ -510,23 +529,26 @@ async fn redact_pipeline_run(
         .await
         .map_err(analysis_error)?;
 
-    // Store the redacted bytes as a new workspace file and record the artifact.
-    let artifact_file = store_redacted_file(
+    // Store the redacted bytes as a new workspace file and link it to the run.
+    let workspace_settings = WorkspaceSettings::from_value(&workspace.settings).retention;
+    let output_file = store_redacted_file(
         &mut conn,
         &nats,
         &crypto,
         &file,
+        &pipeline,
+        &workspace_settings,
         auth_state.account_id,
         redacted.bytes,
     )
     .await?;
-    record_artifact(&mut conn, run.id, artifact_file.id).await?;
 
     let run = conn
         .update_workspace_pipeline_run(
             run.id,
             UpdateWorkspacePipelineRun {
                 status: Some(PipelineRunStatus::Completed),
+                output_file_id: Some(Some(output_file.id)),
                 completed_at: Some(Some(jiff::Timestamp::now().into())),
                 ..Default::default()
             },
@@ -538,7 +560,7 @@ async fn redact_pipeline_run(
             workspace.id,
             run.id,
             Some(auth_state.account_id),
-            Some(serde_json::json!({ "artifactFileId": artifact_file.id })),
+            Some(serde_json::json!({ "outputFileId": output_file.id })),
         )
         .await
     {
@@ -553,7 +575,7 @@ async fn redact_pipeline_run(
     tracing::info!(
         target: TRACING_TARGET,
         run_id = %run.id,
-        artifact_file_id = %artifact_file.id,
+        output_file_id = %output_file.id,
         "Pipeline run redacted"
     );
 
@@ -750,11 +772,14 @@ async fn resolve_policies(
 ///
 /// The redacted file is a first-class file — a sibling of the source — so it is
 /// downloadable through the normal file endpoints.
+#[allow(clippy::too_many_arguments)]
 async fn store_redacted_file(
     conn: &mut PgConn,
     nats: &NatsClient,
     crypto: &CryptoService,
     source: &WorkspaceFile,
+    pipeline: &WorkspacePipeline,
+    workspace_settings: &RetentionSettings,
     account_id: Uuid,
     bytes: Bytes,
 ) -> Result<WorkspaceFile> {
@@ -772,6 +797,13 @@ async fn store_redacted_file(
     let key = FileKey::generate(source.workspace_id);
     store.put(&key, Cursor::new(ciphertext)).await?;
 
+    // Retention expiry for the redacted-documents scope (workspace baseline,
+    // pipeline override if set).
+    let over = RetentionOverride::from_pipeline_metadata(&pipeline.metadata);
+    let expires_at = workspace_settings
+        .resolve(RetentionScope::RedactedDocuments, over.as_ref())
+        .expires_at(jiff::Timestamp::now());
+
     let redacted_name = format!("{}.redacted", source.display_name);
     let new_file = NewWorkspaceFile {
         workspace_id: source.workspace_id,
@@ -780,63 +812,101 @@ async fn store_redacted_file(
         display_name: Some(redacted_name),
         original_filename: Some(source.original_filename.clone()),
         file_extension: Some(source.file_extension.clone()),
-        mime_type: source.mime_type.clone(),
+        file_kind: Some(FileKind::Redacted),
         file_size_bytes: plaintext_size,
         file_hash_sha256: plaintext_hash,
         storage_path: key.to_string(),
         storage_bucket: store.bucket().to_owned(),
+        expires_at: expires_at.map(Into::into),
         ..Default::default()
     };
 
     Ok(conn.create_workspace_file(new_file).await?)
 }
 
-/// Encrypts an [`Audit`] and stores it in the intermediates bucket, returning
-/// its object-store key.
+/// Encrypts an [`Audit`], stores it in the audit bucket, and records it as an
+/// `audit`-kind [`WorkspaceFile`], returning that file's id.
 ///
 /// The analysis is the map of detected PII, so it is encrypted with the
-/// workspace key before it leaves the process.
+/// workspace key before it leaves the process. Modeling it as a file lets
+/// data-retention expire it with the same `expires_at` sweep as documents; its
+/// bytes live in the audit bucket, not the files bucket.
 async fn store_analyzed_document(
+    conn: &mut PgConn,
     nats: &NatsClient,
     crypto: &CryptoService,
-    workspace_id: Uuid,
+    pipeline: &WorkspacePipeline,
+    workspace_settings: &RetentionSettings,
+    account_id: Uuid,
     analyzed: &Audit,
-) -> Result<String> {
+) -> Result<Uuid> {
+    let workspace_id = pipeline.workspace_id;
     let plaintext = serde_json::to_vec(analyzed).map_err(analysis_serde_error)?;
+    let hash = Sha256::digest(&plaintext).to_vec();
+    let size = plaintext.len() as i64;
     let ciphertext = crypto.encrypt(workspace_id, &plaintext).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Failed to encrypt analysis")
             .with_context(err.to_string())
     })?;
 
-    let store = nats.object_store::<IntermediatesBucket>().await?;
-    let key = IntermediateKey::generate(workspace_id);
+    let store = nats.object_store::<AuditBucket>().await?;
+    let key = AuditKey::generate(workspace_id);
     store.put(&key, Cursor::new(ciphertext)).await?;
 
-    Ok(key.to_string())
+    // Retention expiry for the audit scope (workspace baseline, pipeline
+    // override if set).
+    let over = RetentionOverride::from_pipeline_metadata(&pipeline.metadata);
+    let expires_at = workspace_settings
+        .resolve(RetentionScope::AuditLogs, over.as_ref())
+        .expires_at(jiff::Timestamp::now());
+
+    let new_file = NewWorkspaceFile {
+        workspace_id,
+        account_id,
+        display_name: Some("analysis.audit".to_owned()),
+        original_filename: Some("analysis.audit".to_owned()),
+        file_extension: Some("json".to_owned()),
+        file_kind: Some(FileKind::Audit),
+        file_size_bytes: size,
+        file_hash_sha256: hash,
+        storage_path: key.to_string(),
+        storage_bucket: store.bucket().to_owned(),
+        expires_at: expires_at.map(Into::into),
+        ..Default::default()
+    };
+    let file = conn.create_workspace_file(new_file).await?;
+    Ok(file.id)
 }
 
 /// Fetches and decrypts a run's stored [`Audit`].
 ///
 /// Errors if the run has not been analyzed yet or the stored object is missing.
 async fn load_analyzed_document(
+    conn: &mut PgConn,
     nats: &NatsClient,
     crypto: &CryptoService,
     workspace_id: Uuid,
     run: &WorkspacePipelineRun,
 ) -> Result<Audit> {
-    let stored_key = run.analyzed_document_key.as_deref().ok_or_else(|| {
+    let audit_file_id = run.audit_file_id.ok_or_else(|| {
         ErrorKind::Conflict
             .with_message("Run has no analysis yet")
             .with_resource("pipeline_run")
     })?;
-    let key = IntermediateKey::from_str(stored_key).map_err(|err| {
+    let audit_file = conn
+        .find_file_in_workspace(workspace_id, audit_file_id)
+        .await?
+        .ok_or_else(|| {
+            ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
+        })?;
+    let key = AuditKey::from_str(&audit_file.storage_path).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Invalid analysis storage key")
             .with_context(err.to_string())
     })?;
 
-    let store = nats.object_store::<IntermediatesBucket>().await?;
+    let store = nats.object_store::<AuditBucket>().await?;
     let data = store.get(&key).await?.ok_or_else(|| {
         ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
     })?;
@@ -854,19 +924,4 @@ async fn load_analyzed_document(
             .with_context(err.to_string())
     })?;
     serde_json::from_slice(&plaintext).map_err(analysis_serde_error)
-}
-
-/// Records that a run produced an output file (the redaction artifact).
-async fn record_artifact(
-    conn: &mut PgConn,
-    run_id: Uuid,
-    file_id: Uuid,
-) -> Result<WorkspacePipelineArtifact> {
-    let artifact = NewWorkspacePipelineArtifact {
-        run_id,
-        file_id,
-        artifact_type: ArtifactType::Output,
-        metadata: None,
-    };
-    Ok(conn.create_workspace_pipeline_artifact(artifact).await?)
 }

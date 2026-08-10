@@ -7,7 +7,7 @@
 use nvisy_engine::plan::{MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams};
 use nvisy_engine::primitive::ConfidenceThreshold;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
-use nvisy_postgres::types::{Handle, PipelineStatus};
+use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -126,6 +126,9 @@ pub struct CreatePipeline {
     /// definition that can be filled in via update.
     #[validate(nested)]
     pub definition: Option<PipelineDefinition>,
+    /// Optional per-scope data-retention override for this pipeline. Each unset
+    /// scope inherits the workspace retention.
+    pub retention: Option<RetentionOverride>,
 }
 
 /// A pipeline's reference slugs, split out to be resolved to ids and written to
@@ -153,6 +156,10 @@ impl CreatePipeline {
         account_id: Uuid,
     ) -> serde_json::Result<(NewWorkspacePipeline, PipelineReferences)> {
         let (definition, references) = split_definition(self.definition)?;
+        let metadata = self
+            .retention
+            .map(|retention| retention.to_pipeline_metadata())
+            .transpose()?;
         let model = NewWorkspacePipeline {
             workspace_id,
             account_id,
@@ -161,7 +168,7 @@ impl CreatePipeline {
             description: self.description,
             status: None,
             definition: Some(definition),
-            metadata: None,
+            metadata,
             schedule_cron: None,
             schedule_tz: None,
             next_run_at: None,
@@ -201,17 +208,27 @@ pub struct UpdatePipeline {
     /// New detection + redaction configuration (replaces the whole definition).
     #[validate(nested)]
     pub definition: Option<PipelineDefinition>,
+    /// Replacement per-scope data-retention override. When omitted, the
+    /// pipeline's retention override is left unchanged.
+    pub retention: Option<RetentionOverride>,
 }
 
 impl UpdatePipeline {
-    /// Splits this request into the update model and its reference ids.
+    /// Splits this request into the update model, its reference ids, and the
+    /// retention override (when the request set one).
     ///
     /// A missing `definition` leaves both the config column and the reference
     /// join table untouched (partial update); a present one replaces both, so
-    /// the references are returned only in that case.
+    /// the references are returned only in that case. The returned override lets
+    /// the handler recompute `expires_at` on the pipeline's existing files when
+    /// its retention changed.
     pub fn into_parts(
         self,
-    ) -> serde_json::Result<(UpdatePipelineModel, Option<PipelineReferences>)> {
+    ) -> serde_json::Result<(
+        UpdatePipelineModel,
+        Option<PipelineReferences>,
+        Option<RetentionOverride>,
+    )> {
         let (definition, references) = match self.definition {
             Some(definition) => {
                 let (config, policy_slugs) = definition.into_parts()?;
@@ -219,14 +236,19 @@ impl UpdatePipeline {
             }
             None => (None, None),
         };
+        let metadata = self
+            .retention
+            .map(|retention| retention.to_pipeline_metadata())
+            .transpose()?;
         let model = UpdatePipelineModel {
             display_name: self.display_name,
             description: self.description.map(Some),
             status: self.status,
             definition,
+            metadata,
             ..Default::default()
         };
-        Ok((model, references))
+        Ok((model, references, self.retention))
     }
 }
 

@@ -38,10 +38,10 @@ dotenv = ["dep:dotenvy"]
 
 [dependencies]
 # Internal crates
-nvisy-nats = { workspace = true, features = [] }
-nvisy-postgres = { workspace = true, features = [] }
-nvisy-webhook = { workspace = true, features = ["reqwest"] }
-nvisy-server = { workspace = true, features = [] }
+nvisy-nats = { workspace = true, features = ["cli"] }
+nvisy-postgres = { workspace = true, features = ["cli"] }
+nvisy-webhook = { workspace = true, features = ["reqwest", "cli"] }
+nvisy-server = { workspace = true, features = ["cli"] }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }

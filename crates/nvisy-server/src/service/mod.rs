@@ -6,7 +6,9 @@ pub mod crypto;
 pub mod engine;
 mod health;
 mod object;
+mod retention;
 mod security;
+mod sync;
 mod webhook;
 
 use std::sync::Arc;
@@ -22,12 +24,14 @@ pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
-pub use crate::service::object::{
-    ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, ObjectService, is_cron_due,
-    is_valid_cron,
-};
+pub use crate::service::object::ObjectService;
+pub use crate::service::retention::RetentionWorker;
 pub use crate::service::security::{
     PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
+};
+pub use crate::service::sync::{
+    ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
+    StandardCronSchedule, SyncConfig,
 };
 pub use crate::service::webhook::{WebhookEmitter, WebhookWorker};
 use crate::{Error, Result};
@@ -73,6 +77,7 @@ impl ServiceState {
         crypto_config: CryptoConfig,
         engine_config: EngineConfig,
         health_config: HealthConfig,
+        sync_config: SyncConfig,
         webhook_service: WebhookService,
     ) -> Result<Self> {
         let postgres_client = connect_postgres(postgres_config).await?;
@@ -97,6 +102,7 @@ impl ServiceState {
             crypto.clone(),
             object.clone(),
             webhook_emitter.clone(),
+            sync_config,
         );
 
         let service_state = Self {
@@ -138,6 +144,11 @@ impl ServiceState {
             self.crypto.clone(),
             self.connection_sync.clone(),
         )
+    }
+
+    /// Builds the data-retention worker from this state.
+    pub fn retention_worker(&self) -> RetentionWorker {
+        RetentionWorker::new(self.postgres.clone(), self.nats.clone())
     }
 }
 

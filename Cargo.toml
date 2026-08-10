@@ -96,6 +96,7 @@ hmac = { version = "0.13", features = [] }
 base64 = { version = "0.23", features = [] }
 hex = { version = "0.4", features = [] }
 hipstr = { version = "0.8", features = [] }
+mime_guess = { version = "2.0", features = [] }
 
 # Randomness
 rand = { version = "0.10.0-rc.6", features = ["serde"] }

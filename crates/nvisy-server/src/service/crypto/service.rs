@@ -25,8 +25,17 @@ const TRACING_TARGET: &str = "nvisy_server::crypto";
 
 /// Master encryption key file path configuration.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct CryptoConfig {
     /// File path to the 32-byte master encryption key.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long,
+            env = "ENCRYPTION_KEY_FILEPATH",
+            default_value = "./encryption.key"
+        )
+    )]
     pub key_path: PathBuf,
 }
 

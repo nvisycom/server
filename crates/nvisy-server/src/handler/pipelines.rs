@@ -10,9 +10,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspacePipelineArtifactRepository, WorkspacePipelineRepository,
+    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::{Handle, WithAccountRef};
+use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -171,8 +171,6 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Retrieves a pipeline by slug.
-///
-/// Returns the pipeline with all artifacts from its runs.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -199,17 +197,10 @@ async fn get_pipeline(
     let pipeline = found.item;
     let creator: AccountRef = found.account.into();
 
-    let artifacts = conn.list_workspace_pipeline_artifacts(pipeline.id).await?;
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
 
-    let response = Pipeline::from_model_with_artifacts(
-        pipeline,
-        workspace.slug,
-        creator,
-        artifacts,
-        policy_slugs,
-    )
-    .map_err(serialize_error)?;
+    let response = Pipeline::from_model(pipeline, workspace.slug, creator, policy_slugs)
+        .map_err(serialize_error)?;
 
     tracing::info!(target: TRACING_TARGET, "Pipeline retrieved");
 
@@ -257,7 +248,8 @@ async fn update_pipeline(
     let existing = found.item;
     let creator: AccountRef = found.account.into();
 
-    let (update_data, references) = request.into_parts().map_err(serialize_error)?;
+    let (update_data, references, retention_override) =
+        request.into_parts().map_err(serialize_error)?;
     let pipeline_id = existing.id;
 
     // When a definition is supplied, resolve its slugs to ids up front so an
@@ -267,6 +259,28 @@ async fn update_pipeline(
         None => None,
     };
 
+    // If the request changed the retention override, recompute `expires_at` on
+    // the files this pipeline already produced, so the change applies to stored
+    // data too. Resolved against the workspace baseline (override wins per scope).
+    let backfill = retention_override.map(|over| {
+        let workspace_retention = WorkspaceSettings::from_value(&workspace.settings).retention;
+        let now = jiff::Timestamp::now();
+        [
+            (
+                FileKind::Redacted,
+                workspace_retention
+                    .resolve(RetentionScope::RedactedDocuments, Some(&over))
+                    .expires_at(now),
+            ),
+            (
+                FileKind::Audit,
+                workspace_retention
+                    .resolve(RetentionScope::AuditLogs, Some(&over))
+                    .expires_at(now),
+            ),
+        ]
+    });
+
     let pipeline = conn
         .transaction(async |conn| {
             let pipeline = conn
@@ -275,6 +289,13 @@ async fn update_pipeline(
             // Only touch the join table when the request supplied a definition.
             if let Some(policy_ids) = &resolved {
                 replace_references(conn, &pipeline, policy_ids).await?;
+            }
+            // Backfill produced files' expiry when the override changed.
+            if let Some(pairs) = &backfill {
+                for (kind, expires_at) in pairs {
+                    conn.backfill_pipeline_files_expiry(pipeline_id, *kind, *expires_at)
+                        .await?;
+                }
             }
             Ok::<WorkspacePipeline, PgError>(pipeline)
         })

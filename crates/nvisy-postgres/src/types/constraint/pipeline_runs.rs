@@ -11,8 +11,6 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspacePipelineRunConstraints {
     // Size / validation constraints
-    #[strum(serialize = "workspace_pipeline_runs_analyzed_document_key_length")]
-    AnalyzedDocumentKeyLength,
     #[strum(serialize = "workspace_pipeline_runs_metadata_size")]
     MetadataSize,
     #[strum(serialize = "workspace_pipeline_runs_idempotency_key_length")]
@@ -36,8 +34,7 @@ impl WorkspacePipelineRunConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspacePipelineRunConstraints::AnalyzedDocumentKeyLength
-            | WorkspacePipelineRunConstraints::MetadataSize
+            WorkspacePipelineRunConstraints::MetadataSize
             | WorkspacePipelineRunConstraints::IdempotencyKeyLength => {
                 ConstraintCategory::Validation
             }

@@ -22,8 +22,11 @@ pub struct PipelineRun {
     pub pipeline_slug: Handle,
     /// Handle of the workspace this run belongs to.
     pub workspace_slug: Handle,
-    /// File this run analyzes / redacts.
-    pub file_id: Uuid,
+    /// Source document this run analyzes / redacts.
+    pub input_file_id: Uuid,
+    /// Redacted document produced by the run, once it completes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_file_id: Option<Uuid>,
     /// Account that triggered the run.
     pub triggered_by: AccountRef,
     /// How the run was triggered.
@@ -58,7 +61,8 @@ impl PipelineRun {
             id: RunId::from_uuid(run.id),
             pipeline_slug,
             workspace_slug,
-            file_id: run.file_id,
+            input_file_id: run.input_file_id,
+            output_file_id: run.output_file_id,
             triggered_by,
             trigger_type: run.trigger_type,
             status: run.status,

@@ -7,7 +7,7 @@
 use nvisy_postgres::model::{
     NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel, UpdateWorkspaceMember,
 };
-use nvisy_postgres::types::{Handle, NotificationEvent};
+use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -31,8 +31,9 @@ pub struct CreateWorkspace {
     /// Optional description of the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
-    /// Whether approval is required for processed files to be visible.
-    pub require_approval: Option<bool>,
+    /// Workspace settings (approval requirement, data-retention rules). Defaults
+    /// to requiring approval and keeping everything when omitted.
+    pub settings: Option<WorkspaceSettings>,
 }
 
 impl CreateWorkspace {
@@ -65,10 +66,17 @@ impl CreateWorkspace {
             slug,
             description: self.description,
             avatar_url: None,
-            require_approval: self.require_approval,
             tags: None,
             metadata: None,
-            settings: None,
+            settings: self
+                .settings
+                .map(|settings| settings.to_value())
+                .transpose()
+                .map_err(|err| {
+                    ErrorKind::BadRequest
+                        .with_message("Invalid workspace settings")
+                        .with_context(err.to_string())
+                })?,
             created_by: account_id,
         })
     }
@@ -88,18 +96,29 @@ pub struct UpdateWorkspace {
     /// New description for the workspace (max 500 characters).
     #[validate(length(max = 500))]
     pub description: Option<String>,
-    /// Whether approval is required for processed files to be visible.
-    pub require_approval: Option<bool>,
+    /// Replacement workspace settings (approval requirement, data-retention
+    /// rules). When omitted, settings are left unchanged.
+    pub settings: Option<WorkspaceSettings>,
 }
 
 impl UpdateWorkspace {
-    pub fn into_model(self) -> UpdateWorkspaceModel {
-        UpdateWorkspaceModel {
+    pub fn into_model(self) -> Result<UpdateWorkspaceModel> {
+        let settings = self
+            .settings
+            .map(|settings| settings.to_value())
+            .transpose()
+            .map_err(|err| {
+                ErrorKind::BadRequest
+                    .with_message("Invalid workspace settings")
+                    .with_context(err.to_string())
+            })?;
+
+        Ok(UpdateWorkspaceModel {
             display_name: self.display_name,
             description: self.description.map(Some),
-            require_approval: self.require_approval,
+            settings,
             ..Default::default()
-        }
+        })
     }
 }
 
