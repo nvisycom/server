@@ -7,4 +7,4 @@ mod workspace;
 pub use retention::{
     PIPELINE_RETENTION_KEY, Retention, RetentionOverride, RetentionScope, RetentionSettings,
 };
-pub use workspace::WorkspaceSettings;
+pub use workspace::{OcrPolicy, WorkspaceSettings};

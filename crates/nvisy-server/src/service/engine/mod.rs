@@ -11,10 +11,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use derive_more::Deref;
-use nvisy_engine::Engine;
 use nvisy_engine::plan::{
     AnalyzerParams, AnyAnnotations, DeduplicationParams, ProviderSelection, ScopeParams,
 };
+use nvisy_engine::{Engine, OcrMode};
 
 use crate::Result;
 use crate::handler::request::PipelineDefinition;
@@ -84,9 +84,9 @@ impl EngineService {
     ///
     /// Recognizers and deduplication behavior come from the pipeline; enrichment
     /// and deduplication calibration come from the server-wide defaults. Scope is
-    /// the request's own, falling back to the pipeline default. The label catalog
-    /// is not set here: the engine derives it from the run's policies at detect
-    /// time.
+    /// the request's own, falling back to the pipeline default. `ocr_mode` is the
+    /// workspace's OCR policy (forced vs. auto). The label catalog is not set
+    /// here: the engine derives it from the run's policies at detect time.
     ///
     /// Rejects a pipeline that explicitly enables NER or LLM recognizers this
     /// deployment has no lineup for, rather than silently running without them.
@@ -94,6 +94,7 @@ impl EngineService {
         &self,
         definition: &PipelineDefinition,
         request_scope: Option<ScopeParams>,
+        ocr_mode: OcrMode,
     ) -> HandlerResult<AnalyzerParams> {
         let recognizers = &definition.recognizers;
         if wants_recognizer(recognizers.ner.as_ref()) && !self.defaults.has_ner {
@@ -130,6 +131,7 @@ impl EngineService {
             enrichers: self.defaults.enrichers.clone(),
             deduplication,
             scope,
+            ocr_mode,
             annotations: AnyAnnotations::default(),
         })
     }

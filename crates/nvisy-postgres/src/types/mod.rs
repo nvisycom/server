@@ -33,8 +33,8 @@ pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
 pub use prefixed_id::{ConnectionId, PrefixedIdError, RunId, WebhookId};
 pub use settings::{
-    PIPELINE_RETENTION_KEY, Retention, RetentionOverride, RetentionScope, RetentionSettings,
-    WorkspaceSettings,
+    OcrPolicy, PIPELINE_RETENTION_KEY, Retention, RetentionOverride, RetentionScope,
+    RetentionSettings, WorkspaceSettings,
 };
 pub use sorting::{
     FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,

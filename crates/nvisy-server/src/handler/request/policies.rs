@@ -1,8 +1,8 @@
 //! Policy request types.
 
 use nvisy_engine::policy::PolicyDefinition;
+use nvisy_engine::template::PolicyTemplate;
 use nvisy_postgres::types::Handle;
-use nvisy_template::PolicyTemplate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
