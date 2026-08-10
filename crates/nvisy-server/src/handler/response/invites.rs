@@ -136,8 +136,6 @@ pub struct InvitePreview {
     /// Description of the workspace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Tags associated with the workspace.
-    pub tags: Vec<String>,
     /// Role the user will have if they join.
     pub invited_role: WorkspaceRole,
     /// Timestamp when the workspace was created.
@@ -149,12 +147,10 @@ pub struct InvitePreview {
 impl InvitePreview {
     /// Creates an invite preview from workspace and invite models.
     pub fn from_models(workspace: model::Workspace, invite: model::WorkspaceInvite) -> Self {
-        let tags = workspace.get_tags();
         Self {
             workspace_slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
-            tags,
             invited_role: invite.invited_role,
             created_at: workspace.created_at.into(),
             expires_at: invite.expires_at.into(),

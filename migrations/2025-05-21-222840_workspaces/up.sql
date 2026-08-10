@@ -21,12 +21,10 @@ CREATE TABLE workspaces (
     CONSTRAINT workspaces_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
     CONSTRAINT workspaces_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
-    -- Tags and extended metadata
-    tags             TEXT[]             NOT NULL DEFAULT '{}',
+    -- Extended metadata
     metadata         JSONB              NOT NULL DEFAULT '{}',
     settings         JSONB              NOT NULL DEFAULT '{}',
 
-    CONSTRAINT workspaces_tags_count_max CHECK (array_length(tags, 1) IS NULL OR array_length(tags, 1) <= 20),
     CONSTRAINT workspaces_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 8192),
     CONSTRAINT workspaces_settings_size CHECK (length(settings::TEXT) BETWEEN 2 AND 8192),
 
@@ -63,10 +61,6 @@ CREATE INDEX workspaces_owner_lookup_idx
     ON workspaces (created_by, created_at DESC)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX workspaces_tags_lookup_idx
-    ON workspaces USING gin (tags)
-    WHERE array_length(tags, 1) > 0 AND deleted_at IS NULL;
-
 CREATE INDEX workspaces_metadata_lookup_idx
     ON workspaces USING gin (metadata)
     WHERE deleted_at IS NULL;
@@ -83,7 +77,6 @@ COMMENT ON COLUMN workspaces.id IS 'Unique workspace identifier (UUID)';
 COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (2-32 characters)';
 COMMENT ON COLUMN workspaces.description IS 'Detailed workspace description (up to 500 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
-COMMENT ON COLUMN workspaces.tags IS 'Array of tags for workspace classification and search';
 COMMENT ON COLUMN workspaces.metadata IS 'Extended workspace metadata (JSON, 2B-8KB)';
 COMMENT ON COLUMN workspaces.settings IS 'Typed workspace settings (JSON, 2B-8KB): approval requirement, data-retention rules';
 COMMENT ON COLUMN workspaces.created_by IS 'Account that created this workspace (becomes first owner)';

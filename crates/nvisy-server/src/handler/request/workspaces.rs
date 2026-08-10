@@ -66,7 +66,6 @@ impl CreateWorkspace {
             slug,
             description: self.description,
             avatar_url: None,
-            tags: None,
             metadata: None,
             settings: self
                 .settings

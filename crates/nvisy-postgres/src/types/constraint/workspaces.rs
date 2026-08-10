@@ -19,8 +19,6 @@ pub enum WorkspaceConstraints {
     SlugFormat,
     #[strum(serialize = "workspaces_description_length_max")]
     DescriptionLengthMax,
-    #[strum(serialize = "workspaces_tags_count_max")]
-    TagsCountMax,
     #[strum(serialize = "workspaces_metadata_size")]
     MetadataSize,
     #[strum(serialize = "workspaces_settings_size")]
@@ -54,7 +52,6 @@ impl WorkspaceConstraints {
             | WorkspaceConstraints::SlugLength
             | WorkspaceConstraints::SlugFormat
             | WorkspaceConstraints::DescriptionLengthMax
-            | WorkspaceConstraints::TagsCountMax
             | WorkspaceConstraints::MetadataSize
             | WorkspaceConstraints::SettingsSize => ConstraintCategory::Validation,
 

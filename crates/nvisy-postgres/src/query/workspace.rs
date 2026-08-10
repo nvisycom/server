@@ -67,13 +67,6 @@ pub trait WorkspaceRepository {
         search_query: &str,
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
-
-    /// Finds workspaces with overlapping tags.
-    fn find_workspaces_by_tags(
-        &mut self,
-        search_tags: &[String],
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
 }
 
 impl WorkspaceRepository for PgConnection {
@@ -191,27 +184,6 @@ impl WorkspaceRepository for PgConnection {
         let workspace_list = workspaces
             .filter(deleted_at.is_null())
             .filter(display_name.trgm_similar_to(search_query))
-            .select(Workspace::as_select())
-            .order(updated_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(workspace_list)
-    }
-
-    async fn find_workspaces_by_tags(
-        &mut self,
-        search_tags: &[String],
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<Workspace>> {
-        use schema::workspaces::dsl::*;
-
-        let workspace_list = workspaces
-            .filter(tags.overlaps_with(search_tags))
-            .filter(deleted_at.is_null())
             .select(Workspace::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)
