@@ -104,19 +104,19 @@ pub struct UpdateWorkspaceWebhook {
 }
 
 impl WorkspaceWebhook {
-    /// Returns whether the webhook is active and receiving events.
-    pub fn is_active(&self) -> bool {
-        self.status.is_active() && self.deleted_at.is_none()
+    /// Returns whether the webhook is enabled and receiving events.
+    pub fn is_enabled(&self) -> bool {
+        self.status.is_enabled() && self.deleted_at.is_none()
     }
 
-    /// Returns whether the webhook is currently paused.
-    pub fn is_paused(&self) -> bool {
-        self.status.is_paused()
-    }
-
-    /// Returns whether the webhook is disabled.
+    /// Returns whether the webhook was disabled by the user.
     pub fn is_disabled(&self) -> bool {
         self.status.is_disabled()
+    }
+
+    /// Returns whether the webhook was suspended by the system.
+    pub fn is_suspended(&self) -> bool {
+        self.status.is_suspended()
     }
 
     /// Returns whether the webhook has custom headers.
@@ -142,11 +142,6 @@ impl WorkspaceWebhook {
     /// Returns whether the webhook has been triggered at least once.
     pub fn has_been_triggered(&self) -> bool {
         self.last_success_at.is_some() || self.last_failure_at.is_some()
-    }
-
-    /// Returns whether the webhook is in a healthy state.
-    pub fn is_healthy(&self) -> bool {
-        self.is_active()
     }
 }
 

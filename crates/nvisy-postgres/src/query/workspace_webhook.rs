@@ -84,29 +84,17 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
 
-    /// Pauses a webhook.
-    fn pause_webhook(
+    /// Suspends a webhook (system-set, e.g. after repeated failures).
+    fn suspend_webhook(
         &mut self,
         webhook_id: Uuid,
     ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
 
-    /// Resumes a paused webhook.
-    fn resume_webhook(
-        &mut self,
-        webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
-
-    /// Disables a webhook.
-    fn disable_webhook(
-        &mut self,
-        webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
-
-    /// Finds all active webhooks for a workspace that are subscribed to a specific event.
+    /// Finds all enabled webhooks for a workspace that are subscribed to a specific event.
     ///
     /// Returns webhooks where:
     /// - The webhook belongs to the specified workspace
-    /// - The webhook status is Active
+    /// - The webhook status is Enabled
     /// - The webhook's events array contains the specified event
     /// - The webhook is not deleted
     fn find_webhooks_for_event(
@@ -350,40 +338,12 @@ impl WorkspaceWebhookRepository for PgConnection {
         Ok(webhook)
     }
 
-    async fn pause_webhook(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
+    async fn suspend_webhook(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
         use schema::workspace_webhooks::dsl::*;
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
-            .set(status.eq(WebhookStatus::Paused))
-            .returning(WorkspaceWebhook::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(webhook)
-    }
-
-    async fn resume_webhook(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
-        use schema::workspace_webhooks::dsl::*;
-
-        let webhook = diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
-            .set(status.eq(WebhookStatus::Active))
-            .returning(WorkspaceWebhook::as_returning())
-            .get_result(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(webhook)
-    }
-
-    async fn disable_webhook(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
-        use schema::workspace_webhooks::dsl::*;
-
-        let webhook = diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
-            .set(status.eq(WebhookStatus::Disabled))
+            .set(status.eq(WebhookStatus::Suspended))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
@@ -406,7 +366,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
         let webhooks = workspace_webhooks
             .filter(workspace_id.eq(ws_id))
-            .filter(status.eq(WebhookStatus::Active))
+            .filter(status.eq(WebhookStatus::Enabled))
             .filter(deleted_at.is_null())
             .filter(events.contains(needle))
             .select(WorkspaceWebhook::as_select())
