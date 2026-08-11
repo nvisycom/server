@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_engine::OcrMode;
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
@@ -17,7 +16,7 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{OcrPolicy, PipelineRunStatus, WorkspaceSettings};
+use nvisy_postgres::types::{PipelineRunStatus, WorkspaceSettings};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -26,13 +25,16 @@ use crate::extract::{
     WorkspaceContext,
 };
 use crate::handler::request::{
-    CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
-    PipelineRunPathParams, WorkspaceRunsQuery,
+    CreatePipelineRun, CursorPagination, PipelinePathParams, PipelineRunPathParams,
+    WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{BlobService, CryptoService, EngineService, ServiceState, WebhookEmitter};
+use crate::service::{
+    BlobService, CryptoService, DetectionJob, DetectionService, EngineService, ServiceState,
+    WebhookEmitter,
+};
 
 /// Tracing target for pipeline run operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::runs";
@@ -52,9 +54,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::runs";
 )]
 async fn create_pipeline_run(
     State(pg_client): State<PgClient>,
-    State(blob): State<BlobService>,
-    State(crypto): State<CryptoService>,
-    State(engine): State<EngineService>,
+    State(detection): State<DetectionService>,
     State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
@@ -100,15 +100,22 @@ async fn create_pipeline_run(
         ));
     }
 
+    // Validate synchronously so a bad request fails fast (4xx) rather than as a
+    // run that immediately fails in the worker.
     let file = conn
         .find_file_in_workspace(pipeline.workspace_id, request.file_id)
         .await?
         .ok_or_else(|| Error::not_found("file"))?;
 
-    let definition = PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
-        .map_err(serialize_error)?;
+    if conn.list_pipeline_policy_ids(pipeline.id).await?.is_empty() {
+        return Err(ErrorKind::BadRequest
+            .with_message("Pipeline has no policies; attach at least one before running")
+            .with_resource("pipeline"));
+    }
 
-    // Create the run first so its id is the engine correlation id.
+    // Create the run (its id is the engine correlation id) and enqueue detection
+    // for the worker. The response returns immediately; the client learns the
+    // findings are ready via the run's status (SSE at `.../events` or a re-read).
     let new_run = NewWorkspacePipelineRun {
         pipeline_id: pipeline.id,
         input_file_id: file.id,
@@ -118,6 +125,29 @@ async fn create_pipeline_run(
         ..Default::default()
     };
     let run = conn.create_workspace_pipeline_run(new_run).await?;
+
+    let job = DetectionJob {
+        workspace_id: workspace.id,
+        run_id: run.id,
+        scope: request.scope,
+    };
+    if let Err(err) = detection.enqueue(job).await {
+        // Enqueue failed, so the worker will never pick this run up: fail it now
+        // rather than leaving it stuck in `Running`.
+        fail_run(
+            &mut conn,
+            &webhook_emitter,
+            workspace.id,
+            run.id,
+            auth_state.account_id,
+        )
+        .await;
+        return Err(err);
+    }
+
+    detection
+        .broadcast_status(run.id, PipelineRunStatus::Running)
+        .await;
 
     if let Err(err) = webhook_emitter
         .emit_pipeline_run_started(
@@ -136,82 +166,12 @@ async fn create_pipeline_run(
         );
     }
 
-    // Map the workspace's OCR policy to the engine's per-run mode. `Force` renders
-    // every page at the engine's default DPI (no workspace DPI knob).
-    let ocr_mode = match WorkspaceSettings::from_value(&workspace.settings).ocr {
-        OcrPolicy::Auto => OcrMode::Auto,
-        OcrPolicy::Force => OcrMode::force(),
-        OcrPolicy::Never => OcrMode::Never,
-    };
-
-    // Build the analyzer params from the pipeline's intent; the deployment's
-    // recognizer lineups and enrichers are engine-owned.
-    let params = engine.analyzer_params(&definition, request.scope, ocr_mode);
-
-    let document = blob.build_document(&file, run.id).await?;
-
-    // The pipeline's policies own the label vocabulary: detection derives its
-    // catalog from them, so the analysis emits exactly what the policies can act
-    // on. Resolved before analyze and reused verbatim at redact.
-    let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
-    if policies.is_empty() {
-        fail_run(
-            &mut conn,
-            &webhook_emitter,
-            workspace.id,
-            run.id,
-            auth_state.account_id,
-        )
-        .await;
-        return Err(ErrorKind::BadRequest
-            .with_message("Pipeline has no policies; attach at least one before running")
-            .with_resource("pipeline"));
-    }
-
-    let analyzed = match engine.analyze(document, &policies, &params).await {
-        Ok(analyzed) => analyzed,
-        Err(err) => {
-            fail_run(
-                &mut conn,
-                &webhook_emitter,
-                workspace.id,
-                run.id,
-                auth_state.account_id,
-            )
-            .await;
-            return Err(err.into());
-        }
-    };
-
-    // The analysis is a map of detected PII; encrypt it and record it as an
-    // audit-kind file, keeping only its id on the run.
-    let workspace_settings = WorkspaceSettings::from_value(&workspace.settings).retention;
-    let audit_file_id = blob
-        .store_analyzed_document(
-            &mut conn,
-            &pipeline,
-            &workspace_settings,
-            auth_state.account_id,
-            &analyzed,
-        )
-        .await?;
-    let run = conn
-        .update_workspace_pipeline_run(
-            run.id,
-            UpdateWorkspacePipelineRun {
-                status: Some(PipelineRunStatus::Analyzed),
-                audit_file_id: Some(Some(audit_file_id)),
-                ..Default::default()
-            },
-        )
-        .await?;
-
-    tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Pipeline run analyzed");
+    tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Pipeline run enqueued for detection");
 
     let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
     Ok((
-        StatusCode::CREATED,
+        StatusCode::ACCEPTED,
         Json(PipelineRun::from_model(
             run,
             pipeline.slug,
@@ -224,14 +184,19 @@ async fn create_pipeline_run(
 fn create_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Start a run (detect)")
         .description(
-            "Analyzes a file with the pipeline's configuration and returns the run \
-             holding the findings for review. Accepts an Idempotency-Key header.",
+            "Starts detection for a file and returns 202 with the run in the \
+             `running` state; the analysis runs in the background. Watch the run's \
+             status via the SSE stream at `.../runs/{runId}/events` (or re-read the \
+             run) and fetch the findings from `.../runs/{runId}/detections/` once it \
+             reaches `analyzed`. A repeated Idempotency-Key returns the existing run.",
         )
-        .response::<201, Json<PipelineRun>>()
+        .response::<202, Json<PipelineRun>>()
+        .response::<200, Json<PipelineRun>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Lists runs for a specific pipeline.
@@ -573,13 +538,6 @@ async fn fail_run(
             "Failed to emit pipeline:run.failed webhook event"
         );
     }
-}
-
-/// Maps a definition (de)serialization failure to an internal error.
-fn serialize_error(error: serde_json::Error) -> Error<'static> {
-    ErrorKind::InternalServerError
-        .with_message("Failed to process pipeline definition")
-        .with_context(error.to_string())
 }
 
 /// Finds a pipeline within a workspace by slug or returns NotFound.

@@ -7,7 +7,9 @@
 //! webhook events.
 
 mod job;
+mod service;
 mod worker;
 
 pub use job::{DetectionJob, RunStatusEvent, run_subject};
+pub use service::DetectionService;
 pub use worker::DetectionWorker;

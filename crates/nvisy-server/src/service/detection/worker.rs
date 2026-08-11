@@ -22,7 +22,8 @@ use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::job::{DetectionJob, RunStatusEvent, run_subject};
+use super::job::DetectionJob;
+use super::service::DetectionService;
 use crate::handler::request::PipelineDefinition;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{BlobService, CryptoService, EngineService, WebhookEmitter};
@@ -38,6 +39,7 @@ pub struct DetectionWorker {
     engine: EngineService,
     blob: BlobService,
     webhook_emitter: WebhookEmitter,
+    detection: DetectionService,
 }
 
 impl DetectionWorker {
@@ -49,6 +51,7 @@ impl DetectionWorker {
         engine: EngineService,
         blob: BlobService,
         webhook_emitter: WebhookEmitter,
+        detection: DetectionService,
     ) -> Self {
         Self {
             postgres,
@@ -57,6 +60,7 @@ impl DetectionWorker {
             engine,
             blob,
             webhook_emitter,
+            detection,
         }
     }
 
@@ -202,7 +206,9 @@ impl DetectionWorker {
         .await?;
 
         tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Run analyzed");
-        self.broadcast_status(run.id, PipelineRunStatus::Analyzed).await;
+        self.detection
+            .broadcast_status(run.id, PipelineRunStatus::Analyzed)
+            .await;
 
         if let Err(err) = self
             .webhook_emitter
@@ -226,7 +232,9 @@ impl DetectionWorker {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to mark run failed");
         }
 
-        self.broadcast_status(run.id, PipelineRunStatus::Failed).await;
+        self.detection
+            .broadcast_status(run.id, PipelineRunStatus::Failed)
+            .await;
 
         if let Err(err) = self
             .webhook_emitter
@@ -234,14 +242,6 @@ impl DetectionWorker {
             .await
         {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to emit pipeline:run.failed webhook event");
-        }
-    }
-
-    /// Broadcasts a run's status change on its core-NATS subject (best-effort).
-    async fn broadcast_status(&self, run_id: Uuid, status: PipelineRunStatus) {
-        let event = RunStatusEvent { run_id, status };
-        if let Err(err) = self.nats.publish_broadcast(run_subject(run_id), &event).await {
-            tracing::debug!(target: TRACING_TARGET, error = %err, "Failed to broadcast run status");
         }
     }
 }

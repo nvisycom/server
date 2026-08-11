@@ -2,9 +2,9 @@
 
 mod avatar;
 mod blob;
-mod detection;
 mod connection;
 pub mod crypto;
+mod detection;
 pub mod engine;
 mod health;
 mod object;
@@ -22,7 +22,9 @@ use nvisy_webhook::WebhookService;
 
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::blob::BlobService;
-pub use crate::service::detection::{DetectionJob, DetectionWorker, RunStatusEvent, run_subject};
+pub use crate::service::detection::{
+    DetectionJob, DetectionService, DetectionWorker, RunStatusEvent, run_subject,
+};
 pub use crate::service::connection::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
@@ -62,6 +64,7 @@ pub struct ServiceState {
     // Internal services:
     pub avatar: AvatarService,
     pub blob: BlobService,
+    pub detection: DetectionService,
     pub connection_sync: ConnectionSyncService,
     pub health_cache: HealthCache,
     pub object: ObjectService,
@@ -101,6 +104,7 @@ impl ServiceState {
 
         let object = ObjectService::new();
         let blob = BlobService::new(nats_client.clone(), crypto.clone());
+        let detection = DetectionService::new(nats_client.clone());
         let avatar = AvatarService::new(nats_client.clone(), postgres_client.clone());
         let connection_sync = ConnectionSyncService::new(
             postgres_client.clone(),
@@ -121,6 +125,7 @@ impl ServiceState {
 
             avatar,
             blob,
+            detection,
             connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
             object,
@@ -156,6 +161,19 @@ impl ServiceState {
     /// Builds the data-retention worker from this state.
     pub fn retention_worker(&self) -> RetentionWorker {
         RetentionWorker::new(self.postgres.clone(), self.nats.clone())
+    }
+
+    /// Builds the pipeline detection worker from this state.
+    pub fn detection_worker(&self) -> DetectionWorker {
+        DetectionWorker::new(
+            self.postgres.clone(),
+            self.nats.clone(),
+            self.crypto.clone(),
+            self.engine.clone(),
+            self.blob.clone(),
+            self.webhook_emitter.clone(),
+            self.detection.clone(),
+        )
     }
 }
 
@@ -200,6 +218,7 @@ impl_di!(
 impl_di!(
     avatar: AvatarService,
     blob: BlobService,
+    detection: DetectionService,
     connection_sync: ConnectionSyncService,
     crypto: CryptoService,
     engine: EngineService,
