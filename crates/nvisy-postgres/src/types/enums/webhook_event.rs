@@ -99,6 +99,11 @@ pub enum WebhookEvent {
     #[serde(rename = "pipeline:run.started")]
     PipelineRunStarted,
 
+    /// A pipeline run's detection finished (findings ready for review)
+    #[db_rename = "pipeline:run.analyzed"]
+    #[serde(rename = "pipeline:run.analyzed")]
+    PipelineRunAnalyzed,
+
     /// A pipeline run finished successfully
     #[db_rename = "pipeline:run.completed"]
     #[serde(rename = "pipeline:run.completed")]
@@ -168,6 +173,7 @@ impl WebhookEvent {
                 | WebhookEvent::PipelineUpdated
                 | WebhookEvent::PipelineDeleted
                 | WebhookEvent::PipelineRunStarted
+                | WebhookEvent::PipelineRunAnalyzed
                 | WebhookEvent::PipelineRunCompleted
                 | WebhookEvent::PipelineRunFailed
         )
@@ -201,6 +207,7 @@ impl WebhookEvent {
             | WebhookEvent::PipelineUpdated
             | WebhookEvent::PipelineDeleted
             | WebhookEvent::PipelineRunStarted
+            | WebhookEvent::PipelineRunAnalyzed
             | WebhookEvent::PipelineRunCompleted
             | WebhookEvent::PipelineRunFailed => "pipeline",
             WebhookEvent::PolicyCreated
@@ -232,6 +239,7 @@ impl WebhookEvent {
             WebhookEvent::PipelineUpdated => "pipeline.updated",
             WebhookEvent::PipelineDeleted => "pipeline.deleted",
             WebhookEvent::PipelineRunStarted => "pipeline.run.started",
+            WebhookEvent::PipelineRunAnalyzed => "pipeline.run.analyzed",
             WebhookEvent::PipelineRunCompleted => "pipeline.run.completed",
             WebhookEvent::PipelineRunFailed => "pipeline.run.failed",
             WebhookEvent::PolicyCreated => "policy.created",

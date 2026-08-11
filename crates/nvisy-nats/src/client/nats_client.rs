@@ -46,7 +46,7 @@ use crate::object::{
     AuditBucket, AvatarsBucket, FilesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
     WorkspaceAvatarsBucket,
 };
-use crate::stream::{EventPublisher, EventStream, EventSubscriber, WebhookStream};
+use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -300,5 +300,51 @@ impl NatsClient {
         T: DeserializeOwned + Send + Sync + 'static,
     {
         self.event_subscriber().await
+    }
+}
+
+// Core NATS pub/sub (non-JetStream broadcast).
+//
+// Unlike the JetStream helpers above, these use plain NATS subjects: fire-and-
+// forget, no persistence, and every subscriber to a subject receives every
+// message (fan-out). Suited to ephemeral fan-out where the durable source of
+// truth lives elsewhere (e.g. streaming run-status changes to any number of
+// watching SSE connections; the run row in Postgres is authoritative).
+impl NatsClient {
+    /// Publishes a JSON-serialized message to a core NATS subject.
+    ///
+    /// Best-effort: delivered to whichever subscribers are connected now, with no
+    /// persistence or acknowledgement.
+    #[tracing::instrument(skip(self, message), target = TRACING_TARGET_CLIENT)]
+    pub async fn publish_broadcast<T>(&self, subject: String, message: &T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_vec(message)?;
+        self.inner
+            .client
+            .publish(subject, payload.into())
+            .await
+            .map_err(|e| Error::Connection(Box::new(e)))?;
+        Ok(())
+    }
+
+    /// Subscribes to a core NATS subject, yielding each deserialized message.
+    ///
+    /// The stream ends when the subscription is dropped. Messages that fail to
+    /// deserialize are skipped rather than ending the stream.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn subscribe_broadcast<T>(&self, subject: String) -> Result<BroadcastStream<T>>
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
+        let subscriber = self
+            .inner
+            .client
+            .subscribe(subject)
+            .await
+            .map_err(|e| Error::Connection(Box::new(e)))?;
+
+        Ok(BroadcastStream::new(subscriber))
     }
 }

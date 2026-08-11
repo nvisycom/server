@@ -13,7 +13,8 @@ COMMENT ON TYPE PIPELINE_STATUS IS
 
 -- Pipeline run status enum
 CREATE TYPE PIPELINE_RUN_STATUS AS ENUM (
-    'running',      -- Detection in progress
+    'queued',       -- Enqueued for detection; no worker has picked it up yet
+    'analyzing',    -- A worker is actively analyzing the document
     'analyzed',     -- Detection done; awaiting reviewer verification
     'completed',    -- Redaction applied; run finished
     'failed',       -- Run failed with error
@@ -158,7 +159,7 @@ CREATE TABLE workspace_pipeline_runs (
 
     -- Run attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
-    status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'running',
+    status          PIPELINE_RUN_STATUS     NOT NULL DEFAULT 'queued',
 
     -- Idempotency key from the initiating detect request; a repeat replays the
     -- existing run instead of analyzing twice.
@@ -170,6 +171,11 @@ CREATE TABLE workspace_pipeline_runs (
     metadata        JSONB                   NOT NULL DEFAULT '{}',
 
     CONSTRAINT workspace_pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+
+    -- Detection lease: when a worker last claimed this run. A redelivered job
+    -- whose claim is still fresh is skipped (no double-analyze); a stale claim
+    -- (a worker that died mid-analysis) can be re-claimed. Null until claimed.
+    claimed_at      TIMESTAMPTZ             DEFAULT NULL,
 
     -- Timing
     started_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
@@ -187,7 +193,7 @@ CREATE INDEX workspace_pipeline_runs_account_idx
 
 CREATE INDEX workspace_pipeline_runs_status_idx
     ON workspace_pipeline_runs (status, started_at DESC)
-    WHERE status IN ('running', 'analyzed');
+    WHERE status IN ('queued', 'analyzing', 'analyzed');
 
 CREATE INDEX workspace_pipeline_runs_input_file_idx
     ON workspace_pipeline_runs (input_file_id, started_at DESC);
@@ -211,6 +217,7 @@ COMMENT ON COLUMN workspace_pipeline_runs.trigger_type IS 'How the run was initi
 COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current run status';
 COMMENT ON COLUMN workspace_pipeline_runs.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN workspace_pipeline_runs.claimed_at IS 'Detection lease: when a worker last claimed this run';
 COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When the run started';
 COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When the run completed';
 
@@ -228,7 +235,7 @@ SELECT
     EXTRACT(EPOCH FROM (COALESCE(pr.completed_at, current_timestamp) - pr.started_at)) AS duration_seconds
 FROM workspace_pipeline_runs pr
     JOIN workspace_pipelines p ON pr.pipeline_id = p.id
-WHERE pr.status IN ('running', 'analyzed')
+WHERE pr.status IN ('queued', 'analyzing', 'analyzed')
 ORDER BY pr.started_at DESC NULLS LAST;
 
 COMMENT ON VIEW active_workspace_pipeline_runs IS

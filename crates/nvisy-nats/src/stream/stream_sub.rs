@@ -344,27 +344,49 @@ where
         }
         let messages = self.messages.as_mut().expect("message stream initialized");
 
-        match messages.next().await {
-            Some(Ok(message)) => {
-                let payload: T = serde_json::from_slice(&message.payload)?;
-
-                tracing::debug!(
-                    target: TRACING_TARGET_STREAM,
-                    subject = %message.subject,
-                    "Received typed message"
-                );
-
-                Ok(Some(TypedMessage { payload, message }))
+        // Skip over poison messages (payloads that cannot be deserialized) by
+        // terminating them, so a single bad message does not stall the consumer.
+        loop {
+            match messages.next().await {
+                Some(Ok(message)) => match serde_json::from_slice::<T>(&message.payload) {
+                    Ok(payload) => {
+                        tracing::debug!(
+                            target: TRACING_TARGET_STREAM,
+                            subject = %message.subject,
+                            "Received typed message"
+                        );
+                        return Ok(Some(TypedMessage { payload, message }));
+                    }
+                    Err(err) => {
+                        // A payload that cannot be deserialized will never succeed,
+                        // so terminate it (drop permanently) rather than leaving it
+                        // un-acked to be redelivered until the stream ages it out.
+                        tracing::error!(
+                            target: TRACING_TARGET_STREAM,
+                            subject = %message.subject,
+                            error = %err,
+                            "Terminating undeserializable message"
+                        );
+                        if let Err(ack_err) = message.ack_with(jetstream::AckKind::Term).await {
+                            tracing::warn!(
+                                target: TRACING_TARGET_STREAM,
+                                error = %ack_err,
+                                "Failed to terminate undeserializable message"
+                            );
+                        }
+                        // Continue to the next message.
+                    }
+                },
+                Some(Err(e)) => {
+                    tracing::warn!(
+                        target: TRACING_TARGET_STREAM,
+                        error = %e,
+                        "Error receiving message"
+                    );
+                    return Err(Error::operation("message_receive", e.to_string()));
+                }
+                None => return Ok(None),
             }
-            Some(Err(e)) => {
-                tracing::warn!(
-                    target: TRACING_TARGET_STREAM,
-                    error = %e,
-                    "Error receiving message"
-                );
-                Err(Error::operation("message_receive", e.to_string()))
-            }
-            None => Ok(None),
         }
     }
 }

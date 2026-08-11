@@ -72,6 +72,13 @@ async fn run() -> anyhow::Result<()> {
         let _ = retention_worker.run(retention_cancel).await;
     });
 
+    // Spawn pipeline detection worker (runs each run's analyze off the request thread)
+    let detection_worker = state.detection_worker();
+    let detection_cancel = cancel.clone();
+    let detection_handle = tokio::spawn(async move {
+        let _ = detection_worker.run(detection_cancel).await;
+    });
+
     // Run the HTTP server
     let server_result = server::serve(router, cli.server).await;
 
@@ -98,6 +105,13 @@ async fn run() -> anyhow::Result<()> {
             target: TRACING_TARGET_SHUTDOWN,
             error = %err,
             "Retention worker task panicked"
+        );
+    }
+    if let Err(err) = detection_handle.await {
+        tracing::error!(
+            target: TRACING_TARGET_SHUTDOWN,
+            error = %err,
+            "Detection worker task panicked"
         );
     }
 

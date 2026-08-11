@@ -39,6 +39,11 @@ pub struct WorkspacePipelineRun {
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: serde_json::Value,
+    /// When a worker last claimed this run for detection. Acts as a lease: a
+    /// redelivered job whose claim is still fresh is skipped, while a stale
+    /// claim (a worker that died mid-analysis) can be re-claimed. `None` until
+    /// first claimed.
+    pub claimed_at: Option<Timestamp>,
     /// When the run started.
     pub started_at: Timestamp,
     /// When the run completed.
@@ -83,14 +88,21 @@ pub struct UpdateWorkspacePipelineRun {
     pub output_file_id: Option<Option<Uuid>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<serde_json::Value>,
+    /// When a worker last claimed this run for detection (lease timestamp).
+    pub claimed_at: Option<Option<Timestamp>>,
     /// When the run completed.
     pub completed_at: Option<Option<Timestamp>>,
 }
 
 impl WorkspacePipelineRun {
-    /// Returns whether detection is in progress.
-    pub fn is_running(&self) -> bool {
-        self.status.is_running()
+    /// Returns whether the run is enqueued and not yet picked up by a worker.
+    pub fn is_queued(&self) -> bool {
+        self.status.is_queued()
+    }
+
+    /// Returns whether a worker is actively analyzing the document.
+    pub fn is_analyzing(&self) -> bool {
+        self.status.is_analyzing()
     }
 
     /// Returns whether detection is done and the run awaits verification.

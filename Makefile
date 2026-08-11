@@ -94,7 +94,10 @@ clear-migrations: ## Reverts all database migrations.
 	@$(call log,Reverting all migrations...)
 	@while DATABASE_URL=$(POSTGRES_URL) diesel migration list | grep -q "\\[X\\]"; do \
 		$(call log,Reverting migration...); \
-		DATABASE_URL=$(POSTGRES_URL) diesel migration revert; \
+		if ! DATABASE_URL=$(POSTGRES_URL) diesel migration revert; then \
+			$(call log,Revert failed; aborting to avoid an infinite loop.); \
+			exit 1; \
+		fi; \
 	done
 	@$(call log,All migrations reverted successfully.)
 
