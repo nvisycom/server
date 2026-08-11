@@ -282,7 +282,7 @@ impl WebhookWorker {
             Err(err) => return DeliveryOutcome::retryable(Error::from(err)),
         };
 
-        if !webhook.status.is_active() {
+        if !webhook.status.is_enabled() {
             tracing::debug!(
                 target: TRACING_TARGET,
                 webhook_id = %job.webhook_id,
@@ -377,18 +377,18 @@ impl WebhookWorker {
             return;
         }
 
-        match conn.disable_webhook(webhook.id).await {
+        match conn.suspend_webhook(webhook.id).await {
             Ok(_) => tracing::warn!(
                 target: TRACING_TARGET,
                 webhook_id = %webhook.id,
                 consecutive_failures = updated.consecutive_failures,
-                "Auto-disabled webhook after repeated delivery failures"
+                "Auto-suspended webhook after repeated delivery failures"
             ),
             Err(err) => tracing::error!(
                 target: TRACING_TARGET,
                 webhook_id = %webhook.id,
                 error = %err,
-                "Failed to auto-disable webhook after repeated failures"
+                "Failed to auto-suspend webhook after repeated failures"
             ),
         }
     }

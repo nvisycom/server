@@ -3,9 +3,9 @@
 
 -- Webhook status enum
 CREATE TYPE WEBHOOK_STATUS AS ENUM (
-    'active',       -- Webhook is active and will receive events
-    'paused',       -- Webhook is temporarily paused
-    'disabled'      -- Webhook is disabled
+    'enabled',      -- Webhook is enabled and will receive events
+    'disabled',     -- Webhook was disabled by the user
+    'suspended'     -- Webhook was suspended by the system (too many failures)
 );
 
 COMMENT ON TYPE WEBHOOK_STATUS IS
@@ -82,7 +82,7 @@ CREATE TABLE workspace_webhooks (
     CONSTRAINT workspace_webhooks_headers_size CHECK (length(headers::TEXT) BETWEEN 2 AND 4096),
 
     -- Webhook status
-    status           WEBHOOK_STATUS   NOT NULL DEFAULT 'active',
+    status           WEBHOOK_STATUS   NOT NULL DEFAULT 'enabled',
 
     -- Delivery outcome tracking.
     last_success_at  TIMESTAMPTZ      DEFAULT NULL,
@@ -116,7 +116,7 @@ CREATE INDEX workspace_webhooks_workspace_status_idx
 
 CREATE INDEX workspace_webhooks_events_idx
     ON workspace_webhooks USING gin (events)
-    WHERE deleted_at IS NULL AND status = 'active';
+    WHERE deleted_at IS NULL AND status = 'enabled';
 
 -- Comments for workspace_webhooks table
 COMMENT ON TABLE workspace_webhooks IS
@@ -129,7 +129,7 @@ COMMENT ON COLUMN workspace_webhooks.description IS 'Webhook description (up to 
 COMMENT ON COLUMN workspace_webhooks.url IS 'Webhook endpoint URL (must be HTTP/HTTPS)';
 COMMENT ON COLUMN workspace_webhooks.events IS 'Array of event types this webhook subscribes to';
 COMMENT ON COLUMN workspace_webhooks.headers IS 'Custom headers to include in webhook requests';
-COMMENT ON COLUMN workspace_webhooks.status IS 'Current webhook status (active, paused, disabled)';
+COMMENT ON COLUMN workspace_webhooks.status IS 'Current webhook status (enabled, disabled, suspended)';
 COMMENT ON COLUMN workspace_webhooks.last_success_at IS 'Timestamp of last successful delivery';
 COMMENT ON COLUMN workspace_webhooks.last_failure_at IS 'Timestamp of last failed delivery';
 COMMENT ON COLUMN workspace_webhooks.consecutive_failures IS 'Consecutive failed deliveries; reset on success, drives auto-disable';

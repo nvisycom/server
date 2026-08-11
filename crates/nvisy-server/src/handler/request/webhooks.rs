@@ -32,7 +32,7 @@ pub struct CreateWebhook {
     pub events: Vec<WebhookEvent>,
     /// Optional custom headers to include in webhook requests.
     pub headers: Option<HashMap<String, String>>,
-    /// Initial status of the webhook (active or paused).
+    /// Initial status of the webhook (enabled or disabled).
     pub status: Option<WebhookStatus>,
 }
 
@@ -52,9 +52,10 @@ impl CreateWebhook {
     ) -> NewWorkspaceWebhook {
         let events = self.events.into_iter().map(Some).collect();
         let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
-        // Treat Disabled as Paused since users cannot set Disabled status
+        // Suspended is a system-only state; coerce a user-supplied Suspended to
+        // Disabled (the user off-switch).
         let status = self.status.map(|s| match s {
-            WebhookStatus::Disabled => WebhookStatus::Paused,
+            WebhookStatus::Suspended => WebhookStatus::Disabled,
             other => other,
         });
 
@@ -90,25 +91,27 @@ pub struct UpdateWebhook {
     pub events: Option<Vec<WebhookEvent>>,
     /// Updated custom headers to include in webhook requests.
     pub headers: Option<HashMap<String, String>>,
-    /// Updated status (active or paused). Ignored if webhook is currently disabled.
+    /// Updated status (enabled or disabled). Ignored while the webhook is
+    /// system-suspended.
     pub status: Option<WebhookStatus>,
 }
 
 impl UpdateWebhook {
     /// Converts this request into an [`UpdateWorkspaceWebhookModel`].
     ///
-    /// If `current_status` is `Disabled`, the status field is ignored.
-    /// If user tries to set `Disabled`, it's treated as `Paused`.
+    /// While `current_status` is `Suspended` (system-set), the status field is
+    /// ignored. A user-supplied `Suspended` is coerced to `Disabled`.
     #[inline]
     pub fn into_model(self, current_status: WebhookStatus) -> UpdateWorkspaceWebhookModel {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
         let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
-        // Ignore status changes if webhook is disabled; treat Disabled as Paused
-        let status = if current_status.is_disabled() {
+        // A system-suspended webhook ignores user status changes; coerce a
+        // user-supplied Suspended to Disabled.
+        let status = if current_status.is_suspended() {
             None
         } else {
             self.status.map(|s| match s {
-                WebhookStatus::Disabled => WebhookStatus::Paused,
+                WebhookStatus::Suspended => WebhookStatus::Disabled,
                 other => other,
             })
         };
