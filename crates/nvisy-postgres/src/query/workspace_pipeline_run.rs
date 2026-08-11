@@ -10,7 +10,8 @@ use crate::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, PipelineRunStatus, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, Handle, PipelineRunStatus, RunFilter,
+    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -44,28 +45,29 @@ pub trait WorkspacePipelineRunRepository {
         idempotency_key: &str,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
 
-    /// Lists all runs for a specific pipeline with cursor pagination, each
-    /// paired with the account that triggered it.
+    /// Lists a specific pipeline's runs with cursor pagination, each paired with
+    /// the account that triggered it. `filter` narrows by status and/or file
+    /// (its `pipeline_id` is ignored — the listing is already pipeline-scoped).
     fn cursor_list_workspace_pipeline_runs(
         &mut self,
         pipeline_id: Uuid,
         pagination: CursorPagination,
-        status_filter: Option<PipelineRunStatus>,
+        filter: &RunFilter,
     ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>>> + Send;
 
     /// Lists all runs across a workspace's pipelines with cursor pagination.
     ///
     /// Runs carry no workspace reference of their own, so this joins through the
-    /// owning pipeline and filters on its workspace. An optional status filter
-    /// narrows the result; use [`cursor_list_workspace_pipeline_runs`] for a
-    /// single pipeline.
+    /// owning pipeline and filters on its workspace. `filter` narrows by status,
+    /// file, and/or owning pipeline; use [`cursor_list_workspace_pipeline_runs`]
+    /// for a single pipeline.
     ///
     /// [`cursor_list_workspace_pipeline_runs`]: Self::cursor_list_workspace_pipeline_runs
     fn cursor_list_workspace_runs(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-        status_filter: Option<PipelineRunStatus>,
+        filter: &RunFilter,
     ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>>> + Send;
 
     /// Atomically claims a run for detection, transitioning it to `Analyzing`.
@@ -172,18 +174,28 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         pipeline_id: Uuid,
         pagination: CursorPagination,
-        status_filter: Option<PipelineRunStatus>,
+        filter: &RunFilter,
     ) -> PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>> {
         use schema::workspace_pipeline_runs::dsl;
         use schema::{accounts, workspace_pipeline_runs};
 
-        // Build base query with filters
+        // Build base query with filters. The listing is already scoped to one
+        // pipeline, so `filter.pipeline_id` is not applied here.
         let mut base_query = workspace_pipeline_runs::table
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .into_boxed();
 
-        if let Some(status) = status_filter {
+        if let Some(status) = filter.status {
             base_query = base_query.filter(dsl::status.eq(status));
+        }
+        if let Some(file_id) = filter.input_file_id {
+            base_query = base_query.filter(dsl::input_file_id.eq(file_id));
+        }
+        if let Some(account_id) = filter.account_id {
+            base_query = base_query.filter(dsl::account_id.eq(account_id));
+        }
+        if let Some(trigger_type) = filter.trigger_type {
+            base_query = base_query.filter(dsl::trigger_type.eq(trigger_type));
         }
 
         let total = if pagination.include_count {
@@ -204,8 +216,17 @@ impl WorkspacePipelineRunRepository for PgConnection {
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .into_boxed();
 
-        if let Some(status) = status_filter {
+        if let Some(status) = filter.status {
             query = query.filter(dsl::status.eq(status));
+        }
+        if let Some(file_id) = filter.input_file_id {
+            query = query.filter(dsl::input_file_id.eq(file_id));
+        }
+        if let Some(account_id) = filter.account_id {
+            query = query.filter(dsl::account_id.eq(account_id));
+        }
+        if let Some(trigger_type) = filter.trigger_type {
+            query = query.filter(dsl::trigger_type.eq(trigger_type));
         }
 
         let limit = pagination.fetch_limit();
@@ -264,7 +285,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-        status_filter: Option<PipelineRunStatus>,
+        filter: &RunFilter,
     ) -> PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_pipeline_runs::dsl as runs;
@@ -280,8 +301,20 @@ impl WorkspacePipelineRunRepository for PgConnection {
                 .inner_join(accounts::accounts)
                 .filter(pipelines::workspace_id.eq(workspace_id))
                 .into_boxed();
-            if let Some(status) = status_filter {
+            if let Some(status) = filter.status {
                 query = query.filter(runs::status.eq(status));
+            }
+            if let Some(file_id) = filter.input_file_id {
+                query = query.filter(runs::input_file_id.eq(file_id));
+            }
+            if let Some(pipeline_id) = filter.pipeline_id {
+                query = query.filter(runs::pipeline_id.eq(pipeline_id));
+            }
+            if let Some(account_id) = filter.account_id {
+                query = query.filter(runs::account_id.eq(account_id));
+            }
+            if let Some(trigger_type) = filter.trigger_type {
+                query = query.filter(runs::trigger_type.eq(trigger_type));
             }
             query
         };

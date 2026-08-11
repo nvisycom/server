@@ -30,7 +30,7 @@ use crate::extract::{
 };
 use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
-    PipelineRunPathParams, WorkspaceRunsQuery,
+    PipelineRunPathParams, PipelineRunsQuery, WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
@@ -232,6 +232,7 @@ async fn list_pipeline_runs(
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
     Query(pagination): Query<CursorPagination>,
+    Query(query): Query<PipelineRunsQuery>,
 ) -> Result<(StatusCode, Json<PipelineRunsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing pipeline runs");
 
@@ -244,7 +245,7 @@ async fn list_pipeline_runs(
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let page = conn
-        .cursor_list_workspace_pipeline_runs(pipeline.id, pagination.into(), None)
+        .cursor_list_workspace_pipeline_runs(pipeline.id, pagination.into(), &query.into())
         .await?;
 
     tracing::debug!(
@@ -267,7 +268,10 @@ async fn list_pipeline_runs(
 
 fn list_pipeline_runs_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List pipeline runs")
-        .description("Returns all runs for a specific pipeline.")
+        .description(
+            "Returns runs for a specific pipeline, most recent first, with \
+             optional status, file, trigger-account, and trigger-type filters.",
+        )
         .response::<200, Json<PipelineRunsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -301,7 +305,7 @@ async fn list_workspace_runs(
         .await?;
 
     let page = conn
-        .cursor_list_workspace_runs(workspace.id, pagination.into(), query.status)
+        .cursor_list_workspace_runs(workspace.id, pagination.into(), &query.into())
         .await?;
 
     tracing::debug!(
@@ -330,7 +334,8 @@ fn list_workspace_runs_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspace runs")
         .description(
             "Returns all pipeline runs across the workspace, most recent first, \
-             with optional status and pipeline filters.",
+             with optional status, file, pipeline, trigger-account, and \
+             trigger-type filters.",
         )
         .response::<200, Json<PipelineRunsPage>>()
         .response::<401, Json<ErrorResponse>>()
