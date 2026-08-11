@@ -417,7 +417,8 @@ async fn stream_pipeline_run_events(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
-) -> Result<SseResponse<impl Stream<Item = std::result::Result<Event, Infallible>>>> {
+) -> Result<SseResponse<impl Stream<Item = std::result::Result<Event, Infallible>>, RunStatusEvent>>
+{
     tracing::debug!(target: TRACING_TARGET, "Opening run status stream");
 
     let run_id = path_params.run_id.as_uuid();
@@ -478,7 +479,7 @@ async fn stream_pipeline_run_events(
         }
     };
 
-    Ok(SseResponse(
+    Ok(SseResponse::new(
         Sse::new(stream).keep_alive(KeepAlive::default()),
     ))
 }
@@ -512,7 +513,8 @@ fn stream_pipeline_run_events_docs(op: TransformOperation) -> TransformOperation
         .description(
             "Opens a Server-Sent Events stream of the run's status changes. \
              Emits the current status immediately, then each transition, and \
-             ends once the run settles (analyzed, failed, or cancelled). \
+             ends once the run settles (analyzed, failed, or cancelled). Each \
+             event's `data` is a `RunStatusEvent` (see the response schema). \
              Authenticate with a Bearer token via a `fetch`-based client; the \
              native `EventSource` cannot send an `Authorization` header.",
         )

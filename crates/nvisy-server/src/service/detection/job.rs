@@ -2,6 +2,7 @@
 
 use nvisy_engine::plan::ScopeParams;
 use nvisy_postgres::types::PipelineRunStatus;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ pub struct DetectionJob {
 ///
 /// Fan-out to any watching SSE connections; the run row in Postgres remains the
 /// source of truth, so a missed broadcast is recoverable by re-reading the run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RunStatusEvent {
     /// The run whose status changed.
