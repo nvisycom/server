@@ -36,6 +36,7 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'pipeline:updated',
     'pipeline:deleted',
     'pipeline:run.started',
+    'pipeline:run.analyzed',
     'pipeline:run.completed',
     'pipeline:run.failed',
 

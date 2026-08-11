@@ -75,6 +75,7 @@ impl WebhookEmitter {
         emit_pipeline_updated => PipelineUpdated,
         emit_pipeline_deleted => PipelineDeleted,
         emit_pipeline_run_started => PipelineRunStarted,
+        emit_pipeline_run_analyzed => PipelineRunAnalyzed,
         emit_pipeline_run_completed => PipelineRunCompleted,
         emit_pipeline_run_failed => PipelineRunFailed,
         emit_policy_created => PolicyCreated,
