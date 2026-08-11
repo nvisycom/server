@@ -4,7 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_engine::plan::{RecognizerParams, ScopeParams};
+use nvisy_engine::plan::ScopeParams;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
@@ -14,20 +14,17 @@ use validator::Validate;
 
 /// A pipeline's detection + governance intent.
 ///
-/// Holds what a pipeline author decides — any custom recognizer rules, the
-/// default scope, and the policies to apply. Infrastructure config (NER/LLM
-/// lineups, enrichment backends, deduplication) is server-wide and lives in the
-/// engine config, not here. Stored as JSON in the pipeline's `definition` column
-/// but validated against this schema at the API boundary.
+/// Holds what a pipeline author decides — the default scope and the policies to
+/// apply. Recognition is entirely server-wide: the built-in pattern set plus the
+/// deployment's NER/LLM lineups and enrichment backends live in the engine
+/// config, not here. Stored as JSON in the pipeline's `definition` column but
+/// validated against this schema at the API boundary.
 ///
 /// The label catalog is not part of this: the policies own the label vocabulary,
 /// and the engine derives the detection catalog from them at run time.
 ///
 /// The split:
 ///
-/// - `recognizers` — caller-inlined custom pattern rules and dictionaries,
-///   folded into an `AnalyzerParams` alongside the engine's built-in and
-///   deployment recognizers.
 /// - `default_scope` — optional pipeline-wide scope a document may override.
 /// - `policy_slugs` — references to the workspace's policies, resolved at run
 ///   time.
@@ -35,11 +32,6 @@ use validator::Validate;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PipelineDefinition {
-    /// Caller-inlined custom pattern rules and dictionaries, added to the
-    /// built-in recognizers. The deployment's NER/LLM lineups always run and
-    /// are not selectable here.
-    #[serde(default)]
-    pub recognizers: RecognizerParams,
     /// Optional pipeline-wide scope (languages, jurisdictions, document labels).
     ///
     /// A document's own scope overrides this at detect time; absent here means
