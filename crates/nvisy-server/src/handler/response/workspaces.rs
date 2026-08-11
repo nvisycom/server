@@ -23,8 +23,6 @@ pub struct Workspace {
     /// Serve path of the workspace's avatar (logo), when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
-    /// Tags associated with the workspace.
-    pub tags: Vec<String>,
     /// Workspace settings (approval requirement, data-retention rules).
     pub settings: WorkspaceSettings,
     /// Account that created this workspace.
@@ -40,14 +38,12 @@ pub struct Workspace {
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
     pub fn from_model(workspace: model::Workspace, created_by: AccountRef) -> Self {
-        let tags = workspace.get_tags();
         let settings = WorkspaceSettings::from_value(&workspace.settings);
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            tags,
             settings,
             created_by,
             member_role: WorkspaceRole::Owner,
@@ -62,14 +58,12 @@ impl Workspace {
         member: model::WorkspaceMember,
         created_by: AccountRef,
     ) -> Self {
-        let tags = workspace.get_tags();
         let settings = WorkspaceSettings::from_value(&workspace.settings);
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            tags,
             settings,
             created_by,
             member_role: member.member_role,

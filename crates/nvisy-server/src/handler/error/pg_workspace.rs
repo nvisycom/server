@@ -26,9 +26,6 @@ impl From<WorkspaceConstraints> for Error<'static> {
             WorkspaceConstraints::DescriptionLengthMax => {
                 ErrorKind::BadRequest.with_message("Workspace description is too long")
             }
-            WorkspaceConstraints::TagsCountMax => {
-                ErrorKind::BadRequest.with_message("Too many tags")
-            }
             WorkspaceConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Workspace metadata size is invalid")
             }

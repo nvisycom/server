@@ -148,22 +148,9 @@ async fn create_pipeline_run(
         OcrPolicy::Never => OcrMode::Never,
     };
 
-    // Merge the pipeline's intent with the deployment defaults; rejects a
-    // pipeline that enables recognizers this deployment lacks.
-    let params = match engine.analyzer_params(&definition, request.scope, ocr_mode) {
-        Ok(params) => params,
-        Err(err) => {
-            fail_run(
-                &mut conn,
-                &webhook_emitter,
-                workspace.id,
-                run.id,
-                auth_state.account_id,
-            )
-            .await;
-            return Err(err);
-        }
-    };
+    // Build the analyzer params from the pipeline's intent; the deployment's
+    // recognizer lineups and enrichers are engine-owned.
+    let params = engine.analyzer_params(&definition, request.scope, ocr_mode);
 
     let document = build_document(&nats, &crypto, &file, run.id).await?;
 

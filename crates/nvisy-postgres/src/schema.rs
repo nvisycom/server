@@ -373,7 +373,6 @@ diesel::table! {
         slug -> Text,
         description -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
-        tags -> Array<Nullable<Text>>,
         metadata -> Jsonb,
         settings -> Jsonb,
         created_by -> Uuid,

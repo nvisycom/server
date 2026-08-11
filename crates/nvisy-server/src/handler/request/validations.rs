@@ -8,22 +8,6 @@ pub fn validation_error(code: &'static str, message: &str) -> ValidationError {
     error
 }
 
-pub fn is_alphanumeric(tags: &[String]) -> Result<(), ValidationError> {
-    for (index, tag) in tags.iter().enumerate() {
-        if !tag
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-        {
-            let mut error = ValidationError::new("alphanumeric");
-            error.message =
-                Some(format!("Tag at index {} contains invalid characters", index).into());
-            return Err(error);
-        }
-    }
-
-    Ok(())
-}
-
 // Private helper functions for text sanitization
 fn normalize_string(input: &str) -> String {
     input.trim().to_lowercase()

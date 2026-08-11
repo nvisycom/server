@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspaces;
-use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Tags};
+use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt};
 
 /// Main workspace model representing a workspace workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -22,8 +22,6 @@ pub struct Workspace {
     pub description: Option<String>,
     /// URL to workspace avatar/logo image.
     pub avatar_url: Option<String>,
-    /// Workspace tags.
-    pub tags: Vec<Option<String>>,
     /// Additional workspace metadata.
     pub metadata: serde_json::Value,
     /// Workspace-specific settings.
@@ -51,8 +49,6 @@ pub struct NewWorkspace {
     pub description: Option<String>,
     /// Optional avatar URL.
     pub avatar_url: Option<String>,
-    /// Tags.
-    pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
     /// Settings.
@@ -72,8 +68,6 @@ pub struct UpdateWorkspace {
     pub description: Option<Option<String>>,
     /// Avatar URL.
     pub avatar_url: Option<Option<String>>,
-    /// Tags.
-    pub tags: Option<Vec<Option<String>>>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
     /// Settings.
@@ -84,29 +78,6 @@ impl Workspace {
     /// Returns whether the workspace is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
-    }
-
-    /// Returns the tags as a Tags helper.
-    pub fn tags_helper(&self) -> Tags {
-        Tags::from_optional_strings(self.tags.clone())
-    }
-
-    /// Returns the flattened tags (removing None values).
-    pub fn get_tags(&self) -> Vec<String> {
-        self.tags
-            .iter()
-            .filter_map(|tag| tag.as_deref().map(str::to_owned))
-            .collect()
-    }
-
-    /// Returns whether the workspace has tags.
-    pub fn has_tags(&self) -> bool {
-        self.tags.iter().any(|tag| tag.is_some())
-    }
-
-    /// Returns whether the workspace contains a specific tag.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.iter().any(|t| t.as_deref() == Some(tag))
     }
 
     /// Returns whether the workspace has a description.

@@ -42,5 +42,5 @@ pub use sorting::{
 };
 pub use utilities::{
     AccountRefRow, HasCreatedAt, HasDeletedAt, HasExpiresAt, HasGeographicContext,
-    HasLastActivityAt, HasOwnership, HasSecurityContext, HasUpdatedAt, Tags, WithAccountRef,
+    HasLastActivityAt, HasOwnership, HasSecurityContext, HasUpdatedAt, WithAccountRef,
 };

@@ -4,8 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_engine::plan::{MergingStrategyParams, RecognizerParams, ScopeParams, TiebreakerParams};
-use nvisy_engine::primitive::ConfidenceThreshold;
+use nvisy_engine::plan::{RecognizerParams, ScopeParams};
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
@@ -15,19 +14,20 @@ use validator::Validate;
 
 /// A pipeline's detection + governance intent.
 ///
-/// Holds what a pipeline author decides — which recognizers to run, the default
-/// scope, and the policies to apply. Infrastructure config (enrichment backends,
-/// deduplication calibration) is server-wide and lives in the engine config, not
-/// here. Stored as JSON in the pipeline's `definition` column but validated
-/// against this schema at the API boundary.
+/// Holds what a pipeline author decides — any custom recognizer rules, the
+/// default scope, and the policies to apply. Infrastructure config (NER/LLM
+/// lineups, enrichment backends, deduplication) is server-wide and lives in the
+/// engine config, not here. Stored as JSON in the pipeline's `definition` column
+/// but validated against this schema at the API boundary.
 ///
 /// The label catalog is not part of this: the policies own the label vocabulary,
 /// and the engine derives the detection catalog from them at run time.
 ///
 /// The split:
 ///
-/// - `recognizers` / `deduplication` — the detection intent, merged with the
-///   server-wide engine defaults into an `AnalyzerParams`.
+/// - `recognizers` — caller-inlined custom pattern rules and dictionaries,
+///   folded into an `AnalyzerParams` alongside the engine's built-in and
+///   deployment recognizers.
 /// - `default_scope` — optional pipeline-wide scope a document may override.
 /// - `policy_slugs` — references to the workspace's policies, resolved at run
 ///   time.
@@ -35,13 +35,11 @@ use validator::Validate;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PipelineDefinition {
-    /// Recognizer lineup: pattern (incl. inline custom rules and
-    /// dictionaries), plus the NER and LLM toggles.
+    /// Caller-inlined custom pattern rules and dictionaries, added to the
+    /// built-in recognizers. The deployment's NER/LLM lineups always run and
+    /// are not selectable here.
     #[serde(default)]
     pub recognizers: RecognizerParams,
-    /// Post-recognition deduplication behavior.
-    #[serde(default)]
-    pub deduplication: PipelineDeduplication,
     /// Optional pipeline-wide scope (languages, jurisdictions, document labels).
     ///
     /// A document's own scope overrides this at detect time; absent here means
@@ -55,26 +53,6 @@ pub struct PipelineDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[validate(length(max = 64))]
     pub policy_slugs: Vec<Handle>,
-}
-
-/// A pipeline's deduplication intent.
-///
-/// Each field is optional: when a pipeline omits one, it inherits the
-/// deployment default from the engine config. Per-recognizer calibration is
-/// operator-only and never set here.
-#[must_use]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PipelineDeduplication {
-    /// How same-label overlapping findings are merged into one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub merging: Option<MergingStrategyParams>,
-    /// How cross-label overlaps pick a winner.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tiebreaker: Option<TiebreakerParams>,
-    /// Minimum confidence the filter layer admits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_confidence: Option<ConfidenceThreshold>,
 }
 
 impl PipelineDefinition {
