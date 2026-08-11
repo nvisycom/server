@@ -61,7 +61,7 @@ impl DetectionService {
     pub async fn subscribe_status(
         &self,
         run_id: Uuid,
-    ) -> Result<impl futures::Stream<Item = RunStatusEvent> + Send> {
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = RunStatusEvent> + Send>>> {
         let stream = self
             .nats
             .subscribe_broadcast::<RunStatusEvent>(run_subject(run_id))

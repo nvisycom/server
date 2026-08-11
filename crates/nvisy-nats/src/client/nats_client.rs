@@ -337,7 +337,7 @@ impl NatsClient {
     pub async fn subscribe_broadcast<T>(
         &self,
         subject: String,
-    ) -> Result<impl futures::Stream<Item = T> + Send>
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = T> + Send>>>
     where
         T: DeserializeOwned + Send + 'static,
     {
@@ -350,8 +350,9 @@ impl NatsClient {
             .await
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
-        Ok(subscriber.filter_map(|message| async move {
-            serde_json::from_slice::<T>(&message.payload).ok()
-        }))
+        let stream = subscriber
+            .filter_map(|message| async move { serde_json::from_slice::<T>(&message.payload).ok() })
+            .boxed();
+        Ok(stream)
     }
 }

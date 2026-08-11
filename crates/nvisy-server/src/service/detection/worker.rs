@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use nvisy_engine::OcrMode;
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_nats::NatsClient;
 use nvisy_nats::stream::DetectionStream;
@@ -16,7 +17,6 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRunRepository,
     WorkspacePolicyRepository, WorkspaceRepository,
 };
-use nvisy_engine::OcrMode;
 use nvisy_postgres::types::{OcrPolicy, PipelineRunStatus, WorkspaceSettings};
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::sync::CancellationToken;
@@ -84,7 +84,10 @@ impl DetectionWorker {
     /// ack; a crash before ack redelivers, and the job is idempotent (a run no
     /// longer `Running` is skipped).
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber = self.nats.event_subscriber::<DetectionJob, DetectionStream>().await?;
+        let subscriber = self
+            .nats
+            .event_subscriber::<DetectionJob, DetectionStream>()
+            .await?;
         let mut stream = subscriber.subscribe().await?;
 
         loop {
@@ -125,7 +128,10 @@ impl DetectionWorker {
             }
         };
 
-        let (run, pipeline) = match conn.find_workspace_run_by_id(job.workspace_id, job.run_id).await {
+        let (run, pipeline) = match conn
+            .find_workspace_run_by_id(job.workspace_id, job.run_id)
+            .await
+        {
             Ok(Some(pair)) => pair,
             Ok(None) => {
                 tracing::warn!(target: TRACING_TARGET, "Detection job for a missing run; skipping");
@@ -257,7 +263,8 @@ pub(crate) async fn resolve_policies(
     let mut policies = Vec::with_capacity(ids.len());
     for id in ids {
         if let Some(model) = conn.find_policy_in_workspace(workspace_id, id).await? {
-            policies.push(crypto.decrypt_json::<PolicyDefinition>(workspace_id, &model.definition)?);
+            policies
+                .push(crypto.decrypt_json::<PolicyDefinition>(workspace_id, &model.definition)?);
         }
     }
     Ok(policies)

@@ -22,12 +22,12 @@ use nvisy_webhook::WebhookService;
 
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::blob::BlobService;
-pub use crate::service::detection::{
-    DetectionJob, DetectionService, DetectionWorker, RunStatusEvent, run_subject,
-};
 pub use crate::service::connection::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
+pub use crate::service::detection::{
+    DetectionJob, DetectionService, DetectionWorker, RunStatusEvent, run_subject,
+};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::object::ObjectService;

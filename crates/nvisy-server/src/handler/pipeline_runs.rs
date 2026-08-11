@@ -4,10 +4,13 @@
 //! and stores the findings; the run then awaits reviewer verification before
 //! redact consumes the verified findings and produces a redacted file.
 
+use std::convert::Infallible;
+
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
@@ -32,8 +35,8 @@ use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    BlobService, CryptoService, DetectionJob, DetectionService, EngineService, ServiceState,
-    WebhookEmitter,
+    BlobService, CryptoService, DetectionJob, DetectionService, EngineService, RunStatusEvent,
+    ServiceState, WebhookEmitter,
 };
 
 /// Tracing target for pipeline run operations.
@@ -370,6 +373,76 @@ fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Streams a run's status changes as Server-Sent Events until detection settles.
+///
+/// Emits one `status` event with the run's current status immediately (so a
+/// client that connects after detection already finished still learns the
+/// state), then forwards each status change. The stream ends once the run leaves
+/// `running` — i.e. detection has produced `analyzed`, `failed`, or `cancelled`.
+///
+/// Authenticated like every other route (Bearer); browsers should consume it via
+/// a `fetch` stream rather than the native `EventSource`, which cannot send an
+/// `Authorization` header.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        run_id = %path_params.run_id,
+    )
+)]
+async fn stream_pipeline_run_events(
+    State(pg_client): State<PgClient>,
+    State(detection): State<DetectionService>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<PipelineRunPathParams>,
+) -> Result<Sse<impl futures::Stream<Item = std::result::Result<Event, Infallible>>>> {
+    tracing::debug!(target: TRACING_TARGET, "Opening run status stream");
+
+    let mut conn = pg_client.get_connection().await?;
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .await?;
+
+    let (run, _pipeline) =
+        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
+    let run_id = run.id;
+    let current = run.status;
+
+    // Subscribe before dropping the connection so no status change published
+    // between the read above and the subscription is missed.
+    let mut updates = detection.subscribe_status(run_id).await?;
+
+    let stream = async_stream::stream! {
+        // Emit the current status first: covers the race where detection settled
+        // before this stream opened (no live event would ever arrive).
+        yield Ok(status_event(&RunStatusEvent { run_id, status: current }));
+        if current != PipelineRunStatus::Running {
+            return;
+        }
+
+        use futures::StreamExt as _;
+        while let Some(event) = updates.next().await {
+            let settled = event.status != PipelineRunStatus::Running;
+            yield Ok(status_event(&event));
+            if settled {
+                break;
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// Builds a `status` SSE event carrying the run's status change.
+fn status_event(event: &RunStatusEvent) -> Event {
+    Event::default()
+        .event("status")
+        .json_data(event)
+        .unwrap_or_else(|_| Event::default().event("status"))
+}
+
 /// Redacts a run using the reviewer-verified findings, storing the result.
 ///
 /// Consumes the analyzed run (which must be awaiting review), applies the
@@ -584,6 +657,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/runs/{runId}/",
             get_with(get_pipeline_run, get_pipeline_run_docs),
+        )
+        // SSE stream: registered as a plain route (a streaming body is not
+        // meaningfully represented in the OpenAPI document).
+        .route(
+            "/workspaces/{workspaceSlug}/runs/{runId}/events",
+            axum::routing::get(stream_pipeline_run_events),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/runs/{runId}/redactions/",
