@@ -69,6 +69,26 @@ impl EventStream for ConnectionSyncStream {
     const SUBJECT: &'static str = "connection.sync.jobs";
 }
 
+/// Work queue for pipeline detection jobs.
+///
+/// A pipeline run is created synchronously, then its detection (analyze) is
+/// enqueued here and handled by a background worker. A single shared durable
+/// consumer delivers each job to one instance at a time (at-least-once); the
+/// worker is idempotent on the run so a redelivery is safe. Messages expire
+/// after 1 hour so a backlog cannot pile up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct DetectionStream;
+
+impl EventStream for DetectionStream {
+    // Detection can be slow (LLM/OCR); allow ack time to exceed the longest
+    // expected analyze so a slow-but-healthy job is not redelivered mid-run.
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(15 * 60));
+    const CONSUMER_NAME: &'static str = "detection-worker";
+    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
+    const NAME: &'static str = "DETECTIONS";
+    const SUBJECT: &'static str = "pipeline.detection.jobs";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

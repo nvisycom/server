@@ -302,3 +302,56 @@ impl NatsClient {
         self.event_subscriber().await
     }
 }
+
+// Core NATS pub/sub (non-JetStream broadcast).
+//
+// Unlike the JetStream helpers above, these use plain NATS subjects: fire-and-
+// forget, no persistence, and every subscriber to a subject receives every
+// message (fan-out). Suited to ephemeral fan-out where the durable source of
+// truth lives elsewhere (e.g. streaming run-status changes to any number of
+// watching SSE connections; the run row in Postgres is authoritative).
+impl NatsClient {
+    /// Publishes a JSON-serialized message to a core NATS subject.
+    ///
+    /// Best-effort: delivered to whichever subscribers are connected now, with no
+    /// persistence or acknowledgement.
+    #[tracing::instrument(skip(self, message), target = TRACING_TARGET_CLIENT)]
+    pub async fn publish_broadcast<T>(&self, subject: String, message: &T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_vec(message)?;
+        self.inner
+            .client
+            .publish(subject, payload.into())
+            .await
+            .map_err(|e| Error::Connection(Box::new(e)))?;
+        Ok(())
+    }
+
+    /// Subscribes to a core NATS subject, yielding each deserialized message.
+    ///
+    /// The stream ends when the subscription is dropped. Messages that fail to
+    /// deserialize are skipped rather than ending the stream.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
+    pub async fn subscribe_broadcast<T>(
+        &self,
+        subject: String,
+    ) -> Result<impl futures::Stream<Item = T> + Send>
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
+        use futures::StreamExt;
+
+        let subscriber = self
+            .inner
+            .client
+            .subscribe(subject)
+            .await
+            .map_err(|e| Error::Connection(Box::new(e)))?;
+
+        Ok(subscriber.filter_map(|message| async move {
+            serde_json::from_slice::<T>(&message.payload).ok()
+        }))
+    }
+}
