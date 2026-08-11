@@ -28,7 +28,7 @@ pub use enums::{
     PipelineRunStatus, PipelineStatus, PipelineTriggerType, SyncDeletionPolicy, SyncMode,
     SyncStatus, SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
-pub use filtering::{FileFilter, InviteFilter, MemberFilter};
+pub use filtering::{FileFilter, InviteFilter, MemberFilter, RunFilter};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
 pub use prefixed_id::{ConnectionId, PrefixedIdError, RunId, WebhookId};
