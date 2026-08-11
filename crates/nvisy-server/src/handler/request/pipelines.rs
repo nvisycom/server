@@ -96,6 +96,9 @@ pub struct CreatePipeline {
     /// definition that can be filled in via update.
     #[validate(nested)]
     pub definition: Option<PipelineDefinition>,
+    /// Optional lifecycle status. Defaults to `draft`; pass `enabled` to create a
+    /// pipeline ready to run without a follow-up update.
+    pub status: Option<PipelineStatus>,
     /// Optional per-scope data-retention override for this pipeline. Each unset
     /// scope inherits the workspace retention.
     pub retention: Option<RetentionOverride>,
@@ -136,7 +139,7 @@ impl CreatePipeline {
             slug: self.slug,
             display_name: self.display_name,
             description: self.description,
-            status: None,
+            status: self.status,
             definition: Some(definition),
             metadata,
             schedule_cron: None,
