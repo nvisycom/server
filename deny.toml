@@ -20,17 +20,7 @@ unmaintained = "all"
 # The lint level for crates that have been yanked from their source registry
 yanked = "deny"
 # A list of advisory IDs to ignore
-ignore = [
-    # proc-macro-error2 (build-time proc-macro) is unmaintained; pulled in by
-    # validator_derive 0.20, the latest published version. No upstream fix yet.
-    "RUSTSEC-2026-0173",
-    # quick-xml DoS advisories (fix requires >=0.41); pulled in transitively by
-    # object_store 0.14 for its AWS/Azure XML list parsing. The bump is merged
-    # upstream (apache/arrow-rs-object-store#785) but unreleased — v0.14.0 is
-    # still the latest crate. Remove once object_store ships it.
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-]
+ignore = []
 
 [licenses]
 # Confidence threshold for detecting a license from a license text (higher = stricter)
