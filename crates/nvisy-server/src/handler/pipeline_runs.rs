@@ -13,13 +13,12 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::{Stream, StreamExt};
-use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
-    WorkspacePipelineRunRepository, WorkspacePolicyRepository,
+    WorkspacePipelineRunRepository,
 };
 use nvisy_postgres::types::{PipelineRunStatus, WorkspaceSettings};
 use nvisy_postgres::{PgClient, PgConn};
@@ -30,15 +29,15 @@ use crate::extract::{
     WorkspaceContext,
 };
 use crate::handler::request::{
-    CreatePipelineRun, CursorPagination, PipelinePathParams, PipelineRunPathParams,
-    WorkspaceRunsQuery,
+    CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
+    PipelineRunPathParams, WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
     BlobService, CryptoService, DetectionJob, DetectionService, EngineService, RunStatusEvent,
-    ServiceState, WebhookEmitter,
+    ServiceState, WebhookEmitter, fail_run, resolve_policies,
 };
 
 /// Tracing target for pipeline run operations.
@@ -118,6 +117,18 @@ async fn create_pipeline_run(
             .with_resource("pipeline"));
     }
 
+    // Decode the pipeline definition now so an undecodable definition fails the
+    // request synchronously (400) instead of returning 202 and failing later in
+    // the worker. The decoded value is rebuilt in the worker from the same
+    // stored bytes; this is validation only.
+    let _validated = PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
+        .map_err(|err| {
+            ErrorKind::BadRequest
+                .with_message("Pipeline definition is invalid")
+                .with_resource("pipeline")
+                .with_context(err.to_string())
+        })?;
+
     // Create the run (its id is the engine correlation id) and enqueue detection
     // for the worker. The response returns immediately; the client learns the
     // findings are ready via the run's status (SSE at `.../events` or a re-read).
@@ -125,7 +136,7 @@ async fn create_pipeline_run(
         pipeline_id: pipeline.id,
         input_file_id: file.id,
         account_id: auth_state.account_id,
-        status: Some(PipelineRunStatus::Running),
+        status: Some(PipelineRunStatus::Queued),
         idempotency_key: idempotency_key.clone(),
         ..Default::default()
     };
@@ -138,20 +149,22 @@ async fn create_pipeline_run(
     };
     if let Err(err) = detection.enqueue(job).await {
         // Enqueue failed, so the worker will never pick this run up: fail it now
-        // rather than leaving it stuck in `Running`.
+        // rather than leaving it stuck in `Queued`.
         fail_run(
             &mut conn,
+            &detection,
             &webhook_emitter,
             workspace.id,
             run.id,
             auth_state.account_id,
+            "Failed to enqueue detection",
         )
         .await;
         return Err(err);
     }
 
     detection
-        .broadcast_status(run.id, PipelineRunStatus::Running)
+        .broadcast_status(run.id, PipelineRunStatus::Queued)
         .await;
 
     if let Err(err) = webhook_emitter
@@ -380,7 +393,12 @@ fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
 /// Emits one `status` event with the run's current status immediately (so a
 /// client that connects after detection already finished still learns the
 /// state), then forwards each status change. The stream ends once the run leaves
-/// `running` — i.e. detection has produced `analyzed`, `failed`, or `cancelled`.
+/// the detecting phase (`queued`/`analyzing`) — i.e. detection has produced
+/// `analyzed`, or the run `failed`/`cancelled`.
+///
+/// Live status changes arrive over a best-effort core-NATS broadcast; if none
+/// arrives within a short interval the authoritative run row is re-read from the
+/// database, so a dropped broadcast never leaves the stream hanging.
 ///
 /// Authenticated like every other route (Bearer); browsers should consume it via
 /// a `fetch` stream rather than the native `EventSource`, which cannot send an
@@ -402,33 +420,60 @@ async fn stream_pipeline_run_events(
 ) -> Result<SseResponse<impl Stream<Item = std::result::Result<Event, Infallible>>>> {
     tracing::debug!(target: TRACING_TARGET, "Opening run status stream");
 
+    let run_id = path_params.run_id.as_uuid();
     let mut conn = pg_client.get_connection().await?;
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (run, _pipeline) =
-        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
-    let run_id = run.id;
-    let current = run.status;
-
-    // Subscribe before dropping the connection so no status change published
-    // between the read above and the subscription is missed.
+    // Subscribe BEFORE reading the current status: core-NATS broadcasts are not
+    // replayed, so a terminal status published between the read and the
+    // subscription going live would otherwise be lost and the stream would hang.
     let mut updates = detection.subscribe_status(run_id).await?;
+
+    // Confirm the run exists (and is workspace-scoped) so a bad id 404s here
+    // rather than opening an empty stream.
+    let (run, _pipeline) = find_pipeline_run(&mut conn, workspace.id, run_id).await?;
+    let current = run.status;
+    drop(conn);
 
     let stream = stream! {
         // Emit the current status first: covers the race where detection settled
-        // before this stream opened (no live event would ever arrive).
+        // before the subscription was live (no live event would ever arrive).
         yield Ok(status_event(&RunStatusEvent { run_id, status: current }));
-        if current != PipelineRunStatus::Running {
+        if !current.is_detecting() {
             return;
         }
 
-        while let Some(event) = updates.next().await {
-            let settled = event.status != PipelineRunStatus::Running;
-            yield Ok(status_event(&event));
-            if settled {
-                break;
+        loop {
+            match tokio::time::timeout(STATUS_POLL_INTERVAL, updates.next()).await {
+                // A live broadcast arrived; forward it and stop once detection settles.
+                Ok(Some(event)) => {
+                    let settled = !event.status.is_detecting();
+                    yield Ok(status_event(&event));
+                    if settled {
+                        break;
+                    }
+                }
+                // The subscription ended; fall back to the DB so the client still
+                // learns the final status.
+                Ok(None) => {
+                    if let Some(status) = reread_run_status(&pg_client, workspace.id, run_id).await {
+                        yield Ok(status_event(&RunStatusEvent { run_id, status }));
+                    }
+                    break;
+                }
+                // No broadcast within the interval: re-read the authoritative run
+                // row. This recovers a dropped best-effort broadcast (core NATS is
+                // at-most-once) instead of hanging on keep-alive forever.
+                Err(_) => {
+                    if let Some(status) = reread_run_status(&pg_client, workspace.id, run_id).await {
+                        yield Ok(status_event(&RunStatusEvent { run_id, status }));
+                        if !status.is_detecting() {
+                            break;
+                        }
+                    }
+                }
             }
         }
     };
@@ -436,6 +481,29 @@ async fn stream_pipeline_run_events(
     Ok(SseResponse(
         Sse::new(stream).keep_alive(KeepAlive::default()),
     ))
+}
+
+/// How long the status stream waits for a live broadcast before re-reading the
+/// authoritative run row from the database (the fallback for a dropped
+/// best-effort broadcast).
+const STATUS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Re-reads a run's current status from the database, returning `None` if the
+/// run can no longer be read (missing, or a transient error — the next poll
+/// retries).
+async fn reread_run_status(
+    pg_client: &PgClient,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Option<PipelineRunStatus> {
+    let mut conn = pg_client.get_connection().await.ok()?;
+    match find_pipeline_run(&mut conn, workspace_id, run_id).await {
+        Ok((run, _pipeline)) => Some(run.status),
+        Err(err) => {
+            tracing::debug!(target: TRACING_TARGET, error = %err, %run_id, "Failed to re-read run status");
+            None
+        }
+    }
 }
 
 /// OpenAPI documentation for the run status SSE stream.
@@ -600,37 +668,6 @@ fn redact_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Marks a run failed (best effort) after an engine error and emits the
-/// `pipeline:run.failed` webhook event.
-async fn fail_run(
-    conn: &mut PgConn,
-    webhook_emitter: &WebhookEmitter,
-    workspace_id: uuid::Uuid,
-    run_id: uuid::Uuid,
-    triggered_by: uuid::Uuid,
-) {
-    let update = UpdateWorkspacePipelineRun {
-        status: Some(PipelineRunStatus::Failed),
-        completed_at: Some(Some(jiff::Timestamp::now().into())),
-        ..Default::default()
-    };
-    if let Err(err) = conn.update_workspace_pipeline_run(run_id, update).await {
-        tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to mark run failed");
-    }
-
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_run_failed(workspace_id, run_id, Some(triggered_by), None)
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            run_id = %run_id,
-            "Failed to emit pipeline:run.failed webhook event"
-        );
-    }
-}
-
 /// Finds a pipeline within a workspace by slug or returns NotFound.
 async fn find_pipeline(
     conn: &mut PgConn,
@@ -685,22 +722,4 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(redact_pipeline_run, redact_pipeline_run_docs),
         )
         .with_path_items(|item| item.tag("Pipeline Runs"))
-}
-
-/// Resolves a pipeline's live policy references into decrypted engine policies.
-async fn resolve_policies(
-    conn: &mut PgConn,
-    crypto: &CryptoService,
-    workspace_id: Uuid,
-    pipeline_id: Uuid,
-) -> Result<Vec<PolicyDefinition>> {
-    let ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
-    let mut policies = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(model) = conn.find_policy_in_workspace(workspace_id, id).await? {
-            policies
-                .push(crypto.decrypt_json::<PolicyDefinition>(workspace_id, &model.definition)?);
-        }
-    }
-    Ok(policies)
 }

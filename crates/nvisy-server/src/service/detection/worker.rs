@@ -9,27 +9,31 @@
 use std::time::Duration;
 
 use nvisy_engine::OcrMode;
-use nvisy_engine::policy::PolicyDefinition;
 use nvisy_nats::NatsClient;
 use nvisy_nats::stream::DetectionStream;
 use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun};
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRunRepository,
-    WorkspacePolicyRepository, WorkspaceRepository,
+    WorkspaceFileRepository, WorkspacePipelineRunRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{OcrPolicy, PipelineRunStatus, WorkspaceSettings};
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
 use super::job::DetectionJob;
 use super::service::DetectionService;
+use super::support::{fail_run, resolve_policies};
 use crate::handler::request::PipelineDefinition;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{BlobService, CryptoService, EngineService, WebhookEmitter};
 
 /// Tracing target for detection worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
+
+/// How long a detection claim stays valid before another delivery may re-claim
+/// the run. Set above `DetectionStream::ACK_WAIT` (15 min) so a slow-but-healthy
+/// worker whose job is redelivered keeps its claim; only a run whose worker died
+/// (no progress past the lease) is re-claimed and re-analyzed.
+const DETECTION_LEASE: Duration = Duration::from_secs(30 * 60);
 
 /// Background worker that runs pipeline detection off the request thread.
 pub struct DetectionWorker {
@@ -80,9 +84,14 @@ impl DetectionWorker {
         result
     }
 
-    /// Consumes detection jobs until cancelled. At-least-once: run first, then
-    /// ack; a crash before ack redelivers, and the job is idempotent (a run no
-    /// longer `Running` is skipped).
+    /// Consumes detection jobs until cancelled.
+    ///
+    /// At-least-once with an explicit claim: a job is acked once it reaches a
+    /// terminal outcome (analyzed, or marked failed), and nacked for redelivery
+    /// on a transient error (a DB/pool blip before the run could even be
+    /// claimed), so a run is never silently stranded in a non-terminal state.
+    /// The claim (`claim_run_for_detection`) makes redelivery idempotent: a run
+    /// already being analyzed under a fresh lease is skipped.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
         let subscriber = self
             .nats
@@ -100,9 +109,15 @@ impl DetectionWorker {
                     match result {
                         Ok(Some(mut message)) => {
                             let job = message.payload().clone();
-                            self.run_job(job).await;
-                            if let Err(err) = message.ack().await {
-                                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to ack detection job");
+                            let outcome = self.run_job(job).await;
+                            let ack_result = match outcome {
+                                JobOutcome::Done => message.ack().await,
+                                // Transient failure: redeliver instead of dropping
+                                // the job, so the run is eventually settled.
+                                JobOutcome::Retry => message.nack().await,
+                            };
+                            if let Err(err) = ack_result {
+                                tracing::error!(target: TRACING_TARGET, error = %err, ?outcome, "Failed to ack/nack detection job");
                             }
                         }
                         Ok(None) => {}
@@ -117,14 +132,21 @@ impl DetectionWorker {
         Ok(())
     }
 
-    /// Runs one detection job: loads the run, analyzes, and records the result.
+    /// Runs one detection job: claims the run, analyzes, and records the result.
+    ///
+    /// Returns [`JobOutcome::Retry`] when the job should be redelivered (a
+    /// transient error before the run was claimed), and [`JobOutcome::Done`]
+    /// when it reached a terminal outcome or is safe to drop (missing run,
+    /// already claimed, already settled).
     #[tracing::instrument(skip_all, fields(run_id = %job.run_id, workspace_id = %job.workspace_id))]
-    async fn run_job(&self, job: DetectionJob) {
+    async fn run_job(&self, job: DetectionJob) -> JobOutcome {
         let mut conn = match self.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
+                // No connection: the run is still queued. Redeliver so it is not
+                // stranded in a non-terminal state.
                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection for detection job");
-                return;
+                return JobOutcome::Retry;
             }
         };
 
@@ -134,25 +156,58 @@ impl DetectionWorker {
         {
             Ok(Some(pair)) => pair,
             Ok(None) => {
-                tracing::warn!(target: TRACING_TARGET, "Detection job for a missing run; skipping");
-                return;
+                tracing::warn!(target: TRACING_TARGET, "Detection job for a missing run; dropping");
+                return JobOutcome::Done;
             }
             Err(err) => {
+                // Transient load error: redeliver rather than strand the run.
                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to load run for detection job");
-                return;
+                return JobOutcome::Retry;
             }
         };
 
-        // Idempotent redelivery: only a still-`Running` run is analyzed.
-        if run.status != PipelineRunStatus::Running {
-            tracing::debug!(target: TRACING_TARGET, status = %run.status, "Run is not running; skipping detection");
-            return;
+        // Nothing to do for a run already past the queued/analyzing phase.
+        if !run.status.is_detecting() {
+            tracing::debug!(target: TRACING_TARGET, status = %run.status, "Run is not detecting; dropping");
+            return JobOutcome::Done;
         }
+
+        // Atomically claim the run (queued -> analyzing). A redelivery whose
+        // claim is still fresh matches no row and is skipped, so a slow job is
+        // never analyzed twice; only a run whose worker died (stale lease) is
+        // re-claimed.
+        let stale_before = jiff::Timestamp::now() - DETECTION_LEASE;
+        let claimed = match conn.claim_run_for_detection(run.id, stale_before).await {
+            Ok(Some(_)) => true,
+            Ok(None) => {
+                tracing::debug!(target: TRACING_TARGET, "Run already claimed by another worker; skipping");
+                return JobOutcome::Done;
+            }
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to claim run for detection");
+                return JobOutcome::Retry;
+            }
+        };
+        debug_assert!(claimed);
+
+        self.detection
+            .broadcast_status(run.id, PipelineRunStatus::Analyzing)
+            .await;
 
         if let Err(err) = self.detect(&mut conn, &job, &run, &pipeline).await {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
-            self.mark_failed(&mut conn, &job, &run).await;
+            fail_run(
+                &mut conn,
+                &self.detection,
+                &self.webhook_emitter,
+                job.workspace_id,
+                run.id,
+                run.account_id,
+                &err.to_string(),
+            )
+            .await;
         }
+        JobOutcome::Done
     }
 
     /// Performs the analysis and records the run as `Analyzed`.
@@ -179,10 +234,11 @@ impl DetectionWorker {
                     .with_context(err.to_string())
             })?;
 
-        let ocr_mode = ocr_mode_of(&workspace.settings);
-        let params = self
-            .engine
-            .analyzer_params(&definition, job.scope.clone(), ocr_mode);
+        // Parse the workspace settings once; both OCR mode and retention read it.
+        let settings = WorkspaceSettings::from_value(&workspace.settings);
+        let params =
+            self.engine
+                .analyzer_params(&definition, job.scope.clone(), ocr_mode_of(&settings));
 
         let document = self.blob.build_document(&file, run.id).await?;
 
@@ -195,10 +251,15 @@ impl DetectionWorker {
 
         let analyzed = self.engine.analyze(document, &policies, &params).await?;
 
-        let retention = WorkspaceSettings::from_value(&workspace.settings).retention;
         let audit_file_id = self
             .blob
-            .store_analyzed_document(conn, pipeline, &retention, run.account_id, &analyzed)
+            .store_analyzed_document(
+                conn,
+                pipeline,
+                &settings.retention,
+                run.account_id,
+                &analyzed,
+            )
             .await?;
 
         conn.update_workspace_pipeline_run(
@@ -226,53 +287,20 @@ impl DetectionWorker {
 
         Ok(())
     }
-
-    /// Marks a run `Failed`, broadcasts, and emits the failure webhook.
-    async fn mark_failed(&self, conn: &mut PgConn, job: &DetectionJob, run: &WorkspacePipelineRun) {
-        let update = UpdateWorkspacePipelineRun {
-            status: Some(PipelineRunStatus::Failed),
-            completed_at: Some(Some(jiff::Timestamp::now().into())),
-            ..Default::default()
-        };
-        if let Err(err) = conn.update_workspace_pipeline_run(run.id, update).await {
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to mark run failed");
-        }
-
-        self.detection
-            .broadcast_status(run.id, PipelineRunStatus::Failed)
-            .await;
-
-        if let Err(err) = self
-            .webhook_emitter
-            .emit_pipeline_run_failed(job.workspace_id, run.id, Some(run.account_id), None)
-            .await
-        {
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to emit pipeline:run.failed webhook event");
-        }
-    }
 }
 
-/// Resolves a pipeline's live policy references into decrypted engine policies.
-pub(crate) async fn resolve_policies(
-    conn: &mut PgConn,
-    crypto: &CryptoService,
-    workspace_id: Uuid,
-    pipeline_id: Uuid,
-) -> Result<Vec<PolicyDefinition>> {
-    let ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
-    let mut policies = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(model) = conn.find_policy_in_workspace(workspace_id, id).await? {
-            policies
-                .push(crypto.decrypt_json::<PolicyDefinition>(workspace_id, &model.definition)?);
-        }
-    }
-    Ok(policies)
+/// Whether a consumed detection job should be acked (done) or nacked (retry).
+#[derive(Debug, Clone, Copy)]
+enum JobOutcome {
+    /// Reached a terminal outcome or is safe to drop; ack the message.
+    Done,
+    /// Transient error before the run was claimed; nack for redelivery.
+    Retry,
 }
 
 /// Maps a workspace's OCR policy to the engine's per-run OCR mode.
-pub(crate) fn ocr_mode_of(settings: &serde_json::Value) -> OcrMode {
-    match WorkspaceSettings::from_value(settings).ocr {
+fn ocr_mode_of(settings: &WorkspaceSettings) -> OcrMode {
+    match settings.ocr {
         OcrPolicy::Auto => OcrMode::Auto,
         OcrPolicy::Force => OcrMode::force(),
         OcrPolicy::Never => OcrMode::Never,

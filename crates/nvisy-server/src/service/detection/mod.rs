@@ -8,8 +8,10 @@
 
 mod job;
 mod service;
+mod support;
 mod worker;
 
 pub use job::{DetectionJob, RunStatusEvent, run_subject};
 pub use service::DetectionService;
+pub(crate) use support::{fail_run, resolve_policies};
 pub use worker::DetectionWorker;

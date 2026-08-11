@@ -68,6 +68,23 @@ pub trait WorkspacePipelineRunRepository {
         status_filter: Option<PipelineRunStatus>,
     ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>>> + Send;
 
+    /// Atomically claims a run for detection, transitioning it to `Analyzing`.
+    ///
+    /// Succeeds (returning the claimed run) only when the run is still `Queued`,
+    /// or is `Analyzing` but its previous claim has gone stale (`claimed_at`
+    /// older than `stale_before` — a worker that died mid-analysis). A run
+    /// already being analyzed under a fresh claim, or past the detect phase,
+    /// yields `None` so a redelivered job skips it instead of analyzing twice.
+    ///
+    /// The claim stamps `claimed_at = now()`, so the lease renews on each
+    /// (re)claim. Callers pass `stale_before = now - lease` computed against the
+    /// same clock the DB uses closely enough for a lease measured in minutes.
+    fn claim_run_for_detection(
+        &mut self,
+        run_id: Uuid,
+        stale_before: jiff::Timestamp,
+    ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
+
     /// Updates a workspace pipeline run with new data.
     fn update_workspace_pipeline_run(
         &mut self,
@@ -331,6 +348,41 @@ impl WorkspacePipelineRunRepository for PgConnection {
                 (wc.item.started_at.into(), wc.item.id)
             },
         ))
+    }
+
+    async fn claim_run_for_detection(
+        &mut self,
+        run_id: Uuid,
+        stale_before: jiff::Timestamp,
+    ) -> PgResult<Option<WorkspacePipelineRun>> {
+        use schema::workspace_pipeline_runs::{self, dsl};
+
+        let stale_before = jiff_diesel::Timestamp::from(stale_before);
+
+        // Claim only if still queued, or analyzing under a claim that has gone
+        // stale (a dead worker). The WHERE clause makes the transition atomic:
+        // two concurrent deliveries race on the same row and exactly one flips
+        // it to `analyzing`; the loser matches no row and gets `None`.
+        let claimed = diesel::update(
+            workspace_pipeline_runs::table
+                .filter(dsl::id.eq(run_id))
+                .filter(
+                    dsl::status.eq(PipelineRunStatus::Queued).or(dsl::status
+                        .eq(PipelineRunStatus::Analyzing)
+                        .and(dsl::claimed_at.lt(stale_before))),
+                ),
+        )
+        .set((
+            dsl::status.eq(PipelineRunStatus::Analyzing),
+            dsl::claimed_at.eq(diesel::dsl::now),
+        ))
+        .returning(WorkspacePipelineRun::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(PgError::from)?;
+
+        Ok(claimed)
     }
 
     async fn update_workspace_pipeline_run(

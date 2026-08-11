@@ -36,6 +36,9 @@ pub struct PipelineRun {
     /// The detections are available to fetch from the run's `detections`
     /// endpoint once this reaches `analyzed`.
     pub status: PipelineRunStatus,
+    /// Human-readable failure reason, present only when the run `failed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: serde_json::Value,
     /// When the run started.
@@ -57,6 +60,14 @@ impl PipelineRun {
         workspace_slug: Handle,
         triggered_by: AccountRef,
     ) -> Self {
+        // Surface a failure reason (written to metadata.error by the worker /
+        // enqueue-failure path) as a dedicated field for a failed run.
+        let error = run
+            .metadata
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+
         Self {
             id: RunId::from_uuid(run.id),
             pipeline_slug,
@@ -66,6 +77,7 @@ impl PipelineRun {
             triggered_by,
             trigger_type: run.trigger_type,
             status: run.status,
+            error,
             metadata: run.metadata,
             started_at: run.started_at.into(),
             completed_at: run.completed_at.map(Into::into),

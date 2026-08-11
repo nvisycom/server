@@ -293,6 +293,7 @@ diesel::table! {
         status -> PipelineRunStatus,
         idempotency_key -> Nullable<Text>,
         metadata -> Jsonb,
+        claimed_at -> Nullable<Timestamptz>,
         started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,
     }

@@ -337,7 +337,11 @@ impl WorkspaceFileRepository for PgConnection {
         let active_run_holds_file = exists(
             workspace_pipeline_runs::table.filter(
                 runs::status
-                    .eq_any([PipelineRunStatus::Running, PipelineRunStatus::Analyzed])
+                    .eq_any([
+                        PipelineRunStatus::Queued,
+                        PipelineRunStatus::Analyzing,
+                        PipelineRunStatus::Analyzed,
+                    ])
                     .and(
                         runs::input_file_id
                             .eq(workspace_files::id)

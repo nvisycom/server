@@ -28,6 +28,7 @@ pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::detection::{
     DetectionJob, DetectionService, DetectionWorker, RunStatusEvent, run_subject,
 };
+pub(crate) use crate::service::detection::{fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::object::ObjectService;
