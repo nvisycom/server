@@ -151,7 +151,9 @@ async fn list_pipelines(
         )
         .await?;
 
-    let response = Page::from_cursor_page(page, |wc| PipelineSummary::from_model(wc.item));
+    let response = Page::from_cursor_page(page, |wc| {
+        PipelineSummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+    });
 
     tracing::debug!(
         target: TRACING_TARGET,

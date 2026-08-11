@@ -77,6 +77,10 @@ pub type PipelinesPage = Page<Pipeline>;
 pub struct PipelineSummary {
     /// URL slug of the pipeline, unique within its workspace.
     pub slug: Handle,
+    /// Handle of the workspace this pipeline belongs to.
+    pub workspace_slug: Handle,
+    /// Account that created this pipeline.
+    pub created_by: AccountRef,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -91,10 +95,17 @@ pub struct PipelineSummary {
 }
 
 impl PipelineSummary {
-    /// Creates a new instance of [`PipelineSummary`] from the database model.
-    pub fn from_model(pipeline: model::WorkspacePipeline) -> Self {
+    /// Creates a new instance of [`PipelineSummary`] from the database model and
+    /// its creator.
+    pub fn from_model(
+        pipeline: model::WorkspacePipeline,
+        workspace_slug: Handle,
+        created_by: AccountRef,
+    ) -> Self {
         Self {
             slug: pipeline.slug,
+            workspace_slug,
+            created_by,
             display_name: pipeline.display_name,
             description: pipeline.description,
             status: pipeline.status,
