@@ -9,41 +9,32 @@
 use std::path::Path;
 
 use nvisy_engine::provider::{
-    LlmConfig, LlmRecognizerConfig, NerConfig, NerRecognizerConfig, OcrBackend, SttBackend,
+    LlmConfig, LlmRecognizerConfig, NerConfig, NerRecognizerConfig, OcrConfig, OcrEnricherConfig,
+    SttConfig, SttEnricherConfig,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
 /// The deployment engine configuration, as loaded from the config file.
+///
+/// Each lineup entry deserializes straight into the engine's own config element
+/// type, so the file needs no server-side mirror types.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct EngineFile {
-    /// Deployment recognizer lineups, keyed by kind (`recognizers.ner`,
-    /// `recognizers.llm`).
+    /// Deployment recognizer lineups (`recognizers.ner`, `recognizers.llm`).
     #[serde(default)]
     recognizers: EngineRecognizers,
-    /// Enricher backends applied uniformly to every run.
+    /// Enricher backends applied uniformly to every run (`enrichers.ocr`,
+    /// `enrichers.stt`).
     #[serde(default)]
     enrichers: EngineEnrichers,
 }
 
-/// The deployment's enricher backends.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EngineEnrichers {
-    /// OCR enricher backend (image modality). Absent means no OCR.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    ocr: Option<OcrBackendFile>,
-    /// STT enricher backend (audio modality). Absent means no STT.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    stt: Option<SttBackendFile>,
-}
-
 /// The deployment's recognizer lineups.
 ///
-/// Each is a flat list of recognizer instances the operator wired up; every
-/// entry runs on every request whose modality matches.
+/// Each entry runs on every request whose modality matches.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineRecognizers {
@@ -55,48 +46,19 @@ struct EngineRecognizers {
     llm: Vec<LlmRecognizerConfig>,
 }
 
-/// Deserializable mirror of [`OcrBackend`], which is `#[non_exhaustive]` and not
-/// itself `Deserialize`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-enum OcrBackendFile {
-    /// BentoML-hosted OCR service.
-    Bento {
-        /// Base URL of the BentoML service.
-        base_url: String,
-        /// Model identifier the backend should target.
-        model: String,
-    },
-}
-
-impl From<OcrBackendFile> for OcrBackend {
-    fn from(file: OcrBackendFile) -> Self {
-        match file {
-            OcrBackendFile::Bento { base_url, model } => OcrBackend::Bento { base_url, model },
-        }
-    }
-}
-
-/// Deserializable mirror of [`SttBackend`], which is `#[non_exhaustive]` and not
-/// itself `Deserialize`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-enum SttBackendFile {
-    /// BentoML-hosted STT service.
-    Bento {
-        /// Base URL of the BentoML service.
-        base_url: String,
-        /// Model identifier the backend should target.
-        model: String,
-    },
-}
-
-impl From<SttBackendFile> for SttBackend {
-    fn from(file: SttBackendFile) -> Self {
-        match file {
-            SttBackendFile::Bento { base_url, model } => SttBackend::Bento { base_url, model },
-        }
-    }
+/// The deployment's enricher lineups.
+///
+/// At most one enricher attaches per modality; the wire keeps a list for
+/// symmetry with the recognizer lineups.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineEnrichers {
+    /// OCR enricher lineup (image modality). Empty means no OCR.
+    #[serde(default)]
+    ocr: Vec<OcrEnricherConfig>,
+    /// STT enricher lineup (audio modality). Empty means no STT.
+    #[serde(default)]
+    stt: Vec<SttEnricherConfig>,
 }
 
 impl EngineFile {
@@ -115,8 +77,8 @@ impl EngineFile {
         })
     }
 
-    /// Splits the file into the engine's recognizer lineups and enricher
-    /// backends, ready to build the engine with.
+    /// Wraps the parsed lineups into the engine's config types, ready to build
+    /// the engine with.
     pub(super) fn into_parts(self) -> EngineParts {
         EngineParts {
             ner: NerConfig {
@@ -125,8 +87,12 @@ impl EngineFile {
             llm: LlmConfig {
                 recognizers: self.recognizers.llm,
             },
-            ocr: self.enrichers.ocr.map(OcrBackend::from),
-            stt: self.enrichers.stt.map(SttBackend::from),
+            ocr: OcrConfig {
+                enrichers: self.enrichers.ocr,
+            },
+            stt: SttConfig {
+                enrichers: self.enrichers.stt,
+            },
         }
     }
 }
@@ -137,10 +103,10 @@ pub(super) struct EngineParts {
     pub(super) ner: NerConfig,
     /// LLM recognizer lineup.
     pub(super) llm: LlmConfig,
-    /// OCR enricher backend, when configured.
-    pub(super) ocr: Option<OcrBackend>,
-    /// STT enricher backend, when configured.
-    pub(super) stt: Option<SttBackend>,
+    /// OCR enricher lineup.
+    pub(super) ocr: OcrConfig,
+    /// STT enricher lineup.
+    pub(super) stt: SttConfig,
 }
 
 #[cfg(test)]
@@ -154,7 +120,7 @@ mod tests {
         let file = EngineFile::parse(text).expect("example engine config parses");
         assert_eq!(file.recognizers.ner.len(), 1);
         assert_eq!(file.recognizers.llm.len(), 1);
-        assert!(file.enrichers.ocr.is_some());
-        assert!(file.enrichers.stt.is_some());
+        assert_eq!(file.enrichers.ocr.len(), 1);
+        assert_eq!(file.enrichers.stt.len(), 1);
     }
 }
