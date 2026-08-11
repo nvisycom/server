@@ -146,6 +146,9 @@ jiff = { version = "0.2", features = ["serde"] }
 # Image processing
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 
+# Archive reading & writing
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+
 # Cron parsing
 croner = { version = "3" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }

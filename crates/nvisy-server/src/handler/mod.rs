@@ -15,6 +15,7 @@ mod invites;
 mod members;
 mod monitors;
 mod notifications;
+mod pipeline_audits;
 mod pipeline_runs;
 mod pipelines;
 mod policies;
@@ -83,6 +84,7 @@ fn private_routes(
         .merge(files::routes())
         .merge(pipelines::routes())
         .merge(pipeline_runs::routes())
+        .merge(pipeline_audits::routes())
         .merge(policies::routes())
         .merge(catalog::routes());
 
