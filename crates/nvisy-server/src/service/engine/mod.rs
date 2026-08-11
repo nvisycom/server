@@ -2,28 +2,24 @@
 //!
 //! Wraps the runtime's [`Engine`] — the stateless detect/redact pipeline — as a
 //! dependency-injectable service. The engine is configured once at startup with
-//! the deployment's NER/LLM recognizer lineups and the server-wide enrichment
-//! and deduplication-calibration defaults; each request then drives analyze /
-//! anonymize against it, merging those defaults with the pipeline's intent.
+//! the deployment's NER/LLM recognizer lineups and OCR/STT enricher backends;
+//! each request then drives analyze / anonymize against it. Deduplication and
+//! calibration are engine-owned solid defaults, not configured here.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use derive_more::Deref;
-use nvisy_engine::plan::{
-    AnalyzerParams, AnyAnnotations, DeduplicationParams, ProviderSelection, ScopeParams,
-};
+use nvisy_engine::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
 use nvisy_engine::{Engine, OcrMode};
 
 use crate::Result;
 use crate::handler::request::PipelineDefinition;
-use crate::handler::{ErrorKind, Result as HandlerResult};
 
 mod config;
 mod error;
 
-use config::{EngineDefaults, EngineFile};
+use config::EngineFile;
 pub use error::UnknownFormatToken;
 
 /// Deployment configuration for the redaction engine.
@@ -33,10 +29,9 @@ pub use error::UnknownFormatToken;
 pub struct EngineConfig {
     /// Optional path to a TOML file with the deployment engine configuration.
     ///
-    /// Carries the NER/LLM recognizer lineups plus the server-wide enrichment
-    /// and deduplication-calibration defaults. Absent means no NER/LLM
-    /// recognizers, no enrichment, and no calibration (pattern recognizers
-    /// still run).
+    /// Carries the NER/LLM recognizer lineups and the OCR/STT enricher
+    /// backends. Absent means no NER/LLM recognizers and no enrichment (pattern
+    /// recognizers still run).
     #[cfg_attr(feature = "cli", arg(long, env = "ENGINE_CONFIG_FILEPATH"))]
     pub config_path: Option<PathBuf>,
 }
@@ -51,27 +46,29 @@ pub struct EngineConfig {
 pub struct EngineService {
     #[deref]
     engine: Engine,
-    defaults: Arc<EngineDefaults>,
 }
 
 impl EngineService {
     /// Builds the engine from the deployment configuration.
     ///
-    /// Loads the NER/LLM lineups and the server-wide enrichment / calibration
-    /// defaults from the configured file when present; otherwise starts with
-    /// empty lineups, no enrichment, and no calibration.
+    /// Loads the NER/LLM lineups and the OCR/STT enricher backends from the
+    /// configured file when present; otherwise starts with empty lineups and no
+    /// enrichment.
     pub async fn from_config(config: EngineConfig) -> Result<Self> {
         let file = match config.config_path {
             Some(path) => EngineFile::load(&path).await?,
             None => EngineFile::default(),
         };
 
-        let (ner, llm, defaults) = file.into_parts();
-        let engine = Engine::new().with_ner(ner).with_llm(llm);
-        Ok(Self {
-            engine,
-            defaults: Arc::new(defaults),
-        })
+        let parts = file.into_parts();
+        let mut engine = Engine::new().with_ner(parts.ner).with_llm(parts.llm);
+        if let Some(ocr) = parts.ocr {
+            engine = engine.with_ocr(ocr);
+        }
+        if let Some(stt) = parts.stt {
+            engine = engine.with_stt(stt);
+        }
+        Ok(Self { engine })
     }
 
     /// Borrows the underlying [`Engine`].
@@ -79,61 +76,30 @@ impl EngineService {
         &self.engine
     }
 
-    /// Builds the [`AnalyzerParams`] for one detect run by merging a pipeline's
-    /// intent with the deployment defaults.
+    /// Builds the [`AnalyzerParams`] for one detect run from a pipeline's intent.
     ///
-    /// Recognizers and deduplication behavior come from the pipeline; enrichment
-    /// and deduplication calibration come from the server-wide defaults. Scope is
-    /// the request's own, falling back to the pipeline default. `ocr_mode` is the
-    /// workspace's OCR policy (forced vs. auto). The label catalog is not set
-    /// here: the engine derives it from the run's policies at detect time.
-    ///
-    /// Rejects a pipeline that explicitly enables NER or LLM recognizers this
-    /// deployment has no lineup for, rather than silently running without them.
+    /// Recognizers carry the pipeline's caller-inlined custom rules and
+    /// dictionaries (the built-in pattern set and the deployment's NER/LLM
+    /// lineups always run). Scope is the request's own, falling back to the
+    /// pipeline default. `ocr_mode` is the workspace's OCR policy (forced vs.
+    /// auto). Deduplication and calibration are engine-owned defaults; the label
+    /// catalog is derived from the run's policies at detect time.
     pub fn analyzer_params(
         &self,
         definition: &PipelineDefinition,
         request_scope: Option<ScopeParams>,
         ocr_mode: OcrMode,
-    ) -> HandlerResult<AnalyzerParams> {
-        let recognizers = &definition.recognizers;
-        if wants_recognizer(recognizers.ner.as_ref()) && !self.defaults.has_ner {
-            return Err(ErrorKind::BadRequest
-                .with_message("NER recognition is not available in this deployment")
-                .with_resource("pipeline"));
-        }
-        if wants_recognizer(recognizers.llm.as_ref()) && !self.defaults.has_llm {
-            return Err(ErrorKind::BadRequest
-                .with_message("LLM recognition is not available in this deployment")
-                .with_resource("pipeline"));
-        }
-
+    ) -> AnalyzerParams {
         let scope = request_scope
             .or_else(|| definition.default_scope.clone())
             .unwrap_or_default();
 
-        // Deduplication: a pipeline field wins; otherwise the deployment default;
-        // otherwise the engine baseline. Calibration is operator-only.
-        let dedup = &definition.deduplication;
-        let dedup_defaults = &self.defaults.deduplication;
-        let deduplication = DeduplicationParams {
-            calibration: dedup_defaults.calibration.clone(),
-            merging: dedup.merging.or(dedup_defaults.merging).unwrap_or_default(),
-            tiebreaker: dedup
-                .tiebreaker
-                .or(dedup_defaults.tiebreaker)
-                .unwrap_or_default(),
-            min_confidence: dedup.min_confidence.or(dedup_defaults.min_confidence),
-        };
-
-        Ok(AnalyzerParams {
-            recognizers: recognizers.clone(),
-            enrichers: self.defaults.enrichers.clone(),
-            deduplication,
+        AnalyzerParams {
+            recognizers: definition.recognizers.clone(),
             scope,
             ocr_mode,
             annotations: AnyAnnotations::default(),
-        })
+        }
     }
 
     /// Resolves file-extension filter tokens to the set of extensions to match.
@@ -205,17 +171,6 @@ impl EngineService {
         }
 
         Ok(out)
-    }
-}
-
-/// Whether a provider selection is an explicit request to run recognizers
-/// (`All(true)` or a non-empty `Only` allowlist), as opposed to off or the
-/// softly-on default.
-fn wants_recognizer(selection: Option<&ProviderSelection>) -> bool {
-    match selection {
-        Some(ProviderSelection::All(enabled)) => *enabled,
-        Some(ProviderSelection::Only(names)) => !names.is_empty(),
-        None => false,
     }
 }
 

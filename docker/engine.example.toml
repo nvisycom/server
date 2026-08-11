@@ -1,24 +1,24 @@
 # Deployment engine configuration.
 #
-# Server-wide, operator-owned settings the redaction engine is built with and
-# that are merged into every run. Pipelines carry detection intent (which
-# recognizers, labels, scope, policies); the infrastructure config below is not
-# overridable per pipeline.
+# Server-wide, operator-owned settings the redaction engine is built with. Every
+# configured recognizer and enricher runs on every request whose modality
+# matches; pipelines carry detection intent (custom rules, labels, scope,
+# policies), not this infrastructure config. Deduplication and calibration are
+# engine-owned defaults and are not configurable here.
 #
 # Point the server at this file with ENGINE_CONFIG_FILEPATH. When unset, the
-# server runs pattern recognizers only, with no enrichment or calibration.
+# server runs pattern recognizers only, with no NER/LLM and no enrichment.
 
-# NER recognizer lineup. Each entry runs when a pipeline enables
-# `recognizers.ner`. An empty lineup means NER is unavailable and a pipeline
-# that enables it is rejected at run time.
+# NER recognizer lineup. Each entry runs on every text-modality request. An
+# empty lineup means NER is unavailable.
 [[recognizers.ner]]
 name = "bento-ner"
 kind = "bento"
 base_url = "http://ner:3000"
 model = "en_core_web_trf"
 
-# LLM recognizer lineup. Each entry runs when a pipeline enables
-# `recognizers.llm`. An empty lineup means LLM is unavailable.
+# LLM recognizer lineup. Each entry runs on every request whose modality is in
+# its `modalities` list. An empty lineup means LLM is unavailable.
 [[recognizers.llm]]
 name = "anthropic-llm"
 kind = "anthropic"
@@ -26,36 +26,14 @@ api_key = "sk-ant-xxxxxxxx"
 model = "claude-3-5-sonnet-20241022"
 modalities = ["text"]
 
-# Server-wide enrichment, applied uniformly to every run.
-
-# Language detection: restrict the candidate pool for a speed/accuracy win.
-[enrichers.language]
-candidates = ["en", "de"]
-
-# OCR backend (image modality).
+# OCR enricher backend (image modality). Omit to run without OCR.
 [enrichers.ocr]
 kind = "bento"
 base_url = "http://ocr:3000"
 model = "paddleocr"
 
-# STT backend (audio modality).
+# STT enricher backend (audio modality). Omit to run without STT.
 [enrichers.stt]
 kind = "bento"
 base_url = "http://stt:3000"
 model = "whisper-large-v3"
-
-# Deduplication defaults.
-#
-# `merging`, `tiebreaker`, and `minConfidence` are deployment defaults a pipeline
-# inherits per-field when it omits them; a pipeline that sets a field overrides.
-# `calibration` is operator-only (never set per pipeline).
-[deduplication]
-merging = "max"                    # max | noisy_or
-tiebreaker = "highest_confidence"  # highest_confidence | longest_span
-minConfidence = 0.5
-
-# Per-recognizer confidence weights for the calibrate layer. Keys are recognizer
-# names, values are weights in 0.0..=1.0.
-[deduplication.calibration]
-bento-ner = 0.9
-anthropic-llm = 0.95
