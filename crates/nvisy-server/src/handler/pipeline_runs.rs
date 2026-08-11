@@ -8,9 +8,11 @@ use std::convert::Infallible;
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
+use futures::{Stream, StreamExt};
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
@@ -32,7 +34,7 @@ use crate::handler::request::{
     WorkspaceRunsQuery,
 };
 use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
-use crate::handler::utility::resolve_account_ref;
+use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
     BlobService, CryptoService, DetectionJob, DetectionService, EngineService, RunStatusEvent,
@@ -397,7 +399,7 @@ async fn stream_pipeline_run_events(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
-) -> Result<Sse<impl futures::Stream<Item = std::result::Result<Event, Infallible>>>> {
+) -> Result<SseResponse<impl Stream<Item = std::result::Result<Event, Infallible>>>> {
     tracing::debug!(target: TRACING_TARGET, "Opening run status stream");
 
     let mut conn = pg_client.get_connection().await?;
@@ -414,7 +416,7 @@ async fn stream_pipeline_run_events(
     // between the read above and the subscription is missed.
     let mut updates = detection.subscribe_status(run_id).await?;
 
-    let stream = async_stream::stream! {
+    let stream = stream! {
         // Emit the current status first: covers the race where detection settled
         // before this stream opened (no live event would ever arrive).
         yield Ok(status_event(&RunStatusEvent { run_id, status: current }));
@@ -422,7 +424,6 @@ async fn stream_pipeline_run_events(
             return;
         }
 
-        use futures::StreamExt as _;
         while let Some(event) = updates.next().await {
             let settled = event.status != PipelineRunStatus::Running;
             yield Ok(status_event(&event));
@@ -432,7 +433,24 @@ async fn stream_pipeline_run_events(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(KeepAlive::default()),
+    ))
+}
+
+/// OpenAPI documentation for the run status SSE stream.
+fn stream_pipeline_run_events_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Stream pipeline run status")
+        .description(
+            "Opens a Server-Sent Events stream of the run's status changes. \
+             Emits the current status immediately, then each transition, and \
+             ends once the run settles (analyzed, failed, or cancelled). \
+             Authenticate with a Bearer token via a `fetch`-based client; the \
+             native `EventSource` cannot send an `Authorization` header.",
+        )
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Builds a `status` SSE event carrying the run's status change.
@@ -658,11 +676,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceSlug}/runs/{runId}/",
             get_with(get_pipeline_run, get_pipeline_run_docs),
         )
-        // SSE stream: registered as a plain route (a streaming body is not
-        // meaningfully represented in the OpenAPI document).
-        .route(
+        .api_route(
             "/workspaces/{workspaceSlug}/runs/{runId}/events",
-            axum::routing::get(stream_pipeline_run_events),
+            get_with(stream_pipeline_run_events, stream_pipeline_run_events_docs),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/runs/{runId}/redactions/",

@@ -46,7 +46,7 @@ use crate::object::{
     AuditBucket, AvatarsBucket, FilesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
     WorkspaceAvatarsBucket,
 };
-use crate::stream::{EventPublisher, EventStream, EventSubscriber, WebhookStream};
+use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -334,15 +334,10 @@ impl NatsClient {
     /// The stream ends when the subscription is dropped. Messages that fail to
     /// deserialize are skipped rather than ending the stream.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn subscribe_broadcast<T>(
-        &self,
-        subject: String,
-    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = T> + Send>>>
+    pub async fn subscribe_broadcast<T>(&self, subject: String) -> Result<BroadcastStream<T>>
     where
         T: DeserializeOwned + Send + 'static,
     {
-        use futures::StreamExt;
-
         let subscriber = self
             .inner
             .client
@@ -350,9 +345,6 @@ impl NatsClient {
             .await
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
-        let stream = subscriber
-            .filter_map(|message| async move { serde_json::from_slice::<T>(&message.payload).ok() })
-            .boxed();
-        Ok(stream)
+        Ok(BroadcastStream::new(subscriber))
     }
 }

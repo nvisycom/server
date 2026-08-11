@@ -6,7 +6,7 @@
 //! handler so the handler stays thin and the NATS wiring lives in one place.
 
 use nvisy_nats::NatsClient;
-use nvisy_nats::stream::DetectionStream;
+use nvisy_nats::stream::{BroadcastStream, DetectionStream};
 use nvisy_postgres::types::PipelineRunStatus;
 use uuid::Uuid;
 
@@ -58,10 +58,7 @@ impl DetectionService {
     /// Subscribes to a run's status broadcasts, yielding each [`RunStatusEvent`].
     ///
     /// Used by the SSE endpoint to forward status changes to a watching client.
-    pub async fn subscribe_status(
-        &self,
-        run_id: Uuid,
-    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = RunStatusEvent> + Send>>> {
+    pub async fn subscribe_status(&self, run_id: Uuid) -> Result<BroadcastStream<RunStatusEvent>> {
         let stream = self
             .nats
             .subscribe_broadcast::<RunStatusEvent>(run_subject(run_id))
