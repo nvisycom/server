@@ -1,5 +1,9 @@
-//! Object-store access: connects a stored workspace connection's typed
-//! [`StorageConfig`] to an [`nvisy_object`] provider client at runtime.
+//! Object-store access.
+//!
+//! Bridges stored workspace connections to the [`nvisy_object`] providers: a
+//! connection carries an encrypted, typed [`StorageConfig`](nvisy_object::providers::StorageConfig),
+//! which [`ObjectService`] turns into a connected client at runtime. The sync
+//! orchestration built on top lives in the [`sync`](crate::service::sync) module.
 
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::{self, StorageConfig};
