@@ -72,6 +72,14 @@ async fn create_pipeline_run(
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
+    // Only an enabled pipeline runs: a draft (still being configured) or a
+    // disabled (paused) pipeline is rejected.
+    if !pipeline.status.is_enabled() {
+        return Err(ErrorKind::Conflict
+            .with_message("Pipeline is not enabled")
+            .with_resource("pipeline"));
+    }
+
     // Idempotent replay: a repeated key returns the run created the first time,
     // attributed to whoever originally triggered it (not the current caller).
     if let Some(key) = &idempotency_key
