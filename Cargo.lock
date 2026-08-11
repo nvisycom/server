@@ -6059,6 +6059,7 @@ version = "0.1.0"
 source = "git+https://github.com/nvisycom/runtime?branch=main#2b40293abcb71cc3765be6cd6d62dfb46969e835"
 dependencies = [
  "bytes",
+ "csv",
  "elide",
  "elide-bento",
  "elide-core",
@@ -6067,6 +6068,7 @@ dependencies = [
  "nvisy-template",
  "schemars 1.2.2",
  "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -6237,6 +6239,7 @@ dependencies = [
  "uuid",
  "validator",
  "woothee",
+ "zip",
  "zxcvbn",
 ]
 

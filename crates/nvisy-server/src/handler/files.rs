@@ -11,6 +11,7 @@ use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
@@ -521,14 +522,14 @@ async fn download_file(
         .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
 
     let mut headers = HeaderMap::new();
-    headers.insert("content-disposition", disposition);
+    headers.insert(CONTENT_DISPOSITION, disposition);
     // Content-length is the plaintext size from the record; storage holds the
     // larger ciphertext, which the decrypting reader unwraps as it streams.
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(file.file_size_bytes));
     headers.insert(
-        "content-length",
-        file.file_size_bytes.to_string().parse().unwrap(),
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
     );
-    headers.insert("content-type", "application/octet-stream".parse().unwrap());
 
     tracing::debug!(
         target: TRACING_TARGET,

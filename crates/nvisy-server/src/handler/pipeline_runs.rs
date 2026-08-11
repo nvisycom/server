@@ -4,13 +4,15 @@
 //! and stores the findings; the run then awaits reviewer verification before
 //! redact consumes the verified findings and produces a redacted file.
 
-use std::io::Cursor;
+use std::io::{Cursor, Write as _};
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use axum::body::Body;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use nvisy_engine::policy::PolicyDefinition;
 use nvisy_engine::{Audit, Document, OcrMode};
@@ -32,6 +34,7 @@ use nvisy_postgres::{PgClient, PgConn};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
+use zip::write::SimpleFileOptions;
 
 use crate::extract::{
     AuthProvider, AuthState, IdempotencyKey, Json, Path, Permission, Query, ValidateJson,
@@ -458,6 +461,176 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
         .response::<409, Json<ErrorResponse>>()
 }
 
+/// Downloads a run's audit as a pretty-printed JSON file.
+///
+/// The full structure — body, parts, context, and each entity's provenance
+/// chain. Requires `ViewPipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        run_id = %path_params.run_id,
+    )
+)]
+async fn download_pipeline_run_audit_json(
+    State(pg_client): State<PgClient>,
+    State(nats): State<NatsClient>,
+    State(crypto): State<CryptoService>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<PipelineRunPathParams>,
+) -> Result<(StatusCode, HeaderMap, Body)> {
+    tracing::debug!(target: TRACING_TARGET, "Downloading pipeline run audit (JSON)");
+
+    let mut conn = pg_client.get_connection().await?;
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .await?;
+
+    let (run, _pipeline) =
+        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
+    let audit = load_analyzed_document(&mut conn, &nats, &crypto, workspace.id, &run).await?;
+
+    let mut buffer = Vec::new();
+    audit.write_json(&mut buffer).map_err(|err| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to export audit as JSON")
+            .with_context(err.to_string())
+    })?;
+
+    let filename = format!("audit-{}.json", run.id);
+    let headers = attachment_headers(
+        &filename,
+        HeaderValue::from_static("application/json"),
+        buffer.len(),
+    );
+
+    tracing::debug!(target: TRACING_TARGET, "Pipeline run audit exported (JSON)");
+    Ok((StatusCode::OK, headers, Body::from(buffer)))
+}
+
+fn download_pipeline_run_audit_json_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Download run audit (JSON)")
+        .description("Downloads the run's audit as a pretty-printed JSON file.")
+        .response::<200, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
+/// Downloads a run's audit as a zip of CSV tables.
+///
+/// The archive holds `entities.csv`, `provenance.csv`, and `reviews.csv`, which
+/// join on `entity_id`. Requires `ViewPipelines` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        run_id = %path_params.run_id,
+    )
+)]
+async fn download_pipeline_run_audit_csv(
+    State(pg_client): State<PgClient>,
+    State(nats): State<NatsClient>,
+    State(crypto): State<CryptoService>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<PipelineRunPathParams>,
+) -> Result<(StatusCode, HeaderMap, Body)> {
+    tracing::debug!(target: TRACING_TARGET, "Downloading pipeline run audit (CSV)");
+
+    let mut conn = pg_client.get_connection().await?;
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .await?;
+
+    let (run, _pipeline) =
+        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
+    let audit = load_analyzed_document(&mut conn, &nats, &crypto, workspace.id, &run).await?;
+
+    let archive = build_audit_csv_zip(&audit)?;
+
+    let filename = format!("audit-{}.csv.zip", run.id);
+    let headers = attachment_headers(
+        &filename,
+        HeaderValue::from_static("application/zip"),
+        archive.len(),
+    );
+
+    tracing::debug!(target: TRACING_TARGET, "Pipeline run audit exported (CSV)");
+    Ok((StatusCode::OK, headers, Body::from(archive)))
+}
+
+fn download_pipeline_run_audit_csv_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Download run audit (CSV)")
+        .description(
+            "Downloads the run's audit as a zip of entities.csv, provenance.csv, and reviews.csv.",
+        )
+        .response::<200, ()>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
+/// Bundles the audit's three CSV tables into an in-memory zip archive.
+fn build_audit_csv_zip(audit: &Audit) -> Result<Vec<u8>> {
+    let map_csv = |err: nvisy_engine::Error| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to export audit as CSV")
+            .with_context(err.to_string())
+    };
+    let archive_error = |err: &dyn std::fmt::Display| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to build audit archive")
+            .with_context(err.to_string())
+    };
+    let map_zip = |err: zip::result::ZipError| archive_error(&err);
+    let map_io = |err: std::io::Error| archive_error(&err);
+
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = SimpleFileOptions::default();
+
+    let mut table = Vec::new();
+    audit.write_entities_csv(&mut table).map_err(map_csv)?;
+    writer
+        .start_file("entities.csv", options)
+        .map_err(map_zip)?;
+    writer.write_all(&table).map_err(map_io)?;
+
+    table.clear();
+    audit.write_provenance_csv(&mut table).map_err(map_csv)?;
+    writer
+        .start_file("provenance.csv", options)
+        .map_err(map_zip)?;
+    writer.write_all(&table).map_err(map_io)?;
+
+    table.clear();
+    audit.write_reviews_csv(&mut table).map_err(map_csv)?;
+    writer.start_file("reviews.csv", options).map_err(map_zip)?;
+    writer.write_all(&table).map_err(map_io)?;
+
+    Ok(writer.finish().map_err(map_zip)?.into_inner())
+}
+
+/// Builds the download response headers for an attachment.
+///
+/// `filename` is server-generated (a run UUID plus a fixed extension), so it
+/// needs no sanitization for the quoted header value.
+fn attachment_headers(filename: &str, content_type: HeaderValue, length: usize) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    let disposition = format!("attachment; filename=\"{filename}\"")
+        .parse()
+        .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
+    headers.insert(CONTENT_DISPOSITION, disposition);
+    headers.insert(CONTENT_TYPE, content_type);
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(length as u64));
+    headers
+}
+
 /// Redacts a run using the reviewer-verified findings, storing the result.
 ///
 /// Consumes the analyzed run (which must be awaiting review), applies the
@@ -700,6 +873,20 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/runs/{runId}/detections/",
             get_with(get_pipeline_run_analysis, get_pipeline_run_analysis_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/runs/{runId}/audit/json",
+            get_with(
+                download_pipeline_run_audit_json,
+                download_pipeline_run_audit_json_docs,
+            ),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/runs/{runId}/audit/csv",
+            get_with(
+                download_pipeline_run_audit_csv,
+                download_pipeline_run_audit_csv_docs,
+            ),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/runs/{runId}/redactions/",

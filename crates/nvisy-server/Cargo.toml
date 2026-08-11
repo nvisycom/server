@@ -32,7 +32,7 @@ cli = ["dep:clap", "dep:humantime"]
 
 [dependencies]
 # Internal crates
-nvisy-engine = { workspace = true, features = [] }
+nvisy-engine = { workspace = true, features = ["audit-json", "audit-csv"] }
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-inference = { workspace = true, features = ["schema"] }
@@ -106,6 +106,9 @@ jiff = { workspace = true, features = ["serde"] }
 
 # Image processing
 image = { workspace = true }
+
+# Archive reading & writing
+zip = { workspace = true }
 
 # Cron parsing
 croner = { workspace = true, features = [] }

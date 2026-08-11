@@ -2,7 +2,7 @@
 
 use axum::body::Body;
 use axum::extract::Multipart;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use crate::handler::{ErrorKind, Result};
@@ -38,10 +38,13 @@ pub async fn read_image_field(mut multipart: Multipart) -> Result<Vec<u8>> {
 /// than the contents at a URL.
 pub fn avatar_response(bytes: Vec<u8>) -> Response {
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, AVATAR_CONTENT_TYPE.parse().unwrap());
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(AVATAR_CONTENT_TYPE),
+    );
     headers.insert(
         header::CACHE_CONTROL,
-        "public, max-age=31536000, immutable".parse().unwrap(),
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
     );
     (StatusCode::OK, headers, Body::from(bytes)).into_response()
 }
