@@ -78,12 +78,12 @@ impl EngineService {
 
     /// Builds the [`AnalyzerParams`] for one detect run from a pipeline's intent.
     ///
-    /// Recognizers carry the pipeline's caller-inlined custom rules and
-    /// dictionaries (the built-in pattern set and the deployment's NER/LLM
-    /// lineups always run). Scope is the request's own, falling back to the
-    /// pipeline default. `ocr_mode` is the workspace's OCR policy (forced vs.
-    /// auto). Deduplication and calibration are engine-owned defaults; the label
-    /// catalog is derived from the run's policies at detect time.
+    /// Recognition is entirely engine-owned (the built-in pattern set plus the
+    /// deployment's NER/LLM lineups always run). Scope is the request's own,
+    /// falling back to the pipeline default. `ocr_mode` is the workspace's OCR
+    /// policy (forced vs. auto). Deduplication and calibration are engine-owned
+    /// defaults; the label catalog is derived from the run's policies at detect
+    /// time.
     pub fn analyzer_params(
         &self,
         definition: &PipelineDefinition,
@@ -95,7 +95,6 @@ impl EngineService {
             .unwrap_or_default();
 
         AnalyzerParams {
-            recognizers: definition.recognizers.clone(),
             scope,
             ocr_mode,
             annotations: AnyAnnotations::default(),
