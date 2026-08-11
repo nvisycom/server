@@ -61,13 +61,11 @@ impl EngineService {
         };
 
         let parts = file.into_parts();
-        let mut engine = Engine::new().with_ner(parts.ner).with_llm(parts.llm);
-        if let Some(ocr) = parts.ocr {
-            engine = engine.with_ocr(ocr);
-        }
-        if let Some(stt) = parts.stt {
-            engine = engine.with_stt(stt);
-        }
+        let engine = Engine::new()
+            .with_ner(parts.ner)
+            .with_llm(parts.llm)
+            .with_ocr(parts.ocr)
+            .with_stt(parts.stt);
         Ok(Self { engine })
     }
 

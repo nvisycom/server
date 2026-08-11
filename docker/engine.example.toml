@@ -2,12 +2,13 @@
 #
 # Server-wide, operator-owned settings the redaction engine is built with. Every
 # configured recognizer and enricher runs on every request whose modality
-# matches; pipelines carry detection intent (custom rules, labels, scope,
-# policies), not this infrastructure config. Deduplication and calibration are
-# engine-owned defaults and are not configurable here.
+# matches; pipelines carry detection intent (labels, scope, policies), not this
+# infrastructure config. Deduplication and calibration are engine-owned defaults
+# and are not configurable here.
 #
 # Point the server at this file with ENGINE_CONFIG_FILEPATH. When unset, the
-# server runs pattern recognizers only, with no NER/LLM and no enrichment.
+# server runs the built-in pattern recognizers only, with no NER/LLM and no
+# enrichment.
 
 # NER recognizer lineup. Each entry runs on every text-modality request. An
 # empty lineup means NER is unavailable.
@@ -26,14 +27,16 @@ api_key = "sk-ant-xxxxxxxx"
 model = "claude-3-5-sonnet-20241022"
 modalities = ["text"]
 
-# OCR enricher backend (image modality). Omit to run without OCR.
-[enrichers.ocr]
+# OCR enricher lineup (image modality).
+[[enrichers.ocr]]
+name = "bento-ocr"
 kind = "bento"
 base_url = "http://ocr:3000"
 model = "paddleocr"
 
-# STT enricher backend (audio modality). Omit to run without STT.
-[enrichers.stt]
+# STT enricher lineup (audio modality).
+[[enrichers.stt]]
+name = "bento-stt"
 kind = "bento"
 base_url = "http://stt:3000"
 model = "whisper-large-v3"

@@ -2919,7 +2919,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2b40293abcb71cc3765be6cd6d62dfb46969e835"
+source = "git+https://github.com/nvisycom/bento?branch=main#e4e2947c360cfd389cf3c4d83dcff89d49b5a4d5"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -6056,7 +6056,7 @@ dependencies = [
 [[package]]
 name = "nvisy-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2b40293abcb71cc3765be6cd6d62dfb46969e835"
+source = "git+https://github.com/nvisycom/runtime?branch=main#9cb91a943da9fa719cfc5a4362a26b794d78ef36"
 dependencies = [
  "bytes",
  "csv",
@@ -6126,7 +6126,7 @@ dependencies = [
 [[package]]
 name = "nvisy-policy"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2b40293abcb71cc3765be6cd6d62dfb46969e835"
+source = "git+https://github.com/nvisycom/runtime?branch=main#9cb91a943da9fa719cfc5a4362a26b794d78ef36"
 dependencies = [
  "elide-core",
  "elide-operator",
@@ -6172,7 +6172,7 @@ dependencies = [
 [[package]]
 name = "nvisy-schema"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2b40293abcb71cc3765be6cd6d62dfb46969e835"
+source = "git+https://github.com/nvisycom/runtime?branch=main#9cb91a943da9fa719cfc5a4362a26b794d78ef36"
 dependencies = [
  "bytes",
  "elide-core",
@@ -6246,7 +6246,7 @@ dependencies = [
 [[package]]
 name = "nvisy-template"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#2b40293abcb71cc3765be6cd6d62dfb46969e835"
+source = "git+https://github.com/nvisycom/runtime?branch=main#9cb91a943da9fa719cfc5a4362a26b794d78ef36"
 dependencies = [
  "elide-core",
  "hipstr",
@@ -6963,7 +6963,7 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -8550,7 +8550,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -8562,7 +8562,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "287f59010008f0d7cf5e3b03196d666c1acc46c8d3e9cf34c28a1a7157601e72"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
