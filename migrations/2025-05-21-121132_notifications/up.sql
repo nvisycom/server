@@ -41,14 +41,6 @@ CREATE TABLE account_notifications (
     is_read         BOOLEAN          NOT NULL DEFAULT FALSE,
     read_at         TIMESTAMPTZ      DEFAULT NULL,
 
-    -- Optional related entities
-    related_id      UUID             DEFAULT NULL,
-    related_type    TEXT             DEFAULT NULL,
-
-    CONSTRAINT account_notifications_related_type_length CHECK (
-        related_type IS NULL OR length(trim(related_type)) BETWEEN 1 AND 50
-    ),
-
     -- Typed params for the notification's type (the tagged payload's fields).
     params          JSONB            NOT NULL DEFAULT '{}',
 
@@ -78,10 +70,6 @@ CREATE INDEX account_notifications_type_idx
     ON account_notifications (account_id, notify_type, created_at DESC)
     WHERE is_read = FALSE;
 
-CREATE INDEX account_notifications_related_idx
-    ON account_notifications (related_type, related_id)
-    WHERE related_type IS NOT NULL AND related_id IS NOT NULL;
-
 CREATE INDEX account_notifications_cleanup_idx
     ON account_notifications (expires_at)
     WHERE expires_at IS NOT NULL;
@@ -95,8 +83,6 @@ COMMENT ON COLUMN account_notifications.account_id IS 'Account receiving the not
 COMMENT ON COLUMN account_notifications.notify_type IS 'Notification type; the client-side localization key';
 COMMENT ON COLUMN account_notifications.is_read IS 'Whether notification has been read';
 COMMENT ON COLUMN account_notifications.read_at IS 'Timestamp when notification was read';
-COMMENT ON COLUMN account_notifications.related_id IS 'ID of related entity (comment, document, etc.)';
-COMMENT ON COLUMN account_notifications.related_type IS 'Type of related entity';
 COMMENT ON COLUMN account_notifications.params IS 'Typed params for the notification type (JSON, 2B-4KB)';
 COMMENT ON COLUMN account_notifications.created_at IS 'Notification creation timestamp';
 COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration timestamp';

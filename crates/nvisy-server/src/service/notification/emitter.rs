@@ -3,6 +3,7 @@
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewAccountNotification;
 use nvisy_postgres::query::{AccountNotificationRepository, WorkspaceMemberRepository};
+use nvisy_postgres::types::WorkspaceRole;
 use uuid::Uuid;
 
 use crate::Result;
@@ -45,8 +46,6 @@ impl NotificationEmitter {
         conn.create_account_notification(NewAccountNotification {
             account_id,
             notify_type: event,
-            related_id: None,
-            related_type: None,
             params: Some(params),
             expires_at: None,
         })
@@ -102,8 +101,6 @@ impl NotificationEmitter {
         conn.create_account_notification(NewAccountNotification {
             account_id,
             notify_type: event,
-            related_id: None,
-            related_type: None,
             params: Some(params),
             expires_at: None,
         })
@@ -111,5 +108,41 @@ impl NotificationEmitter {
 
         tracing::debug!(target: TRACING_TARGET, %account_id, event = %event, "Notification created");
         Ok(true)
+    }
+
+    /// Notifies every member of `workspace_id` holding one of `roles` and
+    /// accepting the event in-app, skipping `exclude` (e.g. the actor who
+    /// triggered it). Returns how many notifications were created.
+    ///
+    /// Two queries total regardless of recipient count: one resolves the
+    /// preference-filtered recipients, one batch-inserts their rows.
+    pub async fn notify_workspace_roles(
+        &self,
+        workspace_id: Uuid,
+        roles: &[WorkspaceRole],
+        exclude: Option<Uuid>,
+        payload: NotificationPayload,
+    ) -> Result<usize> {
+        let (event, params) = payload.into_stored();
+
+        let mut conn = self.pg_client.get_connection().await?;
+        let recipients = conn
+            .notification_recipients_by_roles(workspace_id, roles, event)
+            .await?;
+
+        let rows: Vec<NewAccountNotification> = recipients
+            .into_iter()
+            .filter(|account_id| Some(*account_id) != exclude)
+            .map(|account_id| NewAccountNotification {
+                account_id,
+                notify_type: event,
+                params: Some(params.clone()),
+                expires_at: None,
+            })
+            .collect();
+
+        let created = conn.create_account_notifications(rows).await?;
+        tracing::debug!(target: TRACING_TARGET, event = %event, created, "Broadcast notifications created");
+        Ok(created)
     }
 }

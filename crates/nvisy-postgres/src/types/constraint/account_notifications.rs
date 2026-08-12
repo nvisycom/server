@@ -11,14 +11,8 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum AccountNotificationConstraints {
     // Notification validation constraints
-    #[strum(serialize = "account_notifications_title_length")]
-    TitleLength,
-    #[strum(serialize = "account_notifications_message_length")]
-    MessageLength,
-    #[strum(serialize = "account_notifications_related_type_length")]
-    RelatedTypeLength,
-    #[strum(serialize = "account_notifications_metadata_size")]
-    MetadataSize,
+    #[strum(serialize = "account_notifications_params_size")]
+    ParamsSize,
 
     // Notification chronological constraints
     #[strum(serialize = "account_notifications_expires_after_created")]
@@ -36,10 +30,7 @@ impl AccountNotificationConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            AccountNotificationConstraints::TitleLength
-            | AccountNotificationConstraints::MessageLength
-            | AccountNotificationConstraints::RelatedTypeLength
-            | AccountNotificationConstraints::MetadataSize => ConstraintCategory::Validation,
+            AccountNotificationConstraints::ParamsSize => ConstraintCategory::Validation,
 
             AccountNotificationConstraints::ExpiresAfterCreated
             | AccountNotificationConstraints::ReadAfterCreated => ConstraintCategory::Chronological,

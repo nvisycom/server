@@ -11,7 +11,7 @@ use crate::model::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
-    OffsetPagination, SortOrder, WorkspaceRole,
+    NotificationEvent, OffsetPagination, SortOrder, WorkspaceRole,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -107,6 +107,19 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         role: WorkspaceRole,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+
+    /// Returns the account ids of members holding any of `roles` who accept
+    /// `event` as an in-app notification.
+    ///
+    /// A member accepts the event when their `notification_events_app` is empty
+    /// (the default, meaning "all") or contains it. One query resolves the whole
+    /// recipient set for a broadcast.
+    fn notification_recipients_by_roles(
+        &mut self,
+        workspace_id: Uuid,
+        roles: &[WorkspaceRole],
+        event: NotificationEvent,
+    ) -> impl Future<Output = PgResult<Vec<Uuid>>> + Send;
 
     /// Checks if a user has any access to a workspace.
     fn check_workspace_access(
@@ -498,6 +511,36 @@ impl WorkspaceMemberRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(members)
+    }
+
+    async fn notification_recipients_by_roles(
+        &mut self,
+        workspace_id: Uuid,
+        roles: &[WorkspaceRole],
+        event: NotificationEvent,
+    ) -> PgResult<Vec<Uuid>> {
+        use schema::workspace_members::{self, dsl};
+
+        // A member accepts the event when their in-app preference list is empty
+        // (default = all) or contains it (`@>`). The array column is
+        // Array<Nullable<NotificationEvent>>, so the needle matches that shape.
+        let needle: Vec<Option<NotificationEvent>> = vec![Some(event)];
+        let empty: Vec<Option<NotificationEvent>> = Vec::new();
+
+        let account_ids = workspace_members::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::member_role.eq_any(roles.to_vec()))
+            .filter(
+                dsl::notification_events_app
+                    .eq(empty)
+                    .or(dsl::notification_events_app.contains(needle)),
+            )
+            .select(dsl::account_id)
+            .load::<Uuid>(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(account_ids)
     }
 
     async fn check_workspace_access(

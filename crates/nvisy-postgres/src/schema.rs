@@ -91,8 +91,6 @@ diesel::table! {
         notify_type -> NotificationEvent,
         is_read -> Bool,
         read_at -> Nullable<Timestamptz>,
-        related_id -> Nullable<Uuid>,
-        related_type -> Nullable<Text>,
         params -> Jsonb,
         created_at -> Timestamptz,
         expires_at -> Nullable<Timestamptz>,

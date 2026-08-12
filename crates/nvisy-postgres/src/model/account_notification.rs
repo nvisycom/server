@@ -22,10 +22,6 @@ pub struct AccountNotification {
     pub is_read: bool,
     /// Timestamp when notification was read.
     pub read_at: Option<Timestamp>,
-    /// ID of related entity (document, member, etc.).
-    pub related_id: Option<Uuid>,
-    /// Type of related entity.
-    pub related_type: Option<String>,
     /// Typed params for the notification type (the tagged payload's fields).
     pub params: serde_json::Value,
     /// Notification creation timestamp.
@@ -43,10 +39,6 @@ pub struct NewAccountNotification {
     pub account_id: Uuid,
     /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
-    /// Related entity ID.
-    pub related_id: Option<Uuid>,
-    /// Related entity type.
-    pub related_type: Option<String>,
     /// Typed params for the notification type.
     pub params: Option<serde_json::Value>,
     /// Expiration timestamp.
@@ -82,11 +74,6 @@ impl AccountNotification {
     /// Returns whether the notification is active (unread and not expired).
     pub fn is_active(&self) -> bool {
         !self.is_read && !self.is_expired()
-    }
-
-    /// Returns whether the notification has a related entity.
-    pub fn has_related_entity(&self) -> bool {
-        self.related_id.is_some()
     }
 
     /// Returns the time remaining until expiration.
