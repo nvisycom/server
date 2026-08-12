@@ -6,13 +6,15 @@ pub mod crypto;
 mod detection;
 pub mod engine;
 mod external_object_store;
+mod file_retention;
 mod health;
 mod infra;
 mod notification;
-mod retention;
+mod password;
 mod run_blob_store;
-mod security;
+mod session_keys;
 mod sync;
+mod user_agent;
 mod webhook;
 
 use std::sync::Arc;
@@ -32,18 +34,18 @@ pub use crate::service::detection::{
 pub(crate) use crate::service::detection::{fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::external_object_store::ExternalObjectStore;
+pub use crate::service::file_retention::FileRetentionWorker;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::notification::NotificationEmitter;
-pub use crate::service::retention::FileRetentionWorker;
+pub use crate::service::password::PasswordService;
 pub use crate::service::run_blob_store::RunBlobStore;
-pub use crate::service::security::{
-    PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
-};
+pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::sync::{
     ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
     StandardCronSchedule, SyncConfig,
 };
+pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
 use crate::{Error, Result};
 
