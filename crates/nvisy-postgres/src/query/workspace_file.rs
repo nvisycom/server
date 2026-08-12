@@ -652,11 +652,15 @@ impl WorkspaceFileRepository for PgConnection {
             None
         };
 
-        // Rebuild query for fetching items (can't reuse boxed query after count)
+        // Rebuild query for fetching items (can't reuse boxed query after count).
+        // The document-kind filter must be reapplied here too: it is what keeps
+        // audit/artifact rows out of the list, and omitting it leaks them into
+        // the results even though the count above excludes them.
         let mut query = workspace_files::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
+            .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
             .into_boxed();
 
         // Apply trigram search filter (pg_trgm)
