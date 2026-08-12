@@ -17,7 +17,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::WebhookJob;
-use crate::service::Infra;
+use crate::service::{Infra, Worker};
 use crate::{Error, Result};
 
 /// Type alias for webhook subscriber.
@@ -86,13 +86,11 @@ pub struct WebhookDeliveryWorker {
     webhook_service: WebhookService,
 }
 
-impl WebhookDeliveryWorker {
-    /// Create a new webhook worker.
-    pub fn new(infra: Infra, webhook_service: WebhookService) -> Self {
-        Self {
-            infra,
-            webhook_service,
-        }
+impl Worker for WebhookDeliveryWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "webhook_delivery"
     }
 
     /// Run the webhook worker until cancelled.
@@ -100,7 +98,7 @@ impl WebhookDeliveryWorker {
     /// This method will continuously consume webhook jobs from NATS and
     /// deliver them to the configured endpoints. Logs lifecycle events
     /// (start, stop, errors) internally.
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(
             target: TRACING_TARGET,
             "Starting webhook worker"
@@ -125,6 +123,16 @@ impl WebhookDeliveryWorker {
         }
 
         result
+    }
+}
+
+impl WebhookDeliveryWorker {
+    /// Create a new webhook worker.
+    pub fn new(infra: Infra, webhook_service: WebhookService) -> Self {
+        Self {
+            infra,
+            webhook_service,
+        }
     }
 
     /// Internal run loop.

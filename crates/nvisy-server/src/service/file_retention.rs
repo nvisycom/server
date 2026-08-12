@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::handler::Result;
-use crate::service::Infra;
+use crate::service::{Infra, Worker};
 
 /// Tracing target for the retention worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::retention";
@@ -34,14 +34,15 @@ pub struct FileRetentionWorker {
     infra: Infra,
 }
 
-impl FileRetentionWorker {
-    /// Creates a new [`FileRetentionWorker`].
-    pub fn new(infra: Infra) -> Self {
-        Self { infra }
+impl Worker for FileRetentionWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "file_retention"
     }
 
     /// Runs the worker until cancelled, logging its lifecycle.
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting retention worker");
 
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
@@ -58,6 +59,13 @@ impl FileRetentionWorker {
 
         tracing::info!(target: TRACING_TARGET, "Retention worker stopped");
         Ok(())
+    }
+}
+
+impl FileRetentionWorker {
+    /// Creates a new [`FileRetentionWorker`].
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
     }
 
     /// Expires all due files, in `SWEEP_BATCH`-sized pages.

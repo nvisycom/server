@@ -11,7 +11,6 @@ use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::*;
 use nvisy_server::service::ServiceState;
-use tokio_util::sync::CancellationToken;
 
 use crate::config::{Cli, MiddlewareConfig};
 use crate::server::TRACING_TARGET_SHUTDOWN;
@@ -48,72 +47,12 @@ async fn run() -> anyhow::Result<()> {
     // Build router
     let router = create_router(state.clone(), &cli.middleware);
 
-    // Create cancellation token for graceful shutdown of workers
-    let cancel = CancellationToken::new();
+    // Spawn every background worker under one shared cancellation token.
+    let workers = state.spawn_workers();
 
-    // Spawn webhook worker (logs lifecycle events internally)
-    let webhook_worker = state.webhook_worker();
-    let webhook_cancel = cancel.clone();
-    let webhook_handle = tokio::spawn(async move {
-        let _ = webhook_worker.run(webhook_cancel).await;
-    });
-
-    // Spawn connection sync worker (scheduler + job consumer + reaper)
-    let sync_worker = state.connection_sync_worker();
-    let sync_cancel = cancel.clone();
-    let sync_handle = tokio::spawn(async move {
-        let _ = sync_worker.run(sync_cancel).await;
-    });
-
-    // Spawn data-retention worker (expires stored data per workspace policy)
-    let retention_worker = state.retention_worker();
-    let retention_cancel = cancel.clone();
-    let retention_handle = tokio::spawn(async move {
-        let _ = retention_worker.run(retention_cancel).await;
-    });
-
-    // Spawn pipeline detection worker (runs each run's analyze off the request thread)
-    let detection_worker = state.detection_worker();
-    let detection_cancel = cancel.clone();
-    let detection_handle = tokio::spawn(async move {
-        let _ = detection_worker.run(detection_cancel).await;
-    });
-
-    // Run the HTTP server
+    // Run the HTTP server, then stop and join the workers.
     let server_result = server::serve(router, cli.server).await;
-
-    // Signal workers to stop
-    cancel.cancel();
-
-    // Wait for workers to finish
-    if let Err(err) = webhook_handle.await {
-        tracing::error!(
-            target: TRACING_TARGET_SHUTDOWN,
-            error = %err,
-            "Webhook worker task panicked"
-        );
-    }
-    if let Err(err) = sync_handle.await {
-        tracing::error!(
-            target: TRACING_TARGET_SHUTDOWN,
-            error = %err,
-            "Connection sync worker task panicked"
-        );
-    }
-    if let Err(err) = retention_handle.await {
-        tracing::error!(
-            target: TRACING_TARGET_SHUTDOWN,
-            error = %err,
-            "Retention worker task panicked"
-        );
-    }
-    if let Err(err) = detection_handle.await {
-        tracing::error!(
-            target: TRACING_TARGET_SHUTDOWN,
-            error = %err,
-            "Detection worker task panicked"
-        );
-    }
+    workers.shutdown().await;
 
     server_result?;
     Ok(())

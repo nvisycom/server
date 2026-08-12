@@ -26,7 +26,9 @@ use crate::handler::response::{
     NotificationPayload, PipelineRunAnalyzedParams, PipelineRunFailedParams,
 };
 use crate::handler::{ErrorKind, Result};
-use crate::service::{EngineService, Infra, NotificationEmitter, RunBlobStore, WebhookEmitter};
+use crate::service::{
+    EngineService, Infra, NotificationEmitter, RunBlobStore, WebhookEmitter, Worker,
+};
 
 /// Tracing target for detection worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
@@ -47,6 +49,30 @@ pub struct DetectionWorker {
     detection: DetectionQueue,
 }
 
+impl Worker for DetectionWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "detection"
+    }
+
+    /// Runs the worker until cancelled, logging its lifecycle.
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
+        tracing::info!(target: TRACING_TARGET, "Starting detection worker");
+
+        let result = self.run_inner(cancel).await;
+
+        match &result {
+            Ok(()) => tracing::info!(target: TRACING_TARGET, "Detection worker stopped"),
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed")
+            }
+        }
+
+        result
+    }
+}
+
 impl DetectionWorker {
     /// Creates a new [`DetectionWorker`].
     pub fn new(
@@ -65,22 +91,6 @@ impl DetectionWorker {
             notification_emitter,
             detection,
         }
-    }
-
-    /// Runs the worker until cancelled, logging its lifecycle.
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting detection worker");
-
-        let result = self.run_inner(cancel).await;
-
-        match &result {
-            Ok(()) => tracing::info!(target: TRACING_TARGET, "Detection worker stopped"),
-            Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed")
-            }
-        }
-
-        result
     }
 
     /// Consumes detection jobs until cancelled.

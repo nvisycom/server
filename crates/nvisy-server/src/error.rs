@@ -180,8 +180,8 @@ impl From<nvisy_postgres::PgError> for Error {
     }
 }
 
-impl From<crate::service::crypto::CryptoError> for Error {
-    fn from(err: crate::service::crypto::CryptoError) -> Self {
+impl From<crate::service::CryptoError> for Error {
+    fn from(err: crate::service::CryptoError) -> Self {
         Error::internal("crypto", err.to_string()).with_source(err)
     }
 }

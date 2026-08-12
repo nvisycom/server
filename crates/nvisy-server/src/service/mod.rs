@@ -2,9 +2,9 @@
 
 mod avatar;
 mod connection_config;
-pub mod crypto;
+mod crypto;
 mod detection;
-pub mod engine;
+mod engine;
 mod external_object_store;
 mod file_retention;
 mod health;
@@ -16,6 +16,7 @@ mod session_keys;
 mod sync;
 mod user_agent;
 mod webhook;
+mod worker;
 
 use std::sync::Arc;
 
@@ -27,7 +28,7 @@ use nvisy_webhook::WebhookService;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
-pub(crate) use crate::service::crypto::{HashingReader, Measurements};
+pub(crate) use crate::service::crypto::{CryptoError, HashingReader, Measurements};
 pub use crate::service::detection::{
     DetectionJob, DetectionQueue, DetectionWorker, RunStatusEvent, run_subject,
 };
@@ -47,6 +48,7 @@ pub use crate::service::sync::{
 };
 pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
+pub use crate::service::worker::{Worker, WorkerSet};
 use crate::{Error, Result};
 
 /// Application state.
@@ -139,36 +141,35 @@ impl ServiceState {
         Ok(service_state)
     }
 
-    /// Builds the webhook delivery worker from this state.
-    pub fn webhook_worker(&self) -> WebhookDeliveryWorker {
-        WebhookDeliveryWorker::new(self.infra.clone(), self.webhook.clone())
-    }
-
-    /// Builds the connection sync worker from this state.
-    pub fn connection_sync_worker(&self) -> ConnectionSyncWorker {
-        ConnectionSyncWorker::new(self.infra.clone(), self.connection_sync.clone())
-    }
-
-    /// Builds the data-retention worker from this state.
-    pub fn retention_worker(&self) -> FileRetentionWorker {
-        FileRetentionWorker::new(self.infra.clone())
-    }
-
-    /// Builds the pipeline detection worker from this state. The stateless
-    /// collaborators are composed through the same [`FromRef`] wiring handlers
-    /// use.
+    /// Spawns every background worker under one shared cancellation token.
+    ///
+    /// The stateless collaborators the detection worker needs are composed
+    /// through the same [`FromRef`] wiring handlers use. Call
+    /// [`WorkerSet::shutdown`] to stop and join them.
     ///
     /// [`FromRef`]: axum::extract::FromRef
-    pub fn detection_worker(&self) -> DetectionWorker {
+    pub fn spawn_workers(&self) -> WorkerSet {
         use axum::extract::FromRef;
-        DetectionWorker::new(
+
+        let mut workers = WorkerSet::new();
+        workers.spawn(WebhookDeliveryWorker::new(
+            self.infra.clone(),
+            self.webhook.clone(),
+        ));
+        workers.spawn(ConnectionSyncWorker::new(
+            self.infra.clone(),
+            self.connection_sync.clone(),
+        ));
+        workers.spawn(FileRetentionWorker::new(self.infra.clone()));
+        workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),
             RunBlobStore::from_ref(self),
             WebhookEmitter::from_ref(self),
             NotificationEmitter::from_ref(self),
             DetectionQueue::from_ref(self),
-        )
+        ));
+        workers
     }
 }
 

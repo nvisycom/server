@@ -32,7 +32,7 @@ use uuid::Uuid;
 
 use super::{ConnectionSyncService, StandardCronSchedule};
 use crate::handler::Result;
-use crate::service::{ConnectionConfig, Infra};
+use crate::service::{ConnectionConfig, Infra, Worker};
 
 /// Tracing target for the connection sync worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::connection_sync";
@@ -81,15 +81,16 @@ pub struct ConnectionSyncWorker {
     sync: ConnectionSyncService,
 }
 
-impl ConnectionSyncWorker {
-    /// Creates a new [`ConnectionSyncWorker`].
-    pub fn new(infra: Infra, sync: ConnectionSyncService) -> Self {
-        Self { infra, sync }
+impl Worker for ConnectionSyncWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "connection_sync"
     }
 
     /// Runs the worker until cancelled, logging its lifecycle (start, stop,
     /// failure).
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting connection sync worker");
 
         let result = self.run_inner(cancel).await;
@@ -102,6 +103,13 @@ impl ConnectionSyncWorker {
         }
 
         result
+    }
+}
+
+impl ConnectionSyncWorker {
+    /// Creates a new [`ConnectionSyncWorker`].
+    pub fn new(infra: Infra, sync: ConnectionSyncService) -> Self {
+        Self { infra, sync }
     }
 
     /// Reaps stale runs, then drives the scheduler tick and the job consumer
