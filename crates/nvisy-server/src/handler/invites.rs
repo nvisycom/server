@@ -16,7 +16,7 @@ use nvisy_postgres::query::{
     AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
     WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::NotificationEvent;
+use nvisy_postgres::types::WorkspaceRole;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
@@ -29,9 +29,10 @@ use crate::handler::request::{
 };
 use crate::handler::response::{
     ErrorResponse, Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
+    MemberInvitedParams, MemberJoinedParams, NotificationPayload,
 };
 use crate::handler::{ErrorKind, Result};
-use crate::service::ServiceState;
+use crate::service::{NotificationEmitter, ServiceState};
 
 /// Tracing target for workspace invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::invites";
@@ -80,6 +81,7 @@ pub struct CreatedInvite {
 pub async fn create_invite(
     conn: &mut PgConn,
     workspace_id: Uuid,
+    workspace_slug: &str,
     actor_id: Uuid,
     request: &CreateInvite,
 ) -> Result<InviteOutcome> {
@@ -114,14 +116,15 @@ pub async fn create_invite(
         .transaction(async |conn| {
             let invite = conn.create_workspace_invite(new_invite).await?;
 
+            let (notify_type, params) = NotificationPayload::MemberInvited(MemberInvitedParams {
+                workspace_slug: workspace_slug.to_owned(),
+                invited_by: None,
+            })
+            .into_stored();
             conn.create_account_notification(NewAccountNotification {
                 account_id,
-                notify_type: NotificationEvent::MemberInvited,
-                title: "Workspace invitation".to_owned(),
-                message: "You've been invited to join a workspace.".to_owned(),
-                related_id: Some(invite.id),
-                related_type: Some("workspace_invite".to_owned()),
-                metadata: None,
+                notify_type,
+                params: Some(params),
                 expires_at: None,
             })
             .await?;
@@ -165,7 +168,15 @@ async fn send_invite(
         .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
         .await?;
 
-    match create_invite(&mut conn, workspace.id, auth_state.account_id, &request).await? {
+    match create_invite(
+        &mut conn,
+        workspace.id,
+        workspace.slug.as_str(),
+        auth_state.account_id,
+        &request,
+    )
+    .await?
+    {
         InviteOutcome::Created(created) => {
             tracing::info!(
                 target: TRACING_TARGET,
@@ -315,6 +326,7 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn reply_to_invite(
     State(pg_client): State<PgClient>,
+    State(notification_emitter): State<NotificationEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<InvitePathParams>,
@@ -338,6 +350,25 @@ async fn reply_to_invite(
             accept_invite_as_member(&mut conn, &invite, auth_state.account_id).await?;
 
         tracing::info!(target: TRACING_TARGET, "Invitation accepted");
+
+        // Notify the workspace's owners and admins that a new member joined,
+        // excluding the joiner themselves (best-effort).
+        let payload = NotificationPayload::MemberJoined(MemberJoinedParams {
+            workspace_slug: workspace.slug.to_string(),
+            member_username: account.username.to_string(),
+        });
+        if let Err(err) = notification_emitter
+            .notify_workspace_roles(
+                workspace.id,
+                &[WorkspaceRole::Owner, WorkspaceRole::Admin],
+                Some(auth_state.account_id),
+                payload,
+            )
+            .await
+        {
+            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to create member-joined notifications");
+        }
+
         Ok((
             StatusCode::CREATED,
             Json(Some(Member::from_model(workspace_member, account))),

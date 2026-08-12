@@ -22,6 +22,13 @@ pub trait AccountNotificationRepository {
         new_notification: NewAccountNotification,
     ) -> impl Future<Output = PgResult<AccountNotification>> + Send;
 
+    /// Creates many account notifications in one statement, returning the number
+    /// inserted. Used to fan a broadcast out to its recipients in a single query.
+    fn create_account_notifications(
+        &mut self,
+        new_notifications: Vec<NewAccountNotification>,
+    ) -> impl Future<Output = PgResult<usize>> + Send;
+
     /// Lists account notifications with offset pagination.
     ///
     /// Excludes expired notifications, ordered by creation date.
@@ -85,6 +92,23 @@ impl AccountNotificationRepository for PgConnection {
             .values(&new_notification)
             .returning(AccountNotification::as_returning())
             .get_result(self)
+            .await
+            .map_err(PgError::from)
+    }
+
+    async fn create_account_notifications(
+        &mut self,
+        new_notifications: Vec<NewAccountNotification>,
+    ) -> PgResult<usize> {
+        use schema::account_notifications;
+
+        if new_notifications.is_empty() {
+            return Ok(0);
+        }
+
+        diesel::insert_into(account_notifications::table)
+            .values(&new_notifications)
+            .execute(self)
             .await
             .map_err(PgError::from)
     }

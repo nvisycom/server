@@ -7,6 +7,7 @@ pub mod crypto;
 mod detection;
 pub mod engine;
 mod health;
+mod notification;
 mod object;
 mod retention;
 mod security;
@@ -31,6 +32,7 @@ pub use crate::service::detection::{
 pub(crate) use crate::service::detection::{fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
+pub use crate::service::notification::NotificationEmitter;
 pub use crate::service::object::ObjectService;
 pub use crate::service::retention::RetentionWorker;
 pub use crate::service::security::{
@@ -68,6 +70,7 @@ pub struct ServiceState {
     pub detection: DetectionService,
     pub connection_sync: ConnectionSyncService,
     pub health_cache: HealthCache,
+    pub notification_emitter: NotificationEmitter,
     pub object: ObjectService,
     pub password: PasswordService,
     pub session_keys: SessionKeys,
@@ -96,6 +99,7 @@ impl ServiceState {
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
         let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
+        let notification_emitter = NotificationEmitter::new(postgres_client.clone());
 
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
             Arc::new(postgres_client.clone()),
@@ -113,6 +117,7 @@ impl ServiceState {
             crypto.clone(),
             object.clone(),
             webhook_emitter.clone(),
+            notification_emitter.clone(),
             sync_config,
         );
 
@@ -129,6 +134,7 @@ impl ServiceState {
             detection,
             connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
+            notification_emitter,
             object,
             password: PasswordService::new(),
             session_keys,
@@ -173,6 +179,7 @@ impl ServiceState {
             self.engine.clone(),
             self.blob.clone(),
             self.webhook_emitter.clone(),
+            self.notification_emitter.clone(),
             self.detection.clone(),
         )
     }
@@ -224,6 +231,7 @@ impl_di!(
     crypto: CryptoService,
     engine: EngineService,
     health_cache: HealthCache,
+    notification_emitter: NotificationEmitter,
     object: ObjectService,
     password: PasswordService,
     session_keys: SessionKeys,

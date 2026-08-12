@@ -16,22 +16,14 @@ pub struct AccountNotification {
     pub id: Uuid,
     /// Account receiving the notification.
     pub account_id: Uuid,
-    /// Type of notification.
+    /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
-    /// Notification title.
-    pub title: String,
-    /// Notification message.
-    pub message: String,
     /// Whether notification has been read.
     pub is_read: bool,
     /// Timestamp when notification was read.
     pub read_at: Option<Timestamp>,
-    /// ID of related entity (document, member, etc.).
-    pub related_id: Option<Uuid>,
-    /// Type of related entity.
-    pub related_type: Option<String>,
-    /// Additional notification data.
-    pub metadata: serde_json::Value,
+    /// Typed params for the notification type (the tagged payload's fields).
+    pub params: serde_json::Value,
     /// Notification creation timestamp.
     pub created_at: Timestamp,
     /// Optional expiration timestamp.
@@ -45,18 +37,10 @@ pub struct AccountNotification {
 pub struct NewAccountNotification {
     /// Account ID.
     pub account_id: Uuid,
-    /// Notification type.
+    /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
-    /// Notification title.
-    pub title: String,
-    /// Notification message.
-    pub message: String,
-    /// Related entity ID.
-    pub related_id: Option<Uuid>,
-    /// Related entity type.
-    pub related_type: Option<String>,
-    /// Metadata.
-    pub metadata: Option<serde_json::Value>,
+    /// Typed params for the notification type.
+    pub params: Option<serde_json::Value>,
     /// Expiration timestamp.
     pub expires_at: Option<Timestamp>,
 }
@@ -90,11 +74,6 @@ impl AccountNotification {
     /// Returns whether the notification is active (unread and not expired).
     pub fn is_active(&self) -> bool {
         !self.is_read && !self.is_expired()
-    }
-
-    /// Returns whether the notification has a related entity.
-    pub fn has_related_entity(&self) -> bool {
-        self.related_id.is_some()
     }
 
     /// Returns the time remaining until expiration.
@@ -147,9 +126,9 @@ impl AccountNotification {
         !self.is_expired() && (!self.is_read || self.is_system_notification())
     }
 
-    /// Returns whether the notification has custom metadata.
-    pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
+    /// Returns whether the notification carries typed params.
+    pub fn has_params(&self) -> bool {
+        !self.params.as_object().is_none_or(|obj| obj.is_empty())
     }
 
     /// Returns whether the notification requires action from the user.

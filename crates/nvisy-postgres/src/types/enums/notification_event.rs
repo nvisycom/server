@@ -8,29 +8,15 @@ use strum::{Display, EnumIter, EnumString};
 
 /// Defines the type of notification event sent to a user.
 ///
-/// This enumeration corresponds to the `NOTIFICATION_EVENT` PostgreSQL enum and is used
-/// for various user notifications including file, member, connection, and system events.
+/// This enumeration corresponds to the `NOTIFICATION_EVENT` PostgreSQL enum and
+/// is used for member, connection-sync, pipeline-run, and system notifications.
+/// The values mirror the [`WebhookEvent`](super::WebhookEvent) naming for the
+/// events the two channels share.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::NotificationEvent"]
 pub enum NotificationEvent {
-    // File events
-    /// File was uploaded
-    #[db_rename = "file:uploaded"]
-    #[serde(rename = "file:uploaded")]
-    FileUploaded,
-
-    /// File was downloaded
-    #[db_rename = "file:downloaded"]
-    #[serde(rename = "file:downloaded")]
-    FileDownloaded,
-
-    /// File verification completed
-    #[db_rename = "file:verified"]
-    #[serde(rename = "file:verified")]
-    FileVerified,
-
     // Member events
     /// User was invited to a workspace
     #[db_rename = "member:invited"]
@@ -42,16 +28,32 @@ pub enum NotificationEvent {
     #[serde(rename = "member:joined")]
     MemberJoined,
 
-    // Connection events
-    /// Connection sync completed
-    #[db_rename = "connection:synced"]
-    #[serde(rename = "connection:synced")]
-    ConnectionSynced,
+    // Connection sync events
+    /// A connection sync completed
+    #[db_rename = "connection:sync.completed"]
+    #[serde(rename = "connection:sync.completed")]
+    ConnectionSyncCompleted,
 
-    /// Connection sync failed or disconnected
-    #[db_rename = "connection:desynced"]
-    #[serde(rename = "connection:desynced")]
-    ConnectionDesynced,
+    /// A connection sync failed
+    #[db_rename = "connection:sync.failed"]
+    #[serde(rename = "connection:sync.failed")]
+    ConnectionSyncFailed,
+
+    // Pipeline run events
+    /// A pipeline run finished detection and is awaiting review
+    #[db_rename = "pipeline:run.analyzed"]
+    #[serde(rename = "pipeline:run.analyzed")]
+    PipelineRunAnalyzed,
+
+    /// A pipeline run completed (redaction produced)
+    #[db_rename = "pipeline:run.completed"]
+    #[serde(rename = "pipeline:run.completed")]
+    PipelineRunCompleted,
+
+    /// A pipeline run failed
+    #[db_rename = "pipeline:run.failed"]
+    #[serde(rename = "pipeline:run.failed")]
+    PipelineRunFailed,
 
     // System events
     /// System-wide announcement
@@ -66,17 +68,6 @@ pub enum NotificationEvent {
 }
 
 impl NotificationEvent {
-    /// Returns whether this is a file-related event.
-    #[inline]
-    pub fn is_file_event(self) -> bool {
-        matches!(
-            self,
-            NotificationEvent::FileUploaded
-                | NotificationEvent::FileDownloaded
-                | NotificationEvent::FileVerified
-        )
-    }
-
     /// Returns whether this is a member-related event.
     #[inline]
     pub fn is_member_event(self) -> bool {
@@ -91,7 +82,18 @@ impl NotificationEvent {
     pub fn is_connection_event(self) -> bool {
         matches!(
             self,
-            NotificationEvent::ConnectionSynced | NotificationEvent::ConnectionDesynced
+            NotificationEvent::ConnectionSyncCompleted | NotificationEvent::ConnectionSyncFailed
+        )
+    }
+
+    /// Returns whether this is a pipeline-related event.
+    #[inline]
+    pub fn is_pipeline_event(self) -> bool {
+        matches!(
+            self,
+            NotificationEvent::PipelineRunAnalyzed
+                | NotificationEvent::PipelineRunCompleted
+                | NotificationEvent::PipelineRunFailed
         )
     }
 
@@ -107,13 +109,12 @@ impl NotificationEvent {
     /// Returns the event category as a string.
     pub fn category(&self) -> &'static str {
         match self {
-            NotificationEvent::FileUploaded
-            | NotificationEvent::FileDownloaded
-            | NotificationEvent::FileVerified => "file",
             NotificationEvent::MemberInvited | NotificationEvent::MemberJoined => "member",
-            NotificationEvent::ConnectionSynced | NotificationEvent::ConnectionDesynced => {
-                "connection"
-            }
+            NotificationEvent::ConnectionSyncCompleted
+            | NotificationEvent::ConnectionSyncFailed => "connection",
+            NotificationEvent::PipelineRunAnalyzed
+            | NotificationEvent::PipelineRunCompleted
+            | NotificationEvent::PipelineRunFailed => "pipeline",
             NotificationEvent::SystemAnnouncement | NotificationEvent::SystemReport => "system",
         }
     }

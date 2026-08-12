@@ -108,7 +108,15 @@ CREATE TABLE workspace_members (
 
     -- Notification preferences
     notify_via_email          BOOLEAN              NOT NULL DEFAULT FALSE,
-    notification_events_app   NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
+    -- In-app defaults to every event so members are notified out of the box;
+    -- a member narrows the set by replacing it. Keep this list in sync with the
+    -- NOTIFICATION_EVENT enum when it changes. Email stays opt-in (empty).
+    notification_events_app   NOTIFICATION_EVENT[] NOT NULL DEFAULT ARRAY[
+        'member:invited', 'member:joined',
+        'connection:sync.completed', 'connection:sync.failed',
+        'pipeline:run.analyzed', 'pipeline:run.completed', 'pipeline:run.failed',
+        'system:announcement', 'system:report'
+    ]::NOTIFICATION_EVENT[],
     notification_events_email NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
 
     -- Audit tracking

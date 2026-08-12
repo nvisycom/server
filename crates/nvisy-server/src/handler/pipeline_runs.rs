@@ -32,12 +32,14 @@ use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
     PipelineRunPathParams, PipelineRunsQuery, WorkspaceRunsQuery,
 };
-use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
+use crate::handler::response::{
+    ErrorResponse, NotificationPayload, PipelineRun, PipelineRunCompletedParams, PipelineRunsPage,
+};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    BlobService, CryptoService, DetectionJob, DetectionService, EngineService, RunStatusEvent,
-    ServiceState, WebhookEmitter, fail_run, resolve_policies,
+    BlobService, CryptoService, DetectionJob, DetectionService, EngineService, NotificationEmitter,
+    RunStatusEvent, ServiceState, WebhookEmitter, fail_run, resolve_policies,
 };
 
 /// Tracing target for pipeline run operations.
@@ -571,6 +573,7 @@ async fn redact_pipeline_run(
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     State(webhook_emitter): State<WebhookEmitter>,
+    State(notification_emitter): State<NotificationEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -667,6 +670,22 @@ async fn redact_pipeline_run(
 
     let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
     let files = conn.run_file_names(workspace.id, &run).await?;
+
+    // Notify the run's trigger that redaction completed (best-effort).
+    if let Err(err) = notification_emitter
+        .notify_account(
+            workspace.id,
+            run.account_id,
+            NotificationPayload::PipelineRunCompleted(PipelineRunCompletedParams {
+                run_id: run.id,
+                pipeline_slug: pipeline.slug.to_string(),
+                input_file_name: files.input.clone(),
+            }),
+        )
+        .await
+    {
+        tracing::warn!(target: TRACING_TARGET, error = %err, run_id = %run.id, "Failed to create run-completed notification");
+    }
 
     Ok((
         StatusCode::OK,

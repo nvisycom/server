@@ -80,14 +80,8 @@ impl From<AccountApiTokenConstraints> for Error<'static> {
 impl From<AccountNotificationConstraints> for Error<'static> {
     fn from(constraint: AccountNotificationConstraints) -> Self {
         let error = match constraint {
-            AccountNotificationConstraints::TitleLength => ErrorKind::BadRequest
-                .with_message("Notification title must be between 1 and 200 characters"),
-            AccountNotificationConstraints::MessageLength => ErrorKind::BadRequest
-                .with_message("Notification message must be between 1 and 1000 characters"),
-            AccountNotificationConstraints::RelatedTypeLength => ErrorKind::BadRequest
-                .with_message("Related type must be between 1 and 50 characters"),
-            AccountNotificationConstraints::MetadataSize => ErrorKind::BadRequest
-                .with_message("Notification metadata must be between 2 and 4096 bytes"),
+            AccountNotificationConstraints::ParamsSize => ErrorKind::BadRequest
+                .with_message("Notification params must be between 2 and 4096 bytes"),
             AccountNotificationConstraints::ExpiresAfterCreated => ErrorKind::BadRequest
                 .with_message("Notification expiration time must be after creation time"),
             AccountNotificationConstraints::ReadAfterCreated => ErrorKind::BadRequest
