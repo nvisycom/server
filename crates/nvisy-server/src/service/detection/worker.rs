@@ -15,16 +15,16 @@ use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, Works
 use nvisy_postgres::query::{
     WorkspaceFileRepository, WorkspacePipelineRunRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::{OcrPolicy, PipelineRunStatus, WorkspaceSettings};
+use nvisy_postgres::types::{
+    NotificationPayload, OcrPolicy, PipelineRunAnalyzedParams, PipelineRunFailedParams,
+    PipelineRunStatus, WorkspaceSettings,
+};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
 use super::support::{fail_run, resolve_policies};
 use crate::handler::request::PipelineDefinition;
-use crate::handler::response::{
-    NotificationPayload, PipelineRunAnalyzedParams, PipelineRunFailedParams,
-};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
     EngineService, Infra, NotificationEmitter, RunBlobStore, WebhookEmitter, Worker,

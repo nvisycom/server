@@ -2,11 +2,10 @@
 
 use nvisy_postgres::model::NewAccountNotification;
 use nvisy_postgres::query::{AccountNotificationRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::WorkspaceRole;
+use nvisy_postgres::types::{NotificationPayload, WorkspaceRole};
 use uuid::Uuid;
 
 use crate::Result;
-use crate::handler::response::NotificationPayload;
 use crate::service::Infra;
 
 /// Tracing target for notification emission.
@@ -46,7 +45,7 @@ impl NotificationEmitter {
         conn.create_account_notification(NewAccountNotification {
             account_id,
             notify_type: event,
-            params: Some(params),
+            params,
             expires_at: None,
         })
         .await?;
@@ -101,7 +100,7 @@ impl NotificationEmitter {
         conn.create_account_notification(NewAccountNotification {
             account_id,
             notify_type: event,
-            params: Some(params),
+            params,
             expires_at: None,
         })
         .await?;
@@ -136,7 +135,7 @@ impl NotificationEmitter {
             .map(|account_id| NewAccountNotification {
                 account_id,
                 notify_type: event,
-                params: Some(params.clone()),
+                params: params.clone(),
                 expires_at: None,
             })
             .collect();

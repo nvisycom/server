@@ -37,8 +37,7 @@ CREATE TABLE account_notifications (
     -- text is stored — the client renders the copy from the type and params.
     notify_type     NOTIFICATION_EVENT NOT NULL,
 
-    -- Status tracking
-    is_read         BOOLEAN          NOT NULL DEFAULT FALSE,
+    -- Read state: `read_at IS NULL` means unread; a timestamp means read.
     read_at         TIMESTAMPTZ      DEFAULT NULL,
 
     -- Typed params for the notification's type (the tagged payload's fields).
@@ -61,14 +60,14 @@ CREATE TABLE account_notifications (
 -- Create indexes for account notifications
 CREATE INDEX account_notifications_account_unread_idx
     ON account_notifications (account_id, created_at DESC)
-    WHERE is_read = FALSE;
+    WHERE read_at IS NULL;
 
 CREATE INDEX account_notifications_account_all_idx
     ON account_notifications (account_id, created_at DESC);
 
 CREATE INDEX account_notifications_type_idx
     ON account_notifications (account_id, notify_type, created_at DESC)
-    WHERE is_read = FALSE;
+    WHERE read_at IS NULL;
 
 CREATE INDEX account_notifications_cleanup_idx
     ON account_notifications (expires_at)
@@ -81,8 +80,7 @@ COMMENT ON TABLE account_notifications IS
 COMMENT ON COLUMN account_notifications.id IS 'Unique notification identifier';
 COMMENT ON COLUMN account_notifications.account_id IS 'Account receiving the notification';
 COMMENT ON COLUMN account_notifications.notify_type IS 'Notification type; the client-side localization key';
-COMMENT ON COLUMN account_notifications.is_read IS 'Whether notification has been read';
-COMMENT ON COLUMN account_notifications.read_at IS 'Timestamp when notification was read';
+COMMENT ON COLUMN account_notifications.read_at IS 'When the notification was read; NULL means unread';
 COMMENT ON COLUMN account_notifications.params IS 'Typed params for the notification type (JSON, 2B-4KB)';
 COMMENT ON COLUMN account_notifications.created_at IS 'Notification creation timestamp';
 COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration timestamp';

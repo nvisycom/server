@@ -9,7 +9,9 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_activities;
-use crate::types::{ActivityCategory, ActivityType, HasCreatedAt, HasSecurityContext};
+use crate::types::{
+    ActivityCategory, ActivityPayload, ActivityType, HasCreatedAt, HasSecurityContext, TypedJson,
+};
 
 /// Workspace activity log entry representing an action performed in a workspace.
 ///
@@ -29,10 +31,8 @@ pub struct WorkspaceActivity {
     pub account_id: Uuid,
     /// Type of activity performed.
     pub activity_type: ActivityType,
-    /// Human-readable description of the activity.
-    pub description: String,
-    /// Additional structured metadata about the activity.
-    pub metadata: serde_json::Value,
+    /// The self-describing tagged payload (its `activityType` + params).
+    pub params: TypedJson<ActivityPayload>,
     /// IP address from which the activity originated.
     pub ip_address: Option<IpNet>,
     /// User agent string of the client that performed the activity.
@@ -45,7 +45,7 @@ pub struct WorkspaceActivity {
 ///
 /// Contains all the necessary information to log a new activity in the workspace
 /// activity log. The ID and creation timestamp are automatically generated.
-#[derive(Debug, Default, Clone, Insertable)]
+#[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_activities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewWorkspaceActivity {
@@ -55,10 +55,8 @@ pub struct NewWorkspaceActivity {
     pub account_id: Uuid,
     /// Type of activity being logged.
     pub activity_type: ActivityType,
-    /// Human-readable description of what occurred.
-    pub description: Option<String>,
-    /// Additional structured data about the activity.
-    pub metadata: Option<serde_json::Value>,
+    /// The self-describing tagged payload (its `activityType` + params).
+    pub params: TypedJson<ActivityPayload>,
     /// IP address of the client that initiated the activity.
     pub ip_address: Option<IpNet>,
     /// User agent string from the client request.
@@ -66,9 +64,9 @@ pub struct NewWorkspaceActivity {
 }
 
 impl WorkspaceActivity {
-    /// Returns whether the activity has additional metadata.
-    pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
+    /// Returns whether the activity carries typed params.
+    pub fn has_params(&self) -> bool {
+        !self.params.is_empty()
     }
 
     /// Returns whether the activity has location information.
@@ -108,15 +106,6 @@ impl WorkspaceActivity {
             self.category(),
             ActivityCategory::Workspace | ActivityCategory::Connection
         )
-    }
-
-    /// Returns a truncated summary of the activity description.
-    pub fn summary(&self) -> String {
-        if self.description.len() > 100 {
-            format!("{}...", &self.description[..97])
-        } else {
-            self.description.clone()
-        }
     }
 
     /// Returns whether this activity requires special audit attention.

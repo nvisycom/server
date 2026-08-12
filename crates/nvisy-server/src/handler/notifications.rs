@@ -43,7 +43,7 @@ async fn list_notifications(
         .cursor_list_account_notifications(auth_state.account_id, pagination.into())
         .await?;
 
-    let response = NotificationsPage::filter_from_cursor_page(page, Notification::from_model);
+    let response = NotificationsPage::from_cursor_page(page, Notification::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,

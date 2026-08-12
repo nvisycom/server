@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
 use crate::types::{
-    AccountRefRow, ActivityType, CursorPage, CursorPagination, OffsetPagination, WithAccountRef,
+    AccountRefRow, ActivityPayload, ActivityType, CursorPage, CursorPagination, OffsetPagination,
+    TypedJson, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -21,10 +22,8 @@ pub struct LogEntityActivityParams {
     pub account_id: Uuid,
     /// The type of activity being logged.
     pub activity_type: ActivityType,
-    /// Human-readable description.
-    pub description: String,
-    /// Structured metadata with activity details.
-    pub metadata: serde_json::Value,
+    /// The self-describing tagged payload (its `activityType` + params).
+    pub params: TypedJson<ActivityPayload>,
     /// Client IP address.
     pub ip_address: Option<IpNet>,
     /// Client user agent string.
@@ -303,8 +302,7 @@ impl WorkspaceActivityRepository for PgConnection {
             workspace_id,
             account_id: params.account_id,
             activity_type: params.activity_type,
-            description: Some(params.description),
-            metadata: Some(params.metadata),
+            params: params.params,
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -321,8 +319,7 @@ impl WorkspaceActivityRepository for PgConnection {
             workspace_id,
             account_id: params.account_id,
             activity_type: params.activity_type,
-            description: Some(params.description),
-            metadata: Some(params.metadata),
+            params: params.params,
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };
@@ -339,8 +336,7 @@ impl WorkspaceActivityRepository for PgConnection {
             workspace_id,
             account_id: params.account_id,
             activity_type: params.activity_type,
-            description: Some(params.description),
-            metadata: Some(params.metadata),
+            params: params.params,
             ip_address: params.ip_address,
             user_agent: params.user_agent,
         };

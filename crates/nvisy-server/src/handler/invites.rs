@@ -16,7 +16,9 @@ use nvisy_postgres::query::{
     AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
     WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::WorkspaceRole;
+use nvisy_postgres::types::{
+    MemberInvitedParams, MemberJoinedParams, NotificationPayload, WorkspaceRole,
+};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
@@ -29,7 +31,6 @@ use crate::handler::request::{
 };
 use crate::handler::response::{
     ErrorResponse, Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
-    MemberInvitedParams, MemberJoinedParams, NotificationPayload,
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::{NotificationEmitter, ServiceState};
@@ -124,7 +125,7 @@ pub async fn create_invite(
             conn.create_account_notification(NewAccountNotification {
                 account_id,
                 notify_type,
-                params: Some(params),
+                params,
                 expires_at: None,
             })
             .await?;

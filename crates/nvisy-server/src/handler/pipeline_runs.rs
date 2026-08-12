@@ -20,7 +20,9 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, RunFiles, WorkspaceFileRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository,
 };
-use nvisy_postgres::types::{PipelineRunStatus, WorkspaceSettings};
+use nvisy_postgres::types::{
+    NotificationPayload, PipelineRunCompletedParams, PipelineRunStatus, WorkspaceSettings,
+};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -32,9 +34,7 @@ use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
     PipelineRunPathParams, PipelineRunsQuery, WorkspaceRunsQuery,
 };
-use crate::handler::response::{
-    ErrorResponse, NotificationPayload, PipelineRun, PipelineRunCompletedParams, PipelineRunsPage,
-};
+use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{

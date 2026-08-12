@@ -18,15 +18,15 @@ use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile
 use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::{FileKind, SyncDeletionPolicy, WorkspaceSettings};
+use nvisy_postgres::types::{
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, FileKind, NotificationPayload,
+    SyncDeletionPolicy, WorkspaceSettings,
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
-use crate::handler::response::{
-    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, NotificationPayload,
-};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
     ExternalObjectStore, HashingReader, Infra, Measurements, NotificationEmitter, WebhookEmitter,
