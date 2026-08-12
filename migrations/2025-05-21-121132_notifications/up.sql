@@ -32,13 +32,10 @@ CREATE TABLE account_notifications (
     -- References
     account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
-    -- Notification details
+    -- Notification details. The type is the client-side localization key; the
+    -- params carry its typed fields (a `notifyType`-tagged payload). No rendered
+    -- text is stored — the client renders the copy from the type and params.
     notify_type     NOTIFICATION_EVENT NOT NULL,
-    title           TEXT             NOT NULL,
-    message         TEXT             NOT NULL,
-
-    CONSTRAINT account_notifications_title_length CHECK (length(trim(title)) BETWEEN 1 AND 200),
-    CONSTRAINT account_notifications_message_length CHECK (length(trim(message)) BETWEEN 1 AND 1000),
 
     -- Status tracking
     is_read         BOOLEAN          NOT NULL DEFAULT FALSE,
@@ -52,10 +49,10 @@ CREATE TABLE account_notifications (
         related_type IS NULL OR length(trim(related_type)) BETWEEN 1 AND 50
     ),
 
-    -- Additional data
-    metadata        JSONB            NOT NULL DEFAULT '{}',
+    -- Typed params for the notification's type (the tagged payload's fields).
+    params          JSONB            NOT NULL DEFAULT '{}',
 
-    CONSTRAINT account_notifications_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 4096),
+    CONSTRAINT account_notifications_params_size CHECK (length(params::TEXT) BETWEEN 2 AND 4096),
 
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
@@ -95,14 +92,12 @@ COMMENT ON TABLE account_notifications IS
 
 COMMENT ON COLUMN account_notifications.id IS 'Unique notification identifier';
 COMMENT ON COLUMN account_notifications.account_id IS 'Account receiving the notification';
-COMMENT ON COLUMN account_notifications.notify_type IS 'Type of notification';
-COMMENT ON COLUMN account_notifications.title IS 'Notification title (1-200 chars)';
-COMMENT ON COLUMN account_notifications.message IS 'Notification message (1-1000 chars)';
+COMMENT ON COLUMN account_notifications.notify_type IS 'Notification type; the client-side localization key';
 COMMENT ON COLUMN account_notifications.is_read IS 'Whether notification has been read';
 COMMENT ON COLUMN account_notifications.read_at IS 'Timestamp when notification was read';
 COMMENT ON COLUMN account_notifications.related_id IS 'ID of related entity (comment, document, etc.)';
 COMMENT ON COLUMN account_notifications.related_type IS 'Type of related entity';
-COMMENT ON COLUMN account_notifications.metadata IS 'Additional notification data (JSON, 2B-4KB)';
+COMMENT ON COLUMN account_notifications.params IS 'Typed params for the notification type (JSON, 2B-4KB)';
 COMMENT ON COLUMN account_notifications.created_at IS 'Notification creation timestamp';
 COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration timestamp';
 

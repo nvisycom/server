@@ -23,8 +23,13 @@ use super::job::DetectionJob;
 use super::service::DetectionService;
 use super::support::{fail_run, resolve_policies};
 use crate::handler::request::PipelineDefinition;
+use crate::handler::response::{
+    NotificationPayload, PipelineRunAnalyzedParams, PipelineRunFailedParams,
+};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{BlobService, CryptoService, EngineService, WebhookEmitter};
+use crate::service::{
+    BlobService, CryptoService, EngineService, NotificationEmitter, WebhookEmitter,
+};
 
 /// Tracing target for detection worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
@@ -43,6 +48,7 @@ pub struct DetectionWorker {
     engine: EngineService,
     blob: BlobService,
     webhook_emitter: WebhookEmitter,
+    notification_emitter: NotificationEmitter,
     detection: DetectionService,
 }
 
@@ -55,6 +61,7 @@ impl DetectionWorker {
         engine: EngineService,
         blob: BlobService,
         webhook_emitter: WebhookEmitter,
+        notification_emitter: NotificationEmitter,
         detection: DetectionService,
     ) -> Self {
         Self {
@@ -64,6 +71,7 @@ impl DetectionWorker {
             engine,
             blob,
             webhook_emitter,
+            notification_emitter,
             detection,
         }
     }
@@ -206,8 +214,32 @@ impl DetectionWorker {
                 &err.to_string(),
             )
             .await;
+
+            let payload = NotificationPayload::PipelineRunFailed(PipelineRunFailedParams {
+                run_id: run.id,
+                pipeline_slug: pipeline.slug.to_string(),
+                input_file_name: None,
+                error: Some(err.to_string()),
+            });
+            self.notify(job.workspace_id, run.account_id, payload).await;
         }
         JobOutcome::Done
+    }
+
+    /// Notifies the run's triggering account, logging (never failing) on error.
+    async fn notify(
+        &self,
+        workspace_id: uuid::Uuid,
+        account_id: uuid::Uuid,
+        payload: NotificationPayload,
+    ) {
+        if let Err(err) = self
+            .notification_emitter
+            .notify_account(workspace_id, account_id, payload)
+            .await
+        {
+            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to create notification");
+        }
     }
 
     /// Performs the analysis and records the run as `Analyzed`.
@@ -284,6 +316,13 @@ impl DetectionWorker {
         {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to emit pipeline:run.analyzed webhook event");
         }
+
+        let payload = NotificationPayload::PipelineRunAnalyzed(PipelineRunAnalyzedParams {
+            run_id: run.id,
+            pipeline_slug: pipeline.slug.to_string(),
+            input_file_name: Some(file.display_name.clone()),
+        });
+        self.notify(job.workspace_id, run.account_id, payload).await;
 
         Ok(())
     }

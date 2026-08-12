@@ -125,4 +125,20 @@ impl<T> Page<T> {
             next_cursor: page.next_cursor,
         })
     }
+
+    /// Creates a page from a cursor page, mapping items and dropping any that map
+    /// to `None` (e.g. a stored row whose shape no longer decodes).
+    ///
+    /// The cursor and total reflect the source page; only the rendered items are
+    /// filtered, so pagination still advances past a skipped row.
+    pub fn filter_from_cursor_page<M, F>(page: CursorPage<M>, f: F) -> Self
+    where
+        F: FnMut(M) -> Option<T>,
+    {
+        Self {
+            items: page.items.into_iter().filter_map(f).collect(),
+            total: page.total,
+            next_cursor: page.next_cursor,
+        }
+    }
 }

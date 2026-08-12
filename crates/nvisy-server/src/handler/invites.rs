@@ -16,7 +16,6 @@ use nvisy_postgres::query::{
     AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
     WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::NotificationEvent;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
 
@@ -29,6 +28,7 @@ use crate::handler::request::{
 };
 use crate::handler::response::{
     ErrorResponse, Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
+    MemberInvitedParams, NotificationPayload,
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::ServiceState;
@@ -80,6 +80,7 @@ pub struct CreatedInvite {
 pub async fn create_invite(
     conn: &mut PgConn,
     workspace_id: Uuid,
+    workspace_slug: &str,
     actor_id: Uuid,
     request: &CreateInvite,
 ) -> Result<InviteOutcome> {
@@ -114,14 +115,17 @@ pub async fn create_invite(
         .transaction(async |conn| {
             let invite = conn.create_workspace_invite(new_invite).await?;
 
+            let (notify_type, params) = NotificationPayload::MemberInvited(MemberInvitedParams {
+                workspace_slug: workspace_slug.to_owned(),
+                invited_by: None,
+            })
+            .into_stored();
             conn.create_account_notification(NewAccountNotification {
                 account_id,
-                notify_type: NotificationEvent::MemberInvited,
-                title: "Workspace invitation".to_owned(),
-                message: "You've been invited to join a workspace.".to_owned(),
+                notify_type,
                 related_id: Some(invite.id),
                 related_type: Some("workspace_invite".to_owned()),
-                metadata: None,
+                params: Some(params),
                 expires_at: None,
             })
             .await?;
@@ -165,7 +169,15 @@ async fn send_invite(
         .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
         .await?;
 
-    match create_invite(&mut conn, workspace.id, auth_state.account_id, &request).await? {
+    match create_invite(
+        &mut conn,
+        workspace.id,
+        workspace.slug.as_str(),
+        auth_state.account_id,
+        &request,
+    )
+    .await?
+    {
         InviteOutcome::Created(created) => {
             tracing::info!(
                 target: TRACING_TARGET,

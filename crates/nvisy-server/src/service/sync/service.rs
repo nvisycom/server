@@ -26,8 +26,13 @@ use uuid::Uuid;
 
 use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
+use crate::handler::response::{
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, NotificationPayload,
+};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{CryptoService, HashingReader, Measurements, ObjectService, WebhookEmitter};
+use crate::service::{
+    CryptoService, HashingReader, Measurements, NotificationEmitter, ObjectService, WebhookEmitter,
+};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::sync";
@@ -50,6 +55,7 @@ pub struct ConnectionSyncService {
     crypto: CryptoService,
     object: ObjectService,
     webhook: WebhookEmitter,
+    notification: NotificationEmitter,
     /// Maximum objects imported concurrently within a single sync.
     import_concurrency: usize,
     // Cancellation tokens for transfers running in this process, keyed by run id.
@@ -67,6 +73,7 @@ impl ConnectionSyncService {
         crypto: CryptoService,
         object: ObjectService,
         webhook: WebhookEmitter,
+        notification: NotificationEmitter,
         config: SyncConfig,
     ) -> Self {
         Self {
@@ -75,6 +82,7 @@ impl ConnectionSyncService {
             crypto,
             object,
             webhook,
+            notification,
             import_concurrency: config.import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -506,7 +514,7 @@ impl ConnectionSyncService {
                     ),
                 };
 
-                self.finish_run(run_id, result).await;
+                self.finish_run(run_id, result.clone()).await;
 
                 let (succeeded, data) = sync_event;
                 let _ = if succeeded {
@@ -528,6 +536,29 @@ impl ConnectionSyncService {
                         )
                         .await
                 };
+
+                // Notify the connection owner (best-effort).
+                let payload = match &result {
+                    Ok(records_synced) => NotificationPayload::ConnectionSyncCompleted(
+                        ConnectionSyncCompletedParams {
+                            connection_id,
+                            records_synced: Some(*records_synced as i64),
+                        },
+                    ),
+                    Err(err) => {
+                        NotificationPayload::ConnectionSyncFailed(ConnectionSyncFailedParams {
+                            connection_id,
+                            error: Some(err.message().unwrap_or("Sync failed").to_owned()),
+                        })
+                    }
+                };
+                if let Err(err) = self
+                    .notification
+                    .notify_account(workspace_id, account_id, payload)
+                    .await
+                {
+                    tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to create sync notification");
+                }
             }
             Outcome::Cancelled => self.cancel_run(run_id).await,
         }
