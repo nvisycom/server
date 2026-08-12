@@ -23,7 +23,7 @@ use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, WorkspaceC
 use crate::handler::request::PipelineRunPathParams;
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{BlobService, ServiceState};
+use crate::service::{RunBlobStore, ServiceState};
 
 /// Tracing target for pipeline audit operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::audits";
@@ -42,7 +42,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::audits";
 )]
 async fn get_pipeline_run_analysis(
     State(pg_client): State<PgClient>,
-    State(blob): State<BlobService>,
+    State(blob): State<RunBlobStore>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -91,7 +91,7 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
 )]
 async fn download_pipeline_run_audit_json(
     State(pg_client): State<PgClient>,
-    State(blob): State<BlobService>,
+    State(blob): State<RunBlobStore>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -151,7 +151,7 @@ fn download_pipeline_run_audit_json_docs(op: TransformOperation) -> TransformOpe
 )]
 async fn download_pipeline_run_audit_csv(
     State(pg_client): State<PgClient>,
-    State(blob): State<BlobService>,
+    State(blob): State<RunBlobStore>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,

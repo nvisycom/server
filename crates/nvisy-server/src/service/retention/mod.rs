@@ -4,8 +4,8 @@
 //! The retention *rules* are value types in
 //! [`nvisy_postgres::types`](nvisy_postgres::types) (`Retention`,
 //! `RetentionSettings`, `RetentionOverride`, `RetentionScope`); this module holds
-//! only the [`RetentionWorker`] that acts on them.
+//! only the [`FileRetentionWorker`] that acts on them.
 
 mod worker;
 
-pub use worker::RetentionWorker;
+pub use worker::FileRetentionWorker;

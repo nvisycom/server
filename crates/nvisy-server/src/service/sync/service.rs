@@ -11,11 +11,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use futures::stream::{self, StreamExt};
-use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectBucket};
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::StorageConfig;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
 use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
@@ -31,7 +29,7 @@ use crate::handler::response::{
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    CryptoService, HashingReader, Measurements, NotificationEmitter, ObjectService, WebhookEmitter,
+    ExternalObjectStore, HashingReader, Infra, Measurements, NotificationEmitter, WebhookEmitter,
 };
 
 /// Tracing target for connection sync operations.
@@ -50,10 +48,8 @@ enum Outcome {
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
 pub struct ConnectionSyncService {
-    postgres: PgClient,
-    nats: NatsClient,
-    crypto: CryptoService,
-    object: ObjectService,
+    infra: Infra,
+    object: ExternalObjectStore,
     webhook: WebhookEmitter,
     notification: NotificationEmitter,
     /// Maximum objects imported concurrently within a single sync.
@@ -68,18 +64,14 @@ pub struct ConnectionSyncService {
 impl ConnectionSyncService {
     /// Creates a new [`ConnectionSyncService`].
     pub fn new(
-        postgres: PgClient,
-        nats: NatsClient,
-        crypto: CryptoService,
-        object: ObjectService,
+        infra: Infra,
+        object: ExternalObjectStore,
         webhook: WebhookEmitter,
         notification: NotificationEmitter,
         config: SyncConfig,
     ) -> Self {
         Self {
-            postgres,
-            nats,
-            crypto,
+            infra,
             object,
             webhook,
             notification,
@@ -136,7 +128,7 @@ impl ConnectionSyncService {
             .map(|o| o.location.as_ref().to_owned())
             .collect();
 
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let already_imported: HashSet<String> = conn
             .imported_keys_for_connection(connection.id)
             .await?
@@ -218,7 +210,7 @@ impl ConnectionSyncService {
         }
 
         let imported = {
-            let mut conn = match self.postgres.get_connection().await {
+            let mut conn = match self.infra.postgres.get_connection().await {
                 Ok(conn) => conn,
                 Err(err) => {
                     tracing::error!(target: TRACING_TARGET, error = %err, "Failed to list imported files for reconciliation");
@@ -265,11 +257,11 @@ impl ConnectionSyncService {
     /// best-effort: the row is already tombstoned, so a failure only leaves an
     /// orphaned object, which is logged.
     async fn remove_vanished_file(&self, file_id: Uuid, storage_path: &str) -> Result<()> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         conn.delete_workspace_file(file_id).await?;
 
         if let Ok(file_key) = FileKey::from_str(storage_path) {
-            let store = self.nats.object_store::<FilesBucket>().await?;
+            let store = self.infra.nats.object_store::<FilesBucket>().await?;
             if let Err(err) = store.delete(&file_key).await {
                 tracing::error!(
                     target: TRACING_TARGET,
@@ -300,11 +292,12 @@ impl ConnectionSyncService {
         let source = client.get_stream(remote_key).await?;
         let (measured, measurements) = HashingReader::new(stream_to_reader(source));
         let ciphertext = Box::pin(
-            self.crypto
+            self.infra
+                .crypto
                 .encrypt_reader(connection.workspace_id, measured),
         );
 
-        let store = self.nats.object_store::<FilesBucket>().await?;
+        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let file_key = FileKey::generate(connection.workspace_id);
         store.put(&file_key, ciphertext).await?;
 
@@ -347,7 +340,7 @@ impl ConnectionSyncService {
         measurements: &Measurements,
         expires_at: Option<jiff::Timestamp>,
     ) -> Result<WorkspaceFile> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let filename = object_basename(remote_key);
         let extension = object_extension(remote_key);
 
@@ -391,7 +384,7 @@ impl ConnectionSyncService {
 
         let client = self.object.connect(config).await?;
 
-        let store = self.nats.object_store::<FilesBucket>().await?;
+        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid file storage path")
@@ -403,7 +396,8 @@ impl ConnectionSyncService {
 
         // NATS ciphertext reader -> decrypt -> external multipart upload.
         let plaintext = Box::pin(
-            self.crypto
+            self.infra
+                .crypto
                 .decrypt_reader(connection.workspace_id, stored.into_reader()),
         );
         let body = reader_to_stream(plaintext);
@@ -570,7 +564,7 @@ impl ConnectionSyncService {
     /// Errors updating the run are logged rather than propagated, since this
     /// runs after the response has already been sent.
     pub async fn finish_run(&self, run_id: Uuid, result: Result<u64>) {
-        let mut conn = match self.postgres.get_connection().await {
+        let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
                 tracing::error!(
@@ -611,7 +605,7 @@ impl ConnectionSyncService {
     /// guarded, so if the cancel handler already flipped the row (or it reached
     /// another terminal state first) this is a harmless no-op.
     async fn cancel_run(&self, run_id: Uuid) {
-        let mut conn = match self.postgres.get_connection().await {
+        let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record cancellation: no connection");

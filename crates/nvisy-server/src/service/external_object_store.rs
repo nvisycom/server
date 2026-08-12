@@ -2,14 +2,14 @@
 //!
 //! Bridges stored workspace connections to the [`nvisy_object`] providers: a
 //! connection carries an encrypted, typed [`StorageConfig`](nvisy_object::providers::StorageConfig),
-//! which [`ObjectService`] turns into a connected client at runtime. The sync
+//! which [`ExternalObjectStore`] turns into a connected client at runtime. The sync
 //! orchestration built on top lives in the [`sync`](crate::service::sync) module.
 
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::{self, StorageConfig};
 
 /// Tracing target for object storage operations.
-const TRACING_TARGET: &str = "nvisy_server::service::object";
+const TRACING_TARGET: &str = "nvisy_server::service::external_object_store";
 
 /// Connects workspace connections to their object storage backends.
 ///
@@ -17,10 +17,10 @@ const TRACING_TARGET: &str = "nvisy_server::service::object";
 /// builds a fresh client per request from the caller's credentials.
 #[derive(Clone, Default)]
 #[must_use = "service does nothing unless you use it"]
-pub struct ObjectService;
+pub struct ExternalObjectStore;
 
-impl ObjectService {
-    /// Creates a new [`ObjectService`].
+impl ExternalObjectStore {
+    /// Creates a new [`ExternalObjectStore`].
     pub fn new() -> Self {
         Self
     }

@@ -1,15 +1,16 @@
 //! Application state and dependency injection.
 
 mod avatar;
-mod blob;
-mod connection;
+mod connection_config;
 pub mod crypto;
 mod detection;
 pub mod engine;
+mod external_object_store;
 mod health;
+mod infra;
 mod notification;
-mod object;
 mod retention;
+mod run_blob_store;
 mod security;
 mod sync;
 mod webhook;
@@ -22,19 +23,20 @@ use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
-pub use crate::service::blob::BlobService;
-pub use crate::service::connection::ConnectionConfig;
+pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{HashingReader, Measurements};
 pub use crate::service::detection::{
-    DetectionJob, DetectionService, DetectionWorker, RunStatusEvent, run_subject,
+    DetectionJob, DetectionQueue, DetectionWorker, RunStatusEvent, run_subject,
 };
 pub(crate) use crate::service::detection::{fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
+pub use crate::service::external_object_store::ExternalObjectStore;
 pub use crate::service::health::{HealthCache, HealthConfig};
+pub use crate::service::infra::Infra;
 pub use crate::service::notification::NotificationEmitter;
-pub use crate::service::object::ObjectService;
-pub use crate::service::retention::RetentionWorker;
+pub use crate::service::retention::FileRetentionWorker;
+pub use crate::service::run_blob_store::RunBlobStore;
 pub use crate::service::security::{
     PasswordService, SessionKeys, SessionKeysConfig, UserAgentParser,
 };
@@ -42,40 +44,44 @@ pub use crate::service::sync::{
     ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
     StandardCronSchedule, SyncConfig,
 };
-pub use crate::service::webhook::{WebhookEmitter, WebhookWorker};
+pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
 use crate::{Error, Result};
 
 /// Application state.
 ///
 /// Used for the [`State`] extraction (dependency injection).
 ///
+/// Only the services that carry live state (or wrap a config-loaded resource)
+/// are stored here; the stateless ones — [`AvatarService`], [`RunBlobStore`],
+/// [`DetectionQueue`], [`ExternalObjectStore`], [`WebhookEmitter`],
+/// [`NotificationEmitter`] — are not fields, but composed on demand from
+/// [`Infra`] in their [`FromRef`] impls (a pure move over `Arc`-backed handles).
+/// The two stateful singletons ([`ConnectionSyncService`]'s cancellation
+/// registry and [`HealthCache`]'s cached snapshot) must be shared, so they are
+/// stored.
+///
 /// [`State`]: axum::extract::State
+/// [`FromRef`]: axum::extract::FromRef
 #[derive(Clone)]
 #[must_use = "state does nothing unless you use it"]
 pub struct ServiceState {
-    // External services:
-    pub postgres: PgClient,
-    pub nats: NatsClient,
-    pub webhook: WebhookService,
+    // Shared infrastructure (Postgres, NATS, crypto):
+    pub infra: Infra,
 
-    // Security services:
-    pub crypto: CryptoService,
+    // External services:
+    pub webhook: WebhookService,
 
     // Redaction engine:
     pub engine: EngineService,
 
-    // Internal services:
-    pub avatar: AvatarService,
-    pub blob: BlobService,
-    pub detection: DetectionService,
+    // Stateful singletons:
     pub connection_sync: ConnectionSyncService,
     pub health_cache: HealthCache,
-    pub notification_emitter: NotificationEmitter,
-    pub object: ObjectService,
+
+    // Security services:
     pub password: PasswordService,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
-    pub webhook_emitter: WebhookEmitter,
 }
 
 impl ServiceState {
@@ -96,91 +102,70 @@ impl ServiceState {
         let nats_client = connect_nats(nats_config).await?;
 
         let crypto = CryptoService::from_config(&crypto_config).await?;
+        let infra = Infra::new(postgres_client, nats_client, crypto);
+
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
-        let webhook_emitter = WebhookEmitter::new(postgres_client.clone(), nats_client.clone());
-        let notification_emitter = NotificationEmitter::new(postgres_client.clone());
 
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
-            Arc::new(postgres_client.clone()),
-            Arc::new(nats_client.clone()),
+            Arc::new(infra.postgres.clone()),
+            Arc::new(infra.nats.clone()),
             Arc::new(webhook_service.clone()),
         ];
 
-        let object = ObjectService::new();
-        let blob = BlobService::new(nats_client.clone(), crypto.clone());
-        let detection = DetectionService::new(nats_client.clone());
-        let avatar = AvatarService::new(nats_client.clone(), postgres_client.clone());
+        // The stateful sync singleton composes the stateless emitters/object
+        // service from the same `Infra` their `FromRef` impls use.
         let connection_sync = ConnectionSyncService::new(
-            postgres_client.clone(),
-            nats_client.clone(),
-            crypto.clone(),
-            object.clone(),
-            webhook_emitter.clone(),
-            notification_emitter.clone(),
+            infra.clone(),
+            ExternalObjectStore::new(),
+            WebhookEmitter::new(infra.clone()),
+            NotificationEmitter::new(infra.clone()),
             sync_config,
         );
 
         let service_state = Self {
-            postgres: postgres_client,
-            nats: nats_client,
+            infra,
             webhook: webhook_service,
-
-            crypto,
             engine,
-
-            avatar,
-            blob,
-            detection,
             connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
-            notification_emitter,
-            object,
             password: PasswordService::new(),
             session_keys,
             user_agent_parser: UserAgentParser::new(),
-            webhook_emitter,
         };
 
         Ok(service_state)
     }
 
     /// Builds the webhook delivery worker from this state.
-    pub fn webhook_worker(&self) -> WebhookWorker {
-        WebhookWorker::new(
-            self.postgres.clone(),
-            self.nats.clone(),
-            self.crypto.clone(),
-            self.webhook.clone(),
-        )
+    pub fn webhook_worker(&self) -> WebhookDeliveryWorker {
+        WebhookDeliveryWorker::new(self.infra.clone(), self.webhook.clone())
     }
 
     /// Builds the connection sync worker from this state.
     pub fn connection_sync_worker(&self) -> ConnectionSyncWorker {
-        ConnectionSyncWorker::new(
-            self.postgres.clone(),
-            self.nats.clone(),
-            self.crypto.clone(),
-            self.connection_sync.clone(),
-        )
+        ConnectionSyncWorker::new(self.infra.clone(), self.connection_sync.clone())
     }
 
     /// Builds the data-retention worker from this state.
-    pub fn retention_worker(&self) -> RetentionWorker {
-        RetentionWorker::new(self.postgres.clone(), self.nats.clone())
+    pub fn retention_worker(&self) -> FileRetentionWorker {
+        FileRetentionWorker::new(self.infra.clone())
     }
 
-    /// Builds the pipeline detection worker from this state.
+    /// Builds the pipeline detection worker from this state. The stateless
+    /// collaborators are composed through the same [`FromRef`] wiring handlers
+    /// use.
+    ///
+    /// [`FromRef`]: axum::extract::FromRef
     pub fn detection_worker(&self) -> DetectionWorker {
+        use axum::extract::FromRef;
         DetectionWorker::new(
-            self.postgres.clone(),
-            self.nats.clone(),
-            self.crypto.clone(),
+            self.infra.clone(),
             self.engine.clone(),
-            self.blob.clone(),
-            self.webhook_emitter.clone(),
-            self.notification_emitter.clone(),
-            self.detection.clone(),
+            RunBlobStore::from_ref(self),
+            WebhookEmitter::from_ref(self),
+            NotificationEmitter::from_ref(self),
+            DetectionQueue::from_ref(self),
         )
     }
 }
@@ -205,8 +190,11 @@ async fn connect_nats(config: NatsConfig) -> Result<NatsClient> {
         .map_err(|e| Error::external("NATS", "Failed to connect to NATS").with_source(e))
 }
 
-macro_rules! impl_di {
-    ($($f:ident: $t:ty),+) => {$(
+/// Derives [`FromRef`] by cloning a stored [`ServiceState`] field.
+///
+/// [`FromRef`]: axum::extract::FromRef
+macro_rules! impl_di_field {
+    ($($f:ident: $t:ty),+ $(,)?) => {$(
         impl axum::extract::FromRef<ServiceState> for $t {
             fn from_ref(state: &ServiceState) -> Self {
                 state.$f.clone()
@@ -215,26 +203,66 @@ macro_rules! impl_di {
     )+};
 }
 
-// External services:
-impl_di!(
+/// Derives [`FromRef`] by composing a stateless service from [`Infra`]. The body
+/// is a pure move over `Arc`-backed handles, so per-request construction is free.
+///
+/// [`FromRef`]: axum::extract::FromRef
+macro_rules! impl_di_compose {
+    ($($t:ty => $ctor:expr),+ $(,)?) => {$(
+        impl axum::extract::FromRef<ServiceState> for $t {
+            fn from_ref(state: &ServiceState) -> Self {
+                let ctor: fn(Infra) -> $t = $ctor;
+                ctor(state.infra.clone())
+            }
+        }
+    )+};
+}
+
+/// Derives [`FromRef`] for a single ambient client by cloning it out of the
+/// shared [`Infra`].
+///
+/// [`FromRef`]: axum::extract::FromRef
+macro_rules! impl_di_infra {
+    ($($f:ident: $t:ty),+ $(,)?) => {$(
+        impl axum::extract::FromRef<ServiceState> for $t {
+            fn from_ref(state: &ServiceState) -> Self {
+                state.infra.$f.clone()
+            }
+        }
+    )+};
+}
+
+// The three ambient clients, resolved from the shared `Infra`:
+impl_di_infra!(
     postgres: PgClient,
     nats: NatsClient,
-    webhook: WebhookService
+    crypto: CryptoService,
 );
 
-// Internal services:
-impl_di!(
-    avatar: AvatarService,
-    blob: BlobService,
-    detection: DetectionService,
-    connection_sync: ConnectionSyncService,
-    crypto: CryptoService,
+// Stored fields (external services + stateful singletons + security):
+impl_di_field!(
+    infra: Infra,
+    webhook: WebhookService,
     engine: EngineService,
+    connection_sync: ConnectionSyncService,
     health_cache: HealthCache,
-    notification_emitter: NotificationEmitter,
-    object: ObjectService,
     password: PasswordService,
     session_keys: SessionKeys,
     user_agent_parser: UserAgentParser,
-    webhook_emitter: WebhookEmitter
 );
+
+// Stateless services, composed from `Infra` on extraction:
+impl_di_compose!(
+    AvatarService => AvatarService::new,
+    RunBlobStore => RunBlobStore::new,
+    DetectionQueue => DetectionQueue::new,
+    WebhookEmitter => WebhookEmitter::new,
+    NotificationEmitter => NotificationEmitter::new,
+);
+
+// `ExternalObjectStore` holds nothing at all:
+impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
+    fn from_ref(_state: &ServiceState) -> Self {
+        ExternalObjectStore::new()
+    }
+}

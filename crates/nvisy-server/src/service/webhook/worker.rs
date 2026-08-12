@@ -6,11 +6,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{EventStream, EventSubscriber, TypedMessage, WebhookStream};
+use nvisy_postgres::PgConn;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
-use nvisy_postgres::{PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
 use tokio_util::sync::CancellationToken;
@@ -18,7 +17,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::WebhookJob;
-use crate::service::CryptoService;
+use crate::service::Infra;
 use crate::{Error, Result};
 
 /// Type alias for webhook subscriber.
@@ -82,25 +81,16 @@ impl DeliveryOutcome {
 ///
 /// This worker subscribes to the `WEBHOOKS` NATS stream and delivers
 /// webhook payloads to external endpoints with HMAC-SHA256 signatures.
-pub struct WebhookWorker {
-    pg_client: PgClient,
-    nats_client: NatsClient,
-    crypto: CryptoService,
+pub struct WebhookDeliveryWorker {
+    infra: Infra,
     webhook_service: WebhookService,
 }
 
-impl WebhookWorker {
+impl WebhookDeliveryWorker {
     /// Create a new webhook worker.
-    pub fn new(
-        pg_client: PgClient,
-        nats_client: NatsClient,
-        crypto: CryptoService,
-        webhook_service: WebhookService,
-    ) -> Self {
+    pub fn new(infra: Infra, webhook_service: WebhookService) -> Self {
         Self {
-            pg_client,
-            nats_client,
-            crypto,
+            infra,
             webhook_service,
         }
     }
@@ -139,7 +129,7 @@ impl WebhookWorker {
 
     /// Internal run loop.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: WebhookSubscriber = self.nats_client.webhook_subscriber().await?;
+        let subscriber: WebhookSubscriber = self.infra.nats.webhook_subscriber().await?;
 
         let mut stream = subscriber.subscribe().await?;
 
@@ -192,7 +182,7 @@ impl WebhookWorker {
 
         let ack = match outcome {
             DeliveryOutcome::Delivered { webhook } => {
-                if let Ok(mut conn) = self.pg_client.get_connection().await {
+                if let Ok(mut conn) = self.infra.postgres.get_connection().await {
                     self.record_success(&mut conn, webhook.id).await;
                 }
                 true
@@ -205,7 +195,7 @@ impl WebhookWorker {
                     error = %error,
                     "Webhook delivery permanently failed"
                 );
-                if let Ok(mut conn) = self.pg_client.get_connection().await {
+                if let Ok(mut conn) = self.infra.postgres.get_connection().await {
                     self.record_failure(&mut conn, &webhook).await;
                 }
                 true
@@ -221,7 +211,7 @@ impl WebhookWorker {
                     // Record the single failure for this event now that no
                     // further redelivery will happen, then ack to drop it.
                     if let (Some(webhook), Ok(mut conn)) =
-                        (webhook, self.pg_client.get_connection().await)
+                        (webhook, self.infra.postgres.get_connection().await)
                     {
                         self.record_failure(&mut conn, &webhook).await;
                     }
@@ -261,7 +251,7 @@ impl WebhookWorker {
     /// run loop records it once the retry disposition is known, so a redelivered
     /// event is not counted as several distinct failures.
     async fn deliver(&self, job: &WebhookJob) -> DeliveryOutcome {
-        let mut conn = match self.pg_client.get_connection().await {
+        let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
                 // The webhook could not even be loaded; retry later.
@@ -444,6 +434,7 @@ impl WebhookWorker {
     /// Decrypts a webhook's stored signing secret under the workspace key.
     fn decrypt_secret(&self, webhook: &WorkspaceWebhook, workspace_id: Uuid) -> Result<String> {
         let plaintext = self
+            .infra
             .crypto
             .decrypt(workspace_id, &webhook.encrypted_secret)?;
         String::from_utf8(plaintext).map_err(|err| {

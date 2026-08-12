@@ -1,6 +1,5 @@
 //! In-app notification emitter.
 
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::NewAccountNotification;
 use nvisy_postgres::query::{AccountNotificationRepository, WorkspaceMemberRepository};
 use nvisy_postgres::types::WorkspaceRole;
@@ -8,26 +7,27 @@ use uuid::Uuid;
 
 use crate::Result;
 use crate::handler::response::NotificationPayload;
+use crate::service::Infra;
 
 /// Tracing target for notification emission.
 const TRACING_TARGET: &str = "nvisy_server::service::notification";
 
 /// Creates in-app notifications for domain events.
 ///
-/// Cheaply cloneable (holds only a [`PgClient`], which is `Arc`-backed). Each
-/// notification is a stored row of `notify_type` + typed params (the client
+/// Cheaply cloneable (holds the shared [`Infra`] clients, all `Arc`-backed).
+/// Each notification is a stored row of `notify_type` + typed params (the client
 /// localizes the copy); a member's `notification_events_app` preferences decide
 /// whether the event reaches them.
 #[derive(Clone)]
 #[must_use = "the emitter does nothing unless you notify with it"]
 pub struct NotificationEmitter {
-    pg_client: PgClient,
+    infra: Infra,
 }
 
 impl NotificationEmitter {
     /// Creates a new [`NotificationEmitter`].
-    pub fn new(pg_client: PgClient) -> Self {
-        Self { pg_client }
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
     }
 
     /// Notifies a single account unconditionally, without a workspace membership
@@ -42,7 +42,7 @@ impl NotificationEmitter {
         payload: NotificationPayload,
     ) -> Result<()> {
         let (event, params) = payload.into_stored();
-        let mut conn = self.pg_client.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         conn.create_account_notification(NewAccountNotification {
             account_id,
             notify_type: event,
@@ -72,7 +72,7 @@ impl NotificationEmitter {
     ) -> Result<bool> {
         let (event, params) = payload.into_stored();
 
-        let mut conn = self.pg_client.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
 
         // Respect the member's in-app preferences. An empty preference list means
         // "all events" (the column defaults to every event), so only a member who
@@ -125,7 +125,7 @@ impl NotificationEmitter {
     ) -> Result<usize> {
         let (event, params) = payload.into_stored();
 
-        let mut conn = self.pg_client.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let recipients = conn
             .notification_recipients_by_roles(workspace_id, roles, event)
             .await?;

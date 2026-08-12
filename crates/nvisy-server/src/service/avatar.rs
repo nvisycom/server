@@ -10,15 +10,14 @@
 use std::io::Cursor;
 
 use image::{ImageFormat, ImageReader};
-use nvisy_nats::NatsClient;
 use nvisy_nats::object::{AccountAvatarKey, WorkspaceAvatarKey};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, UpdateAccount, UpdateWorkspace};
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
+use crate::service::Infra;
 
 /// The content type of every stored avatar.
 pub const AVATAR_CONTENT_TYPE: &str = "image/webp";
@@ -38,14 +37,13 @@ const TARGET_DIMENSION: u32 = 512;
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
 pub struct AvatarService {
-    nats: NatsClient,
-    postgres: PgClient,
+    infra: Infra,
 }
 
 impl AvatarService {
     /// Creates a new [`AvatarService`].
-    pub fn new(nats: NatsClient, postgres: PgClient) -> Self {
-        Self { nats, postgres }
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
     }
 
     /// Normalizes and stores an account avatar as a new content-versioned object,
@@ -61,7 +59,7 @@ impl AvatarService {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
 
-        let store = self.nats.avatar_store().await?;
+        let store = self.infra.nats.avatar_store().await?;
         store
             .put(
                 &AccountAvatarKey::new(account_id, &version),
@@ -69,7 +67,7 @@ impl AvatarService {
             )
             .await?;
 
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let previous = conn.find_account_by_id(account_id).await?;
 
         let avatar_url = format!("/avatars/accounts/{account_id}/{version}/");
@@ -96,7 +94,7 @@ impl AvatarService {
 
     /// Streams the account avatar for a specific version, or `None` if absent.
     pub async fn account_avatar(&self, account_id: Uuid, version: &str) -> Result<Option<Vec<u8>>> {
-        let store = self.nats.avatar_store().await?;
+        let store = self.infra.nats.avatar_store().await?;
         read_object(
             store
                 .get(&AccountAvatarKey::new(account_id, version))
@@ -107,11 +105,11 @@ impl AvatarService {
 
     /// Removes an account's current avatar object and clears its `avatar_url`.
     pub async fn delete_account_avatar(&self, account_id: Uuid) -> Result<()> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let account = conn.find_account_by_id(account_id).await?;
 
         if let Some(version) = account.and_then(|a| avatar_version(a.avatar_url.as_deref())) {
-            let store = self.nats.avatar_store().await?;
+            let store = self.infra.nats.avatar_store().await?;
             store
                 .delete(&AccountAvatarKey::new(account_id, version))
                 .await?;
@@ -141,7 +139,7 @@ impl AvatarService {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
 
-        let store = self.nats.workspace_avatar_store().await?;
+        let store = self.infra.nats.workspace_avatar_store().await?;
         store
             .put(
                 &WorkspaceAvatarKey::new(workspace_id, &version),
@@ -149,7 +147,7 @@ impl AvatarService {
             )
             .await?;
 
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let previous = conn.find_workspace_by_id(workspace_id).await?;
 
         let avatar_url = format!("/avatars/workspaces/{workspace_id}/{version}/");
@@ -179,7 +177,7 @@ impl AvatarService {
         workspace_id: Uuid,
         version: &str,
     ) -> Result<Option<Vec<u8>>> {
-        let store = self.nats.workspace_avatar_store().await?;
+        let store = self.infra.nats.workspace_avatar_store().await?;
         read_object(
             store
                 .get(&WorkspaceAvatarKey::new(workspace_id, version))
@@ -190,11 +188,11 @@ impl AvatarService {
 
     /// Removes a workspace's current avatar object and clears its `avatar_url`.
     pub async fn delete_workspace_avatar(&self, workspace_id: Uuid) -> Result<()> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let workspace = conn.find_workspace_by_id(workspace_id).await?;
 
         if let Some(version) = workspace.and_then(|w| avatar_version(w.avatar_url.as_deref())) {
-            let store = self.nats.workspace_avatar_store().await?;
+            let store = self.infra.nats.workspace_avatar_store().await?;
             store
                 .delete(&WorkspaceAvatarKey::new(workspace_id, version))
                 .await?;

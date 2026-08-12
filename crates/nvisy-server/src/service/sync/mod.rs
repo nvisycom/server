@@ -1,7 +1,7 @@
 //! Connection sync: importing objects from and exporting them to external
 //! storage connections, plus the scheduler that drives periodic syncs.
 //!
-//! Built on top of [`ObjectService`](crate::service::ObjectService) (bare
+//! Built on top of [`ExternalObjectStore`](crate::service::ExternalObjectStore) (bare
 //! object-store access): [`ConnectionSyncService`] orchestrates the transfers,
 //! [`ConnectionSyncWorker`] schedules them, and [`StandardCronSchedule`] decides
 //! when a cron-scheduled connection is due.

@@ -5,32 +5,33 @@
 //! its status on the run's core-NATS subject. Injected into the create-run
 //! handler so the handler stays thin and the NATS wiring lives in one place.
 
-use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{BroadcastStream, DetectionStream};
 use nvisy_postgres::types::PipelineRunStatus;
 use uuid::Uuid;
 
 use super::job::{DetectionJob, RunStatusEvent, run_subject};
 use crate::handler::Result;
+use crate::service::Infra;
 
 /// Enqueues pipeline detection jobs and broadcasts run-status changes.
 ///
-/// Cheaply cloneable (holds only a [`NatsClient`], which is `Arc`-backed).
+/// Cheaply cloneable (holds the shared [`Infra`] clients, all `Arc`-backed).
 #[derive(Clone)]
 #[must_use = "service does nothing unless you enqueue or broadcast with it"]
-pub struct DetectionService {
-    nats: NatsClient,
+pub struct DetectionQueue {
+    infra: Infra,
 }
 
-impl DetectionService {
-    /// Creates a new [`DetectionService`].
-    pub fn new(nats: NatsClient) -> Self {
-        Self { nats }
+impl DetectionQueue {
+    /// Creates a new [`DetectionQueue`].
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
     }
 
     /// Enqueues a run's detection onto the work-queue for the worker to pick up.
     pub async fn enqueue(&self, job: DetectionJob) -> Result<()> {
         let publisher = self
+            .infra
             .nats
             .event_publisher::<DetectionJob, DetectionStream>()
             .await?;
@@ -43,6 +44,7 @@ impl DetectionService {
     pub async fn broadcast_status(&self, run_id: Uuid, status: PipelineRunStatus) {
         let event = RunStatusEvent { run_id, status };
         if let Err(err) = self
+            .infra
             .nats
             .publish_broadcast(run_subject(run_id), &event)
             .await
@@ -60,6 +62,7 @@ impl DetectionService {
     /// Used by the SSE endpoint to forward status changes to a watching client.
     pub async fn subscribe_status(&self, run_id: Uuid) -> Result<BroadcastStream<RunStatusEvent>> {
         let stream = self
+            .infra
             .nats
             .subscribe_broadcast::<RunStatusEvent>(run_subject(run_id))
             .await?;
