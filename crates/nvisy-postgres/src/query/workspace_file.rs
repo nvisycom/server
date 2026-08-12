@@ -15,6 +15,31 @@ use crate::types::{
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
+/// A live file imported from a connection, for deletion reconciliation.
+///
+/// A `source_key` no longer present in the remote listing identifies a file
+/// whose source object was removed.
+#[derive(Debug, Clone, Queryable)]
+pub struct ImportedFileRef {
+    /// The connection-side key the file was imported from.
+    pub source_key: String,
+    /// The imported file's id.
+    pub file_id: Uuid,
+    /// The imported file's object-store path.
+    pub storage_path: String,
+}
+
+/// A file whose retention window has elapsed, for the expiry sweep.
+#[derive(Debug, Clone, Queryable)]
+pub struct ExpiredFileRef {
+    /// The file's id.
+    pub id: Uuid,
+    /// The file's object-store path.
+    pub storage_path: String,
+    /// The bucket the file's object lives in.
+    pub storage_bucket: String,
+}
+
 /// Repository for workspace file database operations.
 ///
 /// Handles file lifecycle management including upload tracking,
@@ -68,24 +93,21 @@ pub trait WorkspaceFileRepository {
         connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Vec<String>>> + Send;
 
-    /// Returns `(source_key, file_id, storage_path)` for each live file imported
-    /// from a connection.
-    ///
-    /// Used to reconcile deletions: a source key no longer present in the remote
-    /// listing identifies a file whose source object was removed.
+    /// Returns each live file imported from a connection, for deletion
+    /// reconciliation (a source key absent from the remote listing identifies a
+    /// removed source object).
     fn imported_files_for_connection(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<(String, Uuid, String)>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ImportedFileRef>>> + Send;
 
     /// Returns up to `limit` live files whose retention window has elapsed
-    /// (`expires_at < now`), as `(id, storage_path, storage_bucket)`. The
-    /// data-retention worker sweeps these, purges their objects, and soft-deletes
-    /// the rows.
+    /// (`expires_at < now`). The data-retention worker sweeps these, purges their
+    /// objects, and soft-deletes the rows.
     fn files_due_for_expiry(
         &mut self,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<(Uuid, String, String)>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ExpiredFileRef>>> + Send;
 
     /// Recomputes `expires_at` for live files of `kind` in `workspace_id`,
     /// returning the number updated. Used to backfill when retention settings
@@ -304,7 +326,7 @@ impl WorkspaceFileRepository for PgConnection {
     async fn imported_files_for_connection(
         &mut self,
         connection_id: Uuid,
-    ) -> PgResult<Vec<(String, Uuid, String)>> {
+    ) -> PgResult<Vec<ImportedFileRef>> {
         use schema::{workspace_file_imports, workspace_files};
 
         let files = workspace_file_imports::table
@@ -316,14 +338,14 @@ impl WorkspaceFileRepository for PgConnection {
                 workspace_files::id,
                 workspace_files::storage_path,
             ))
-            .load::<(String, Uuid, String)>(self)
+            .load::<ImportedFileRef>(self)
             .await
             .map_err(PgError::from)?;
 
         Ok(files)
     }
 
-    async fn files_due_for_expiry(&mut self, limit: i64) -> PgResult<Vec<(Uuid, String, String)>> {
+    async fn files_due_for_expiry(&mut self, limit: i64) -> PgResult<Vec<ExpiredFileRef>> {
         use diesel::dsl::{exists, not, now};
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::{workspace_files, workspace_pipeline_runs};
@@ -361,7 +383,7 @@ impl WorkspaceFileRepository for PgConnection {
                 workspace_files::storage_bucket,
             ))
             .limit(limit)
-            .load::<(Uuid, String, String)>(self)
+            .load::<ExpiredFileRef>(self)
             .await
             .map_err(PgError::from)?;
 

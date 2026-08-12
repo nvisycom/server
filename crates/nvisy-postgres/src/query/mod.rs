@@ -39,7 +39,7 @@ pub use workspace_activity::WorkspaceActivityRepository;
 pub use workspace_connection::WorkspaceConnectionRepository;
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_sync::WorkspaceConnectionSyncRepository;
-pub use workspace_file::WorkspaceFileRepository;
+pub use workspace_file::{ExpiredFileRef, ImportedFileRef, WorkspaceFileRepository};
 pub use workspace_invite::WorkspaceInviteRepository;
 pub use workspace_member::WorkspaceMemberRepository;
 pub use workspace_pipeline::WorkspacePipelineRepository;
